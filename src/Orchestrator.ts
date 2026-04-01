@@ -174,7 +174,7 @@ const invokeAgent = (
 
     const execEffect = Effect.gen(function* () {
       const execResult = yield* sandbox.execStreaming(
-        `claude --print --verbose --dangerously-skip-permissions --output-format stream-json --model ${model} -p ${shellEscape(prompt)}`,
+        `claude --print --verbose --dangerously-skip-permissions --output-format stream-json --model ${shellEscape(model)} -p ${shellEscape(prompt)}`,
         (line) => {
           for (const parsed of parseStreamJsonLine(line)) {
             if (parsed.type === "text") {

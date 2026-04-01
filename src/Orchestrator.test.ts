@@ -1544,7 +1544,7 @@ describe("Orchestrator streaming", () => {
       }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
     );
 
-    expect(capturedCommand).toContain(`--model ${DEFAULT_MODEL}`);
+    expect(capturedCommand).toContain(`--model '${DEFAULT_MODEL}'`);
   });
 
   it("uses custom model when specified in options", async () => {
@@ -1604,7 +1604,7 @@ describe("Orchestrator streaming", () => {
       }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
     );
 
-    expect(capturedCommand).toContain("--model claude-sonnet-4-6");
+    expect(capturedCommand).toContain("--model 'claude-sonnet-4-6'");
     expect(capturedCommand).not.toContain(DEFAULT_MODEL);
   });
 });
