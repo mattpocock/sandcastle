@@ -36,7 +36,9 @@ const resolveImageName = (
 ): string => (cliFlag._tag === "Some" ? cliFlag.value : defaultImageName(cwd));
 
 const agentOption = Options.text("agent").pipe(
-  Options.withDescription('Agent provider to use (e.g. "claude-code", "pi")'),
+  Options.withDescription(
+    'Agent provider to use (e.g. "claude-code", "pi", "codex")',
+  ),
   Options.withDefault(DEFAULT_AGENT),
 );
 

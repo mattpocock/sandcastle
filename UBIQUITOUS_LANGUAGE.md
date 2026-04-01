@@ -7,7 +7,7 @@
 | **Sandcastle** | The TypeScript CLI tool that orchestrates AI coding agents inside isolated environments                                       | "the tool", "the CLI", "RALPH"                                                          |
 | **Sandbox**    | An isolated environment where an agent executes code — a Docker container with the **worktree** bind-mounted as the workspace | "container" (too specific), "Docker sandbox" (ambiguous with Claude's built-in feature) |
 | **Host**       | The developer's machine where Sandcastle runs and the real git repo lives                                                     | "local" (ambiguous — the sandbox also has a local filesystem)                           |
-| **Agent**      | The AI coding tool invoked inside the sandbox (e.g. Claude Code, pi, Codex)                                                   | "RALPH", "the bot", "Claude" (too specific — agent is swappable)                        |
+| **Agent**      | The AI coding tool invoked inside the sandbox (e.g. Claude Code, pi, Codex CLI)                                               | "RALPH", "the bot", "Claude" (too specific — agent is swappable)                        |
 
 ## Environment
 

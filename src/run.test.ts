@@ -152,6 +152,11 @@ describe("RunOptions", () => {
     expect(opts.agent).toBe("pi");
   });
 
+  it("allows agent to be specified as codex", () => {
+    const opts: RunOptions = { prompt: "test", agent: "codex" };
+    expect(opts.agent).toBe("codex");
+  });
+
   it("allows idleTimeoutSeconds to be specified", () => {
     const opts: RunOptions = { prompt: "test", idleTimeoutSeconds: 120 };
     expect(opts.idleTimeoutSeconds).toBe(120);

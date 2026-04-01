@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   claudeCodeProvider,
   piProvider,
+  codexProvider,
   getAgentProvider,
   parseClaudeStreamLine,
   parsePiStreamLine,
+  parseCodexStreamLine,
 } from "./AgentProvider.js";
 
 describe("claudeCodeProvider", () => {
@@ -129,6 +131,64 @@ describe("piProvider", () => {
   });
 });
 
+describe("codexProvider", () => {
+  it("has name 'codex'", () => {
+    expect(codexProvider.name).toBe("codex");
+  });
+
+  it("envManifest contains OPENAI_API_KEY and GH_TOKEN", () => {
+    expect(codexProvider.envManifest).toHaveProperty("OPENAI_API_KEY");
+    expect(codexProvider.envManifest).toHaveProperty("GH_TOKEN");
+  });
+
+  it("has a non-empty dockerfileTemplate that installs codex", () => {
+    expect(codexProvider.dockerfileTemplate).toContain("FROM");
+    expect(codexProvider.dockerfileTemplate).toContain("@openai/codex");
+  });
+
+  it("has a default model", () => {
+    expect(codexProvider.defaultModel).toBe("gpt-5.4-mini");
+  });
+
+  it("builds a print command with codex exec flags", () => {
+    const cmd = codexProvider.buildPrintCommand({
+      model: "gpt-5.4",
+      prompt: "Hello world",
+    });
+    expect(cmd).toContain("codex exec");
+    expect(cmd).toContain("--json");
+    expect(cmd).toContain("--dangerously-bypass-approvals-and-sandbox");
+    expect(cmd).toContain("'gpt-5.4'");
+    expect(cmd).toContain("'Hello world'");
+  });
+
+  it("shell-escapes model and prompt in print command", () => {
+    const cmd = codexProvider.buildPrintCommand({
+      model: "my'model",
+      prompt: "Fix the user's code",
+    });
+    expect(cmd).toContain("my'\\''model");
+    expect(cmd).toContain("user'\\''s");
+  });
+
+  it("builds interactive args for codex", () => {
+    const args = codexProvider.buildInteractiveArgs({ model: "gpt-5.4" });
+    expect(args[0]).toBe("codex");
+    expect(args).toContain("--dangerously-bypass-approvals-and-sandbox");
+    expect(args).toContain("gpt-5.4");
+  });
+
+  it("parseStreamLine delegates to parseCodexStreamLine", () => {
+    const line = JSON.stringify({
+      type: "item.completed",
+      item: { type: "agent_message", text: "Hello" },
+    });
+    expect(codexProvider.parseStreamLine(line)).toEqual(
+      parseCodexStreamLine(line),
+    );
+  });
+});
+
 describe("getAgentProvider", () => {
   it("returns claude-code provider for 'claude-code'", () => {
     const provider = getAgentProvider("claude-code");
@@ -138,6 +198,11 @@ describe("getAgentProvider", () => {
   it("returns pi provider for 'pi'", () => {
     const provider = getAgentProvider("pi");
     expect(provider.name).toBe("pi");
+  });
+
+  it("returns codex provider for 'codex'", () => {
+    const provider = getAgentProvider("codex");
+    expect(provider.name).toBe("codex");
   });
 
   it("throws for unknown agent name", () => {
@@ -540,5 +605,82 @@ describe("parsePiStreamLine", () => {
 
   it("handles malformed JSON gracefully", () => {
     expect(parsePiStreamLine("{bad json")).toEqual([]);
+  });
+});
+
+describe("parseCodexStreamLine", () => {
+  it("extracts text and result from item.completed agent_message", () => {
+    const line = JSON.stringify({
+      type: "item.completed",
+      item: { id: "item_0", type: "agent_message", text: "Hello world" },
+    });
+    expect(parseCodexStreamLine(line)).toEqual([
+      { type: "text", text: "Hello world" },
+      { type: "result", result: "Hello world", usage: null },
+    ]);
+  });
+
+  it("extracts command from item.started command_execution", () => {
+    const line = JSON.stringify({
+      type: "item.started",
+      item: {
+        id: "item_1",
+        type: "command_execution",
+        command: "/bin/bash -c 'npm test'",
+        status: "in_progress",
+      },
+    });
+    expect(parseCodexStreamLine(line)).toEqual([
+      { type: "tool_call", name: "Bash", args: "/bin/bash -c 'npm test'" },
+    ]);
+  });
+
+  it("returns empty array for turn.completed (usage not yet extracted)", () => {
+    const line = JSON.stringify({
+      type: "turn.completed",
+      usage: {
+        input_tokens: 18133,
+        cached_input_tokens: 3456,
+        output_tokens: 32,
+      },
+    });
+    expect(parseCodexStreamLine(line)).toEqual([]);
+  });
+
+  it("ignores item.completed command_execution (not agent_message)", () => {
+    const line = JSON.stringify({
+      type: "item.completed",
+      item: {
+        id: "item_1",
+        type: "command_execution",
+        command: "echo hello",
+        aggregated_output: "hello\n",
+        exit_code: 0,
+        status: "completed",
+      },
+    });
+    expect(parseCodexStreamLine(line)).toEqual([]);
+  });
+
+  it("ignores thread.started events", () => {
+    const line = JSON.stringify({
+      type: "thread.started",
+      thread_id: "019d4ab1-34f2-7c60-a71e-1fc6bee265da",
+    });
+    expect(parseCodexStreamLine(line)).toEqual([]);
+  });
+
+  it("returns empty array for non-JSON lines", () => {
+    expect(parseCodexStreamLine("not json")).toEqual([]);
+    expect(parseCodexStreamLine("")).toEqual([]);
+  });
+
+  it("handles malformed JSON gracefully", () => {
+    expect(parseCodexStreamLine("{bad json")).toEqual([]);
+  });
+
+  it("returns empty array for turn.completed without usage data", () => {
+    const line = JSON.stringify({ type: "turn.completed" });
+    expect(parseCodexStreamLine(line)).toEqual([]);
   });
 });

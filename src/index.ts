@@ -6,4 +6,5 @@ export {
   getAgentProvider,
   claudeCodeProvider,
   piProvider,
+  codexProvider,
 } from "./AgentProvider.js";

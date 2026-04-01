@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 import { Display, type DisplayEntry, SilentDisplay } from "./Display.js";
 import { makeLocalSandboxLayer } from "./testSandbox.js";
 import { DEFAULT_MODEL, orchestrate } from "./Orchestrator.js";
-import { piProvider } from "./AgentProvider.js";
+import { piProvider, codexProvider } from "./AgentProvider.js";
 import { Sandbox } from "./SandboxFactory.js";
 import type { DockerError, SandboxError } from "./errors.js";
 import { TimeoutError } from "./errors.js";
@@ -76,6 +76,24 @@ const toPiStreamJson = (output: string): string => {
           content: [{ type: "text", text: output }],
         },
       ],
+    }),
+  );
+  return lines.join("\n");
+};
+
+/** Format a mock agent result as Codex JSONL lines */
+const toCodexStreamJson = (output: string): string => {
+  const lines: string[] = [];
+  lines.push(
+    JSON.stringify({
+      type: "item.completed",
+      item: { id: "item_0", type: "agent_message", text: output },
+    }),
+  );
+  lines.push(
+    JSON.stringify({
+      type: "turn.completed",
+      usage: { input_tokens: 100, cached_input_tokens: 0, output_tokens: 50 },
     }),
   );
   return lines.join("\n");
@@ -210,6 +228,18 @@ const makeMockPiAgentLayer = (
   mockAgentBehavior: (sandboxRepoDir: string) => Promise<string>,
 ): Layer.Layer<Sandbox> =>
   makeMockAgentLayerFor("pi ", toPiStreamJson, sandboxDir, mockAgentBehavior);
+
+/** Create a mock layer that intercepts `codex` commands (Codex provider) */
+const makeMockCodexAgentLayer = (
+  sandboxDir: string,
+  mockAgentBehavior: (sandboxRepoDir: string) => Promise<string>,
+): Layer.Layer<Sandbox> =>
+  makeMockAgentLayerFor(
+    "codex ",
+    toCodexStreamJson,
+    sandboxDir,
+    mockAgentBehavior,
+  );
 
 describe("Orchestrator", () => {
   it("runs a single iteration: sync-in, agent, sync-out", async () => {
@@ -813,6 +843,75 @@ describe("Orchestrator with pi provider", () => {
     );
 
     expect(result.iterationsRun).toBe(1);
+  });
+});
+
+describe("Orchestrator with codex provider", () => {
+  it("runs a single iteration using codexProvider", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-codex-host-"));
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory(
+      hostDir,
+      (dir) =>
+        makeMockCodexAgentLayer(dir, async (repoDir) => {
+          await writeFile(join(repoDir, "codex-output.txt"), "codex was here");
+          await execAsync("git add -A", { cwd: repoDir });
+          await execAsync('git config user.email "agent@test.com"', {
+            cwd: repoDir,
+          });
+          await execAsync('git config user.name "Agent"', { cwd: repoDir });
+          await execAsync('git commit -m "codex: agent commit"', {
+            cwd: repoDir,
+          });
+          return "Done with iteration.";
+        }),
+    );
+
+    const result = await Effect.runPromise(
+      orchestrate({
+        hostRepoDir: hostDir,
+        sandboxRepoDir,
+        iterations: 1,
+        prompt: "do some work",
+        agentProvider: codexProvider,
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+    );
+
+    expect(result.iterationsRun).toBe(1);
+
+    const content = await readFile(join(hostDir, "codex-output.txt"), "utf-8");
+    expect(content).toBe("codex was here");
+  });
+
+  it("stops early on completion signal with codexProvider", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-codex-host-"));
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory(
+      hostDir,
+      (dir) =>
+        makeMockCodexAgentLayer(dir, async () => {
+          return "All done. <promise>COMPLETE</promise>";
+        }),
+    );
+
+    const result = await Effect.runPromise(
+      orchestrate({
+        hostRepoDir: hostDir,
+        sandboxRepoDir,
+        iterations: 5,
+        prompt: "do some work",
+        agentProvider: codexProvider,
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+    );
+
+    expect(result.iterationsRun).toBe(1);
+    expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
   });
 });
 

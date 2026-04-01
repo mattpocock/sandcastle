@@ -177,8 +177,8 @@ export interface RunOptions {
   readonly name?: string;
   /** Paths relative to the host repo root to copy into the worktree before container start. */
   readonly copyToSandbox?: string[];
-  /** Agent provider to use (default: "claude-code"). Available: "claude-code", "pi" */
-  readonly agent?: "claude-code" | "pi" | (string & {});
+  /** Agent provider to use (default: "claude-code"). Available: "claude-code", "pi", "codex" */
+  readonly agent?: "claude-code" | "pi" | "codex" | (string & {});
 }
 
 export interface RunResult {

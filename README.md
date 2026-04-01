@@ -94,7 +94,7 @@ const result = await run({
   branch: "agent/fix-42",
 
   // Agent provider to use. Default: "claude-code"
-  // Available: "claude-code", "pi"
+  // Available: "claude-code", "pi", "codex"
   agent: "claude-code",
 
   // Model passed to the agent. Default depends on agent provider.
@@ -263,10 +263,10 @@ Select a template during `sandcastle init` when prompted, or re-run init in a fr
 
 Scaffolds the `.sandcastle/` config directory and builds the Docker image. This is the first command you run in a new repo.
 
-| Option         | Required | Default                      | Description                          |
-| -------------- | -------- | ---------------------------- | ------------------------------------ |
-| `--image-name` | No       | `sandcastle:<repo-dir-name>` | Docker image name                    |
-| `--agent`      | No       | `claude-code`                | Agent provider (`claude-code`, `pi`) |
+| Option         | Required | Default                      | Description                                   |
+| -------------- | -------- | ---------------------------- | --------------------------------------------- |
+| `--image-name` | No       | `sandcastle:<repo-dir-name>` | Docker image name                             |
+| `--agent`      | No       | `claude-code`                | Agent provider (`claude-code`, `pi`, `codex`) |
 
 Creates the following files:
 
@@ -299,22 +299,22 @@ Removes the Docker image.
 
 ### `RunOptions`
 
-| Option               | Type               | Default                       | Description                                                                 |
-| -------------------- | ------------------ | ----------------------------- | --------------------------------------------------------------------------- |
-| `prompt`             | string             | —                             | Inline prompt (mutually exclusive with `promptFile`)                        |
-| `promptFile`         | string             | —                             | Path to prompt file (mutually exclusive with `prompt`)                      |
-| `maxIterations`      | number             | `1`                           | Maximum iterations to run                                                   |
-| `hooks`              | object             | —                             | Lifecycle hooks (`onSandboxReady`)                                          |
-| `branch`             | string             | —                             | Target branch for sandbox work                                              |
-| `agent`              | string             | `"claude-code"`               | Agent provider (`"claude-code"`, `"pi"`)                                    |
-| `model`              | string             | provider-specific             | Model to use (claude-code: `claude-opus-4-6`, pi: `claude-sonnet-4-6`)      |
-| `imageName`          | string             | `sandcastle:<repo-dir-name>`  | Docker image name for the sandbox                                           |
-| `name`               | string             | —                             | Display name for the run, shown as a prefix in log output                   |
-| `promptArgs`         | PromptArgs         | —                             | Key-value map for `{{KEY}}` placeholder substitution                        |
-| `copyToSandbox`      | string[]           | —                             | Host-relative file paths to copy into the worktree before start             |
-| `logging`            | object             | file (auto-generated)         | `{ type: 'file', path }` or `{ type: 'stdout' }`                            |
-| `completionSignal`   | string \| string[] | `<promise>COMPLETE</promise>` | String or array of strings the agent emits to stop the iteration loop early |
-| `idleTimeoutSeconds` | number             | `300`                         | Idle timeout in seconds — resets on each agent output event                 |
+| Option               | Type               | Default                       | Description                                                                                   |
+| -------------------- | ------------------ | ----------------------------- | --------------------------------------------------------------------------------------------- |
+| `prompt`             | string             | —                             | Inline prompt (mutually exclusive with `promptFile`)                                          |
+| `promptFile`         | string             | —                             | Path to prompt file (mutually exclusive with `prompt`)                                        |
+| `maxIterations`      | number             | `1`                           | Maximum iterations to run                                                                     |
+| `hooks`              | object             | —                             | Lifecycle hooks (`onSandboxReady`)                                                            |
+| `branch`             | string             | —                             | Target branch for sandbox work                                                                |
+| `agent`              | string             | `"claude-code"`               | Agent provider (`"claude-code"`, `"pi"`, `"codex"`)                                           |
+| `model`              | string             | provider-specific             | Model to use (claude-code: `claude-opus-4-6`, pi: `claude-sonnet-4-6`, codex: `gpt-5.4-mini`) |
+| `imageName`          | string             | `sandcastle:<repo-dir-name>`  | Docker image name for the sandbox                                                             |
+| `name`               | string             | —                             | Display name for the run, shown as a prefix in log output                                     |
+| `promptArgs`         | PromptArgs         | —                             | Key-value map for `{{KEY}}` placeholder substitution                                          |
+| `copyToSandbox`      | string[]           | —                             | Host-relative file paths to copy into the worktree before start                               |
+| `logging`            | object             | file (auto-generated)         | `{ type: 'file', path }` or `{ type: 'stdout' }`                                              |
+| `completionSignal`   | string \| string[] | `<promise>COMPLETE</promise>` | String or array of strings the agent emits to stop the iteration loop early                   |
+| `idleTimeoutSeconds` | number             | `300`                         | Idle timeout in seconds — resets on each agent output event                                   |
 
 ### `RunResult`
 
@@ -344,7 +344,7 @@ All templates share:
 - **Node.js 22** (base image)
 - **git**, **curl**, **jq** (system dependencies)
 - **GitHub CLI** (`gh`)
-- The selected agent CLI (Claude Code or pi)
+- The selected agent CLI (Claude Code, pi, or Codex)
 - A non-root `agent` user (required — the agent runs as this user)
 
 When customizing the Dockerfile, ensure you keep:
