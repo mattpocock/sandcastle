@@ -93,7 +93,11 @@ const result = await run({
   // Branch the agent commits to inside the sandbox.
   branch: "agent/fix-42",
 
-  // Claude model passed to the agent. Default: "claude-opus-4-6"
+  // Agent provider to use. Default: "claude-code"
+  // Available: "claude-code", "pi"
+  agent: "claude-code",
+
+  // Model passed to the agent. Default depends on agent provider.
   model: "claude-opus-4-6",
 
   // Docker image used for the sandbox. Default: "sandcastle:<repo-dir-name>"
@@ -259,9 +263,10 @@ Select a template during `sandcastle init` when prompted, or re-run init in a fr
 
 Scaffolds the `.sandcastle/` config directory and builds the Docker image. This is the first command you run in a new repo.
 
-| Option         | Required | Default                      | Description       |
-| -------------- | -------- | ---------------------------- | ----------------- |
-| `--image-name` | No       | `sandcastle:<repo-dir-name>` | Docker image name |
+| Option         | Required | Default                      | Description                          |
+| -------------- | -------- | ---------------------------- | ------------------------------------ |
+| `--image-name` | No       | `sandcastle:<repo-dir-name>` | Docker image name                    |
+| `--agent`      | No       | `claude-code`                | Agent provider (`claude-code`, `pi`) |
 
 Creates the following files:
 
@@ -301,7 +306,8 @@ Removes the Docker image.
 | `maxIterations`      | number             | `1`                           | Maximum iterations to run                                                   |
 | `hooks`              | object             | —                             | Lifecycle hooks (`onSandboxReady`)                                          |
 | `branch`             | string             | —                             | Target branch for sandbox work                                              |
-| `model`              | string             | `claude-opus-4-6`             | Model to use for the agent                                                  |
+| `agent`              | string             | `"claude-code"`               | Agent provider (`"claude-code"`, `"pi"`)                                    |
+| `model`              | string             | provider-specific             | Model to use (claude-code: `claude-opus-4-6`, pi: `claude-sonnet-4-6`)      |
 | `imageName`          | string             | `sandcastle:<repo-dir-name>`  | Docker image name for the sandbox                                           |
 | `name`               | string             | —                             | Display name for the run, shown as a prefix in log output                   |
 | `promptArgs`         | PromptArgs         | —                             | Key-value map for `{{KEY}}` placeholder substitution                        |
@@ -331,20 +337,22 @@ All per-repo sandbox configuration lives in `.sandcastle/`. Run `sandcastle init
 
 ### Custom Dockerfile
 
-The `.sandcastle/Dockerfile` controls the sandbox environment. The default template installs:
+The `.sandcastle/Dockerfile` controls the sandbox environment. The default template depends on the agent provider selected during `sandcastle init --agent`. Each provider installs its own CLI tool.
+
+All templates share:
 
 - **Node.js 22** (base image)
 - **git**, **curl**, **jq** (system dependencies)
 - **GitHub CLI** (`gh`)
-- **Claude Code CLI**
-- A non-root `agent` user (required — Claude runs as this user)
+- The selected agent CLI (Claude Code or pi)
+- A non-root `agent` user (required — the agent runs as this user)
 
 When customizing the Dockerfile, ensure you keep:
 
-- A non-root user (the default `agent` user) for Claude to run as
+- A non-root user (the default `agent` user) for the agent to run as
 - `git` (required for commits and branch operations)
 - `gh` (required for issue fetching)
-- Claude Code CLI installed and on PATH
+- The agent CLI installed and on PATH
 
 Add your project-specific dependencies (e.g., language runtimes, build tools) to the Dockerfile as needed.
 

@@ -19,11 +19,16 @@ const runScaffold = (...args: Parameters<typeof scaffold>) =>
 
 const fakeProvider: AgentProvider = {
   name: "fake-agent",
+  defaultModel: "fake-model-1",
   envManifest: {
     FAKE_TOKEN: "Fake agent token",
     FAKE_SECRET: "Fake agent secret",
   },
   dockerfileTemplate: "FROM ubuntu:latest\nRUN echo fake\n",
+  buildPrintCommand: ({ model, prompt }) =>
+    `fake-agent --print --model ${model} '${prompt}'`,
+  buildInteractiveArgs: ({ model }) => ["fake-agent", "--model", model],
+  parseStreamLine: () => [],
 };
 
 describe("InitService scaffold", () => {

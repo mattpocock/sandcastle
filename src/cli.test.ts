@@ -66,14 +66,14 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("--template");
   });
 
-  it("init --help does not expose --agent flag", async () => {
+  it("init --help shows --agent flag", async () => {
     const { stdout } = await runCli("init --help", process.cwd());
-    expect(stdout).not.toContain("--agent");
+    expect(stdout).toContain("--agent");
   });
 
-  it("interactive --help does not expose --agent flag", async () => {
+  it("interactive --help shows --agent flag", async () => {
     const { stdout } = await runCli("interactive --help", process.cwd());
-    expect(stdout).not.toContain("--agent");
+    expect(stdout).toContain("--agent");
   });
 
   it("init --template nonexistent produces error listing available templates", async () => {

@@ -28,6 +28,9 @@ import {
 /** Default maximum number of iterations for a run. */
 export const DEFAULT_MAX_ITERATIONS = 1;
 
+/** Default agent provider name. */
+export const DEFAULT_AGENT = "claude-code";
+
 /** Replace characters that are invalid or problematic in file paths with dashes. */
 export const sanitizeBranchForFilename = (branch: string): string =>
   branch.replace(/[/\\:*?"<>|]/g, "-");
@@ -158,7 +161,7 @@ export interface RunOptions {
   };
   /** Target branch name for sandbox work */
   readonly branch?: string;
-  /** Model to use for the agent (default: claude-opus-4-6) */
+  /** Model to use for the agent (default: provider-specific) */
   readonly model?: string;
   /** Docker image name to use for the sandbox (default: sandcastle:<repo-dir-name>) */
   readonly imageName?: string;
@@ -174,6 +177,8 @@ export interface RunOptions {
   readonly name?: string;
   /** Paths relative to the host repo root to copy into the worktree before container start. */
   readonly copyToSandbox?: string[];
+  /** Agent provider to use (default: "claude-code"). Available: "claude-code", "pi" */
+  readonly agent?: "claude-code" | "pi" | (string & {});
 }
 
 export interface RunResult {
@@ -212,12 +217,13 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
     ),
   );
 
-  // Resolve model: explicit option > default
-  const resolvedModel = model;
-
-  // Agent is hardcoded to claude-code (agent selection is not part of the public API)
-  const agentName = "claude-code";
+  // Resolve agent provider
+  const agentName = options.agent ?? DEFAULT_AGENT;
   const provider = getAgentProvider(agentName);
+
+  // Model resolution: explicit option is passed through to orchestrate(),
+  // which falls back to provider.defaultModel when undefined.
+  const resolvedModel = model;
 
   // Resolve image name: explicit option > default
   const resolvedImageName = options.imageName ?? defaultImageName(hostRepoDir);
@@ -257,7 +263,7 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
       ? (() => {
           printFileDisplayStartup({
             logPath: resolvedLogging.path,
-            agentName: options.name,
+            agentName: options.name ?? agentName,
             branch: resolvedBranch,
           });
           return Layer.provide(
@@ -330,6 +336,7 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
         completionSignal: options.completionSignal,
         idleTimeoutSeconds: options.idleTimeoutSeconds,
         name: options.name,
+        agentProvider: provider,
       });
 
       const completion = buildCompletionMessage(

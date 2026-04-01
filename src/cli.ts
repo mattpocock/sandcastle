@@ -7,12 +7,13 @@ import { execSync, spawn } from "node:child_process";
 import { join } from "node:path";
 import { styleText } from "node:util";
 import { Display } from "./Display.js";
-import { DEFAULT_MODEL } from "./Orchestrator.js";
+
 import { buildImage, removeImage } from "./DockerLifecycle.js";
 import { scaffold, listTemplates, getNextStepsLines } from "./InitService.js";
-import { defaultImageName } from "./run.js";
+import { defaultImageName, DEFAULT_AGENT } from "./run.js";
 import { getAgentProvider } from "./AgentProvider.js";
 import { AgentError, ConfigDirError, InitError } from "./errors.js";
+import type { AgentProvider } from "./AgentProvider.js";
 import {
   SandboxFactory,
   WorktreeDockerSandboxFactory,
@@ -33,6 +34,11 @@ const resolveImageName = (
   cliFlag: import("effect").Option.Option<string>,
   cwd: string,
 ): string => (cliFlag._tag === "Some" ? cliFlag.value : defaultImageName(cwd));
+
+const agentOption = Options.text("agent").pipe(
+  Options.withDescription('Agent provider to use (e.g. "claude-code", "pi")'),
+  Options.withDefault(DEFAULT_AGENT),
+);
 
 // --- Config directory check ---
 
@@ -69,15 +75,15 @@ const initCommand = Command.make(
   {
     imageName: imageNameOption,
     template: templateOption,
+    agent: agentOption,
   },
-  ({ imageName: imageNameFlag, template }) =>
+  ({ imageName: imageNameFlag, template, agent }) =>
     Effect.gen(function* () {
       const d = yield* Display;
       const cwd = process.cwd();
       const imageName = resolveImageName(imageNameFlag, cwd);
 
-      // Agent is hardcoded to claude-code (agent selection is not part of the public API)
-      const agentName = "claude-code";
+      const agentName = agent;
       const provider = yield* Effect.try({
         try: () => getAgentProvider(agentName),
         catch: (e) =>
@@ -254,15 +260,16 @@ const modelOption = Options.text("model").pipe(
 const interactiveSession = (options: {
   hostRepoDir: string;
   model?: string;
+  agentName: string;
+  interactiveArgs: string[];
 }): Effect.Effect<
   void,
   import("./errors.js").SandboxError,
   SandboxFactory | Display
 > =>
   Effect.gen(function* () {
-    const { hostRepoDir } = options;
+    const { hostRepoDir, interactiveArgs } = options;
     const sandboxRepoDir = SANDBOX_WORKSPACE_DIR;
-    const resolvedModel = options.model ?? DEFAULT_MODEL;
     const factory = yield* SandboxFactory;
     const d = yield* Display;
 
@@ -275,8 +282,11 @@ const interactiveSession = (options: {
             const hostnameResult = yield* ctx.sandbox.exec("hostname");
             const containerId = hostnameResult.stdout.trim();
 
-            // Launch interactive Claude session with TTY passthrough
-            yield* d.status("Launching interactive Claude session...", "info");
+            // Launch interactive agent session with TTY passthrough
+            yield* d.status(
+              `Launching interactive ${options.agentName} session...`,
+              "info",
+            );
 
             const exitCode = yield* Effect.async<number, AgentError>(
               (resume) => {
@@ -288,10 +298,7 @@ const interactiveSession = (options: {
                     "-w",
                     ctx.sandboxRepoDir,
                     containerId,
-                    "claude",
-                    "--dangerously-skip-permissions",
-                    "--model",
-                    resolvedModel,
+                    ...interactiveArgs,
                   ],
                   { stdio: "inherit" },
                 );
@@ -300,7 +307,7 @@ const interactiveSession = (options: {
                   resume(
                     Effect.fail(
                       new AgentError({
-                        message: `Failed to launch Claude: ${error.message}`,
+                        message: `Failed to launch ${options.agentName}: ${error.message}`,
                       }),
                     ),
                   );
@@ -326,21 +333,38 @@ const interactiveCommand = Command.make(
   {
     imageName: imageNameOption,
     model: modelOption,
+    agent: agentOption,
   },
-  ({ imageName: imageNameFlag, model }) =>
+  ({ imageName: imageNameFlag, model, agent }) =>
     Effect.gen(function* () {
       const hostRepoDir = process.cwd();
       yield* requireConfigDir(hostRepoDir);
 
       const imageName = resolveImageName(imageNameFlag, hostRepoDir);
 
+      // Resolve agent provider
+      const provider = yield* Effect.try({
+        try: () => getAgentProvider(agent),
+        catch: (e) =>
+          new InitError({
+            message: `${e instanceof Error ? e.message : e}`,
+          }),
+      });
+
+      const resolvedModel =
+        model._tag === "Some" ? model.value : provider.defaultModel;
+      const interactiveArgs = provider.buildInteractiveArgs({
+        model: resolvedModel,
+      });
+
       // Resolve env vars
       const env = yield* resolveEnv(hostRepoDir);
 
-      const resolvedModel = model._tag === "Some" ? model.value : undefined;
-
       const d = yield* Display;
-      yield* d.summary("Sandcastle Interactive", { Image: imageName });
+      yield* d.summary("Sandcastle Interactive", {
+        Agent: provider.name,
+        Image: imageName,
+      });
 
       const factoryLayer = Layer.provide(
         WorktreeDockerSandboxFactory.layer,
@@ -357,6 +381,8 @@ const interactiveCommand = Command.make(
       yield* interactiveSession({
         hostRepoDir,
         model: resolvedModel,
+        agentName: provider.name,
+        interactiveArgs,
       }).pipe(Effect.provide(factoryLayer));
     }),
 );

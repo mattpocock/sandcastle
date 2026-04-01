@@ -7,7 +7,7 @@
 | **Sandcastle** | The TypeScript CLI tool that orchestrates AI coding agents inside isolated environments                                       | "the tool", "the CLI", "RALPH"                                                          |
 | **Sandbox**    | An isolated environment where an agent executes code — a Docker container with the **worktree** bind-mounted as the workspace | "container" (too specific), "Docker sandbox" (ambiguous with Claude's built-in feature) |
 | **Host**       | The developer's machine where Sandcastle runs and the real git repo lives                                                     | "local" (ambiguous — the sandbox also has a local filesystem)                           |
-| **Agent**      | The AI coding tool invoked inside the sandbox (e.g. Claude Code, Codex)                                                       | "RALPH", "the bot", "Claude" (too specific — agent is swappable)                        |
+| **Agent**      | The AI coding tool invoked inside the sandbox (e.g. Claude Code, pi, Codex)                                                   | "RALPH", "the bot", "Claude" (too specific — agent is swappable)                        |
 
 ## Environment
 
@@ -52,10 +52,11 @@
 
 ## Architecture
 
-| Term                | Definition                                                                                                                                                                      | Aliases to avoid       |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
-| **Sandbox service** | The Effect service interface exposing `exec`, `copyIn`, and `copyOut` operations against a sandbox                                                                              | "adapter", "transport" |
-| **Worktree**        | A git worktree created in `.sandcastle/worktrees/` on the **host**, bind-mounted into the **sandbox** container as the agent's working directory — eliminates the need for sync | "branch copy", "clone" |
+| Term                | Definition                                                                                                                                                                                                                              | Aliases to avoid                |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| **Agent provider**  | A named bundle of agent-specific behavior: Dockerfile template, env manifest, default model, CLI command construction, and stream output parsing. Each provider is registered in the agent registry and selected via the `agent` option | "agent adapter", "agent driver" |
+| **Sandbox service** | The Effect service interface exposing `exec`, `copyIn`, and `copyOut` operations against a sandbox                                                                                                                                      | "adapter", "transport"          |
+| **Worktree**        | A git worktree created in `.sandcastle/worktrees/` on the **host**, bind-mounted into the **sandbox** container as the agent's working directory — eliminates the need for sync                                                         | "branch copy", "clone"          |
 
 ## Relationships
 

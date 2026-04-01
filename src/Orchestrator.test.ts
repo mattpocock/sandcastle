@@ -9,12 +9,8 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import { Display, type DisplayEntry, SilentDisplay } from "./Display.js";
 import { makeLocalSandboxLayer } from "./testSandbox.js";
-import {
-  DEFAULT_MODEL,
-  formatToolCall,
-  orchestrate,
-  parseStreamJsonLine,
-} from "./Orchestrator.js";
+import { DEFAULT_MODEL, orchestrate } from "./Orchestrator.js";
+import { piProvider } from "./AgentProvider.js";
 import { Sandbox } from "./SandboxFactory.js";
 import type { DockerError, SandboxError } from "./errors.js";
 import { TimeoutError } from "./errors.js";
@@ -58,6 +54,30 @@ const toStreamJson = (output: string): string => {
     }),
   );
   lines.push(JSON.stringify({ type: "result", result: output }));
+  return lines.join("\n");
+};
+
+/** Format a mock agent result as pi JSON mode lines */
+const toPiStreamJson = (output: string): string => {
+  const lines: string[] = [];
+  lines.push(
+    JSON.stringify({
+      type: "message_update",
+      message: {},
+      assistantMessageEvent: { type: "text_delta", delta: output },
+    }),
+  );
+  lines.push(
+    JSON.stringify({
+      type: "agent_end",
+      messages: [
+        {
+          role: "assistant",
+          content: [{ type: "text", text: output }],
+        },
+      ],
+    }),
+  );
   return lines.join("\n");
 };
 
@@ -126,11 +146,12 @@ const makeTestSandboxFactory = (
 };
 
 /**
- * Create a mock sandbox layer that intercepts `claude` commands
- * and runs a mock script instead. All other commands pass through
- * to the filesystem sandbox.
+ * Create a mock sandbox layer that intercepts agent commands matching `commandPrefix`
+ * and runs a mock script instead. All other commands pass through to the filesystem sandbox.
  */
-const makeMockAgentLayer = (
+const makeMockAgentLayerFor = (
+  commandPrefix: string,
+  toStream: (output: string) => string,
   sandboxDir: string,
   mockAgentBehavior: (sandboxRepoDir: string) => Promise<string>,
 ): Layer.Layer<Sandbox> => {
@@ -138,34 +159,29 @@ const makeMockAgentLayer = (
 
   return Layer.succeed(Sandbox, {
     exec: (command, options) => {
-      // Intercept claude invocations
-      if (command.startsWith("claude ")) {
+      if (command.startsWith(commandPrefix)) {
         return Effect.gen(function* () {
           const cwd = options?.cwd ?? sandboxDir;
           const output = yield* Effect.promise(() => mockAgentBehavior(cwd));
           return { stdout: output, stderr: "", exitCode: 0 };
         });
       }
-      // Pass through to real filesystem sandbox
       return Effect.flatMap(Sandbox, (real) =>
         real.exec(command, options),
       ).pipe(Effect.provide(fsLayer));
     },
     execStreaming: (command, onStdoutLine, options) => {
-      // Intercept claude invocations
-      if (command.startsWith("claude ")) {
+      if (command.startsWith(commandPrefix)) {
         return Effect.gen(function* () {
           const cwd = options?.cwd ?? sandboxDir;
           const output = yield* Effect.promise(() => mockAgentBehavior(cwd));
-          const streamOutput = toStreamJson(output);
-          // Emit each line to the callback
+          const streamOutput = toStream(output);
           for (const line of streamOutput.split("\n")) {
             onStdoutLine(line);
           }
           return { stdout: streamOutput, stderr: "", exitCode: 0 };
         });
       }
-      // Pass through to real filesystem sandbox
       return Effect.flatMap(Sandbox, (real) =>
         real.execStreaming(command, onStdoutLine, options),
       ).pipe(Effect.provide(fsLayer));
@@ -180,6 +196,20 @@ const makeMockAgentLayer = (
       ).pipe(Effect.provide(fsLayer)),
   });
 };
+
+/** Create a mock layer that intercepts `claude` commands (Claude Code provider) */
+const makeMockAgentLayer = (
+  sandboxDir: string,
+  mockAgentBehavior: (sandboxRepoDir: string) => Promise<string>,
+): Layer.Layer<Sandbox> =>
+  makeMockAgentLayerFor("claude ", toStreamJson, sandboxDir, mockAgentBehavior);
+
+/** Create a mock layer that intercepts `pi` commands (pi provider) */
+const makeMockPiAgentLayer = (
+  sandboxDir: string,
+  mockAgentBehavior: (sandboxRepoDir: string) => Promise<string>,
+): Layer.Layer<Sandbox> =>
+  makeMockAgentLayerFor("pi ", toPiStreamJson, sandboxDir, mockAgentBehavior);
 
 describe("Orchestrator", () => {
   it("runs a single iteration: sync-in, agent, sync-out", async () => {
@@ -684,339 +714,105 @@ describe("OrchestrateResult", () => {
   });
 });
 
-describe("parseStreamJsonLine", () => {
-  it("extracts text from assistant message", () => {
-    const line = JSON.stringify({
-      type: "assistant",
-      message: { content: [{ type: "text", text: "Hello world" }] },
-    });
-    expect(parseStreamJsonLine(line)).toEqual([
-      { type: "text", text: "Hello world" },
-    ]);
+// Stream parsing unit tests live in AgentProvider.test.ts
+// (they are part of the AgentProvider contract).
+
+describe("Orchestrator with pi provider", () => {
+  it("runs a single iteration using piProvider", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-pi-host-"));
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory(
+      hostDir,
+      (dir) =>
+        makeMockPiAgentLayer(dir, async (repoDir) => {
+          await writeFile(join(repoDir, "pi-output.txt"), "pi was here");
+          await execAsync("git add -A", { cwd: repoDir });
+          await execAsync('git config user.email "agent@test.com"', {
+            cwd: repoDir,
+          });
+          await execAsync('git config user.name "Agent"', { cwd: repoDir });
+          await execAsync('git commit -m "pi: agent commit"', {
+            cwd: repoDir,
+          });
+          return "Done with iteration.";
+        }),
+    );
+
+    const result = await Effect.runPromise(
+      orchestrate({
+        hostRepoDir: hostDir,
+        sandboxRepoDir,
+        iterations: 1,
+        prompt: "do some work",
+        agentProvider: piProvider,
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+    );
+
+    expect(result.iterationsRun).toBe(1);
+
+    // Verify the agent's commit was synced back to host
+    const content = await readFile(join(hostDir, "pi-output.txt"), "utf-8");
+    expect(content).toBe("pi was here");
   });
 
-  it("extracts result from result message", () => {
-    const line = JSON.stringify({
-      type: "result",
-      result: "Final answer <promise>COMPLETE</promise>",
-    });
-    expect(parseStreamJsonLine(line)).toEqual([
-      {
-        type: "result",
-        result: "Final answer <promise>COMPLETE</promise>",
-        usage: null,
-      },
-    ]);
+  it("stops early on completion signal with piProvider", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-pi-host-"));
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory(
+      hostDir,
+      (dir) =>
+        makeMockPiAgentLayer(dir, async () => {
+          return "All done. <promise>COMPLETE</promise>";
+        }),
+    );
+
+    const result = await Effect.runPromise(
+      orchestrate({
+        hostRepoDir: hostDir,
+        sandboxRepoDir,
+        iterations: 5,
+        prompt: "do some work",
+        agentProvider: piProvider,
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+    );
+
+    expect(result.iterationsRun).toBe(1);
+    expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
   });
 
-  it("returns empty array for non-JSON lines", () => {
-    expect(parseStreamJsonLine("not json")).toEqual([]);
-    expect(parseStreamJsonLine("")).toEqual([]);
-  });
+  it("uses piProvider default model when no model specified", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-pi-host-"));
 
-  it("returns empty array for malformed JSON starting with {", () => {
-    expect(parseStreamJsonLine("{bad json")).toEqual([]);
-    expect(parseStreamJsonLine('{"type": "assistant", broken')).toEqual([]);
-  });
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
-  it("returns empty array for unrecognized JSON types", () => {
-    const line = JSON.stringify({ type: "system", data: "something" });
-    expect(parseStreamJsonLine(line)).toEqual([]);
-  });
+    const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory(
+      hostDir,
+      (dir) =>
+        makeMockPiAgentLayer(dir, async () => {
+          return "Done.";
+        }),
+    );
 
-  it("handles multiple text content blocks", () => {
-    const line = JSON.stringify({
-      type: "assistant",
-      message: {
-        content: [
-          { type: "text", text: "Hello " },
-          { type: "text", text: "world" },
-        ],
-      },
-    });
-    expect(parseStreamJsonLine(line)).toEqual([
-      { type: "text", text: "Hello world" },
-    ]);
-  });
+    // Should not throw — piProvider.defaultModel is used as fallback
+    const result = await Effect.runPromise(
+      orchestrate({
+        hostRepoDir: hostDir,
+        sandboxRepoDir,
+        iterations: 1,
+        prompt: "do some work",
+        agentProvider: piProvider,
+        // model intentionally omitted
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+    );
 
-  it("skips malformed tool_use blocks (no name/input)", () => {
-    const line = JSON.stringify({
-      type: "assistant",
-      message: {
-        content: [
-          { type: "tool_use", id: "123" },
-          { type: "text", text: "result" },
-        ],
-      },
-    });
-    expect(parseStreamJsonLine(line)).toEqual([
-      { type: "text", text: "result" },
-    ]);
-  });
-
-  it("extracts tool_use block from assistant event (Bash → command arg)", () => {
-    const line = JSON.stringify({
-      type: "assistant",
-      message: {
-        content: [
-          { type: "tool_use", name: "Bash", input: { command: "npm test" } },
-        ],
-      },
-    });
-    expect(parseStreamJsonLine(line)).toEqual([
-      { type: "tool_call", name: "Bash", args: "npm test" },
-    ]);
-  });
-
-  it("handles mixed text and tool_use content blocks", () => {
-    const line = JSON.stringify({
-      type: "assistant",
-      message: {
-        content: [
-          { type: "text", text: "Running tests..." },
-          { type: "tool_use", name: "Bash", input: { command: "npm test" } },
-        ],
-      },
-    });
-    expect(parseStreamJsonLine(line)).toEqual([
-      { type: "text", text: "Running tests..." },
-      { type: "tool_call", name: "Bash", args: "npm test" },
-    ]);
-  });
-
-  it("handles multiple tool_use blocks in one event", () => {
-    const line = JSON.stringify({
-      type: "assistant",
-      message: {
-        content: [
-          { type: "tool_use", name: "Bash", input: { command: "npm test" } },
-          {
-            type: "tool_use",
-            name: "WebSearch",
-            input: { query: "typescript types" },
-          },
-        ],
-      },
-    });
-    expect(parseStreamJsonLine(line)).toEqual([
-      { type: "tool_call", name: "Bash", args: "npm test" },
-      { type: "tool_call", name: "WebSearch", args: "typescript types" },
-    ]);
-  });
-
-  it("extracts WebFetch tool_use with url arg", () => {
-    const line = JSON.stringify({
-      type: "assistant",
-      message: {
-        content: [
-          {
-            type: "tool_use",
-            name: "WebFetch",
-            input: { url: "https://example.com" },
-          },
-        ],
-      },
-    });
-    expect(parseStreamJsonLine(line)).toEqual([
-      { type: "tool_call", name: "WebFetch", args: "https://example.com" },
-    ]);
-  });
-
-  it("extracts Agent tool_use with description arg", () => {
-    const line = JSON.stringify({
-      type: "assistant",
-      message: {
-        content: [
-          {
-            type: "tool_use",
-            name: "Agent",
-            input: { description: "Run tests and report results" },
-          },
-        ],
-      },
-    });
-    expect(parseStreamJsonLine(line)).toEqual([
-      {
-        type: "tool_call",
-        name: "Agent",
-        args: "Run tests and report results",
-      },
-    ]);
-  });
-
-  it("filters out non-allowlisted tools (Read, Glob, Grep, Edit, Write)", () => {
-    for (const name of ["Read", "Glob", "Grep", "Edit", "Write"]) {
-      const line = JSON.stringify({
-        type: "assistant",
-        message: {
-          content: [
-            { type: "tool_use", name, input: { file_path: "/some/file" } },
-          ],
-        },
-      });
-      expect(parseStreamJsonLine(line)).toEqual([]);
-    }
-  });
-
-  it("filters out tool_use blocks with missing expected input field", () => {
-    const line = JSON.stringify({
-      type: "assistant",
-      message: {
-        content: [
-          // Bash with no `command` field
-          { type: "tool_use", name: "Bash", input: { other: "value" } },
-        ],
-      },
-    });
-    expect(parseStreamJsonLine(line)).toEqual([]);
-  });
-
-  it("keeps text events even when all tool_use blocks are filtered out", () => {
-    const line = JSON.stringify({
-      type: "assistant",
-      message: {
-        content: [
-          { type: "text", text: "Looking at files..." },
-          { type: "tool_use", name: "Read", input: { file_path: "/foo" } },
-        ],
-      },
-    });
-    expect(parseStreamJsonLine(line)).toEqual([
-      { type: "text", text: "Looking at files..." },
-    ]);
-  });
-
-  it("returns only text when event has no tool_use blocks", () => {
-    const line = JSON.stringify({
-      type: "assistant",
-      message: {
-        content: [{ type: "text", text: "Just text, no tools" }],
-      },
-    });
-    expect(parseStreamJsonLine(line)).toEqual([
-      { type: "text", text: "Just text, no tools" },
-    ]);
-  });
-
-  it("extracts usage data from result message", () => {
-    const line = JSON.stringify({
-      type: "result",
-      result: "Done.",
-      total_cost_usd: 0.14,
-      num_turns: 3,
-      duration_ms: 12000,
-      usage: {
-        input_tokens: 52340,
-        output_tokens: 3201,
-        cache_read_input_tokens: 10000,
-        cache_creation_input_tokens: 5000,
-      },
-    });
-    const parsed = parseStreamJsonLine(line);
-    expect(parsed).toEqual([
-      {
-        type: "result",
-        result: "Done.",
-        usage: {
-          input_tokens: 52340,
-          output_tokens: 3201,
-          cache_read_input_tokens: 10000,
-          cache_creation_input_tokens: 5000,
-          total_cost_usd: 0.14,
-          num_turns: 3,
-          duration_ms: 12000,
-        },
-      },
-    ]);
-  });
-
-  it("returns null usage when result message has no usage data", () => {
-    const line = JSON.stringify({
-      type: "result",
-      result: "Done.",
-    });
-    const parsed = parseStreamJsonLine(line);
-    expect(parsed).toEqual([
-      {
-        type: "result",
-        result: "Done.",
-        usage: null,
-      },
-    ]);
-  });
-
-  it("returns null usage when usage fields are partial", () => {
-    const line = JSON.stringify({
-      type: "result",
-      result: "Done.",
-      usage: { input_tokens: 100 },
-    });
-    const parsed = parseStreamJsonLine(line);
-    expect(parsed).toEqual([
-      {
-        type: "result",
-        result: "Done.",
-        usage: null,
-      },
-    ]);
-  });
-});
-
-describe("formatToolCall", () => {
-  it("formats Bash tool call using command field", () => {
-    expect(formatToolCall("Bash", { command: "npm test" })).toEqual({
-      name: "Bash",
-      formattedArgs: "npm test",
-    });
-  });
-
-  it("formats WebSearch tool call using query field", () => {
-    expect(
-      formatToolCall("WebSearch", { query: "npm trusted publishing OIDC" }),
-    ).toEqual({
-      name: "WebSearch",
-      formattedArgs: "npm trusted publishing OIDC",
-    });
-  });
-
-  it("formats WebFetch tool call using url field", () => {
-    expect(
-      formatToolCall("WebFetch", { url: "https://example.com/docs" }),
-    ).toEqual({ name: "WebFetch", formattedArgs: "https://example.com/docs" });
-  });
-
-  it("formats Agent tool call using description field", () => {
-    expect(
-      formatToolCall("Agent", { description: "Run tests and report results" }),
-    ).toEqual({ name: "Agent", formattedArgs: "Run tests and report results" });
-  });
-
-  it("returns null for Read (not in allowlist)", () => {
-    expect(formatToolCall("Read", { file_path: "/some/path" })).toBeNull();
-  });
-
-  it("returns null for Glob (not in allowlist)", () => {
-    expect(formatToolCall("Glob", { pattern: "**/*.ts" })).toBeNull();
-  });
-
-  it("returns null for Grep (not in allowlist)", () => {
-    expect(formatToolCall("Grep", { pattern: "foo" })).toBeNull();
-  });
-
-  it("returns null for Edit (not in allowlist)", () => {
-    expect(formatToolCall("Edit", { file_path: "/foo.ts" })).toBeNull();
-  });
-
-  it("returns null for Write (not in allowlist)", () => {
-    expect(formatToolCall("Write", { file_path: "/foo.ts" })).toBeNull();
-  });
-
-  it("returns null for unknown tool", () => {
-    expect(formatToolCall("UnknownTool", { x: 1 })).toBeNull();
-  });
-
-  it("returns null when the arg field is missing", () => {
-    expect(formatToolCall("Bash", {})).toBeNull();
+    expect(result.iterationsRun).toBe(1);
   });
 });
 
@@ -1544,7 +1340,7 @@ describe("Orchestrator streaming", () => {
       }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
     );
 
-    expect(capturedCommand).toContain(`--model ${DEFAULT_MODEL}`);
+    expect(capturedCommand).toContain(`--model '${DEFAULT_MODEL}'`);
   });
 
   it("uses custom model when specified in options", async () => {
@@ -1604,7 +1400,7 @@ describe("Orchestrator streaming", () => {
       }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
     );
 
-    expect(capturedCommand).toContain("--model claude-sonnet-4-6");
+    expect(capturedCommand).toContain("--model 'claude-sonnet-4-6'");
     expect(capturedCommand).not.toContain(DEFAULT_MODEL);
   });
 });
