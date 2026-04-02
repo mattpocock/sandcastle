@@ -219,7 +219,7 @@ Passing `SOURCE_BRANCH` or `TARGET_BRANCH` in `promptArgs` is an error — built
 
 ### Early termination with `<promise>COMPLETE</promise>`
 
-When the agent outputs `<promise>COMPLETE</promise>`, the orchestrator stops the iteration loop early. This is a convention you document in your prompt for the agent to follow — the engine never injects it.
+When the agent outputs `<promise>COMPLETE</promise>`, the orchestrator stops the iteration loop early. This is a convention for your document in your prompt for the agent to follow — the engine never injects it.
 
 This is useful for task-based workflows where the agent should stop once it has finished, rather than running all remaining iterations.
 
