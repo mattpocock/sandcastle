@@ -50,7 +50,13 @@ const MAX_FILES_PER_IDEA = parseEnvInt("MAX_FILES_PER_IDEA", 10);
 
 // Hooks run inside the sandbox before the agent starts.
 const hooks = {
-  onSandboxReady: [{ command: "npm install" }],
+  onSandboxReady: [
+    // Trust the mounted workspace directory for git operations
+    {
+      command: "git config --global --add safe.directory /home/agent/workspace",
+    },
+    { command: "npm install" },
+  ],
 };
 
 const copyToSandbox = ["node_modules"];
@@ -173,6 +179,8 @@ function validateBranchName(branch: string): void {
 
 function gitMerge(branch: string): "merged" | "conflicted" {
   validateBranchName(branch);
+
+  // First attempt: direct merge
   try {
     execFileSync("git", ["merge", branch, "--no-edit"], {
       stdio: "pipe",
@@ -184,13 +192,67 @@ function gitMerge(branch: string): "merged" | "conflicted" {
     });
     return "merged";
   } catch {
+    // Merge failed — abort and try rebase approach
     try {
       execFileSync("git", ["merge", "--abort"], {
         stdio: "pipe",
         timeout: GIT_TIMEOUT,
       });
     } catch {
-      // merge --abort may fail if not in merge state
+      // may not be in merge state
+    }
+  }
+
+  // Second attempt: rebase the task branch onto current HEAD, then fast-forward merge
+  const currentBranch = execFileSync(
+    "git",
+    ["rev-parse", "--abbrev-ref", "HEAD"],
+    {
+      encoding: "utf-8",
+      timeout: GIT_TIMEOUT,
+    },
+  ).trim();
+
+  try {
+    execFileSync("git", ["checkout", branch], {
+      stdio: "pipe",
+      timeout: GIT_TIMEOUT,
+    });
+    execFileSync("git", ["rebase", currentBranch], {
+      stdio: "pipe",
+      timeout: GIT_TIMEOUT,
+    });
+    execFileSync("git", ["checkout", currentBranch], {
+      stdio: "pipe",
+      timeout: GIT_TIMEOUT,
+    });
+    execFileSync("git", ["merge", branch, "--no-edit"], {
+      stdio: "pipe",
+      timeout: GIT_TIMEOUT,
+    });
+    execFileSync("git", ["branch", "-D", branch], {
+      stdio: "pipe",
+      timeout: GIT_TIMEOUT,
+    });
+    console.log("  Merged via rebase after initial conflict.");
+    return "merged";
+  } catch {
+    // Rebase also failed — give up
+    try {
+      execFileSync("git", ["rebase", "--abort"], {
+        stdio: "pipe",
+        timeout: GIT_TIMEOUT,
+      });
+    } catch {
+      /* not in rebase state */
+    }
+    try {
+      execFileSync("git", ["checkout", currentBranch], {
+        stdio: "pipe",
+        timeout: GIT_TIMEOUT,
+      });
+    } catch {
+      /* already on current branch */
     }
     try {
       execFileSync("git", ["branch", "-D", branch], {
@@ -198,7 +260,7 @@ function gitMerge(branch: string): "merged" | "conflicted" {
         timeout: GIT_TIMEOUT,
       });
     } catch {
-      // branch may not exist if sandbox failed early
+      /* branch may not exist */
     }
     return "conflicted";
   }
@@ -618,6 +680,39 @@ async function executeTask(task: DiscoveryItem): Promise<{
 // Main orchestrator loop
 // ---------------------------------------------------------------------------
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function cleanupStaleContainers(): void {
+  try {
+    const output = execFileSync(
+      "docker",
+      ["ps", "-a", "--filter", "name=sandcastle-", "--format", "{{.Names}}"],
+      {
+        encoding: "utf-8",
+        timeout: GIT_TIMEOUT,
+      },
+    ).trim();
+    if (output) {
+      const containers = output.split("\n").filter(Boolean);
+      for (const name of containers) {
+        try {
+          execFileSync("docker", ["rm", "-f", name], {
+            stdio: "pipe",
+            timeout: GIT_TIMEOUT,
+          });
+          console.log(`  Cleaned stale container: ${name}`);
+        } catch {
+          // ignore — container may already be gone
+        }
+      }
+    }
+  } catch {
+    // docker ps failed — no containers to clean
+  }
+}
+
 async function main(): Promise<void> {
   console.log(`\n=== CE Auto-Coder ===`);
   console.log(`Mode: ${MODE}`);
@@ -626,6 +721,10 @@ async function main(): Promise<void> {
     `Circuit breaker: ${CIRCUIT_BREAKER_THRESHOLD} consecutive failures`,
   );
   console.log(`Priority: ${PRIORITY_MODE}\n`);
+
+  // Clean up stale sandcastle containers from previous runs
+  console.log("Cleaning up stale containers...");
+  cleanupStaleContainers();
 
   // --- Discovery ---
   console.log("Phase 1: Discovering work...\n");
@@ -710,6 +809,11 @@ async function main(): Promise<void> {
 
     logTask(entry);
     results.push(entry);
+
+    // Small delay between tasks to prevent Docker daemon rate limiting
+    if (tasks.indexOf(task) < tasks.length - 1) {
+      await sleep(2000);
+    }
   }
 
   // --- Summary ---
