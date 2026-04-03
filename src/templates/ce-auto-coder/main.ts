@@ -713,6 +713,125 @@ function cleanupStaleContainers(): void {
   }
 }
 
+function cleanupStaleWorktrees(): void {
+  const worktreeDir = ".sandcastle/worktrees";
+  try {
+    if (!existsSync(worktreeDir)) return;
+    const entries = execFileSync("ls", [worktreeDir], {
+      encoding: "utf-8",
+      timeout: GIT_TIMEOUT,
+    })
+      .trim()
+      .split("\n")
+      .filter(Boolean);
+    if (entries.length > 0) {
+      console.log(`  Found ${entries.length} stale worktrees — cleaning...`);
+      // Use git worktree prune first to clean up stale refs
+      try {
+        execFileSync("git", ["worktree", "prune"], {
+          stdio: "pipe",
+          timeout: GIT_TIMEOUT,
+        });
+      } catch {
+        // prune may fail if no worktrees registered
+      }
+      // Then remove the directories
+      for (const entry of entries) {
+        const fullPath = `${worktreeDir}/${entry}`;
+        try {
+          execFileSync("rm", ["-rf", fullPath], {
+            stdio: "pipe",
+            timeout: GIT_TIMEOUT,
+          });
+        } catch {
+          console.warn(`  Could not remove worktree: ${fullPath}`);
+        }
+      }
+      // Clean up any stale branches left behind
+      try {
+        const branches = execFileSync(
+          "git",
+          ["branch", "--list", "sandcastle/*", "ce-auto-coder/*"],
+          { encoding: "utf-8", timeout: GIT_TIMEOUT },
+        )
+          .trim()
+          .split("\n")
+          .map((b) => b.trim())
+          .filter((b) => b && !b.startsWith("*"));
+        for (const branch of branches) {
+          try {
+            execFileSync("git", ["branch", "-D", branch], {
+              stdio: "pipe",
+              timeout: GIT_TIMEOUT,
+            });
+          } catch {
+            // branch may be checked out elsewhere
+          }
+        }
+        if (branches.length > 0) {
+          console.log(`  Cleaned ${branches.length} stale branches.`);
+        }
+      } catch {
+        // branch listing failed
+      }
+      console.log("  Worktree cleanup done.");
+    }
+  } catch {
+    // cleanup failed — not critical
+  }
+}
+
+function reportDiskUsage(): void {
+  try {
+    const worktreeDir = ".sandcastle/worktrees";
+    if (existsSync(worktreeDir)) {
+      const size = execFileSync("du", ["-sh", worktreeDir], {
+        encoding: "utf-8",
+        timeout: GIT_TIMEOUT,
+      }).trim();
+      console.log(`  Worktree disk usage: ${size.split("\t")[0]}`);
+    }
+    const dfOutput = execFileSync("df", ["-h", "."], {
+      encoding: "utf-8",
+      timeout: GIT_TIMEOUT,
+    })
+      .trim()
+      .split("\n");
+    if (dfOutput.length > 1) {
+      const parts = dfOutput[1]!.split(/\s+/);
+      console.log(`  Disk: ${parts[3]} available (${parts[4]} used)`);
+    }
+  } catch {
+    // not critical
+  }
+}
+
+const MIN_DISK_MB = 2000; // 2GB minimum free space
+
+function checkDiskSpace(): boolean {
+  try {
+    const output = execFileSync("df", ["-m", "."], {
+      encoding: "utf-8",
+      timeout: GIT_TIMEOUT,
+    })
+      .trim()
+      .split("\n");
+    if (output.length > 1) {
+      const parts = output[1]!.split(/\s+/);
+      const availMB = parseInt(parts[3]!, 10);
+      if (availMB < MIN_DISK_MB) {
+        console.error(
+          `Disk space critically low: ${availMB}MB available (minimum ${MIN_DISK_MB}MB). Halting.`,
+        );
+        return false;
+      }
+    }
+  } catch {
+    // can't check — continue anyway
+  }
+  return true;
+}
+
 async function main(): Promise<void> {
   console.log(`\n=== CE Auto-Coder ===`);
   console.log(`Mode: ${MODE}`);
@@ -722,9 +841,12 @@ async function main(): Promise<void> {
   );
   console.log(`Priority: ${PRIORITY_MODE}\n`);
 
-  // Clean up stale sandcastle containers from previous runs
-  console.log("Cleaning up stale containers...");
+  // Clean up stale resources from previous runs
+  console.log("Startup cleanup...");
   cleanupStaleContainers();
+  cleanupStaleWorktrees();
+  reportDiskUsage();
+  console.log("");
 
   // --- Discovery ---
   console.log("Phase 1: Discovering work...\n");
@@ -770,6 +892,11 @@ async function main(): Promise<void> {
       console.error(
         `\nCircuit breaker: ${consecutiveFailures} consecutive failures. Halting.`,
       );
+      break;
+    }
+
+    // Disk space check — prevent filling disk with worktrees
+    if (!checkDiskSpace()) {
       break;
     }
 
