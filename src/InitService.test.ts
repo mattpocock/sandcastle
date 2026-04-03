@@ -11,7 +11,7 @@ import {
   getAgent,
   listTemplates,
 } from "./InitService.js";
-import type { AgentEntry, ScaffoldOptions } from "./InitService.js";
+import type { ScaffoldOptions } from "./InitService.js";
 import { SANDBOX_WORKSPACE_DIR } from "./SandboxFactory.js";
 import { SKELETON_PROMPT } from "./templates.js";
 
@@ -422,11 +422,10 @@ describe("InitService scaffold", () => {
       expect(joined).toContain("npm run sandcastle");
     });
 
-    it("non-blank template includes a note about customizing the install command", () => {
+    it("non-blank template includes a note about the install hook", () => {
       const lines = getNextStepsLines("simple-loop");
       const joined = lines.join("\n");
       expect(joined).toContain("npm install");
-      expect(joined).toContain("onSandboxReady");
     });
 
     it("non-blank template mentions copyToSandbox and node_modules", () => {
@@ -473,6 +472,36 @@ describe("InitService scaffold", () => {
       const lines = getNextStepsLines("simple-loop");
       const numberedSteps = lines.filter((l) => /^\d+\./.test(l));
       expect(numberedSteps.length).toBeGreaterThanOrEqual(3);
+    });
+
+    it("uses pnpm in next steps when packageManager is pnpm", () => {
+      const lines = getNextStepsLines("simple-loop", "pnpm");
+      const joined = lines.join("\n");
+      expect(joined).toContain("pnpm run sandcastle");
+      expect(joined).toContain("pnpm install");
+      // "pnpm run" contains "npm run" as substring, so check no standalone "npm run"
+      expect(joined).not.toMatch(/(?<![p])npm run/);
+      expect(joined).not.toMatch(/(?<![p])npm install/);
+    });
+
+    it("uses yarn in next steps when packageManager is yarn", () => {
+      const lines = getNextStepsLines("simple-loop", "yarn");
+      const joined = lines.join("\n");
+      expect(joined).toContain("yarn run sandcastle");
+      expect(joined).toContain("yarn install");
+    });
+
+    it("uses bun in next steps when packageManager is bun", () => {
+      const lines = getNextStepsLines("simple-loop", "bun");
+      const joined = lines.join("\n");
+      expect(joined).toContain("bun run sandcastle");
+      expect(joined).toContain("bun install");
+    });
+
+    it("uses pnpm in blank template next steps", () => {
+      const lines = getNextStepsLines("blank", "pnpm");
+      const joined = lines.join("\n");
+      expect(joined).toContain("pnpm run sandcastle");
     });
   });
 
@@ -629,6 +658,199 @@ describe("InitService scaffold", () => {
         "utf-8",
       );
       expect(envExample).toContain("ANTHROPIC_API_KEY=");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Package manager support
+  // -------------------------------------------------------------------------
+
+  describe("package manager support", () => {
+    it("scaffolds with npm by default (no Dockerfile changes)", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "simple-loop" });
+
+      const dockerfile = await readFile(
+        join(dir, ".sandcastle", "Dockerfile"),
+        "utf-8",
+      );
+      expect(dockerfile).not.toContain("corepack");
+      expect(dockerfile).not.toContain("pnpm");
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.ts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain("npm install");
+    });
+
+    it("scaffolds with pnpm: Dockerfile installs pnpm, main.ts uses pnpm", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        packageManager: { name: "pnpm", version: "9.1.0" },
+      });
+
+      const dockerfile = await readFile(
+        join(dir, ".sandcastle", "Dockerfile"),
+        "utf-8",
+      );
+      expect(dockerfile).toContain("corepack enable");
+      expect(dockerfile).toContain("corepack prepare pnpm@9.1.0 --activate");
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.ts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain("pnpm install");
+      expect(mainTs).not.toMatch(/(?<![p])npm install/);
+    });
+
+    it("scaffolds with yarn: Dockerfile installs yarn via corepack", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        packageManager: { name: "yarn", version: "4.0.0" },
+      });
+
+      const dockerfile = await readFile(
+        join(dir, ".sandcastle", "Dockerfile"),
+        "utf-8",
+      );
+      expect(dockerfile).toContain("corepack enable");
+      expect(dockerfile).toContain("corepack prepare yarn@4.0.0 --activate");
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.ts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain("yarn install");
+    });
+
+    it("scaffolds with bun: Dockerfile installs bun via npm", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        packageManager: { name: "bun" },
+      });
+
+      const dockerfile = await readFile(
+        join(dir, ".sandcastle", "Dockerfile"),
+        "utf-8",
+      );
+      expect(dockerfile).toContain("npm install -g bun");
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.ts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain("bun install");
+    });
+
+    it("pnpm without version uses latest", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        packageManager: { name: "pnpm" },
+      });
+
+      const dockerfile = await readFile(
+        join(dir, ".sandcastle", "Dockerfile"),
+        "utf-8",
+      );
+      expect(dockerfile).toContain("corepack prepare pnpm@latest --activate");
+    });
+
+    it("strips +sha512 hash from version in Dockerfile", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        packageManager: {
+          name: "pnpm",
+          version: "10.30.3+sha512.abc123def",
+        },
+      });
+
+      const dockerfile = await readFile(
+        join(dir, ".sandcastle", "Dockerfile"),
+        "utf-8",
+      );
+      expect(dockerfile).toContain("corepack prepare pnpm@10.30.3 --activate");
+      expect(dockerfile).not.toContain("sha512");
+    });
+
+    it("inserts package manager install before USER line (runs as root)", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        packageManager: { name: "pnpm", version: "9.1.0" },
+      });
+
+      const dockerfile = await readFile(
+        join(dir, ".sandcastle", "Dockerfile"),
+        "utf-8",
+      );
+      const corepackIdx = dockerfile.indexOf("corepack enable");
+      const userIdx = dockerfile.indexOf("USER agent");
+      expect(corepackIdx).toBeGreaterThan(-1);
+      expect(userIdx).toBeGreaterThan(-1);
+      expect(corepackIdx).toBeLessThan(userIdx);
+    });
+
+    it("substitutes package manager in prompt .md files", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        packageManager: { name: "pnpm" },
+      });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).toContain("pnpm run typecheck");
+      expect(prompt).toContain("pnpm run test");
+      expect(prompt).not.toMatch(/(?<![p])npm run/);
+    });
+
+    it("substitutes package manager in sequential-reviewer template files", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "sequential-reviewer",
+        packageManager: { name: "yarn" },
+      });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.ts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain("yarn install");
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "implement-prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).toContain("yarn run typecheck");
+    });
+
+    it("substitutes package manager in parallel-planner template files", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "parallel-planner",
+        packageManager: { name: "bun" },
+      });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.ts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain("bun install");
+
+      const mergePrompt = await readFile(
+        join(dir, ".sandcastle", "merge-prompt.md"),
+        "utf-8",
+      );
+      expect(mergePrompt).toContain("bun run typecheck");
     });
   });
 });

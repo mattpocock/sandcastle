@@ -16,6 +16,7 @@ import {
   getNextStepsLines,
 } from "./InitService.js";
 import { defaultImageName } from "./run.js";
+import type { PackageManagerName } from "./InitService.js";
 import {
   claudeCode,
   codex as codexFactory,
@@ -88,6 +89,15 @@ const initModelOption = Options.text("model").pipe(
   Options.optional,
 );
 
+const packageManagerOption = Options.text("package-manager").pipe(
+  Options.withDescription(
+    "Package manager to use in generated files (npm, pnpm, yarn, bun). Prompted interactively if omitted",
+  ),
+  Options.optional,
+);
+
+const VALID_PACKAGE_MANAGERS = ["npm", "pnpm", "yarn", "bun"] as const;
+
 const initCommand = Command.make(
   "init",
   {
@@ -95,12 +105,14 @@ const initCommand = Command.make(
     template: templateOption,
     agent: agentOption,
     model: initModelOption,
+    packageManager: packageManagerOption,
   },
   ({
     imageName: imageNameFlag,
     template,
     agent: agentFlag,
     model: modelFlag,
+    packageManager: packageManagerFlag,
   }) =>
     Effect.gen(function* () {
       const d = yield* Display;
@@ -202,12 +214,48 @@ const initCommand = Command.make(
         }).pipe(Effect.ignore);
       }
 
+      // Resolve package manager: CLI flag > interactive select
+      let selectedPm: PackageManagerName;
+      if (packageManagerFlag._tag === "Some") {
+        const name = packageManagerFlag.value;
+        if (
+          !VALID_PACKAGE_MANAGERS.includes(
+            name as (typeof VALID_PACKAGE_MANAGERS)[number],
+          )
+        ) {
+          yield* Effect.fail(
+            new InitError({
+              message: `Unknown package manager "${name}". Available: ${VALID_PACKAGE_MANAGERS.join(", ")}`,
+            }),
+          );
+        }
+        selectedPm = name as PackageManagerName;
+      } else {
+        const selected = yield* Effect.promise(() =>
+          clack.select({
+            message: "Select a package manager:",
+            initialValue: "npm" as const,
+            options: VALID_PACKAGE_MANAGERS.map((pm) => ({
+              value: pm,
+              label: pm,
+            })),
+          }),
+        );
+        if (clack.isCancel(selected)) {
+          yield* Effect.fail(
+            new InitError({ message: "Package manager selection cancelled." }),
+          );
+        }
+        selectedPm = selected as PackageManagerName;
+      }
+
       yield* d.spinner(
         "Scaffolding .sandcastle/ config directory...",
         scaffold(cwd, {
           agent: selectedAgent,
           model: selectedModel,
           templateName: selectedTemplate,
+          packageManager: { name: selectedPm },
         }).pipe(
           Effect.mapError(
             (e) =>
@@ -241,7 +289,7 @@ const initCommand = Command.make(
       }
 
       // Show template-specific next steps
-      const nextSteps = getNextStepsLines(selectedTemplate);
+      const nextSteps = getNextStepsLines(selectedTemplate, selectedPm);
       for (const [i, line] of nextSteps.entries()) {
         yield* d.text(i === 0 ? line : styleText("dim", line));
       }

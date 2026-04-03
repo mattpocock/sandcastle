@@ -4,6 +4,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SANDBOX_WORKSPACE_DIR } from "./SandboxFactory.js";
 
+export type PackageManagerName = "npm" | "pnpm" | "yarn" | "bun";
+
+export interface DetectedPackageManager {
+  readonly name: PackageManagerName;
+  readonly version?: string;
+}
+
 const GITIGNORE = `.env
 logs/
 worktrees/
@@ -183,7 +190,11 @@ export const getAgent = (name: string): AgentEntry | undefined =>
 // Next steps
 // ---------------------------------------------------------------------------
 
-export function getNextStepsLines(template: string): string[] {
+export function getNextStepsLines(
+  template: string,
+  packageManager: PackageManagerName = "npm",
+): string[] {
+  const pm = packageManager;
   if (template === "blank") {
     return [
       "Next steps:",
@@ -191,18 +202,72 @@ export function getNextStepsLines(template: string): string[] {
       "2. Read and customize .sandcastle/prompt.md to describe what you want the agent to do",
       `3. Customize .sandcastle/main.ts — it uses the JS API (\`run()\`) to control how the agent runs`,
       `4. Add "sandcastle": "npx tsx .sandcastle/main.ts" to your package.json scripts`,
-      "5. Run `npm run sandcastle` to start the agent",
+      `5. Run \`${pm} run sandcastle\` to start the agent`,
     ];
   } else {
     return [
       "Next steps:",
       `1. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
       `2. Add "sandcastle": "npx tsx .sandcastle/main.ts" to your package.json scripts`,
-      '3. Templates use `copyToSandbox: ["node_modules"]` to copy your host node_modules into the sandbox for fast startup — the `npm install` in the onSandboxReady hook is a safety net for platform-specific binaries. Adjust both if you use a different package manager',
+      `3. Templates use \`copyToSandbox: ["node_modules"]\` to copy your host node_modules into the sandbox for fast startup — the \`${pm} install\` in the onSandboxReady hook is a safety net for platform-specific binaries`,
       "4. Read and customize the prompt files in .sandcastle/ — they shape what the agent does",
-      "5. Run `npm run sandcastle` to start the agent",
+      `5. Run \`${pm} run sandcastle\` to start the agent`,
     ];
   }
+}
+
+// ---------------------------------------------------------------------------
+// Package manager Dockerfile helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a Dockerfile RUN instruction to install the given package manager.
+ * Returns undefined for npm (already available in the Node base image).
+ */
+function buildPackageManagerInstallLine(
+  pm: DetectedPackageManager,
+): string | undefined {
+  switch (pm.name) {
+    case "npm":
+      return undefined;
+    case "pnpm":
+    case "yarn": {
+      // Strip +sha512.xxx integrity hash from version — corepack doesn't need it
+      const version = pm.version?.replace(/\+.*$/, "");
+      const spec = version ? `${pm.name}@${version}` : `${pm.name}@latest`;
+      return `RUN corepack enable && corepack prepare ${spec} --activate`;
+    }
+    case "bun":
+      return "RUN npm install -g bun";
+  }
+}
+
+/**
+ * Insert a package-manager install line into a Dockerfile string,
+ * before the USER line so it runs as root.
+ */
+function insertPackageManagerInDockerfile(
+  dockerfile: string,
+  installLine: string,
+): string {
+  return dockerfile.replace(
+    /^(USER .*)$/m,
+    `# Install project package manager\n${installLine}\n\n$1`,
+  );
+}
+
+/**
+ * Replace npm command references in file content with the target package manager.
+ * Handles: "npm install", "npm run <script>", and comment references.
+ */
+function substitutePackageManager(
+  content: string,
+  pm: PackageManagerName,
+): string {
+  if (pm === "npm") return content;
+  return content
+    .replace(/\bnpm install\b/g, `${pm} install`)
+    .replace(/\bnpm run\b/g, `${pm} run`);
 }
 
 // ---------------------------------------------------------------------------
@@ -306,6 +371,7 @@ export interface ScaffoldOptions {
   agent: AgentEntry;
   model: string;
   templateName?: string;
+  packageManager?: DetectedPackageManager;
 }
 
 export const scaffold = (
@@ -313,7 +379,12 @@ export const scaffold = (
   options: ScaffoldOptions,
 ): Effect.Effect<void, Error, FileSystem.FileSystem> =>
   Effect.gen(function* () {
-    const { agent, model, templateName = "blank" } = options;
+    const {
+      agent,
+      model,
+      templateName = "blank",
+      packageManager = { name: "npm" as const },
+    } = options;
     const fs = yield* FileSystem.FileSystem;
     const configDir = join(repoDir, ".sandcastle");
 
@@ -334,13 +405,17 @@ export const scaffold = (
 
     const templateDir = yield* getTemplateDir(templateName);
 
+    // Build Dockerfile with optional package manager install line
+    let dockerfile = agent.dockerfileTemplate;
+    const installLine = buildPackageManagerInstallLine(packageManager);
+    if (installLine) {
+      dockerfile = insertPackageManagerInDockerfile(dockerfile, installLine);
+    }
+
     yield* Effect.all(
       [
         fs
-          .writeFileString(
-            join(configDir, "Dockerfile"),
-            agent.dockerfileTemplate,
-          )
+          .writeFileString(join(configDir, "Dockerfile"), dockerfile)
           .pipe(Effect.mapError((e) => new Error(e.message))),
         fs
           .writeFileString(join(configDir, ".gitignore"), GITIGNORE)
@@ -352,4 +427,45 @@ export const scaffold = (
 
     // Rewrite main.ts with the selected agent factory and model
     yield* rewriteMainTs(configDir, agent, model);
+
+    // Substitute package manager in all generated files
+    if (packageManager.name !== "npm") {
+      yield* rewritePackageManagerRefs(configDir, packageManager.name);
+    }
+  });
+
+/**
+ * Rewrite npm references in all .ts and .md files in the config directory.
+ */
+const rewritePackageManagerRefs = (
+  configDir: string,
+  pm: PackageManagerName,
+): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const files = yield* fs
+      .readDirectory(configDir)
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+
+    const rewritable = files.filter(
+      (f) => f.endsWith(".ts") || f.endsWith(".md"),
+    );
+
+    yield* Effect.all(
+      rewritable.map((f) =>
+        Effect.gen(function* () {
+          const path = join(configDir, f);
+          let content = yield* fs
+            .readFileString(path)
+            .pipe(Effect.mapError((e) => new Error(e.message)));
+          const updated = substitutePackageManager(content, pm);
+          if (updated !== content) {
+            yield* fs
+              .writeFileString(path, updated)
+              .pipe(Effect.mapError((e) => new Error(e.message)));
+          }
+        }),
+      ),
+      { concurrency: "unbounded" },
+    );
   });
