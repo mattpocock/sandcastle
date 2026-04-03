@@ -449,13 +449,15 @@ async function executeTask(task: DiscoveryItem): Promise<{
   phases: string[];
   error_reason?: string;
 }> {
-  const branch = `ce-auto-coder/${task.id}`;
-  validateBranchName(branch);
+  // Sanitize task ID for use as git branch name (remove colons, spaces, etc.)
+  const safeBranchId = task.id.replace(/[^a-zA-Z0-9._\/-]/g, "-");
+  const branch = `ce-auto-coder/${safeBranchId}`;
   const phases: string[] = [];
   let iterations = 0;
 
   let sandbox;
   try {
+    validateBranchName(branch);
     sandbox = await sandcastle.createSandbox({
       branch,
       hooks,
