@@ -33,6 +33,11 @@ const TEMPLATES: TemplateMetadata[] = [
     description:
       "Plans parallelizable issues, executes on separate branches, merges",
   },
+  {
+    name: "ce-auto-coder",
+    description:
+      "Autonomous CE-powered orchestrator — discovers work, plans, reviews, implements, and ships",
+  },
 ];
 
 export const listTemplates = (): TemplateMetadata[] => TEMPLATES;
