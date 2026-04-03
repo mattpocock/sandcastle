@@ -443,9 +443,7 @@ async function reviewLoop(
 // Phase: Execute Task (full CE lifecycle)
 // ---------------------------------------------------------------------------
 
-async function executeTask(
-  task: DiscoveryItem,
-): Promise<{
+async function executeTask(task: DiscoveryItem): Promise<{
   outcome: TaskOutcome;
   iterations: number;
   phases: string[];
@@ -548,9 +546,7 @@ async function executeTask(
       TASK_TIER: task.tier,
       TASK_SIZE: task.size,
     };
-    if (planFile) {
-      workPromptArgs.PLAN_FILE = planFile;
-    }
+    workPromptArgs.PLAN_FILE = planFile ?? "none";
 
     const workResult = await sandbox.run({
       agent: sandcastle.claudeCode("claude-sonnet-4-6"),
@@ -570,7 +566,7 @@ async function executeTask(
       {
         TASK_ID: task.id,
         TASK_TITLE: task.title,
-        SOURCE_BRANCH: sandbox.branch,
+        REVIEW_BASE_BRANCH: sandbox.branch,
       },
       3,
     );

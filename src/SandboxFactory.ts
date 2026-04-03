@@ -4,6 +4,7 @@ import { NodeFileSystem } from "@effect/platform-node";
 import { randomUUID } from "node:crypto";
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { dirname, join } from "node:path";
+
 import { createInterface } from "node:readline";
 import {
   startContainer,
@@ -319,12 +320,17 @@ const startSandboxContainer = (
   const hostUid = process.getuid?.() ?? 1000;
   const hostGid = process.getgid?.() ?? 1000;
 
+  // OAuth auth is handled via CLAUDE_CODE_OAUTH_TOKEN env var
+  // (passed through .sandcastle/.env → container env).
+  // No ~/.claude mount needed.
+  const allMounts = volumeMounts;
+
   return startContainer(
     containerName,
     imageName,
     { ...env, HOME: "/home/agent" },
     {
-      volumeMounts,
+      volumeMounts: allMounts,
       workdir: SANDBOX_WORKSPACE_DIR,
       user: `${hostUid}:${hostGid}`,
     },

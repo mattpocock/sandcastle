@@ -32,7 +32,7 @@ Review the code changes on this branch and identify issues. You are a separate a
 
 ## Review Process
 
-1. Check what changed: `git diff {{SOURCE_BRANCH}}...HEAD`
+1. Check what changed: `git diff {{REVIEW_BASE_BRANCH}}...HEAD`
 2. Read the changed files in full context (not just the diff)
 3. Run tests if a test command is available
 4. Identify issues by severity

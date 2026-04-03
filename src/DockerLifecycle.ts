@@ -129,10 +129,9 @@ export const chownInContainer = (
       "-u",
       "root",
       containerName,
-      "chown",
-      "-R",
-      owner,
-      path,
+      "bash",
+      "-c",
+      `find ${path} -not -path '${path}/.claude' -not -path '${path}/.claude/*' -exec chown ${owner} {} + 2>/dev/null || true`,
     ]),
   );
 
