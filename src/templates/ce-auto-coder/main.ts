@@ -212,6 +212,18 @@ function recordBranch(branch: string): void {
   }
 }
 
+function removeBranchFromManifest(branch: string): void {
+  try {
+    const branches = readManifest().filter((b) => b !== branch);
+    writeFileSync(
+      MANIFEST_PATH,
+      branches.join("\n") + (branches.length ? "\n" : ""),
+    );
+  } catch {
+    // non-critical
+  }
+}
+
 function readManifest(): string[] {
   try {
     if (!existsSync(MANIFEST_PATH)) return [];
@@ -243,11 +255,12 @@ function gitMerge(branch: string): "merged" | "conflicted" {
       stdio: "pipe",
       timeout: GIT_TIMEOUT,
     });
-    // Success — delete the branch (only place branches are deleted)
+    // Success — delete the branch and remove from manifest
     execFileSync("git", ["branch", "-D", branch], {
       stdio: "pipe",
       timeout: GIT_TIMEOUT,
     });
+    removeBranchFromManifest(branch);
     return "merged";
   } catch {
     try {
@@ -284,22 +297,31 @@ function gitMerge(branch: string): "merged" | "conflicted" {
       stdio: "pipe",
       timeout: GIT_TIMEOUT,
     });
-    // Success — delete the branch
+    // Success — delete the branch and remove from manifest
     execFileSync("git", ["branch", "-D", branch], {
       stdio: "pipe",
       timeout: GIT_TIMEOUT,
     });
+    removeBranchFromManifest(branch);
     console.log("  Merged via rebase after initial conflict.");
     return "merged";
   } catch {
-    // Rebase failed — preserve the branch (do NOT delete)
+    // Rebase or post-rebase merge failed — preserve the branch
+    try {
+      execFileSync("git", ["merge", "--abort"], {
+        stdio: "pipe",
+        timeout: GIT_TIMEOUT,
+      });
+    } catch {
+      /* may not be in merge state */
+    }
     try {
       execFileSync("git", ["rebase", "--abort"], {
         stdio: "pipe",
         timeout: GIT_TIMEOUT,
       });
     } catch {
-      /* not in rebase state */
+      /* may not be in rebase state */
     }
     try {
       execFileSync("git", ["checkout", currentBranch], {
@@ -351,10 +373,13 @@ async function discover(): Promise<DiscoveryItem[]> {
         `Discovery attempt ${attempt + 1}: invalid output, retrying...`,
       );
     } catch (err) {
-      if (attempt === 0) {
-        console.warn("Discovery failed, likely preprocessing error:", err);
-      }
-      return [];
+      console.warn(
+        `Discovery attempt ${attempt + 1} threw:`,
+        err instanceof Error ? err.message : err,
+      );
+      // Allow retries for transient errors (Docker, network)
+      // Only bail immediately if this is the last attempt
+      if (attempt >= MAX_XML_RETRIES - 1) return [];
     }
   }
 
@@ -512,8 +537,22 @@ async function reviewLoop(
     const review = parseXmlTag<ReviewResult>(result.stdout, "review");
 
     if (!review || !validateReview(review)) {
-      // Malformed output — do NOT advance stuck window, just retry
-      console.warn(`Review round ${round}: malformed output, retrying...`);
+      // Malformed output — counts as "no improvement" toward stuck detection
+      roundsWithoutImprovement++;
+      console.warn(
+        `Review round ${round}: malformed output (stale: ${roundsWithoutImprovement}/3), retrying...`,
+      );
+      if (roundsWithoutImprovement >= 3) {
+        console.log(
+          `Review: STUCK — ${roundsWithoutImprovement} rounds without valid/improving output.`,
+        );
+        return {
+          passed: false,
+          stuck: true,
+          budgetExhausted: false,
+          iterations: totalIterations,
+        };
+      }
       continue;
     }
 
@@ -586,6 +625,17 @@ async function executeTask(
   const phases: string[] = [];
   let iterations = 0;
   let remainingBudget = taskBudget;
+
+  // Capture the current base branch before creating the task branch
+  let baseBranch = "main";
+  try {
+    baseBranch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      encoding: "utf-8",
+      timeout: GIT_TIMEOUT,
+    }).trim();
+  } catch {
+    // fallback to "main"
+  }
 
   let sandbox;
   try {
@@ -711,11 +761,12 @@ async function executeTask(
       {
         TASK_ID: task.id,
         TASK_TITLE: task.title,
-        REVIEW_BASE_BRANCH: sandbox.branch,
+        REVIEW_BASE_BRANCH: baseBranch,
       },
       remainingBudget,
     );
     iterations += codeReview.iterations;
+    remainingBudget -= codeReview.iterations;
     phases.push("review-code");
 
     if (!codeReview.passed) {
