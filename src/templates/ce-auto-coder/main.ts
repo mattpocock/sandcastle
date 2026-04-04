@@ -464,8 +464,13 @@ async function reviewLoop(
       result = await sandbox.run({
         agent: sandcastle.claudeCode("claude-sonnet-4-6"),
         promptFile,
-        promptArgs: { ...promptArgs, REVIEW_ROUND: String(round + 1) },
-        maxIterations: 1,
+        promptArgs: {
+          ...promptArgs,
+          REVIEW_ROUND: String(round + 1),
+          MAX_REVIEW_ROUNDS: String(maxRounds),
+        },
+        // Give the review agent enough iterations to find AND fix issues in one pass
+        maxIterations: 10,
         idleTimeoutSeconds: TIMEOUT_REVIEW,
       });
     } catch (err) {
@@ -546,10 +551,11 @@ async function executeTask(task: DiscoveryItem): Promise<{
           TASK_DESCRIPTION: task.description,
           TASK_TIER: task.tier,
         },
-        maxIterations: 1,
+        // Give the plan agent enough iterations to explore codebase AND write plan
+        maxIterations: 10,
         idleTimeoutSeconds: TIMEOUT_PLAN,
       });
-      iterations++;
+      iterations += planResult.iterationsRun;
       phases.push("plan");
 
       const planOutput = parseXmlTag<{ plan_file: string }>(
@@ -572,7 +578,7 @@ async function executeTask(task: DiscoveryItem): Promise<{
         );
         if (!retryOutput?.plan_file) {
           await sandbox.close();
-          deleteBranch(branch);
+          console.log(`  Branch preserved: ${branch} (plan output missing)`);
           return { outcome: "blocked", iterations, phases };
         }
         planFile = retryOutput.plan_file;
@@ -597,7 +603,7 @@ async function executeTask(task: DiscoveryItem): Promise<{
       if (!planReview.passed) {
         console.log(`Task ${task.id}: plan review blocked after 3 rounds.`);
         await sandbox.close();
-        deleteBranch(branch);
+        console.log(`  Branch preserved: ${branch} (plan review blocked)`);
         return { outcome: "blocked", iterations, phases };
       }
     }
@@ -640,7 +646,7 @@ async function executeTask(task: DiscoveryItem): Promise<{
     if (!codeReview.passed) {
       console.log(`Task ${task.id}: code review failed after 3 rounds.`);
       await sandbox.close();
-      deleteBranch(branch);
+      console.log(`  Branch preserved: ${branch} (code review failed)`);
       return { outcome: "failed", iterations, phases };
     }
 
@@ -655,18 +661,17 @@ async function executeTask(task: DiscoveryItem): Promise<{
 
     return { outcome: "completed", iterations, phases };
   } catch (err) {
-    // Unrecoverable error — clean up
+    // Unrecoverable error — close sandbox but preserve branch for inspection
     const errorMsg = err instanceof Error ? err.message : String(err);
     console.error(`Task ${task.id} failed:`, errorMsg);
     try {
       await sandbox.close();
-      deleteBranch(branch);
     } catch {
-      // If close() throws, preserve branch for manual inspection (do NOT delete)
-      console.warn(
-        `Could not clean up branch ${branch}. Preserved for manual inspection.`,
-      );
+      console.warn(`Could not close sandbox for ${branch}.`);
     }
+    console.log(
+      `  Branch preserved: ${branch} (error: ${errorMsg.slice(0, 80)})`,
+    );
     return {
       outcome: "failed",
       iterations,
@@ -960,6 +965,28 @@ async function main(): Promise<void> {
   console.log(`Total iterations: ${totalIterations}`);
   console.log(`Total duration: ${Math.round(totalDuration / 1000)}s`);
   console.log(`Run log: ${RUN_LOG_PATH}`);
+
+  // List preserved branches (failed/blocked tasks with recoverable work)
+  try {
+    const branches = execFileSync(
+      "git",
+      ["branch", "--list", "ce-auto-coder/*"],
+      { encoding: "utf-8", timeout: GIT_TIMEOUT },
+    )
+      .trim()
+      .split("\n")
+      .map((b) => b.trim())
+      .filter(Boolean);
+    if (branches.length > 0) {
+      console.log(`\nPreserved branches (inspect or resume):`);
+      for (const b of branches) {
+        console.log(`  git diff HEAD...${b}`);
+      }
+    }
+  } catch {
+    // branch listing failed
+  }
+
   console.log(`\nAll done.`);
 }
 
