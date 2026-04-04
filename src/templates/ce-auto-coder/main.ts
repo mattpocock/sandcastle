@@ -464,13 +464,8 @@ async function reviewLoop(
       result = await sandbox.run({
         agent: sandcastle.claudeCode("claude-sonnet-4-6"),
         promptFile,
-        promptArgs: {
-          ...promptArgs,
-          REVIEW_ROUND: String(round + 1),
-          MAX_REVIEW_ROUNDS: String(maxRounds),
-        },
-        // Give the review agent enough iterations to find AND fix issues in one pass
-        maxIterations: 10,
+        promptArgs: { ...promptArgs, REVIEW_ROUND: String(round + 1) },
+        maxIterations: 1,
         idleTimeoutSeconds: TIMEOUT_REVIEW,
       });
     } catch (err) {
@@ -551,11 +546,10 @@ async function executeTask(task: DiscoveryItem): Promise<{
           TASK_DESCRIPTION: task.description,
           TASK_TIER: task.tier,
         },
-        // Give the plan agent enough iterations to explore codebase AND write plan
-        maxIterations: 10,
+        maxIterations: 1,
         idleTimeoutSeconds: TIMEOUT_PLAN,
       });
-      iterations += planResult.iterationsRun;
+      iterations++;
       phases.push("plan");
 
       const planOutput = parseXmlTag<{ plan_file: string }>(
@@ -578,7 +572,7 @@ async function executeTask(task: DiscoveryItem): Promise<{
         );
         if (!retryOutput?.plan_file) {
           await sandbox.close();
-          console.log(`  Branch preserved: ${branch} (plan output missing)`);
+          deleteBranch(branch);
           return { outcome: "blocked", iterations, phases };
         }
         planFile = retryOutput.plan_file;
@@ -603,7 +597,7 @@ async function executeTask(task: DiscoveryItem): Promise<{
       if (!planReview.passed) {
         console.log(`Task ${task.id}: plan review blocked after 3 rounds.`);
         await sandbox.close();
-        console.log(`  Branch preserved: ${branch} (plan review blocked)`);
+        deleteBranch(branch);
         return { outcome: "blocked", iterations, phases };
       }
     }
@@ -646,7 +640,7 @@ async function executeTask(task: DiscoveryItem): Promise<{
     if (!codeReview.passed) {
       console.log(`Task ${task.id}: code review failed after 3 rounds.`);
       await sandbox.close();
-      console.log(`  Branch preserved: ${branch} (code review failed)`);
+      deleteBranch(branch);
       return { outcome: "failed", iterations, phases };
     }
 
@@ -661,17 +655,18 @@ async function executeTask(task: DiscoveryItem): Promise<{
 
     return { outcome: "completed", iterations, phases };
   } catch (err) {
-    // Unrecoverable error — close sandbox but preserve branch for inspection
+    // Unrecoverable error — clean up
     const errorMsg = err instanceof Error ? err.message : String(err);
     console.error(`Task ${task.id} failed:`, errorMsg);
     try {
       await sandbox.close();
+      deleteBranch(branch);
     } catch {
-      console.warn(`Could not close sandbox for ${branch}.`);
+      // If close() throws, preserve branch for manual inspection (do NOT delete)
+      console.warn(
+        `Could not clean up branch ${branch}. Preserved for manual inspection.`,
+      );
     }
-    console.log(
-      `  Branch preserved: ${branch} (error: ${errorMsg.slice(0, 80)})`,
-    );
     return {
       outcome: "failed",
       iterations,
@@ -718,125 +713,6 @@ function cleanupStaleContainers(): void {
   }
 }
 
-function cleanupStaleWorktrees(): void {
-  const worktreeDir = ".sandcastle/worktrees";
-  try {
-    if (!existsSync(worktreeDir)) return;
-    const entries = execFileSync("ls", [worktreeDir], {
-      encoding: "utf-8",
-      timeout: GIT_TIMEOUT,
-    })
-      .trim()
-      .split("\n")
-      .filter(Boolean);
-    if (entries.length > 0) {
-      console.log(`  Found ${entries.length} stale worktrees — cleaning...`);
-      // Use git worktree prune first to clean up stale refs
-      try {
-        execFileSync("git", ["worktree", "prune"], {
-          stdio: "pipe",
-          timeout: GIT_TIMEOUT,
-        });
-      } catch {
-        // prune may fail if no worktrees registered
-      }
-      // Then remove the directories
-      for (const entry of entries) {
-        const fullPath = `${worktreeDir}/${entry}`;
-        try {
-          execFileSync("rm", ["-rf", fullPath], {
-            stdio: "pipe",
-            timeout: GIT_TIMEOUT,
-          });
-        } catch {
-          console.warn(`  Could not remove worktree: ${fullPath}`);
-        }
-      }
-      // Clean up any stale branches left behind
-      try {
-        const branches = execFileSync(
-          "git",
-          ["branch", "--list", "sandcastle/*", "ce-auto-coder/*"],
-          { encoding: "utf-8", timeout: GIT_TIMEOUT },
-        )
-          .trim()
-          .split("\n")
-          .map((b) => b.trim())
-          .filter((b) => b && !b.startsWith("*"));
-        for (const branch of branches) {
-          try {
-            execFileSync("git", ["branch", "-D", branch], {
-              stdio: "pipe",
-              timeout: GIT_TIMEOUT,
-            });
-          } catch {
-            // branch may be checked out elsewhere
-          }
-        }
-        if (branches.length > 0) {
-          console.log(`  Cleaned ${branches.length} stale branches.`);
-        }
-      } catch {
-        // branch listing failed
-      }
-      console.log("  Worktree cleanup done.");
-    }
-  } catch {
-    // cleanup failed — not critical
-  }
-}
-
-function reportDiskUsage(): void {
-  try {
-    const worktreeDir = ".sandcastle/worktrees";
-    if (existsSync(worktreeDir)) {
-      const size = execFileSync("du", ["-sh", worktreeDir], {
-        encoding: "utf-8",
-        timeout: GIT_TIMEOUT,
-      }).trim();
-      console.log(`  Worktree disk usage: ${size.split("\t")[0]}`);
-    }
-    const dfOutput = execFileSync("df", ["-h", "."], {
-      encoding: "utf-8",
-      timeout: GIT_TIMEOUT,
-    })
-      .trim()
-      .split("\n");
-    if (dfOutput.length > 1) {
-      const parts = dfOutput[1]!.split(/\s+/);
-      console.log(`  Disk: ${parts[3]} available (${parts[4]} used)`);
-    }
-  } catch {
-    // not critical
-  }
-}
-
-const MIN_DISK_MB = 2000; // 2GB minimum free space
-
-function checkDiskSpace(): boolean {
-  try {
-    const output = execFileSync("df", ["-m", "."], {
-      encoding: "utf-8",
-      timeout: GIT_TIMEOUT,
-    })
-      .trim()
-      .split("\n");
-    if (output.length > 1) {
-      const parts = output[1]!.split(/\s+/);
-      const availMB = parseInt(parts[3]!, 10);
-      if (availMB < MIN_DISK_MB) {
-        console.error(
-          `Disk space critically low: ${availMB}MB available (minimum ${MIN_DISK_MB}MB). Halting.`,
-        );
-        return false;
-      }
-    }
-  } catch {
-    // can't check — continue anyway
-  }
-  return true;
-}
-
 async function main(): Promise<void> {
   console.log(`\n=== CE Auto-Coder ===`);
   console.log(`Mode: ${MODE}`);
@@ -846,12 +722,9 @@ async function main(): Promise<void> {
   );
   console.log(`Priority: ${PRIORITY_MODE}\n`);
 
-  // Clean up stale resources from previous runs
-  console.log("Startup cleanup...");
+  // Clean up stale sandcastle containers from previous runs
+  console.log("Cleaning up stale containers...");
   cleanupStaleContainers();
-  cleanupStaleWorktrees();
-  reportDiskUsage();
-  console.log("");
 
   // --- Discovery ---
   console.log("Phase 1: Discovering work...\n");
@@ -897,11 +770,6 @@ async function main(): Promise<void> {
       console.error(
         `\nCircuit breaker: ${consecutiveFailures} consecutive failures. Halting.`,
       );
-      break;
-    }
-
-    // Disk space check — prevent filling disk with worktrees
-    if (!checkDiskSpace()) {
       break;
     }
 
@@ -965,28 +833,6 @@ async function main(): Promise<void> {
   console.log(`Total iterations: ${totalIterations}`);
   console.log(`Total duration: ${Math.round(totalDuration / 1000)}s`);
   console.log(`Run log: ${RUN_LOG_PATH}`);
-
-  // List preserved branches (failed/blocked tasks with recoverable work)
-  try {
-    const branches = execFileSync(
-      "git",
-      ["branch", "--list", "ce-auto-coder/*"],
-      { encoding: "utf-8", timeout: GIT_TIMEOUT },
-    )
-      .trim()
-      .split("\n")
-      .map((b) => b.trim())
-      .filter(Boolean);
-    if (branches.length > 0) {
-      console.log(`\nPreserved branches (inspect or resume):`);
-      for (const b of branches) {
-        console.log(`  git diff HEAD...${b}`);
-      }
-    }
-  } catch {
-    // branch listing failed
-  }
-
   console.log(`\nAll done.`);
 }
 
