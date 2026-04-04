@@ -1,8 +1,8 @@
-// CE Auto-Coder — Autonomous CE-powered orchestration template
+// CE Auto-Coder v2 — Autonomous CE-powered orchestration template
 //
 // Discovers work (GitHub issues, TODOs, optimizations, ideation), prioritizes
 // by impact, and runs each task through a CE-style development lifecycle:
-//   plan → review plan → work → review code → commit → merge
+//   plan → review plan (loop until clean) → work → review code (loop until clean) → merge
 //
 // Two operating modes:
 //   auto       — fully autonomous, all tiers including ideation
@@ -15,7 +15,13 @@
 
 import * as sandcastle from "@ai-hero/sandcastle";
 import { execFileSync } from "node:child_process";
-import { appendFileSync, mkdirSync, existsSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdirSync,
+  existsSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 
 // ---------------------------------------------------------------------------
 // Configuration (from environment / .env)
@@ -47,6 +53,7 @@ const PRIORITY_MODE: "tier-ordered" | "cross-tier" = priorityRaw;
 const MAX_ITERATIONS = parseEnvInt("MAX_ITERATIONS", 50);
 const CIRCUIT_BREAKER_THRESHOLD = parseEnvInt("CIRCUIT_BREAKER_THRESHOLD", 3);
 const MAX_FILES_PER_IDEA = parseEnvInt("MAX_FILES_PER_IDEA", 10);
+const MIN_TASK_BUDGET = 8;
 
 // Hooks run inside the sandbox before the agent starts.
 const hooks = {
@@ -66,8 +73,12 @@ const TIMEOUT_PLAN = 900;
 const TIMEOUT_WORK = 1200;
 const TIMEOUT_REVIEW = 600;
 
-// Run log path
+// Run log and manifest paths
 const RUN_LOG_PATH = ".sandcastle/logs/ce-auto-coder-run.jsonl";
+const MANIFEST_PATH = ".sandcastle/current-run-branches.txt";
+
+// XML retry cap
+const MAX_XML_RETRIES = 5;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -89,7 +100,9 @@ type TaskOutcome =
   | "blocked"
   | "failed"
   | "skipped"
-  | "conflicted";
+  | "conflicted"
+  | "needs-human"
+  | "budget-exhausted";
 
 interface TaskLogEntry {
   timestamp: string;
@@ -108,6 +121,13 @@ interface ReviewResult {
   pass: boolean;
   findings_summary: { p0: number; p1: number; p2: number; p3: number };
   details: unknown[];
+}
+
+interface ReviewLoopResult {
+  passed: boolean;
+  stuck: boolean;
+  budgetExhausted: boolean;
+  iterations: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -131,7 +151,6 @@ function validateDiscovery(
   if (typeof parsed !== "object" || parsed === null) return false;
   const obj = parsed as Record<string, unknown>;
   if (!Array.isArray(obj.items)) return false;
-  // Filter out malformed items — require at minimum id, title, tier, score, size
   obj.items = (obj.items as unknown[]).filter((item) => {
     if (typeof item !== "object" || item === null) return false;
     const i = item as Record<string, unknown>;
@@ -169,13 +188,51 @@ function logTask(entry: TaskLogEntry): void {
   }
 }
 
-const GIT_TIMEOUT = 60_000; // 60s timeout for git commands
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const GIT_TIMEOUT = 60_000;
 
 function validateBranchName(branch: string): void {
   if (!/^[a-zA-Z0-9._\/-]+$/.test(branch)) {
     throw new Error(`Invalid branch name: ${branch}`);
   }
 }
+
+// --- Branch manifest (track current-run branches for cleanup) ---
+
+function recordBranch(branch: string): void {
+  try {
+    const dir = ".sandcastle";
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    appendFileSync(MANIFEST_PATH, branch + "\n");
+  } catch {
+    // non-critical
+  }
+}
+
+function readManifest(): string[] {
+  try {
+    if (!existsSync(MANIFEST_PATH)) return [];
+    return readFileSync(MANIFEST_PATH, "utf-8")
+      .trim()
+      .split("\n")
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function clearManifest(): void {
+  try {
+    writeFileSync(MANIFEST_PATH, "");
+  } catch {
+    // non-critical
+  }
+}
+
+// --- Git operations ---
 
 function gitMerge(branch: string): "merged" | "conflicted" {
   validateBranchName(branch);
@@ -186,13 +243,13 @@ function gitMerge(branch: string): "merged" | "conflicted" {
       stdio: "pipe",
       timeout: GIT_TIMEOUT,
     });
+    // Success — delete the branch (only place branches are deleted)
     execFileSync("git", ["branch", "-D", branch], {
       stdio: "pipe",
       timeout: GIT_TIMEOUT,
     });
     return "merged";
   } catch {
-    // Merge failed — abort and try rebase approach
     try {
       execFileSync("git", ["merge", "--abort"], {
         stdio: "pipe",
@@ -203,14 +260,11 @@ function gitMerge(branch: string): "merged" | "conflicted" {
     }
   }
 
-  // Second attempt: rebase the task branch onto current HEAD, then fast-forward merge
+  // Second attempt: rebase then fast-forward
   const currentBranch = execFileSync(
     "git",
     ["rev-parse", "--abbrev-ref", "HEAD"],
-    {
-      encoding: "utf-8",
-      timeout: GIT_TIMEOUT,
-    },
+    { encoding: "utf-8", timeout: GIT_TIMEOUT },
   ).trim();
 
   try {
@@ -230,6 +284,7 @@ function gitMerge(branch: string): "merged" | "conflicted" {
       stdio: "pipe",
       timeout: GIT_TIMEOUT,
     });
+    // Success — delete the branch
     execFileSync("git", ["branch", "-D", branch], {
       stdio: "pipe",
       timeout: GIT_TIMEOUT,
@@ -237,7 +292,7 @@ function gitMerge(branch: string): "merged" | "conflicted" {
     console.log("  Merged via rebase after initial conflict.");
     return "merged";
   } catch {
-    // Rebase also failed — give up
+    // Rebase failed — preserve the branch (do NOT delete)
     try {
       execFileSync("git", ["rebase", "--abort"], {
         stdio: "pipe",
@@ -254,87 +309,60 @@ function gitMerge(branch: string): "merged" | "conflicted" {
     } catch {
       /* already on current branch */
     }
-    try {
-      execFileSync("git", ["branch", "-D", branch], {
-        stdio: "pipe",
-        timeout: GIT_TIMEOUT,
-      });
-    } catch {
-      /* branch may not exist */
-    }
+    // Branch preserved for inspection — NOT deleted
+    console.log(`  Branch preserved: ${branch} (merge conflict)`);
     return "conflicted";
   }
 }
 
-function deleteBranch(branch: string): void {
-  validateBranchName(branch);
-  try {
-    execFileSync("git", ["branch", "-D", branch], {
-      stdio: "pipe",
-      timeout: GIT_TIMEOUT,
-    });
-  } catch {
-    // branch may not exist
-  }
-}
-
 // ---------------------------------------------------------------------------
-// Phase: Discovery
+// Phase: Discovery (with retry loop)
 // ---------------------------------------------------------------------------
 
 async function discover(): Promise<DiscoveryItem[]> {
-  let result;
-  try {
-    result = await sandcastle.run({
-      hooks,
-      copyToSandbox,
-      name: "discovery",
-      maxIterations: 1,
-      agent: sandcastle.claudeCode("claude-sonnet-4-6"),
-      promptFile: "./.sandcastle/discover-prompt.md",
-      idleTimeoutSeconds: TIMEOUT_PLAN,
-    });
-  } catch (err) {
-    console.warn("Discovery failed, likely preprocessing error:", err);
-    return [];
-  }
+  let lastStdout = "";
 
-  const discovery = parseXmlTag<{ items: DiscoveryItem[] }>(
-    result.stdout,
-    "discovery",
-  );
-
-  if (!discovery || !validateDiscovery(discovery)) {
-    console.warn("Discovery agent did not produce valid <discovery> output.");
-    // Retry once with reformat instruction, including original output for context
+  for (let attempt = 0; attempt < MAX_XML_RETRIES; attempt++) {
     try {
-      const retry = await sandcastle.run({
+      const isRetry = attempt > 0;
+      const result = await sandcastle.run({
         hooks,
         copyToSandbox,
-        name: "discovery-retry",
+        name: isRetry ? `discovery-retry-${attempt}` : "discovery",
         maxIterations: 1,
         agent: sandcastle.claudeCode("claude-sonnet-4-6"),
-        prompt: `Your previous discovery output was not parseable as valid XML-tagged JSON. Here is what you produced:\n\n${result.stdout.slice(0, 4000)}\n\nPlease reformat this as valid JSON wrapped in <discovery>{"items": [...]}</discovery> XML tags.`,
+        ...(isRetry
+          ? {
+              prompt: `Your previous discovery output was not parseable as valid XML-tagged JSON. Here is what you produced:\n\n${lastStdout.slice(0, 4000)}\n\nPlease reformat this as valid JSON wrapped in <discovery>{"items": [...]}</discovery> XML tags.`,
+            }
+          : { promptFile: "./.sandcastle/discover-prompt.md" }),
         idleTimeoutSeconds: TIMEOUT_PLAN,
       });
-      const retryDiscovery = parseXmlTag<{ items: DiscoveryItem[] }>(
-        retry.stdout,
+      lastStdout = result.stdout;
+
+      const discovery = parseXmlTag<{ items: DiscoveryItem[] }>(
+        result.stdout,
         "discovery",
       );
-      if (retryDiscovery && validateDiscovery(retryDiscovery))
-        return retryDiscovery.items;
-    } catch {
-      // retry failed too
+      if (discovery && validateDiscovery(discovery)) {
+        return discovery.items;
+      }
+      console.warn(
+        `Discovery attempt ${attempt + 1}: invalid output, retrying...`,
+      );
+    } catch (err) {
+      if (attempt === 0) {
+        console.warn("Discovery failed, likely preprocessing error:", err);
+      }
+      return [];
     }
-    return [];
   }
 
-  return discovery.items;
+  console.warn(`Discovery failed after ${MAX_XML_RETRIES} attempts. No items.`);
+  return [];
 }
 
 function filterAndSort(items: DiscoveryItem[]): DiscoveryItem[] {
-  // Filter: skip issues assigned to others (handled in discovery prompt)
-  // Filter: ideation items exceeding blast radius
   const filtered = items.filter((item) => {
     if (item.tier === "ideation") {
       if (item.viability === false) return false;
@@ -349,11 +377,9 @@ function filterAndSort(items: DiscoveryItem[]): DiscoveryItem[] {
   });
 
   if (PRIORITY_MODE === "cross-tier") {
-    // Unified scoring: sort all items by score descending
     return filtered.sort((a, b) => b.score - a.score);
   }
 
-  // Tier-ordered: process tiers in order, sort within each tier
   const tierOrder: DiscoveryItem["tier"][] = [
     "issue",
     "todo",
@@ -390,7 +416,6 @@ async function selectIdeationItems(
 
   if (ideationItems.length === 0) return items;
 
-  // Fail closed: skip ideation if no TTY
   if (!process.stdin.isTTY) {
     console.warn(
       "Supervised mode requires interactive TTY. Skipping ideation tier.",
@@ -398,7 +423,6 @@ async function selectIdeationItems(
     return nonIdeationItems;
   }
 
-  // Dynamic import to avoid loading @clack/prompts in auto mode
   let multiselect;
   try {
     ({ multiselect } = await import("@clack/prompts"));
@@ -418,7 +442,6 @@ async function selectIdeationItems(
   });
 
   if (typeof selected === "symbol") {
-    // User cancelled
     console.log("Ideation selection cancelled. Skipping ideation tier.");
     return nonIdeationItems;
   }
@@ -427,7 +450,6 @@ async function selectIdeationItems(
   const selectedItems = ideationItems.filter((i) => selectedSet.has(i.id));
   const rejectedItems = ideationItems.filter((i) => !selectedSet.has(i.id));
 
-  // Log rejected items
   for (const item of rejectedItems) {
     logTask({
       timestamp: new Date().toISOString(),
@@ -447,75 +469,123 @@ async function selectIdeationItems(
 }
 
 // ---------------------------------------------------------------------------
-// Phase: Review Loop (reusable for plan and code review)
+// Phase: Review Loop — loop until clean (v2)
+//
+// Exits on: (a) 0 P0/P1 = pass, (b) no progress for 3 rounds = stuck,
+//           (c) task budget exhausted, (d) sandbox error
 // ---------------------------------------------------------------------------
 
 async function reviewLoop(
   sandbox: Awaited<ReturnType<typeof sandcastle.createSandbox>>,
   promptFile: string,
   promptArgs: Record<string, string>,
-  maxRounds: number,
-): Promise<{ passed: boolean; iterations: number }> {
+  taskBudget: number,
+): Promise<ReviewLoopResult> {
   let totalIterations = 0;
+  let minP0P1Seen = Infinity;
+  let roundsWithoutImprovement = 0;
+  let round = 0;
 
-  for (let round = 0; round < maxRounds; round++) {
+  while (totalIterations < taskBudget) {
+    round++;
     let result;
     try {
       result = await sandbox.run({
         agent: sandcastle.claudeCode("claude-sonnet-4-6"),
         promptFile,
-        promptArgs: { ...promptArgs, REVIEW_ROUND: String(round + 1) },
-        maxIterations: 1,
+        promptArgs: { ...promptArgs, REVIEW_ROUND: String(round) },
+        maxIterations: 10,
         idleTimeoutSeconds: TIMEOUT_REVIEW,
       });
     } catch (err) {
-      console.error(`Review round ${round + 1} threw:`, err);
+      console.error(`Review round ${round} threw:`, err);
       totalIterations++;
-      return { passed: false, iterations: totalIterations };
+      return {
+        passed: false,
+        stuck: false,
+        budgetExhausted: false,
+        iterations: totalIterations,
+      };
     }
     totalIterations++;
 
     const review = parseXmlTag<ReviewResult>(result.stdout, "review");
 
     if (!review || !validateReview(review)) {
-      // Malformed output — retry once
-      if (round < maxRounds - 1) {
-        console.warn(
-          `Review round ${round + 1}: malformed output, retrying...`,
-        );
-        continue;
-      }
-      // Treat persistent malformed output as P0 finding
-      return { passed: false, iterations: totalIterations };
+      // Malformed output — do NOT advance stuck window, just retry
+      console.warn(`Review round ${round}: malformed output, retrying...`);
+      continue;
     }
 
-    if (review.findings_summary.p0 + review.findings_summary.p1 === 0) {
-      return { passed: true, iterations: totalIterations };
+    const currentP0P1 = review.findings_summary.p0 + review.findings_summary.p1;
+
+    // Exit: clean pass
+    if (currentP0P1 === 0) {
+      console.log(`Review round ${round}: PASS (0 P0/P1 findings)`);
+      return {
+        passed: true,
+        stuck: false,
+        budgetExhausted: false,
+        iterations: totalIterations,
+      };
+    }
+
+    // Track progress against historical minimum
+    if (currentP0P1 < minP0P1Seen) {
+      minP0P1Seen = currentP0P1;
+      roundsWithoutImprovement = 0;
+    } else {
+      roundsWithoutImprovement++;
+    }
+
+    // Exit: stuck (no improvement for 3 rounds)
+    if (roundsWithoutImprovement >= 3) {
+      console.log(
+        `Review round ${round}: STUCK — P0+P1=${currentP0P1} has not improved beyond ${minP0P1Seen} for 3 rounds.`,
+      );
+      return {
+        passed: false,
+        stuck: true,
+        budgetExhausted: false,
+        iterations: totalIterations,
+      };
     }
 
     console.log(
-      `Review round ${round + 1}: P0=${review.findings_summary.p0} P1=${review.findings_summary.p1} — ${round < maxRounds - 1 ? "agent fixing..." : "max rounds reached"}`,
+      `Review round ${round}: P0=${review.findings_summary.p0} P1=${review.findings_summary.p1} (min seen: ${minP0P1Seen}, stale rounds: ${roundsWithoutImprovement}/3) — agent fixing...`,
     );
   }
 
-  return { passed: false, iterations: totalIterations };
+  // Budget exhausted
+  console.log(
+    `Review: task budget exhausted after ${round} rounds (${totalIterations} iterations).`,
+  );
+  return {
+    passed: false,
+    stuck: false,
+    budgetExhausted: true,
+    iterations: totalIterations,
+  };
 }
 
 // ---------------------------------------------------------------------------
 // Phase: Execute Task (full CE lifecycle)
 // ---------------------------------------------------------------------------
 
-async function executeTask(task: DiscoveryItem): Promise<{
+async function executeTask(
+  task: DiscoveryItem,
+  taskBudget: number,
+): Promise<{
   outcome: TaskOutcome;
   iterations: number;
   phases: string[];
   error_reason?: string;
 }> {
-  // Sanitize task ID for use as git branch name (remove colons, spaces, etc.)
   const safeBranchId = task.id.replace(/[^a-zA-Z0-9._\/-]/g, "-");
   const branch = `ce-auto-coder/${safeBranchId}`;
   const phases: string[] = [];
   let iterations = 0;
+  let remainingBudget = taskBudget;
 
   let sandbox;
   try {
@@ -525,10 +595,10 @@ async function executeTask(task: DiscoveryItem): Promise<{
       hooks,
       copyToSandbox,
     });
+    recordBranch(branch);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`Failed to create sandbox for ${task.id}:`, msg);
-    deleteBranch(branch);
     return { outcome: "failed", iterations: 0, phases: [], error_reason: msg };
   }
 
@@ -537,50 +607,48 @@ async function executeTask(task: DiscoveryItem): Promise<{
     let planFile: string | undefined;
 
     if (task.size !== "trivial") {
-      const planResult = await sandbox.run({
-        agent: sandcastle.claudeCode("claude-sonnet-4-6"),
-        promptFile: "./.sandcastle/plan-prompt.md",
-        promptArgs: {
-          TASK_ID: task.id,
-          TASK_TITLE: task.title,
-          TASK_DESCRIPTION: task.description,
-          TASK_TIER: task.tier,
-        },
-        maxIterations: 1,
-        idleTimeoutSeconds: TIMEOUT_PLAN,
-      });
-      iterations++;
-      phases.push("plan");
-
-      const planOutput = parseXmlTag<{ plan_file: string }>(
-        planResult.stdout,
-        "plan_output",
-      );
-      if (!planOutput?.plan_file) {
-        // Retry once
-        console.warn("Plan phase did not produce <plan_output>. Retrying...");
-        const retry = await sandbox.run({
+      // Plan with retry loop for XML output
+      for (
+        let planAttempt = 0;
+        planAttempt < MAX_XML_RETRIES && remainingBudget > 0;
+        planAttempt++
+      ) {
+        const planResult = await sandbox.run({
           agent: sandcastle.claudeCode("claude-sonnet-4-6"),
-          prompt: `Your previous output did not include a <plan_output> tag. Look in the sandbox for any plan files you may have written (e.g., docs/plans/), and output the path as <plan_output>{"plan_file": "path/to/plan.md"}</plan_output>.`,
-          maxIterations: 1,
+          promptFile: "./.sandcastle/plan-prompt.md",
+          promptArgs: {
+            TASK_ID: task.id,
+            TASK_TITLE: task.title,
+            TASK_DESCRIPTION: task.description,
+            TASK_TIER: task.tier,
+          },
+          maxIterations: 10,
           idleTimeoutSeconds: TIMEOUT_PLAN,
         });
         iterations++;
-        const retryOutput = parseXmlTag<{ plan_file: string }>(
-          retry.stdout,
+        remainingBudget--;
+        if (planAttempt === 0) phases.push("plan");
+
+        const planOutput = parseXmlTag<{ plan_file: string }>(
+          planResult.stdout,
           "plan_output",
         );
-        if (!retryOutput?.plan_file) {
-          await sandbox.close();
-          deleteBranch(branch);
-          return { outcome: "blocked", iterations, phases };
+        if (planOutput?.plan_file) {
+          planFile = planOutput.plan_file;
+          break;
         }
-        planFile = retryOutput.plan_file;
-      } else {
-        planFile = planOutput.plan_file;
+        console.warn(
+          `Plan attempt ${planAttempt + 1}: no <plan_output>, retrying...`,
+        );
       }
 
-      // --- Review Plan ---
+      if (!planFile) {
+        await sandbox.close();
+        console.log(`  Branch preserved: ${branch} (plan output missing)`);
+        return { outcome: "blocked", iterations, phases };
+      }
+
+      // --- Review Plan (loop until clean) ---
       const planReview = await reviewLoop(
         sandbox,
         "./.sandcastle/review-plan-prompt.md",
@@ -589,16 +657,28 @@ async function executeTask(task: DiscoveryItem): Promise<{
           TASK_TITLE: task.title,
           PLAN_FILE: planFile,
         },
-        3,
+        remainingBudget,
       );
       iterations += planReview.iterations;
+      remainingBudget -= planReview.iterations;
       phases.push("review-plan");
 
       if (!planReview.passed) {
-        console.log(`Task ${task.id}: plan review blocked after 3 rounds.`);
+        const reason = planReview.stuck
+          ? "stuck"
+          : planReview.budgetExhausted
+            ? "budget"
+            : "failed";
+        console.log(
+          `Task ${task.id}: plan review ${reason} after ${planReview.iterations} rounds.`,
+        );
         await sandbox.close();
-        deleteBranch(branch);
-        return { outcome: "blocked", iterations, phases };
+        console.log(`  Branch preserved: ${branch} (plan review ${reason})`);
+        return {
+          outcome: planReview.stuck ? "needs-human" : "budget-exhausted",
+          iterations,
+          phases,
+        };
       }
     }
 
@@ -620,10 +700,11 @@ async function executeTask(task: DiscoveryItem): Promise<{
       idleTimeoutSeconds: TIMEOUT_WORK,
       completionSignal: "<promise>WORK_COMPLETE</promise>",
     });
-    iterations += workResult.iterationsRun;
+    iterations++;
+    remainingBudget--;
     phases.push("work");
 
-    // --- Review Code ---
+    // --- Review Code (loop until clean) ---
     const codeReview = await reviewLoop(
       sandbox,
       "./.sandcastle/review-code-prompt.md",
@@ -632,16 +713,25 @@ async function executeTask(task: DiscoveryItem): Promise<{
         TASK_TITLE: task.title,
         REVIEW_BASE_BRANCH: sandbox.branch,
       },
-      3,
+      remainingBudget,
     );
     iterations += codeReview.iterations;
     phases.push("review-code");
 
     if (!codeReview.passed) {
-      console.log(`Task ${task.id}: code review failed after 3 rounds.`);
+      const reason = codeReview.stuck
+        ? "stuck"
+        : codeReview.budgetExhausted
+          ? "budget"
+          : "failed";
+      console.log(`Task ${task.id}: code review ${reason}.`);
       await sandbox.close();
-      deleteBranch(branch);
-      return { outcome: "failed", iterations, phases };
+      console.log(`  Branch preserved: ${branch} (code review ${reason})`);
+      return {
+        outcome: codeReview.stuck ? "needs-human" : "budget-exhausted",
+        iterations,
+        phases,
+      };
     }
 
     // --- Close sandbox and merge ---
@@ -655,18 +745,16 @@ async function executeTask(task: DiscoveryItem): Promise<{
 
     return { outcome: "completed", iterations, phases };
   } catch (err) {
-    // Unrecoverable error — clean up
     const errorMsg = err instanceof Error ? err.message : String(err);
     console.error(`Task ${task.id} failed:`, errorMsg);
     try {
       await sandbox.close();
-      deleteBranch(branch);
     } catch {
-      // If close() throws, preserve branch for manual inspection (do NOT delete)
-      console.warn(
-        `Could not clean up branch ${branch}. Preserved for manual inspection.`,
-      );
+      console.warn(`Could not close sandbox for ${branch}.`);
     }
+    console.log(
+      `  Branch preserved: ${branch} (error: ${errorMsg.slice(0, 80)})`,
+    );
     return {
       outcome: "failed",
       iterations,
@@ -677,22 +765,15 @@ async function executeTask(task: DiscoveryItem): Promise<{
 }
 
 // ---------------------------------------------------------------------------
-// Main orchestrator loop
+// Startup: Cleanup stale resources
 // ---------------------------------------------------------------------------
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function cleanupStaleContainers(): void {
   try {
     const output = execFileSync(
       "docker",
       ["ps", "-a", "--filter", "name=sandcastle-", "--format", "{{.Names}}"],
-      {
-        encoding: "utf-8",
-        timeout: GIT_TIMEOUT,
-      },
+      { encoding: "utf-8", timeout: GIT_TIMEOUT },
     ).trim();
     if (output) {
       const containers = output.split("\n").filter(Boolean);
@@ -704,17 +785,119 @@ function cleanupStaleContainers(): void {
           });
           console.log(`  Cleaned stale container: ${name}`);
         } catch {
-          // ignore — container may already be gone
+          // ignore
         }
       }
     }
   } catch {
-    // docker ps failed — no containers to clean
+    // docker ps failed
   }
 }
 
+function cleanupStaleWorktrees(): void {
+  const worktreeDir = ".sandcastle/worktrees";
+  try {
+    if (!existsSync(worktreeDir)) return;
+    const entries = execFileSync("ls", [worktreeDir], {
+      encoding: "utf-8",
+      timeout: GIT_TIMEOUT,
+    })
+      .trim()
+      .split("\n")
+      .filter(Boolean);
+    if (entries.length > 0) {
+      console.log(`  Found ${entries.length} stale worktrees — cleaning...`);
+      try {
+        execFileSync("git", ["worktree", "prune"], {
+          stdio: "pipe",
+          timeout: GIT_TIMEOUT,
+        });
+      } catch {
+        // prune may fail
+      }
+      for (const entry of entries) {
+        try {
+          execFileSync("rm", ["-rf", `${worktreeDir}/${entry}`], {
+            stdio: "pipe",
+            timeout: GIT_TIMEOUT,
+          });
+        } catch {
+          // ignore
+        }
+      }
+      console.log("  Worktree cleanup done.");
+    }
+  } catch {
+    // not critical
+  }
+}
+
+function cleanupManifestBranches(): void {
+  const branches = readManifest();
+  if (branches.length === 0) return;
+  console.log(`  Cleaning ${branches.length} branches from previous run...`);
+  for (const branch of branches) {
+    try {
+      execFileSync("git", ["branch", "-D", branch], {
+        stdio: "pipe",
+        timeout: GIT_TIMEOUT,
+      });
+    } catch {
+      // branch may not exist
+    }
+  }
+  clearManifest();
+}
+
+const MIN_DISK_MB = 2000;
+
+function checkDiskSpace(): boolean {
+  try {
+    const output = execFileSync("df", ["-m", "."], {
+      encoding: "utf-8",
+      timeout: GIT_TIMEOUT,
+    })
+      .trim()
+      .split("\n");
+    if (output.length > 1) {
+      const parts = output[1]!.split(/\s+/);
+      const availMB = parseInt(parts[3]!, 10);
+      if (availMB < MIN_DISK_MB) {
+        console.error(
+          `Disk space critically low: ${availMB}MB available (minimum ${MIN_DISK_MB}MB). Halting.`,
+        );
+        return false;
+      }
+    }
+  } catch {
+    // can't check — continue
+  }
+  return true;
+}
+
+function reportDiskUsage(): void {
+  try {
+    const dfOutput = execFileSync("df", ["-h", "."], {
+      encoding: "utf-8",
+      timeout: GIT_TIMEOUT,
+    })
+      .trim()
+      .split("\n");
+    if (dfOutput.length > 1) {
+      const parts = dfOutput[1]!.split(/\s+/);
+      console.log(`  Disk: ${parts[3]} available (${parts[4]} used)`);
+    }
+  } catch {
+    // not critical
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Main orchestrator loop
+// ---------------------------------------------------------------------------
+
 async function main(): Promise<void> {
-  console.log(`\n=== CE Auto-Coder ===`);
+  console.log(`\n=== CE Auto-Coder v2 ===`);
   console.log(`Mode: ${MODE}`);
   console.log(`Max iterations: ${MAX_ITERATIONS}`);
   console.log(
@@ -722,9 +905,13 @@ async function main(): Promise<void> {
   );
   console.log(`Priority: ${PRIORITY_MODE}\n`);
 
-  // Clean up stale sandcastle containers from previous runs
-  console.log("Cleaning up stale containers...");
+  // Startup cleanup
+  console.log("Startup cleanup...");
   cleanupStaleContainers();
+  cleanupStaleWorktrees();
+  cleanupManifestBranches();
+  reportDiskUsage();
+  console.log("");
 
   // --- Discovery ---
   console.log("Phase 1: Discovering work...\n");
@@ -753,13 +940,20 @@ async function main(): Promise<void> {
     );
   }
 
+  // Calculate per-task budget
+  const perTaskBudget = Math.max(
+    MIN_TASK_BUDGET,
+    Math.floor(MAX_ITERATIONS / tasks.length),
+  );
+  console.log(`\nPer-task budget: ${perTaskBudget} iterations\n`);
+
   // --- Execute tasks ---
   let totalIterations = 0;
   let consecutiveFailures = 0;
   const results: TaskLogEntry[] = [];
 
   for (const task of tasks) {
-    // Budget check
+    // Global budget check
     if (totalIterations >= MAX_ITERATIONS) {
       console.log(`\nIteration budget exhausted (${MAX_ITERATIONS}). Halting.`);
       break;
@@ -773,11 +967,22 @@ async function main(): Promise<void> {
       break;
     }
 
+    // Disk space check
+    if (!checkDiskSpace()) {
+      break;
+    }
+
     console.log(`\n--- Task: ${task.title} (${task.id}) [${task.size}] ---\n`);
     const startTime = Date.now();
 
-    const { outcome, iterations, phases, error_reason } =
-      await executeTask(task);
+    // Calculate remaining budget for this task (min of per-task cap and global remaining)
+    const remainingGlobal = MAX_ITERATIONS - totalIterations;
+    const effectiveBudget = Math.min(perTaskBudget, remainingGlobal);
+
+    const { outcome, iterations, phases, error_reason } = await executeTask(
+      task,
+      effectiveBudget,
+    );
     totalIterations += iterations;
 
     const entry: TaskLogEntry = {
@@ -796,8 +1001,6 @@ async function main(): Promise<void> {
       consecutiveFailures = 0;
       console.log(`✓ Task ${task.id} completed and merged.`);
     } else {
-      // Only actual failures count toward circuit breaker.
-      // Blocked (plan review) and conflicted (merge) are expected workflow outcomes.
       if (outcome === "failed") {
         consecutiveFailures++;
       } else {
@@ -822,17 +1025,45 @@ async function main(): Promise<void> {
   const blocked = results.filter((r) => r.outcome === "blocked").length;
   const skipped = results.filter((r) => r.outcome === "skipped").length;
   const conflicted = results.filter((r) => r.outcome === "conflicted").length;
+  const needsHuman = results.filter((r) => r.outcome === "needs-human").length;
+  const budgetExhausted = results.filter(
+    (r) => r.outcome === "budget-exhausted",
+  ).length;
   const totalDuration = results.reduce((sum, r) => sum + r.duration_ms, 0);
 
   console.log(`\n=== Run Summary ===`);
-  console.log(`Completed: ${completed}`);
-  console.log(`Failed:    ${failed}`);
-  console.log(`Blocked:   ${blocked}`);
-  console.log(`Skipped:   ${skipped}`);
-  console.log(`Conflicted: ${conflicted}`);
+  console.log(`Completed:       ${completed}`);
+  console.log(`Failed:          ${failed}`);
+  console.log(`Blocked:         ${blocked}`);
+  console.log(`Needs human:     ${needsHuman}`);
+  console.log(`Budget exhausted: ${budgetExhausted}`);
+  console.log(`Conflicted:      ${conflicted}`);
+  console.log(`Skipped:         ${skipped}`);
   console.log(`Total iterations: ${totalIterations}`);
   console.log(`Total duration: ${Math.round(totalDuration / 1000)}s`);
   console.log(`Run log: ${RUN_LOG_PATH}`);
+
+  // List preserved branches
+  try {
+    const branches = execFileSync(
+      "git",
+      ["branch", "--list", "ce-auto-coder/*"],
+      { encoding: "utf-8", timeout: GIT_TIMEOUT },
+    )
+      .trim()
+      .split("\n")
+      .map((b) => b.trim())
+      .filter(Boolean);
+    if (branches.length > 0) {
+      console.log(`\nPreserved branches (inspect or resume):`);
+      for (const b of branches) {
+        console.log(`  git diff HEAD...${b}`);
+      }
+    }
+  } catch {
+    // branch listing failed
+  }
+
   console.log(`\nAll done.`);
 }
 

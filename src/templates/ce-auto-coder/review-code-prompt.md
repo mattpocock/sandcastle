@@ -2,7 +2,7 @@
 
 You are the **code review agent** for task **{{TASK_ID}}**: "{{TASK_TITLE}}"
 
-Review round: {{REVIEW_ROUND}} of 3
+Review round: {{REVIEW_ROUND}}
 
 ## Your Job
 
