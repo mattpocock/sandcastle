@@ -94,8 +94,6 @@ const MANIFEST_PATH = ".sandcastle/current-run-branches.txt";
 // XML retry cap
 const MAX_XML_RETRIES = 5;
 
-// Types and pure helpers imported from ./helpers.js
-
 function logTask(entry: TaskLogEntry): void {
   try {
     const dir = ".sandcastle/logs";
@@ -300,8 +298,6 @@ async function discover(): Promise<DiscoveryItem[]> {
   console.warn(`Discovery failed after ${MAX_XML_RETRIES} attempts. No items.`);
   return [];
 }
-
-// filterAndSort imported from ./helpers.js
 
 // ---------------------------------------------------------------------------
 // Phase: Supervised Ideation Selection
@@ -620,7 +616,7 @@ async function executeTask(
     };
     workPromptArgs.PLAN_FILE = planFile ?? "none";
 
-    const workResult = await sandbox.run({
+    await sandbox.run({
       agent: sandcastle.claudeCode("claude-sonnet-4-6"),
       promptFile: "./.sandcastle/work-prompt.md",
       promptArgs: workPromptArgs,

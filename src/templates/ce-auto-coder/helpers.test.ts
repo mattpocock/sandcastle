@@ -207,6 +207,20 @@ describe("validateReview", () => {
       }),
     ).toBe(true);
   });
+
+  it("returns false when findings_summary.p1 is NaN", () => {
+    expect(
+      validateReview({
+        pass: true,
+        findings_summary: { p0: 0, p1: NaN },
+        details: [],
+      }),
+    ).toBe(false);
+  });
+
+  it("returns false for undefined input", () => {
+    expect(validateReview(undefined)).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -272,6 +286,28 @@ describe("filterAndSort", () => {
           score: 80,
           viability: true,
           files_affected: 5,
+        }),
+      ];
+      const result = filterAndSort(items, crossTierConfig);
+      expect(result).toHaveLength(1);
+      expect(result[0]!.id).toBe("a");
+    });
+
+    it("keeps ideation item with viability=undefined (not set)", () => {
+      const items = [makeItem({ id: "a", tier: "ideation", score: 80 })];
+      const result = filterAndSort(items, crossTierConfig);
+      expect(result).toHaveLength(1);
+      expect(result[0]!.id).toBe("a");
+    });
+
+    it("keeps ideation item when files_affected equals maxFilesPerIdea exactly", () => {
+      const items = [
+        makeItem({
+          id: "a",
+          tier: "ideation",
+          score: 80,
+          viability: true,
+          files_affected: 10,
         }),
       ];
       const result = filterAndSort(items, crossTierConfig);
@@ -408,6 +444,18 @@ describe("validateBranchName", () => {
   it("throws for empty string", () => {
     expect(() => validateBranchName("")).toThrow("Invalid branch name");
   });
+
+  it("throws for shell injection characters", () => {
+    expect(() => validateBranchName("main; rm -rf /")).toThrow(
+      "Invalid branch name",
+    );
+    expect(() => validateBranchName("feat`whoami`")).toThrow(
+      "Invalid branch name",
+    );
+    expect(() => validateBranchName("feat$(id)")).toThrow(
+      "Invalid branch name",
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -527,6 +575,13 @@ describe("shouldContinueReview", () => {
     expect(result.action).toBe("budget-exhausted");
   });
 
+  it("returns budget-exhausted when budgetRemaining is negative", () => {
+    const result = shouldContinueReview(
+      state({ budgetRemaining: -1, p0p1Count: 3 }),
+    );
+    expect(result.action).toBe("budget-exhausted");
+  });
+
   // --- Sandbox error ---
 
   it("returns error on sandbox error (immediate bail)", () => {
@@ -555,11 +610,11 @@ describe("shouldContinueReview", () => {
 
   // --- Budget ordering ---
 
-  it("returns budget-exhausted when budget=0 even if p0p1Count=0 (budget checked first)", () => {
+  it("returns pass when budget=0 and p0p1Count=0 (pass checked before budget)", () => {
     const result = shouldContinueReview(
       state({ budgetRemaining: 0, p0p1Count: 0 }),
     );
-    expect(result.action).toBe("budget-exhausted");
+    expect(result.action).toBe("pass");
   });
 
   it("returns error when sandboxError=true even if budget=0 (sandbox error checked first)", () => {

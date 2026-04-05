@@ -42,7 +42,7 @@ export interface TaskLogEntry {
 
 export interface ReviewResult {
   pass: boolean;
-  findings_summary: { p0: number; p1: number; p2: number; p3: number };
+  findings_summary: { p0: number; p1: number; p2?: number; p3?: number };
   details: unknown[];
 }
 
@@ -193,9 +193,9 @@ export function filterAndSort(
 //
 // Transition priority (first match wins):
 //   1. sandboxError → error
-//   2. budgetRemaining <= 0 → budget-exhausted
-//   3. isValidOutput=false → retry
-//   4. p0p1Count == 0 → pass
+//   2. isValidOutput=false → retry (or stuck after 3)
+//   3. p0p1Count == 0 → pass (checked before budget so final-round success is reported)
+//   4. budgetRemaining <= 0 → budget-exhausted (only when another round is needed)
 //   5. p0p1Count < minP0P1Seen → continue (improvement)
 //   6. p0p1Count >= minP0P1Seen → increment stale counter
 //      if >= 3 → stuck, else → continue
@@ -207,12 +207,7 @@ export function shouldContinueReview(state: ReviewState): ReviewAction {
     return { action: "error" };
   }
 
-  // 2. Budget exhausted — checked before processing results
-  if (state.budgetRemaining <= 0) {
-    return { action: "budget-exhausted" };
-  }
-
-  // 3. Malformed output — retry, increment stale counter
+  // 2. Malformed output — retry, increment stale counter
   if (!state.isValidOutput) {
     const newRounds = state.roundsWithoutImprovement + 1;
     if (newRounds >= 3) {
@@ -221,9 +216,15 @@ export function shouldContinueReview(state: ReviewState): ReviewAction {
     return { action: "retry", roundsWithoutImprovement: newRounds };
   }
 
-  // 4. Clean pass — 0 P0/P1 findings
+  // 3. Clean pass — 0 P0/P1 findings (checked before budget so a passing
+  //    final round is reported as success, not budget-exhausted)
   if (state.p0p1Count === 0) {
     return { action: "pass" };
+  }
+
+  // 4. Budget exhausted — only matters when another round is needed
+  if (state.budgetRemaining <= 0) {
+    return { action: "budget-exhausted" };
   }
 
   // 5-6. Track progress against historical minimum
