@@ -22,6 +22,20 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
+import {
+  type DiscoveryItem,
+  type TaskOutcome,
+  type TaskLogEntry,
+  type ReviewResult,
+  type ReviewLoopResult,
+  type FilterAndSortConfig,
+  parseXmlTag,
+  validateDiscovery,
+  validateReview,
+  validateBranchName,
+  filterAndSort,
+  shouldContinueReview,
+} from "./helpers.js";
 
 // ---------------------------------------------------------------------------
 // Configuration (from environment / .env)
@@ -80,101 +94,7 @@ const MANIFEST_PATH = ".sandcastle/current-run-branches.txt";
 // XML retry cap
 const MAX_XML_RETRIES = 5;
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-interface DiscoveryItem {
-  id: string;
-  title: string;
-  tier: "issue" | "todo" | "optimization" | "ideation";
-  score: number;
-  size: "trivial" | "standard" | "complex";
-  files_affected?: number;
-  viability?: boolean;
-  description: string;
-}
-
-type TaskOutcome =
-  | "completed"
-  | "blocked"
-  | "failed"
-  | "skipped"
-  | "conflicted"
-  | "needs-human"
-  | "budget-exhausted";
-
-interface TaskLogEntry {
-  timestamp: string;
-  task_id: string;
-  task_title: string;
-  tier: DiscoveryItem["tier"];
-  size: DiscoveryItem["size"];
-  outcome: TaskOutcome;
-  duration_ms: number;
-  iterations: number;
-  phases_completed: string[];
-  error_reason?: string;
-}
-
-interface ReviewResult {
-  pass: boolean;
-  findings_summary: { p0: number; p1: number; p2: number; p3: number };
-  details: unknown[];
-}
-
-interface ReviewLoopResult {
-  passed: boolean;
-  stuck: boolean;
-  budgetExhausted: boolean;
-  iterations: number;
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function parseXmlTag<T>(stdout: string, tag: string): T | null {
-  const regex = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`);
-  const match = stdout.match(regex);
-  if (!match) return null;
-  try {
-    return JSON.parse(match[1]!) as T;
-  } catch {
-    return null;
-  }
-}
-
-function validateDiscovery(
-  parsed: unknown,
-): parsed is { items: DiscoveryItem[] } {
-  if (typeof parsed !== "object" || parsed === null) return false;
-  const obj = parsed as Record<string, unknown>;
-  if (!Array.isArray(obj.items)) return false;
-  obj.items = (obj.items as unknown[]).filter((item) => {
-    if (typeof item !== "object" || item === null) return false;
-    const i = item as Record<string, unknown>;
-    return (
-      typeof i.id === "string" &&
-      i.id.length > 0 &&
-      typeof i.title === "string" &&
-      typeof i.tier === "string" &&
-      typeof i.score === "number" &&
-      Number.isFinite(i.score) &&
-      typeof i.size === "string"
-    );
-  });
-  return true;
-}
-
-function validateReview(parsed: unknown): parsed is ReviewResult {
-  if (typeof parsed !== "object" || parsed === null) return false;
-  const obj = parsed as Record<string, unknown>;
-  if (typeof obj.pass !== "boolean") return false;
-  const summary = obj.findings_summary as Record<string, unknown> | undefined;
-  if (!summary) return false;
-  return Number.isFinite(summary.p0) && Number.isFinite(summary.p1);
-}
+// Types and pure helpers imported from ./helpers.js
 
 function logTask(entry: TaskLogEntry): void {
   try {
@@ -193,12 +113,6 @@ function sleep(ms: number): Promise<void> {
 }
 
 const GIT_TIMEOUT = 60_000;
-
-function validateBranchName(branch: string): void {
-  if (!/^[a-zA-Z0-9._\/-]+$/.test(branch)) {
-    throw new Error(`Invalid branch name: ${branch}`);
-  }
-}
 
 // --- Branch manifest (track current-run branches for cleanup) ---
 
@@ -387,45 +301,7 @@ async function discover(): Promise<DiscoveryItem[]> {
   return [];
 }
 
-function filterAndSort(items: DiscoveryItem[]): DiscoveryItem[] {
-  const filtered = items.filter((item) => {
-    if (item.tier === "ideation") {
-      if (item.viability === false) return false;
-      if (
-        item.files_affected !== undefined &&
-        item.files_affected > MAX_FILES_PER_IDEA
-      ) {
-        return false;
-      }
-    }
-    return true;
-  });
-
-  if (PRIORITY_MODE === "cross-tier") {
-    return filtered.sort((a, b) => b.score - a.score);
-  }
-
-  const tierOrder: DiscoveryItem["tier"][] = [
-    "issue",
-    "todo",
-    "optimization",
-    "ideation",
-  ];
-  const byTier = new Map<DiscoveryItem["tier"], DiscoveryItem[]>();
-  for (const item of filtered) {
-    const list = byTier.get(item.tier) ?? [];
-    list.push(item);
-    byTier.set(item.tier, list);
-  }
-
-  const sorted: DiscoveryItem[] = [];
-  for (const tier of tierOrder) {
-    const tierItems = byTier.get(tier) ?? [];
-    tierItems.sort((a, b) => b.score - a.score);
-    sorted.push(...tierItems);
-  }
-  return sorted;
-}
+// filterAndSort imported from ./helpers.js
 
 // ---------------------------------------------------------------------------
 // Phase: Supervised Ideation Selection
@@ -513,89 +389,91 @@ async function reviewLoop(
 
   while (totalIterations < taskBudget) {
     round++;
-    let result;
+    let sandboxError = false;
+    let stdout = "";
     try {
-      result = await sandbox.run({
+      const result = await sandbox.run({
         agent: sandcastle.claudeCode("claude-sonnet-4-6"),
         promptFile,
         promptArgs: { ...promptArgs, REVIEW_ROUND: String(round) },
         maxIterations: 10,
         idleTimeoutSeconds: TIMEOUT_REVIEW,
       });
+      stdout = result.stdout;
     } catch (err) {
       console.error(`Review round ${round} threw:`, err);
-      totalIterations++;
-      return {
-        passed: false,
-        stuck: false,
-        budgetExhausted: false,
-        iterations: totalIterations,
-      };
+      sandboxError = true;
     }
     totalIterations++;
 
-    const review = parseXmlTag<ReviewResult>(result.stdout, "review");
+    const review = sandboxError
+      ? null
+      : parseXmlTag<ReviewResult>(stdout, "review");
+    const isValidOutput = !sandboxError && !!review && validateReview(review);
+    const p0p1Count = isValidOutput
+      ? review.findings_summary.p0 + review.findings_summary.p1
+      : 0;
 
-    if (!review || !validateReview(review)) {
-      // Malformed output — counts as "no improvement" toward stuck detection
-      roundsWithoutImprovement++;
-      console.warn(
-        `Review round ${round}: malformed output (stale: ${roundsWithoutImprovement}/3), retrying...`,
-      );
-      if (roundsWithoutImprovement >= 3) {
+    const decision = shouldContinueReview({
+      p0p1Count,
+      minP0P1Seen,
+      roundsWithoutImprovement,
+      budgetRemaining: taskBudget - totalIterations,
+      isValidOutput,
+      sandboxError,
+    });
+
+    switch (decision.action) {
+      case "error":
+        return {
+          passed: false,
+          stuck: false,
+          budgetExhausted: false,
+          iterations: totalIterations,
+        };
+      case "budget-exhausted":
         console.log(
-          `Review: STUCK — ${roundsWithoutImprovement} rounds without valid/improving output.`,
+          `Review: task budget exhausted after ${round} rounds (${totalIterations} iterations).`,
         );
+        return {
+          passed: false,
+          stuck: false,
+          budgetExhausted: true,
+          iterations: totalIterations,
+        };
+      case "stuck":
+        console.log(`Review round ${round}: STUCK — no progress for 3 rounds.`);
         return {
           passed: false,
           stuck: true,
           budgetExhausted: false,
           iterations: totalIterations,
         };
-      }
-      continue;
+      case "pass":
+        console.log(`Review round ${round}: PASS (0 P0/P1 findings)`);
+        return {
+          passed: true,
+          stuck: false,
+          budgetExhausted: false,
+          iterations: totalIterations,
+        };
+      case "retry":
+        roundsWithoutImprovement = decision.roundsWithoutImprovement;
+        console.warn(
+          `Review round ${round}: malformed output (stale: ${roundsWithoutImprovement}/3), retrying...`,
+        );
+        continue;
+      case "continue":
+        minP0P1Seen = decision.minP0P1Seen;
+        roundsWithoutImprovement = decision.roundsWithoutImprovement;
+        console.log(
+          `Review round ${round}: P0+P1=${p0p1Count} (min seen: ${minP0P1Seen}, stale rounds: ${roundsWithoutImprovement}/3) — agent fixing...`,
+        );
+        continue;
     }
-
-    const currentP0P1 = review.findings_summary.p0 + review.findings_summary.p1;
-
-    // Exit: clean pass
-    if (currentP0P1 === 0) {
-      console.log(`Review round ${round}: PASS (0 P0/P1 findings)`);
-      return {
-        passed: true,
-        stuck: false,
-        budgetExhausted: false,
-        iterations: totalIterations,
-      };
-    }
-
-    // Track progress against historical minimum
-    if (currentP0P1 < minP0P1Seen) {
-      minP0P1Seen = currentP0P1;
-      roundsWithoutImprovement = 0;
-    } else {
-      roundsWithoutImprovement++;
-    }
-
-    // Exit: stuck (no improvement for 3 rounds)
-    if (roundsWithoutImprovement >= 3) {
-      console.log(
-        `Review round ${round}: STUCK — P0+P1=${currentP0P1} has not improved beyond ${minP0P1Seen} for 3 rounds.`,
-      );
-      return {
-        passed: false,
-        stuck: true,
-        budgetExhausted: false,
-        iterations: totalIterations,
-      };
-    }
-
-    console.log(
-      `Review round ${round}: P0=${review.findings_summary.p0} P1=${review.findings_summary.p1} (min seen: ${minP0P1Seen}, stale rounds: ${roundsWithoutImprovement}/3) — agent fixing...`,
-    );
   }
 
-  // Budget exhausted
+  // Budget exhausted (while-loop guard)
   console.log(
     `Review: task budget exhausted after ${round} rounds (${totalIterations} iterations).`,
   );
@@ -976,7 +854,10 @@ async function main(): Promise<void> {
   console.log(`Discovered ${rawItems.length} items across all tiers.`);
 
   // --- Filter, sort, and supervised selection ---
-  const sorted = filterAndSort(rawItems);
+  const sorted = filterAndSort(rawItems, {
+    priorityMode: PRIORITY_MODE,
+    maxFilesPerIdea: MAX_FILES_PER_IDEA,
+  });
   const tasks = await selectIdeationItems(sorted);
 
   if (tasks.length === 0) {
