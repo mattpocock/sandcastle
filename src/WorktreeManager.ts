@@ -260,7 +260,17 @@ export const pruneStale = (
       const entryPath = join(worktreesDir, entry);
       const isDir = yield* fs.stat(entryPath).pipe(
         Effect.map((s) => s.type === "Directory"),
-        Effect.catchAll(() => Effect.succeed(false)),
+        Effect.catchSome((e) =>
+          e._tag === "SystemError" && e.reason === "NotFound"
+            ? Option.some(Effect.succeed(false))
+            : Option.none(),
+        ),
+        Effect.mapError(
+          (e) =>
+            new WorktreeError({
+              message: `Failed to stat ${entryPath}: ${e.message}`,
+            }),
+        ),
       );
       if (isDir && !activeWorktreePaths.has(entryPath)) {
         yield* fs.remove(entryPath, { recursive: true, force: true }).pipe(
