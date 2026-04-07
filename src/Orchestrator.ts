@@ -198,6 +198,27 @@ export const orchestrate = (
           },
           (ctx) =>
             Effect.gen(function* () {
+              // On the first iteration, validate that the agent binary exists
+              if (i === 1) {
+                const validateCmd = provider.buildValidateCommand();
+                const validateResult = yield* ctx.sandbox
+                  .exec(validateCmd, { cwd: ctx.sandboxRepoDir })
+                  .pipe(
+                    Effect.catchAll(() =>
+                      Effect.succeed({ exitCode: 1, stdout: "", stderr: "" }),
+                    ),
+                  );
+                if (validateResult.exitCode !== 0) {
+                  yield* display.status(
+                    label(
+                      `Warning: ${provider.name} binary not found in sandbox. ` +
+                        `Verify the Dockerfile installs it, or rebuild with: sandcastle build-image`,
+                    ),
+                    "warn",
+                  );
+                }
+              }
+
               // Preprocess prompt (run !`command` expressions inside sandbox)
               const fullPrompt = yield* preprocessPrompt(
                 prompt,

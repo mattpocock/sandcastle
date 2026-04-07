@@ -104,6 +104,8 @@ export interface AgentProvider {
   buildPrintCommand(prompt: string): string;
   buildInteractiveArgs(prompt: string): string[];
   parseStreamLine(line: string): ParsedStreamEvent[];
+  /** Shell command to verify the agent binary is available inside the sandbox. */
+  buildValidateCommand(): string;
 }
 
 export const DEFAULT_MODEL = "claude-opus-4-6";
@@ -174,6 +176,10 @@ export const pi = (model: string): AgentProvider => ({
   parseStreamLine(line: string): ParsedStreamEvent[] {
     return parsePiStreamLine(line);
   },
+
+  buildValidateCommand(): string {
+    return "which pi";
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -228,6 +234,10 @@ export const codex = (model: string): AgentProvider => ({
   parseStreamLine(line: string): ParsedStreamEvent[] {
     return parseCodexStreamLine(line);
   },
+
+  buildValidateCommand(): string {
+    return "which codex";
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -247,5 +257,9 @@ export const claudeCode = (model: string): AgentProvider => ({
 
   parseStreamLine(line: string): ParsedStreamEvent[] {
     return parseStreamJsonLine(line);
+  },
+
+  buildValidateCommand(): string {
+    return "which claude";
   },
 });
