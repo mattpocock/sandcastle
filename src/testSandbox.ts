@@ -99,6 +99,7 @@ export const makeLocalSandboxLayer = (
         });
 
         proc.on("close", (code) => {
+          rl.close();
           resume(
             Effect.succeed({
               stdout: stdoutChunks.join("\n"),
