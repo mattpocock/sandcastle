@@ -70,18 +70,17 @@ const parseStreamJsonLine = (line: string): ParsedStreamEvent[] => {
           typeof block.name === "string" &&
           block.input !== undefined
         ) {
-          const argField = TOOL_ARG_FIELDS[block.name];
-          if (argField === undefined) continue; // not allowlisted
-          const argValue = block.input[argField];
-          if (typeof argValue !== "string") continue; // missing/wrong arg field
           if (texts.length > 0) {
             events.push({ type: "text", text: texts.join("") });
             texts.length = 0;
           }
+          const argField = TOOL_ARG_FIELDS[block.name];
+          const argValue =
+            argField !== undefined ? block.input[argField] : undefined;
           events.push({
             type: "tool_call",
             name: block.name,
-            args: argValue,
+            args: typeof argValue === "string" ? argValue : `(${block.name})`,
           });
         }
       }
