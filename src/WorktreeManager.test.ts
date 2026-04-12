@@ -263,7 +263,7 @@ describe("WorktreeManager.create", () => {
       repoDir,
       ".sandcastle",
       "worktrees",
-      "sandcastle-issue-17-relatorios-csv-pdf-historico",
+      "sandcastle-issue-17-report-export-history",
     );
 
     await mkdir(orphanPath, { recursive: true });
@@ -271,11 +271,11 @@ describe("WorktreeManager.create", () => {
 
     const { path, branch } = await run(
       create(repoDir, {
-        branch: "sandcastle/issue-17-relatorios-csv-pdf-historico",
+        branch: "sandcastle/issue-17-report-export-history",
       }),
     );
 
-    expect(branch).toBe("sandcastle/issue-17-relatorios-csv-pdf-historico");
+    expect(branch).toBe("sandcastle/issue-17-report-export-history");
     expect(path).toBe(orphanPath);
     await expect(stat(join(path, "junk.txt"))).rejects.toThrow();
 
