@@ -362,6 +362,52 @@ describe("codex factory", () => {
     ]);
   });
 
+  it("parseStreamLine emits command completion details for item.completed command_execution", () => {
+    const provider = codex("gpt-5.4-mini");
+    const line = JSON.stringify({
+      type: "item.completed",
+      item: {
+        type: "command_execution",
+        command: "npm test",
+        exit_code: 1,
+        stdout: "tests started",
+        stderr: "boom",
+      },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      {
+        type: "text",
+        text: "$ npm test (exit 1)\nstdout: tests started\nstderr: boom",
+      },
+    ]);
+  });
+
+  it("parseStreamLine truncates verbose command completion output", () => {
+    const provider = codex("gpt-5.4-mini");
+    const line = JSON.stringify({
+      type: "item.completed",
+      item: {
+        type: "command_execution",
+        command: "npm test",
+        exitCode: 0,
+        stdout: "a".repeat(260),
+      },
+    });
+    const events = provider.parseStreamLine(line);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toEqual(
+      expect.objectContaining({
+        type: "text",
+      }),
+    );
+    if (events[0]?.type !== "text") {
+      throw new Error("expected text event");
+    }
+    expect(events[0].text).toContain("$ npm test (exit 0)");
+    expect(events[0].text).toContain("stdout: ");
+    expect(events[0].text).toContain("...");
+  });
+
   it("parseStreamLine skips turn.completed events", () => {
     const provider = codex("gpt-5.4-mini");
     const line = JSON.stringify({ type: "turn.completed" });

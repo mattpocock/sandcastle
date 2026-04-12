@@ -4,6 +4,11 @@ export type ParsedStreamEvent =
   | { type: "tool_call"; name: string; args: string };
 
 const shellEscape = (s: string): string => "'" + s.replace(/'/g, "'\\''") + "'";
+const truncateForLog = (value: string, maxLength: number = 200): string => {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, maxLength - 3)}...`;
+};
 
 /** Maps allowlisted tool names to the input field containing the display arg */
 const TOOL_ARG_FIELDS: Record<string, string> = {
@@ -174,6 +179,36 @@ const parseCodexStreamLine = (line: string): ParsedStreamEvent[] => {
       typeof obj.item.command === "string"
     ) {
       return [{ type: "tool_call", name: "Bash", args: obj.item.command }];
+    }
+
+    if (
+      obj.type === "item.completed" &&
+      obj.item?.type === "command_execution" &&
+      typeof obj.item.command === "string"
+    ) {
+      const exitCode =
+        typeof obj.item.exit_code === "number"
+          ? obj.item.exit_code
+          : typeof obj.item.exitCode === "number"
+            ? obj.item.exitCode
+            : undefined;
+      const stdout =
+        typeof obj.item.stdout === "string"
+          ? truncateForLog(obj.item.stdout)
+          : "";
+      const stderr =
+        typeof obj.item.stderr === "string"
+          ? truncateForLog(obj.item.stderr)
+          : "";
+      const details = [
+        `$ ${obj.item.command}${typeof exitCode === "number" ? ` (exit ${exitCode})` : ""}`,
+        stdout ? `stdout: ${stdout}` : "",
+        stderr ? `stderr: ${stderr}` : "",
+      ].filter(Boolean);
+
+      if (details.length > 0) {
+        return [{ type: "text", text: details.join("\n") }];
+      }
     }
 
     // turn.completed → skip
