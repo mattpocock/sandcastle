@@ -137,10 +137,28 @@ export const create = (
     }
 
     const worktreePath = join(worktreesDir, worktreeName);
+    const existing = yield* listWorktrees(repoDir);
+    const activeWorktreePaths = new Set(existing.map((wt) => wt.path));
+    const hasOrphanedDir =
+      (yield* fs
+        .exists(worktreePath)
+        .pipe(
+          Effect.mapError((e) => new WorktreeError({ message: e.message })),
+        )) && !activeWorktreePaths.has(worktreePath);
+
+    if (hasOrphanedDir) {
+      yield* fs.remove(worktreePath, { recursive: true, force: true }).pipe(
+        Effect.mapError(
+          (e) =>
+            new WorktreeError({
+              message: `Failed to remove orphaned worktree dir '${worktreePath}': ${e.message}`,
+            }),
+        ),
+      );
+    }
 
     if (opts?.branch) {
       // Proactively detect collision before git produces a confusing error
-      const existing = yield* listWorktrees(repoDir);
       const collision = existing.find((wt) => wt.branch === branch);
       if (collision) {
         yield* Effect.fail(
@@ -210,8 +228,21 @@ export const remove = (
 ): Effect.Effect<void, WorktreeError> => {
   // Derive the main repo dir: worktreePath = <repoDir>/.sandcastle/worktrees/<name>
   const repoDir = join(worktreePath, "..", "..", "..");
-  return execGit(["worktree", "remove", "--force", worktreePath], repoDir).pipe(
-    Effect.asVoid,
+  const removeOnce = () =>
+    execGit(["worktree", "remove", "--force", worktreePath], repoDir).pipe(
+      Effect.asVoid,
+    );
+
+  return removeOnce().pipe(
+    Effect.catchAll((error) => {
+      if (!error.message.includes("Directory not empty")) {
+        return Effect.fail(error);
+      }
+
+      return execGit(["clean", "-fdx"], worktreePath).pipe(
+        Effect.andThen(removeOnce()),
+      );
+    }),
   );
 };
 

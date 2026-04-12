@@ -1,4 +1,7 @@
 import { Deferred, Effect } from "effect";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Display } from "./Display.js";
 import { preprocessPrompt } from "./PromptPreprocessor.js";
 import { AgentError, TimeoutError } from "./errors.js";
@@ -11,6 +14,7 @@ import type { AgentProvider } from "./AgentProvider.js";
 export type { ParsedStreamEvent } from "./AgentProvider.js";
 
 const IDLE_WARNING_INTERVAL_MS = 60_000;
+const shellEscape = (s: string): string => "'" + s.replace(/'/g, "'\\''") + "'";
 
 const invokeAgent = (
   sandbox: SandboxService,
@@ -64,8 +68,22 @@ const invokeAgent = (
     resetIdleTimer();
 
     const execEffect = Effect.gen(function* () {
+      let command = provider.buildPrintCommand(prompt);
+      let tempDir: string | null = null;
+
+      if (provider.buildPrintCommandFromStdin) {
+        tempDir = mkdtempSync(join(tmpdir(), "sandcastle-prompt-"));
+        const hostPromptPath = join(tempDir, "prompt.txt");
+        const sandboxPromptPath = "/tmp/sandcastle-prompt.txt";
+
+        writeFileSync(hostPromptPath, prompt, "utf8");
+        yield* sandbox.copyIn(hostPromptPath, sandboxPromptPath);
+
+        command = `cat ${shellEscape(sandboxPromptPath)} | ${provider.buildPrintCommandFromStdin()}`;
+      }
+
       const execResult = yield* sandbox.execStreaming(
-        provider.buildPrintCommand(prompt),
+        command,
         (line) => {
           for (const parsed of provider.parseStreamLine(line)) {
             if (parsed.type === "text") {
@@ -82,10 +100,17 @@ const invokeAgent = (
         { cwd: sandboxRepoDir },
       );
 
+      if (tempDir !== null) {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+
       if (execResult.exitCode !== 0) {
+        const stdout = execResult.stdout.trim();
+        const stderr = execResult.stderr.trim();
+        const details = [stderr, stdout].filter(Boolean).join("\n");
         return yield* Effect.fail(
           new AgentError({
-            message: `${provider.name} exited with code ${execResult.exitCode}:\n${execResult.stderr}`,
+            message: `${provider.name} exited with code ${execResult.exitCode}${details ? `:\n${details}` : ""}`,
           }),
         );
       }

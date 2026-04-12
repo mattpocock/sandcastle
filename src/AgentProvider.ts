@@ -65,6 +65,7 @@ const parseStreamJsonLine = (line: string): ParsedStreamEvent[] => {
 export interface AgentProvider {
   readonly name: string;
   buildPrintCommand(prompt: string): string;
+  buildPrintCommandFromStdin?(): string;
   buildInteractiveArgs(prompt: string): string[];
   parseStreamLine(line: string): ParsedStreamEvent[];
 }
@@ -187,6 +188,10 @@ export const codex = (model: string): AgentProvider => ({
 
   buildPrintCommand(prompt: string): string {
     return `codex exec --json --dangerously-bypass-approvals-and-sandbox -m ${shellEscape(model)} ${shellEscape(prompt)}`;
+  },
+
+  buildPrintCommandFromStdin(): string {
+    return `codex exec --json --dangerously-bypass-approvals-and-sandbox -m ${shellEscape(model)} -`;
   },
 
   buildInteractiveArgs(_prompt: string): string[] {

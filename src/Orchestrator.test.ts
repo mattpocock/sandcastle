@@ -2424,16 +2424,21 @@ const toCodexStreamJson = (output: string): string => {
  */
 const makeMockCodexAgentLayer = (
   sandboxDir: string,
-  mockAgentBehavior: (sandboxRepoDir: string) => Promise<string>,
+  mockAgentBehavior: (
+    sandboxRepoDir: string,
+    command: string,
+  ) => Promise<string>,
 ): Layer.Layer<Sandbox> => {
   const fsLayer = makeLocalSandboxLayer(sandboxDir);
 
   return Layer.succeed(Sandbox, {
     exec: (command, options) => {
-      if (command.startsWith("codex ")) {
+      if (command.includes("codex exec")) {
         return Effect.gen(function* () {
           const cwd = options?.cwd ?? sandboxDir;
-          const output = yield* Effect.promise(() => mockAgentBehavior(cwd));
+          const output = yield* Effect.promise(() =>
+            mockAgentBehavior(cwd, command),
+          );
           return { stdout: output, stderr: "", exitCode: 0 };
         });
       }
@@ -2442,10 +2447,12 @@ const makeMockCodexAgentLayer = (
       ).pipe(Effect.provide(fsLayer));
     },
     execStreaming: (command, onStdoutLine, options) => {
-      if (command.startsWith("codex ")) {
+      if (command.includes("codex exec")) {
         return Effect.gen(function* () {
           const cwd = options?.cwd ?? sandboxDir;
-          const output = yield* Effect.promise(() => mockAgentBehavior(cwd));
+          const output = yield* Effect.promise(() =>
+            mockAgentBehavior(cwd, command),
+          );
           const streamOutput = toCodexStreamJson(output);
           for (const line of streamOutput.split("\n")) {
             onStdoutLine(line);
@@ -2531,5 +2538,43 @@ describe("Orchestrator with codex provider", () => {
 
     expect(result.iterationsRun).toBe(1);
     expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
+  });
+
+  it("feeds the codex prompt via stdin file instead of argv", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-codex-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    let seenCommand = "";
+    let seenPrompt = "";
+
+    const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory(
+      hostDir,
+      (dir) =>
+        makeMockCodexAgentLayer(dir, async (repoDir, command) => {
+          seenCommand = command;
+          seenPrompt = await readFile(
+            "/tmp/sandcastle-prompt.txt",
+            "utf-8",
+          ).catch(() => "");
+          return "All done. <promise>COMPLETE</promise>";
+        }),
+    );
+
+    const result = await Effect.runPromise(
+      orchestrate({
+        provider: codexTestProvider,
+        hostRepoDir: hostDir,
+        sandboxRepoDir,
+        iterations: 1,
+        prompt: "large prompt body",
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+    );
+
+    expect(result.iterationsRun).toBe(1);
+    expect(seenCommand).toContain(
+      "cat '/tmp/sandcastle-prompt.txt' | codex exec",
+    );
+    expect(seenPrompt).toBe("large prompt body");
   });
 });
