@@ -352,6 +352,8 @@ Passing `SOURCE_BRANCH` or `TARGET_BRANCH` in `promptArgs` is an error — built
 
 When the agent outputs `<promise>COMPLETE</promise>`, the orchestrator stops the iteration loop early. This is a convention you document in your prompt for the agent to follow — the engine never injects it.
 
+This is only a stop signal. It does not imply semantic success. If your workflow needs stronger guarantees, encode concrete validation steps in the prompt or wrap `run()` with project-specific checks.
+
 This is useful for task-based workflows where the agent should stop once it has finished, rather than running all remaining iterations.
 
 You can override the default signal by passing `completionSignal` to `run()`. It accepts a single string or an array of strings:
@@ -370,6 +372,8 @@ await run({
 ```
 
 Tell the agent to output your chosen string(s) in the prompt, and the orchestrator will stop when it detects any of them. The matched signal is returned as `result.completionSignal`.
+
+For runtime-sensitive tasks, prefer prompts that require evidence such as build output, process health, or HTTP probes rather than allowing the agent to declare success without observable validation.
 
 ### Templates
 

@@ -8,6 +8,9 @@
 //                      each working a single issue on its own branch.
 //   Phase 3 (Merge):   A sonnet agent merges all branches that produced commits.
 //
+// Runtime-sensitive work still needs explicit validation evidence in the
+// prompts. Passing unit tests alone is not enough for server/bootstrap tasks.
+//
 // The outer loop repeats up to MAX_ITERATIONS times so that newly unblocked
 // issues are picked up after each round of merges.
 //

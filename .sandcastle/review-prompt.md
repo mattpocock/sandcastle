@@ -58,6 +58,8 @@ If you find improvements to make:
 2. Run `npm run typecheck` and `npm run test` to ensure nothing is broken
 3. Commit with a message starting with `RALPH: Review -` describing the refinements
 
+If the change touches runtime/bootstrap/dev server/build/deployment/server entry/auth/routing, collect explicit runtime evidence instead of inferring success from unit tests alone. Record the exact commands and outcomes in your final answer.
+
 If the code is already clean and well-structured, do nothing.
 
 Once complete, output <promise>COMPLETE</promise>.

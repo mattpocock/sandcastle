@@ -37,6 +37,18 @@ If applicable, use RGR to complete the task.
 
 Before committing, run `npm run typecheck` and `npm run test` to ensure the tests pass.
 
+# VALIDATION EVIDENCE
+
+If the task touches runtime/bootstrap/dev server/build/deployment/server entry/auth/routing, collect explicit runtime evidence and record the exact commands plus outcomes. Do not treat passing unit tests as sufficient evidence for runtime-sensitive work.
+
+Examples of acceptable evidence:
+
+- build command passed
+- dev server started and a real probe succeeded
+- CLI/task runner command produced the expected observable output
+
+Do not declare success from a timeout alone. Evidence beats assertion.
+
 # COMMIT
 
 Make a git commit. The commit message must:
@@ -52,6 +64,8 @@ Keep it concise.
 # THE ISSUE
 
 If the task is not complete, leave a comment on the GitHub issue with what was done.
+
+If you leave an issue comment, include a short `Validation` section listing the commands you actually ran and whether they passed, failed, or were skipped.
 
 Do not close the issue - this will be done later.
 
