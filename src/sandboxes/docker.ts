@@ -6,7 +6,7 @@
  *   await run({ agent: claudeCode("claude-opus-4-6"), sandbox: docker() });
  */
 
-import { execFile, execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import { Effect } from "effect";
@@ -130,65 +130,8 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
             cwd?: string;
             sudo?: boolean;
           },
-        ): Promise<ExecResult> => {
-          const effectiveCommand = opts?.sudo ? `sudo ${command}` : command;
-          const args = ["exec"];
-          if (opts?.cwd) args.push("-w", opts.cwd);
-          args.push(containerName, "sh", "-c", effectiveCommand);
-
-          if (opts?.onLine) {
-            const onLine = opts.onLine;
-            return new Promise((resolve, reject) => {
-              const proc = spawn("docker", args, {
-                stdio: ["ignore", "pipe", "pipe"],
-              });
-
-              const stdoutChunks: string[] = [];
-              const stderrChunks: string[] = [];
-
-              const rl = createInterface({ input: proc.stdout! });
-              rl.on("line", (line) => {
-                stdoutChunks.push(line);
-                onLine(line);
-              });
-
-              proc.stderr!.on("data", (chunk: Buffer) => {
-                stderrChunks.push(chunk.toString());
-              });
-
-              proc.on("error", (error) => {
-                reject(new Error(`docker exec failed: ${error.message}`));
-              });
-
-              proc.on("close", (code) => {
-                resolve({
-                  stdout: stdoutChunks.join("\n"),
-                  stderr: stderrChunks.join(""),
-                  exitCode: code ?? 0,
-                });
-              });
-            });
-          }
-
-          return new Promise((resolve, reject) => {
-            execFile(
-              "docker",
-              args,
-              { maxBuffer: 10 * 1024 * 1024 },
-              (error, stdout, stderr) => {
-                if (error && error.code === undefined) {
-                  reject(new Error(`docker exec failed: ${error.message}`));
-                } else {
-                  resolve({
-                    stdout: stdout.toString(),
-                    stderr: stderr.toString(),
-                    exitCode: typeof error?.code === "number" ? error.code : 0,
-                  });
-                }
-              },
-            );
-          });
-        },
+        ): Promise<ExecResult> =>
+          execViaStdin(containerName, command, opts),
 
         close: async (): Promise<void> => {
           process.removeListener("exit", onExit);
@@ -202,6 +145,53 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
     },
   });
 };
+
+const execViaStdin = (
+  containerName: string,
+  command: string,
+  opts?: { onLine?: (line: string) => void; cwd?: string; sudo?: boolean },
+): Promise<ExecResult> =>
+  new Promise((resolve, reject) => {
+    const effectiveCommand = opts?.sudo ? `sudo ${command}` : command;
+    const args = ["exec", "-i"];
+    if (opts?.cwd) args.push("-w", opts.cwd);
+    args.push(containerName, "sh");
+
+    const proc = spawn("docker", args, {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+
+    const rl = createInterface({ input: proc.stdout! });
+    rl.on("line", (line) => {
+      opts?.onLine?.(line);
+    });
+
+    proc.stdout!.on("data", (chunk: Buffer) => {
+      stdoutChunks.push(chunk);
+    });
+
+    proc.stderr!.on("data", (chunk: Buffer) => {
+      stderrChunks.push(chunk);
+    });
+
+    proc.on("error", (error) => {
+      reject(new Error(`docker exec failed: ${error.message}`));
+    });
+
+    proc.on("close", (code) => {
+      rl.close();
+      resolve({
+        stdout: Buffer.concat(stdoutChunks).toString(),
+        stderr: Buffer.concat(stderrChunks).toString(),
+        exitCode: code ?? 0,
+      });
+    });
+
+    proc.stdin!.end(effectiveCommand);
+  });
 
 /**
  * Derive the default Docker image name from the repo directory.

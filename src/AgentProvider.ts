@@ -67,6 +67,7 @@ export interface AgentProvider {
   /** Environment variables injected by this agent provider. Merged at launch time with env resolver and sandbox provider env. */
   readonly env: Record<string, string>;
   buildPrintCommand(prompt: string): string;
+  buildPrintCommandFromStdin?(): string;
   buildInteractiveArgs(prompt: string): string[];
   parseStreamLine(line: string): ParsedStreamEvent[];
 }
@@ -206,6 +207,10 @@ export const codex = (
 
   buildPrintCommand(prompt: string): string {
     return `codex exec --json --dangerously-bypass-approvals-and-sandbox -m ${shellEscape(model)} ${shellEscape(prompt)}`;
+  },
+
+  buildPrintCommandFromStdin(): string {
+    return `codex exec --json --dangerously-bypass-approvals-and-sandbox -m ${shellEscape(model)} -`;
   },
 
   buildInteractiveArgs(_prompt: string): string[] {

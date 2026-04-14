@@ -294,6 +294,31 @@ describe("WorktreeManager.create", () => {
     const err = await runFail(create(repoDir, { branch: "main" }));
     expect(err.message).toMatch(/already checked out/i);
   });
+
+  it("removes an orphaned target directory before creating the worktree", async () => {
+    const repoDir = await setupRepo();
+    const orphanPath = join(
+      repoDir,
+      ".sandcastle",
+      "worktrees",
+      "sandcastle-issue-17-example-worktree",
+    );
+
+    await mkdir(orphanPath, { recursive: true });
+    await writeFile(join(orphanPath, "junk.txt"), "orphan");
+
+    const { path, branch } = await run(
+      create(repoDir, {
+        branch: "sandcastle/issue-17-example-worktree",
+      }),
+    );
+
+    expect(branch).toBe("sandcastle/issue-17-example-worktree");
+    expect(path).toBe(orphanPath);
+    await expect(stat(join(path, "junk.txt"))).rejects.toThrow();
+
+    await run(remove(path));
+  });
 });
 
 describe("WorktreeManager.remove", () => {
@@ -313,6 +338,26 @@ describe("WorktreeManager.remove", () => {
     await run(remove(path));
 
     // After removal, the worktree should not appear in git worktree list
+    const { stdout } = await execAsync("git worktree list --porcelain", {
+      cwd: repoDir,
+    });
+    expect(stdout).not.toContain(path);
+  });
+
+  it("cleans ignored files before removing the worktree", async () => {
+    const repoDir = await setupRepo();
+    await writeFile(join(repoDir, ".gitignore"), "node_modules/\n");
+    await execAsync('git add .gitignore && git commit -m "add gitignore"', {
+      cwd: repoDir,
+    });
+
+    const { path } = await run(create(repoDir));
+    await mkdir(join(path, "node_modules"), { recursive: true });
+    await writeFile(join(path, "node_modules", "junk.txt"), "junk");
+
+    await run(remove(path));
+
+    await expect(stat(path)).rejects.toThrow();
     const { stdout } = await execAsync("git worktree list --porcelain", {
       cwd: repoDir,
     });

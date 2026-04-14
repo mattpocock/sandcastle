@@ -1,4 +1,7 @@
 import { Deferred, Effect } from "effect";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Display } from "./Display.js";
 import { preprocessPrompt } from "./PromptPreprocessor.js";
 import { AgentError, TimeoutError } from "./errors.js";
@@ -12,6 +15,7 @@ import { TextDeltaBuffer } from "./TextDeltaBuffer.js";
 export type { ParsedStreamEvent } from "./AgentProvider.js";
 
 const IDLE_WARNING_INTERVAL_MS = 60_000;
+const shellEscape = (s: string): string => "'" + s.replace(/'/g, "'\\''") + "'";
 
 const invokeAgent = (
   sandbox: SandboxService,
@@ -63,31 +67,45 @@ const invokeAgent = (
     };
 
     resetIdleTimer();
+    let tempDir: string | null = null;
 
     const execEffect = Effect.gen(function* () {
-      const execResult = yield* sandbox.exec(
-        provider.buildPrintCommand(prompt),
-        {
-          onLine: (line) => {
-            resetIdleTimer();
-            for (const parsed of provider.parseStreamLine(line)) {
-              if (parsed.type === "text") {
-                onText(parsed.text);
-              } else if (parsed.type === "result") {
-                resultText = parsed.result;
-              } else if (parsed.type === "tool_call") {
-                onToolCall(parsed.name, parsed.args);
-              }
+      let command = provider.buildPrintCommand(prompt);
+
+      if (provider.buildPrintCommandFromStdin) {
+        tempDir = mkdtempSync(join(tmpdir(), "sandcastle-prompt-"));
+        const hostPromptPath = join(tempDir, "prompt.txt");
+        const sandboxPromptPath = "/tmp/sandcastle-prompt.txt";
+
+        writeFileSync(hostPromptPath, prompt, "utf8");
+        yield* sandbox.copyIn(hostPromptPath, sandboxPromptPath);
+
+        command = `cat ${shellEscape(sandboxPromptPath)} | ${provider.buildPrintCommandFromStdin()}`;
+      }
+
+      const execResult = yield* sandbox.exec(command, {
+        onLine: (line) => {
+          resetIdleTimer();
+          for (const parsed of provider.parseStreamLine(line)) {
+            if (parsed.type === "text") {
+              onText(parsed.text);
+            } else if (parsed.type === "result") {
+              resultText = parsed.result;
+            } else if (parsed.type === "tool_call") {
+              onToolCall(parsed.name, parsed.args);
             }
-          },
-          cwd: sandboxRepoDir,
+          }
         },
-      );
+        cwd: sandboxRepoDir,
+      });
 
       if (execResult.exitCode !== 0) {
+        const stdout = execResult.stdout.trim();
+        const stderr = execResult.stderr.trim();
+        const details = [stderr, stdout].filter(Boolean).join("\n");
         return yield* Effect.fail(
           new AgentError({
-            message: `${provider.name} exited with code ${execResult.exitCode}:\n${execResult.stderr}`,
+            message: `${provider.name} exited with code ${execResult.exitCode}${details ? `:\n${details}` : ""}`,
           }),
         );
       }
@@ -103,6 +121,10 @@ const invokeAgent = (
           if (warningHandle !== null) {
             clearInterval(warningHandle);
             warningHandle = null;
+          }
+          if (tempDir !== null) {
+            rmSync(tempDir, { recursive: true, force: true });
+            tempDir = null;
           }
         }),
       ),

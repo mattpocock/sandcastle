@@ -314,6 +314,20 @@ describe("codex factory", () => {
     expect(provider.name).toBe("codex");
   });
 
+  it("buildPrintCommand includes model and shell-escaped prompt", () => {
+    const provider = codex("gpt-5.4-mini");
+    const command = provider.buildPrintCommand("it's a test");
+    expect(command).toContain("-m 'gpt-5.4-mini'");
+    expect(command).toContain("'it'\\''s a test'");
+  });
+
+  it("buildPrintCommandFromStdin omits the prompt arg", () => {
+    const provider = codex("gpt-5.4-mini");
+    expect(provider.buildPrintCommandFromStdin?.()).toBe(
+      "codex exec --json --dangerously-bypass-approvals-and-sandbox -m 'gpt-5.4-mini' -",
+    );
+  });
+
   it("does not expose envManifest or dockerfileTemplate", () => {
     const provider = codex("gpt-5.4-mini");
     expect(provider).not.toHaveProperty("envManifest");
