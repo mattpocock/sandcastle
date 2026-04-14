@@ -4,6 +4,11 @@ import { PromptError } from "./errors.js";
 import type { ExecError } from "./errors.js";
 import type { SandboxService } from "./SandboxFactory.js";
 
+/**
+ * Rough token estimate: 1 token ≈ 4 characters (Anthropic approximation).
+ */
+const estimateTokens = (text: string): number => Math.ceil(text.length / 4);
+
 export const preprocessPrompt = (
   prompt: string,
   sandbox: SandboxService,
@@ -42,6 +47,15 @@ export const preprocessPrompt = (
             );
           }),
           { concurrency: "unbounded" },
+        );
+
+        // Log estimated token count from all resolved shell expression outputs
+        const totalTokens = results.reduce(
+          (sum, output) => sum + estimateTokens(output),
+          0,
+        );
+        message(
+          `~${totalTokens.toLocaleString()} tokens from shell expressions`,
         );
 
         // Replace all matches using original indices (process in reverse to preserve positions)

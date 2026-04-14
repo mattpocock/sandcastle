@@ -135,4 +135,38 @@ describe("PromptPreprocessor", () => {
     const entries = await Effect.runPromise(Ref.get(displayRef));
     expect(entries.filter((e) => e._tag === "taskLog")).toHaveLength(0);
   });
+
+  it("includes a token count message in the taskLog after resolving shell expressions", async () => {
+    const { sandboxDir, layer, displayRef } = await setup();
+    // "hello" is 5 chars → estimateTokens = ceil(5/4) = 2
+    const prompt = "Result: !`echo hello`";
+    await run(prompt, layer, sandboxDir);
+    const entries = await Effect.runPromise(Ref.get(displayRef));
+    const taskLogEntry = entries.find((e) => e._tag === "taskLog");
+    expect(taskLogEntry).toBeDefined();
+    if (taskLogEntry?._tag === "taskLog") {
+      const tokenMsg = taskLogEntry.messages.find((m) =>
+        m.includes("tokens from shell expressions"),
+      );
+      expect(tokenMsg).toBeDefined();
+      expect(tokenMsg).toMatch(/^~\d+ tokens from shell expressions$/);
+    }
+  });
+
+  it("token count covers all shell expression outputs combined", async () => {
+    const { sandboxDir, layer, displayRef } = await setup();
+    // "hello" (5) + "world" (5) = 10 chars → ceil(5/4) + ceil(5/4) = 2 + 2 = 4 tokens
+    const prompt = "A: !`echo hello`\nB: !`echo world`";
+    await run(prompt, layer, sandboxDir);
+    const entries = await Effect.runPromise(Ref.get(displayRef));
+    const taskLogEntry = entries.find((e) => e._tag === "taskLog");
+    expect(taskLogEntry).toBeDefined();
+    if (taskLogEntry?._tag === "taskLog") {
+      const tokenMsg = taskLogEntry.messages.find((m) =>
+        m.includes("tokens from shell expressions"),
+      );
+      expect(tokenMsg).toBeDefined();
+      expect(tokenMsg).toBe("~4 tokens from shell expressions");
+    }
+  });
 });
