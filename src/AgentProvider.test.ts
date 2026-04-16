@@ -499,11 +499,28 @@ describe("opencode factory", () => {
     expect(command).toContain("opencode/big-pickle");
   });
 
-  it("buildPrintCommand does not include --format json", () => {
+  it("buildPrintCommand includes --format json", () => {
     const provider = opencode("opencode/big-pickle");
     const command = provider.buildPrintCommand(opts("do something"));
-    expect(command).not.toContain("--format json");
-    expect(command).not.toContain("--format");
+    expect(command).toContain("--format json");
+  });
+
+  it("buildPrintCommand includes --dangerously-skip-permissions when true", () => {
+    const provider = opencode("opencode/big-pickle");
+    const command = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+    });
+    expect(command).toContain("--dangerously-skip-permissions");
+  });
+
+  it("buildPrintCommand omits --dangerously-skip-permissions when false", () => {
+    const provider = opencode("opencode/big-pickle");
+    const command = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: false,
+    });
+    expect(command).not.toContain("--dangerously-skip-permissions");
   });
 
   it("buildPrintCommand shell-escapes the prompt", () => {
@@ -518,23 +535,186 @@ describe("opencode factory", () => {
     expect(command).toContain("--model 'opencode/big-pickle'");
   });
 
-  it("parseStreamLine returns empty array for all input (raw passthrough)", () => {
+  it("parseStreamLine extracts text from text event", () => {
     const provider = opencode("opencode/big-pickle");
-    expect(provider.parseStreamLine("some output text")).toEqual([]);
-    expect(provider.parseStreamLine("")).toEqual([]);
-    expect(
-      provider.parseStreamLine(JSON.stringify({ type: "text", text: "hi" })),
-    ).toEqual([]);
+    const line = JSON.stringify({
+      type: "text",
+      part: { type: "text", text: "Hello world" },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "text", text: "Hello world" },
+    ]);
+  });
+
+  it("parseStreamLine extracts tool call from tool_use event (bash → command)", () => {
+    const provider = opencode("opencode/big-pickle");
+    const line = JSON.stringify({
+      type: "tool_use",
+      part: {
+        type: "tool",
+        tool: "bash",
+        state: {
+          status: "completed",
+          input: { command: "npm test", description: "Run tests" },
+        },
+      },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "tool_call", name: "bash", args: "npm test" },
+    ]);
+  });
+
+  it("parseStreamLine extracts tool call for read tool (filePath)", () => {
+    const provider = opencode("opencode/big-pickle");
+    const line = JSON.stringify({
+      type: "tool_use",
+      part: {
+        type: "tool",
+        tool: "read",
+        state: {
+          status: "completed",
+          input: { filePath: "/tmp/test.ts" },
+        },
+      },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "tool_call", name: "read", args: "/tmp/test.ts" },
+    ]);
+  });
+
+  it("parseStreamLine extracts tool call for write tool (filePath)", () => {
+    const provider = opencode("opencode/big-pickle");
+    const line = JSON.stringify({
+      type: "tool_use",
+      part: {
+        type: "tool",
+        tool: "write",
+        state: {
+          status: "completed",
+          input: { filePath: "/tmp/output.ts" },
+        },
+      },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "tool_call", name: "write", args: "/tmp/output.ts" },
+    ]);
+  });
+
+  it("parseStreamLine extracts tool call for glob tool (pattern)", () => {
+    const provider = opencode("opencode/big-pickle");
+    const line = JSON.stringify({
+      type: "tool_use",
+      part: {
+        type: "tool",
+        tool: "glob",
+        state: {
+          status: "completed",
+          input: { pattern: "**/*.ts" },
+        },
+      },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "tool_call", name: "glob", args: "**/*.ts" },
+    ]);
+  });
+
+  it("parseStreamLine extracts tool call for grep tool (pattern)", () => {
+    const provider = opencode("opencode/big-pickle");
+    const line = JSON.stringify({
+      type: "tool_use",
+      part: {
+        type: "tool",
+        tool: "grep",
+        state: {
+          status: "completed",
+          input: { pattern: "TODO" },
+        },
+      },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "tool_call", name: "grep", args: "TODO" },
+    ]);
+  });
+
+  it("parseStreamLine skips non-allowlisted tools", () => {
+    const provider = opencode("opencode/big-pickle");
+    const line = JSON.stringify({
+      type: "tool_use",
+      part: {
+        type: "tool",
+        tool: "unknown_tool",
+        state: {
+          status: "completed",
+          input: { foo: "bar" },
+        },
+      },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([]);
+  });
+
+  it("parseStreamLine skips step_finish events (output collected via stdout)", () => {
+    const provider = opencode("opencode/big-pickle");
+    const line = JSON.stringify({
+      type: "step_finish",
+      part: { reason: "stop", messageID: "msg_123" },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([]);
+  });
+
+  it("parseStreamLine skips step_finish with tool-calls reason", () => {
+    const provider = opencode("opencode/big-pickle");
+    const line = JSON.stringify({
+      type: "step_finish",
+      part: { reason: "tool-calls", messageID: "msg_123" },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([]);
+  });
+
+  it("parseStreamLine skips step_start events", () => {
+    const provider = opencode("opencode/big-pickle");
+    const line = JSON.stringify({
+      type: "step_start",
+      part: { type: "step-start" },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([]);
   });
 
   it("parseStreamLine returns empty array for non-JSON lines", () => {
     const provider = opencode("opencode/big-pickle");
-    expect(provider.parseStreamLine("not json")).toEqual([]);
+    expect(provider.parseStreamLine("some output text")).toEqual([]);
+    expect(provider.parseStreamLine("")).toEqual([]);
   });
 
   it("parseStreamLine returns empty array for malformed JSON", () => {
     const provider = opencode("opencode/big-pickle");
     expect(provider.parseStreamLine("{bad json")).toEqual([]);
+  });
+
+  it("parseStreamLine handles text event with missing text field", () => {
+    const provider = opencode("opencode/big-pickle");
+    const line = JSON.stringify({
+      type: "text",
+      part: { type: "text" },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([]);
+  });
+
+  it("parseStreamLine handles tool_use event with missing state", () => {
+    const provider = opencode("opencode/big-pickle");
+    const line = JSON.stringify({
+      type: "tool_use",
+      part: { type: "tool", tool: "bash" },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([]);
+  });
+
+  it("parseStreamLine handles tool_use event with missing tool name", () => {
+    const provider = opencode("opencode/big-pickle");
+    const line = JSON.stringify({
+      type: "tool_use",
+      part: { type: "tool" },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([]);
   });
 
   it("bakes model into each provider instance independently", () => {

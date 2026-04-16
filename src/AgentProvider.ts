@@ -5,12 +5,22 @@ export type ParsedStreamEvent =
 
 const shellEscape = (s: string): string => "'" + s.replace(/'/g, "'\\''") + "'";
 
-/** Maps allowlisted tool names to the input field containing the display arg */
+/** Maps allowlisted tool names to the input field containing the display arg.
+ *  Covers Claude Code (PascalCase), Pi, Codex, and OpenCode (lowercase) tool names. */
 const TOOL_ARG_FIELDS: Record<string, string> = {
   Bash: "command",
   WebSearch: "query",
   WebFetch: "url",
   Agent: "description",
+  bash: "command",
+  websearch: "query",
+  webfetch: "url",
+  task: "description",
+  read: "filePath",
+  write: "filePath",
+  edit: "filePath",
+  glob: "pattern",
+  grep: "pattern",
 };
 
 const parseStreamJsonLine = (line: string): ParsedStreamEvent[] => {
@@ -241,6 +251,36 @@ export interface OpenCodeOptions {
   readonly env?: Record<string, string>;
 }
 
+const parseOpenCodeStreamLine = (line: string): ParsedStreamEvent[] => {
+  if (!line.startsWith("{")) return [];
+  try {
+    const obj = JSON.parse(line);
+
+    if (obj.type === "text" && obj.part?.type === "text") {
+      const text = obj.part.text;
+      if (typeof text === "string") {
+        return [{ type: "text", text }];
+      }
+      return [];
+    }
+
+    if (obj.type === "tool_use" && obj.part?.type === "tool") {
+      const toolName = obj.part.tool;
+      if (typeof toolName !== "string") return [];
+      const argField = TOOL_ARG_FIELDS[toolName];
+      if (argField === undefined) return [];
+      const input = obj.part.state?.input;
+      if (!input || typeof input !== "object") return [];
+      const argValue = input[argField as keyof typeof input];
+      if (typeof argValue !== "string") return [];
+      return [{ type: "tool_call", name: toolName, args: argValue }];
+    }
+  } catch {
+    // Not valid JSON — skip
+  }
+  return [];
+};
+
 export const opencode = (
   model: string,
   options?: OpenCodeOptions,
@@ -248,8 +288,14 @@ export const opencode = (
   name: "opencode",
   env: options?.env ?? {},
 
-  buildPrintCommand({ prompt }: AgentCommandOptions): string {
-    return `opencode run --model ${shellEscape(model)} ${shellEscape(prompt)}`;
+  buildPrintCommand({
+    prompt,
+    dangerouslySkipPermissions,
+  }: AgentCommandOptions): string {
+    const permsFlag = dangerouslySkipPermissions
+      ? " --dangerously-skip-permissions"
+      : "";
+    return `opencode run --format json${permsFlag} --model ${shellEscape(model)} ${shellEscape(prompt)}`;
   },
 
   buildInteractiveArgs({ prompt }: AgentCommandOptions): string[] {
@@ -258,8 +304,8 @@ export const opencode = (
     return args;
   },
 
-  parseStreamLine(_line: string): ParsedStreamEvent[] {
-    return [];
+  parseStreamLine(line: string): ParsedStreamEvent[] {
+    return parseOpenCodeStreamLine(line);
   },
 });
 
