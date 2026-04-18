@@ -203,18 +203,21 @@ const parseOpenCodeStreamLine = (
   line: string,
   accumulatedText: string,
 ): { events: ParsedStreamEvent[]; accumulatedText: string } => {
-  if (!line.startsWith("{")) return { accumulatedText, events: [] };
+  if (!line.startsWith("{")) return { events: [], accumulatedText };
   try {
     const obj = JSON.parse(line);
 
     if (obj.type === "text" && typeof obj.part?.text === "string") {
-      const nextAccumulatedText = accumulatedText + obj.part.text;
       return {
-        accumulatedText: nextAccumulatedText,
-        events: [
-          { type: "text", text: obj.part.text },
-          { type: "result", result: nextAccumulatedText },
-        ],
+        events: [{ type: "text", text: obj.part.text }],
+        accumulatedText: accumulatedText + obj.part.text,
+      };
+    }
+
+    if (obj.type === "step_finish" && accumulatedText.length > 0) {
+      return {
+        events: [{ type: "result", result: accumulatedText }],
+        accumulatedText,
       };
     }
 
@@ -234,27 +237,33 @@ const parseOpenCodeStreamLine = (
           displayName = "Agent";
           break;
       }
-      if (displayName === undefined) return { accumulatedText, events: [] };
+      if (displayName === undefined) {
+        return { events: [], accumulatedText };
+      }
 
       const argField = TOOL_ARG_FIELDS[displayName];
-      if (argField === undefined) return { accumulatedText, events: [] };
+      if (argField === undefined) {
+        return { events: [], accumulatedText };
+      }
       const input = obj.part?.state?.input as
         | Record<string, unknown>
         | undefined;
-      if (!input) return { accumulatedText, events: [] };
+      if (!input) return { events: [], accumulatedText };
 
       const argValue = input[argField];
-      if (typeof argValue !== "string") return { accumulatedText, events: [] };
+      if (typeof argValue !== "string") {
+        return { events: [], accumulatedText };
+      }
 
       return {
-        accumulatedText,
         events: [{ type: "tool_call", name: displayName, args: argValue }],
+        accumulatedText,
       };
     }
   } catch {
     // Not valid JSON — skip
   }
-  return { accumulatedText, events: [] };
+  return { events: [], accumulatedText };
 };
 
 /** Options for the codex agent provider. */
