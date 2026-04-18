@@ -499,11 +499,10 @@ describe("opencode factory", () => {
     expect(command).toContain("opencode/big-pickle");
   });
 
-  it("buildPrintCommand does not include --format json", () => {
+  it("buildPrintCommand includes --format json", () => {
     const provider = opencode("opencode/big-pickle");
     const command = provider.buildPrintCommand(opts("do something"));
-    expect(command).not.toContain("--format json");
-    expect(command).not.toContain("--format");
+    expect(command).toContain("--format json");
   });
 
   it("buildPrintCommand shell-escapes the prompt", () => {

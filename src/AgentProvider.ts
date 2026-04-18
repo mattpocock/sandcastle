@@ -199,6 +199,64 @@ const parseCodexStreamLine = (line: string): ParsedStreamEvent[] => {
   return [];
 };
 
+const parseOpenCodeStreamLine = (
+  line: string,
+  accumulatedText: string,
+): { events: ParsedStreamEvent[]; accumulatedText: string } => {
+  if (!line.startsWith("{")) return { accumulatedText, events: [] };
+  try {
+    const obj = JSON.parse(line);
+
+    if (obj.type === "text" && typeof obj.part?.text === "string") {
+      const nextAccumulatedText = accumulatedText + obj.part.text;
+      return {
+        accumulatedText: nextAccumulatedText,
+        events: [
+          { type: "text", text: obj.part.text },
+          { type: "result", result: nextAccumulatedText },
+        ],
+      };
+    }
+
+    if (obj.type === "tool_use" && typeof obj.part?.tool === "string") {
+      let displayName: keyof typeof TOOL_ARG_FIELDS | undefined;
+      switch (obj.part.tool) {
+        case "bash":
+          displayName = "Bash";
+          break;
+        case "webfetch":
+          displayName = "WebFetch";
+          break;
+        case "websearch":
+          displayName = "WebSearch";
+          break;
+        case "agent":
+          displayName = "Agent";
+          break;
+      }
+      if (displayName === undefined) return { accumulatedText, events: [] };
+
+      const argField = TOOL_ARG_FIELDS[displayName];
+      if (argField === undefined) return { accumulatedText, events: [] };
+      const input = obj.part?.state?.input as
+        | Record<string, unknown>
+        | undefined;
+      if (!input) return { accumulatedText, events: [] };
+
+      const argValue = input[argField];
+      if (typeof argValue !== "string") return { accumulatedText, events: [] };
+
+      return {
+        accumulatedText,
+        events: [{ type: "tool_call", name: displayName, args: argValue }],
+      };
+    }
+  } catch {
+    // Not valid JSON — skip
+  }
+  return { accumulatedText, events: [] };
+};
+
 /** Options for the codex agent provider. */
 export interface CodexOptions {
   readonly effort?: "low" | "medium" | "high" | "xhigh";
@@ -244,24 +302,31 @@ export interface OpenCodeOptions {
 export const opencode = (
   model: string,
   options?: OpenCodeOptions,
-): AgentProvider => ({
-  name: "opencode",
-  env: options?.env ?? {},
+): AgentProvider => {
+  let accumulatedText = "";
 
-  buildPrintCommand({ prompt }: AgentCommandOptions): string {
-    return `opencode run --model ${shellEscape(model)} ${shellEscape(prompt)}`;
-  },
+  return {
+    name: "opencode",
+    env: options?.env ?? {},
 
-  buildInteractiveArgs({ prompt }: AgentCommandOptions): string[] {
-    const args = ["opencode", "--model", model];
-    if (prompt) args.push("-p", prompt);
-    return args;
-  },
+    buildPrintCommand({ prompt }: AgentCommandOptions): string {
+      accumulatedText = "";
+      return `opencode run --format json --model ${shellEscape(model)} ${shellEscape(prompt)}`;
+    },
 
-  parseStreamLine(_line: string): ParsedStreamEvent[] {
-    return [];
-  },
-});
+    buildInteractiveArgs({ prompt }: AgentCommandOptions): string[] {
+      const args = ["opencode", "--model", model];
+      if (prompt) args.push("-p", prompt);
+      return args;
+    },
+
+    parseStreamLine(line: string): ParsedStreamEvent[] {
+      const parsed = parseOpenCodeStreamLine(line, accumulatedText);
+      accumulatedText = parsed.accumulatedText;
+      return parsed.events;
+    },
+  };
+};
 
 // ---------------------------------------------------------------------------
 // Claude Code agent provider
