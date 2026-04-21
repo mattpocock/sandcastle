@@ -191,6 +191,7 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
 
       const handle: BindMountSandboxHandle = {
         worktreePath,
+        supportsStdinExec: true,
 
         exec: (
           command: string,
@@ -198,28 +199,50 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
             onLine?: (line: string) => void;
             cwd?: string;
             sudo?: boolean;
+            stdin?: string;
           },
         ): Promise<ExecResult> => {
           const effectiveCommand = opts?.sudo ? `sudo ${command}` : command;
           const args = ["exec"];
+          // `-i` keeps stdin open so we can pipe opts.stdin into the container process
+          if (opts?.stdin !== undefined) args.push("-i");
           if (opts?.cwd) args.push("-w", opts.cwd);
           args.push(containerName, "sh", "-c", effectiveCommand);
 
-          if (opts?.onLine) {
-            const onLine = opts.onLine;
+          const stdinPayload = opts?.stdin;
+          const stdinMode: "pipe" | "ignore" =
+            stdinPayload !== undefined ? "pipe" : "ignore";
+
+          if (opts?.onLine || stdinPayload !== undefined) {
+            const onLine = opts?.onLine;
             return new Promise((resolve, reject) => {
               const proc = spawn("podman", args, {
-                stdio: ["ignore", "pipe", "pipe"],
+                stdio: [stdinMode, "pipe", "pipe"],
               });
+
+              if (stdinPayload !== undefined && proc.stdin) {
+                proc.stdin.on("error", (error: Error) => {
+                  reject(
+                    new Error(`podman exec stdin failed: ${error.message}`),
+                  );
+                });
+                proc.stdin.end(stdinPayload);
+              }
 
               const stdoutChunks: string[] = [];
               const stderrChunks: string[] = [];
 
-              const rl = createInterface({ input: proc.stdout! });
-              rl.on("line", (line) => {
-                stdoutChunks.push(line);
-                onLine(line);
-              });
+              if (onLine) {
+                const rl = createInterface({ input: proc.stdout! });
+                rl.on("line", (line) => {
+                  stdoutChunks.push(line);
+                  onLine(line);
+                });
+              } else {
+                proc.stdout!.on("data", (chunk: Buffer) => {
+                  stdoutChunks.push(chunk.toString());
+                });
+              }
 
               proc.stderr!.on("data", (chunk: Buffer) => {
                 stderrChunks.push(chunk.toString());
@@ -231,7 +254,7 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
 
               proc.on("close", (code) => {
                 resolve({
-                  stdout: stdoutChunks.join("\n"),
+                  stdout: stdoutChunks.join(onLine ? "\n" : ""),
                   stderr: stderrChunks.join(""),
                   exitCode: code ?? 0,
                 });

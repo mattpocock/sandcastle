@@ -25,6 +25,13 @@ export interface BindMountSandboxHandle {
   /** Absolute path to the worktree inside the sandbox. */
   readonly worktreePath: string;
   /**
+   * Whether `exec()` forwards the `stdin` option to the underlying child process.
+   * When true, callers may deliver large payloads (e.g. prompts larger than
+   * `MAX_ARG_STRLEN`) via stdin. When false or unset, the `stdin` option is
+   * silently ignored.
+   */
+  readonly supportsStdinExec?: boolean;
+  /**
    * Execute a command in the sandbox.
    *
    * Implementations MUST support line-by-line streaming via `onLine`. This is
@@ -35,7 +42,19 @@ export interface BindMountSandboxHandle {
    */
   exec(
     command: string,
-    options?: { onLine?: (line: string) => void; cwd?: string; sudo?: boolean },
+    options?: {
+      onLine?: (line: string) => void;
+      cwd?: string;
+      sudo?: boolean;
+      /**
+       * When set, the value is written to the child process's stdin and stdin is
+       * then closed. Providers that forward stdin to the underlying process MUST
+       * set `supportsStdinExec: true`; providers that ignore this option MUST
+       * leave `supportsStdinExec` unset/false. Callers should check the flag on
+       * the handle before relying on this behaviour.
+       */
+      stdin?: string;
+    },
   ): Promise<ExecResult>;
   /**
    * Launch an interactive process inside the sandbox.
@@ -88,6 +107,11 @@ export interface IsolatedSandboxHandle {
   /** Absolute path to the worktree inside the sandbox. */
   readonly worktreePath: string;
   /**
+   * Whether `exec()` forwards the `stdin` option to the underlying child process.
+   * See `BindMountSandboxHandle.supportsStdinExec` for semantics.
+   */
+  readonly supportsStdinExec?: boolean;
+  /**
    * Execute a command in the sandbox.
    *
    * Implementations MUST support line-by-line streaming via `onLine`. This is
@@ -98,7 +122,19 @@ export interface IsolatedSandboxHandle {
    */
   exec(
     command: string,
-    options?: { onLine?: (line: string) => void; cwd?: string; sudo?: boolean },
+    options?: {
+      onLine?: (line: string) => void;
+      cwd?: string;
+      sudo?: boolean;
+      /**
+       * When set, the value is written to the child process's stdin and stdin is
+       * then closed. Providers that forward stdin to the underlying process MUST
+       * set `supportsStdinExec: true`; providers that ignore this option MUST
+       * leave `supportsStdinExec` unset/false. Callers should check the flag on
+       * the handle before relying on this behaviour.
+       */
+      stdin?: string;
+    },
   ): Promise<ExecResult>;
   /**
    * Launch an interactive process inside the sandbox.
@@ -169,6 +205,11 @@ export interface NoSandboxHandle {
   /** Absolute path to the worktree on the host. */
   readonly worktreePath: string;
   /**
+   * Whether `exec()` forwards the `stdin` option to the underlying child process.
+   * See `BindMountSandboxHandle.supportsStdinExec` for semantics.
+   */
+  readonly supportsStdinExec?: boolean;
+  /**
    * Execute a command on the host.
    *
    * Implementations MUST support line-by-line streaming via `onLine`. This is
@@ -177,7 +218,19 @@ export interface NoSandboxHandle {
    */
   exec(
     command: string,
-    options?: { onLine?: (line: string) => void; cwd?: string; sudo?: boolean },
+    options?: {
+      onLine?: (line: string) => void;
+      cwd?: string;
+      sudo?: boolean;
+      /**
+       * When set, the value is written to the child process's stdin and stdin is
+       * then closed. Providers that forward stdin to the underlying process MUST
+       * set `supportsStdinExec: true`; providers that ignore this option MUST
+       * leave `supportsStdinExec` unset/false. Callers should check the flag on
+       * the handle before relying on this behaviour.
+       */
+      stdin?: string;
+    },
   ): Promise<ExecResult>;
   /**
    * Launch an interactive process on the host with inherited stdio.

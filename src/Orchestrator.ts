@@ -75,31 +75,46 @@ const invokeAgent = (
 
     resetIdleTimer();
 
-    const execEffect = Effect.gen(function* () {
-      const execResult = yield* sandbox.exec(
-        provider.buildPrintCommand({
+    // Prefer stdin-based invocation when both the agent provider and the
+    // sandbox support it — this keeps the prompt out of argv and avoids the
+    // per-argv-string kernel limit (`MAX_ARG_STRLEN`, 128 KB on Linux) that
+    // otherwise caps how large a prompt can be.
+    const useStdinPath =
+      sandbox.supportsStdinExec && provider.buildPrintInvocation !== undefined;
+    const invocation = useStdinPath
+      ? provider.buildPrintInvocation!({
           prompt,
           dangerouslySkipPermissions: true,
           resumeSession,
-        }),
-        {
-          onLine: (line) => {
-            resetIdleTimer();
-            for (const parsed of provider.parseStreamLine(line)) {
-              if (parsed.type === "text") {
-                onText(parsed.text);
-              } else if (parsed.type === "result") {
-                resultText = parsed.result;
-              } else if (parsed.type === "tool_call") {
-                onToolCall(parsed.name, parsed.args);
-              } else if (parsed.type === "session_id") {
-                sessionId = parsed.sessionId;
-              }
+        })
+      : {
+          command: provider.buildPrintCommand({
+            prompt,
+            dangerouslySkipPermissions: true,
+            resumeSession,
+          }),
+          stdin: undefined as string | undefined,
+        };
+
+    const execEffect = Effect.gen(function* () {
+      const execResult = yield* sandbox.exec(invocation.command, {
+        onLine: (line) => {
+          resetIdleTimer();
+          for (const parsed of provider.parseStreamLine(line)) {
+            if (parsed.type === "text") {
+              onText(parsed.text);
+            } else if (parsed.type === "result") {
+              resultText = parsed.result;
+            } else if (parsed.type === "tool_call") {
+              onToolCall(parsed.name, parsed.args);
+            } else if (parsed.type === "session_id") {
+              sessionId = parsed.sessionId;
             }
-          },
-          cwd: sandboxRepoDir,
+          }
         },
-      );
+        cwd: sandboxRepoDir,
+        stdin: invocation.stdin,
+      });
 
       if (execResult.exitCode !== 0) {
         return yield* Effect.fail(

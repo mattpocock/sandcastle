@@ -1602,6 +1602,122 @@ describe("Orchestrator streaming", () => {
     expect(capturedCommand).toContain("--model 'claude-sonnet-4-6'");
     expect(capturedCommand).not.toContain(DEFAULT_MODEL);
   });
+
+  it("routes prompt through stdin when sandbox reports supportsStdinExec", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-stdin-host-"));
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    let capturedCommand = "";
+    let capturedStdin: string | undefined;
+
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) => {
+      const fsLayer = makeLocalSandboxLayer(dir);
+      return Layer.succeed(Sandbox, {
+        supportsStdinExec: true,
+        exec: (command, options) => {
+          if (command.startsWith("claude ") && options?.onLine) {
+            capturedCommand = command;
+            capturedStdin = options.stdin;
+            const onLine = options.onLine;
+            const streamOutput = toStreamJson("Done.");
+            for (const line of streamOutput.split("\n")) {
+              onLine(line);
+            }
+            return Effect.succeed({
+              stdout: streamOutput,
+              stderr: "",
+              exitCode: 0,
+            });
+          }
+          return Effect.flatMap(Sandbox, (real) =>
+            real.exec(command, options),
+          ).pipe(Effect.provide(fsLayer));
+        },
+        copyIn: (hostPath, sandboxPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyIn(hostPath, sandboxPath),
+          ).pipe(Effect.provide(fsLayer)),
+        copyFileOut: (sandboxPath, hostPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyFileOut(sandboxPath, hostPath),
+          ).pipe(Effect.provide(fsLayer)),
+      });
+    });
+
+    const bigPrompt = "the real work\n" + "x".repeat(200_000);
+    await Effect.runPromise(
+      orchestrate({
+        provider: testProvider,
+        hostRepoDir: hostDir,
+        iterations: 1,
+        prompt: bigPrompt,
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+    );
+
+    // Prompt must arrive via stdin, not argv
+    expect(capturedStdin).toBe(bigPrompt);
+    expect(capturedCommand).not.toContain(bigPrompt);
+    expect(capturedCommand).not.toMatch(/\s-p\s/);
+  });
+
+  it("keeps prompt in argv when sandbox does not report supportsStdinExec", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-noexec-host-"));
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    let capturedCommand = "";
+    let capturedStdin: string | undefined = "unset";
+
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) => {
+      const fsLayer = makeLocalSandboxLayer(dir);
+      return Layer.succeed(Sandbox, {
+        // supportsStdinExec intentionally omitted — falls back to argv
+        exec: (command, options) => {
+          if (command.startsWith("claude ") && options?.onLine) {
+            capturedCommand = command;
+            capturedStdin = options.stdin;
+            const onLine = options.onLine;
+            const streamOutput = toStreamJson("Done.");
+            for (const line of streamOutput.split("\n")) {
+              onLine(line);
+            }
+            return Effect.succeed({
+              stdout: streamOutput,
+              stderr: "",
+              exitCode: 0,
+            });
+          }
+          return Effect.flatMap(Sandbox, (real) =>
+            real.exec(command, options),
+          ).pipe(Effect.provide(fsLayer));
+        },
+        copyIn: (hostPath, sandboxPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyIn(hostPath, sandboxPath),
+          ).pipe(Effect.provide(fsLayer)),
+        copyFileOut: (sandboxPath, hostPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyFileOut(sandboxPath, hostPath),
+          ).pipe(Effect.provide(fsLayer)),
+      });
+    });
+
+    await Effect.runPromise(
+      orchestrate({
+        provider: testProvider,
+        hostRepoDir: hostDir,
+        iterations: 1,
+        prompt: "small prompt",
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+    );
+
+    // Argv fallback: prompt is inlined in the command
+    expect(capturedCommand).toMatch(/\s-p\s+'small prompt'/);
+    expect(capturedStdin).toBeUndefined();
+  });
 });
 
 describe("Orchestrator prompt preprocessing", () => {

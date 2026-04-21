@@ -78,6 +78,17 @@ export interface AgentCommandOptions {
   readonly resumeSession?: string;
 }
 
+/**
+ * Shell command plus an optional stdin payload, returned by `buildPrintInvocation`.
+ * When `stdin` is set, the caller should pipe it into the child process's stdin
+ * instead of inlining it in argv. Used to keep the prompt out of argv so it does
+ * not hit the per-argv-string kernel limit (`MAX_ARG_STRLEN`, 128 KB on Linux).
+ */
+export interface AgentInvocation {
+  readonly command: string;
+  readonly stdin?: string;
+}
+
 export interface AgentProvider {
   readonly name: string;
   /** Environment variables injected by this agent provider. Merged at launch time with env resolver and sandbox provider env. */
@@ -85,6 +96,14 @@ export interface AgentProvider {
   /** When true, session capture is enabled for this provider. Default: true for Claude Code, false for others. */
   readonly captureSessions: boolean;
   buildPrintCommand(options: AgentCommandOptions): string;
+  /**
+   * Optional: return `{ command, stdin }` where `stdin` carries the prompt.
+   * When present and the sandbox reports `supportsStdinExec`, the orchestrator
+   * routes the prompt through stdin instead of inlining it in argv. This avoids
+   * the per-argv-string limit (`MAX_ARG_STRLEN`, 128 KB on Linux) for large
+   * prompts. Falls back to `buildPrintCommand` when either side is missing.
+   */
+  buildPrintInvocation?(options: AgentCommandOptions): AgentInvocation;
   buildInteractiveArgs?(options: AgentCommandOptions): string[];
   parseStreamLine(line: string): ParsedStreamEvent[];
 }
@@ -311,6 +330,27 @@ export const claudeCode = (
       ? ` --resume ${shellEscape(resumeSession)}`
       : "";
     return `claude --print --verbose${skipPerms} --output-format stream-json --model ${shellEscape(model)}${effortFlag}${resumeFlag} -p ${shellEscape(prompt)}`;
+  },
+
+  // Claude Code's `--print` mode reads the prompt from stdin when no prompt
+  // argument is supplied. Routing the prompt through stdin keeps it out of
+  // argv entirely, so it is not subject to MAX_ARG_STRLEN (128 KB on Linux).
+  buildPrintInvocation({
+    prompt,
+    dangerouslySkipPermissions,
+    resumeSession,
+  }: AgentCommandOptions): AgentInvocation {
+    const skipPerms = dangerouslySkipPermissions
+      ? " --dangerously-skip-permissions"
+      : "";
+    const effortFlag = options?.effort ? ` --effort ${options.effort}` : "";
+    const resumeFlag = resumeSession
+      ? ` --resume ${shellEscape(resumeSession)}`
+      : "";
+    return {
+      command: `claude --print --verbose${skipPerms} --output-format stream-json --model ${shellEscape(model)}${effortFlag}${resumeFlag}`,
+      stdin: prompt,
+    };
   },
 
   buildInteractiveArgs({

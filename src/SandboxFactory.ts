@@ -36,8 +36,26 @@ export interface ExecResult {
 export interface SandboxService {
   readonly exec: (
     command: string,
-    options?: { onLine?: (line: string) => void; cwd?: string; sudo?: boolean },
+    options?: {
+      onLine?: (line: string) => void;
+      cwd?: string;
+      sudo?: boolean;
+      /**
+       * When set, the value is written to the child process's stdin and stdin
+       * is then closed. Only respected when `supportsStdinExec` is true; on
+       * other sandboxes this option is silently ignored.
+       */
+      stdin?: string;
+    },
   ) => Effect.Effect<ExecResult, ExecError>;
+
+  /**
+   * Whether the underlying sandbox forwards the `stdin` option in `exec()` to
+   * the spawned child process. Callers wanting to deliver a large payload (for
+   * example a prompt exceeding `MAX_ARG_STRLEN`) MUST check this flag before
+   * relying on `stdin`. Unset is treated as `false`.
+   */
+  readonly supportsStdinExec?: boolean;
 
   /** Copy a file or directory from the host into the sandbox. */
   readonly copyIn: (
@@ -107,6 +125,7 @@ export const makeSandboxLayerFromHandle = (
             message: `exec failed: ${e instanceof Error ? e.message : String(e)}`,
           }),
       }),
+    supportsStdinExec: handle.supportsStdinExec === true,
     copyIn: getCopyIn(handle),
     copyFileOut:
       "copyFileOut" in handle

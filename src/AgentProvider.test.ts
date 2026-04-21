@@ -204,6 +204,42 @@ describe("claudeCode factory", () => {
     expect(command).not.toContain("--dangerously-skip-permissions");
   });
 
+  // --- buildPrintInvocation (stdin-based prompt transport) ---
+
+  it("buildPrintInvocation returns command without -p and prompt in stdin", () => {
+    const provider = claudeCode("claude-opus-4-6");
+    const invocation = provider.buildPrintInvocation!(opts("prompt text"));
+    expect(invocation.command).toContain("--print");
+    expect(invocation.command).toContain("--output-format stream-json");
+    expect(invocation.command).toContain("claude-opus-4-6");
+    expect(invocation.command).not.toMatch(/\s-p\s/);
+    expect(invocation.command).not.toContain("prompt text");
+    expect(invocation.stdin).toBe("prompt text");
+  });
+
+  it("buildPrintInvocation keeps flags aligned with buildPrintCommand", () => {
+    const provider = claudeCode("claude-opus-4-6");
+    const common: AgentCommandOptions = {
+      prompt: "hello",
+      dangerouslySkipPermissions: true,
+      resumeSession: "abc-123",
+    };
+    const invocation = provider.buildPrintInvocation!(common);
+    expect(invocation.command).toContain("--dangerously-skip-permissions");
+    expect(invocation.command).toContain("--resume 'abc-123'");
+  });
+
+  it("buildPrintInvocation keeps large prompts entirely out of argv", () => {
+    const provider = claudeCode("claude-opus-4-6");
+    const bigPrompt = "x".repeat(200_000);
+    const invocation = provider.buildPrintInvocation!({
+      prompt: bigPrompt,
+      dangerouslySkipPermissions: true,
+    });
+    expect(invocation.command.length).toBeLessThan(1_000);
+    expect(invocation.stdin).toBe(bigPrompt);
+  });
+
   it("buildInteractiveArgs includes --dangerously-skip-permissions when true", () => {
     const provider = claudeCode("claude-opus-4-6");
     const args = provider.buildInteractiveArgs!({

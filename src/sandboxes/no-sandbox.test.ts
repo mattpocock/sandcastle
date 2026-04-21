@@ -90,6 +90,41 @@ describe("noSandbox", () => {
       expect(result.stdout.trim()).toBe("sandcastle_test_value");
     });
 
+    it("handle declares supportsStdinExec: true", async () => {
+      const provider = noSandbox();
+      const handle = await provider.create({
+        worktreePath: process.cwd(),
+        env: {},
+      });
+      expect(handle.supportsStdinExec).toBe(true);
+    });
+
+    it("exec forwards the stdin option to the spawned process", async () => {
+      const provider = noSandbox();
+      const handle = await provider.create({
+        worktreePath: process.cwd(),
+        env: {},
+      });
+
+      const result = await handle.exec("cat", { stdin: "piped-input-data" });
+      expect(result.stdout).toBe("piped-input-data");
+      expect(result.exitCode).toBe(0);
+    });
+
+    it("exec delivers stdin payloads larger than MAX_ARG_STRLEN (128 KB)", async () => {
+      const provider = noSandbox();
+      const handle = await provider.create({
+        worktreePath: process.cwd(),
+        env: {},
+      });
+
+      // 256 KB — double the per-argv-string kernel cap. Would hit E2BIG via argv.
+      const largePayload = "x".repeat(256 * 1024);
+      const result = await handle.exec("wc -c", { stdin: largePayload });
+      expect(result.stdout.trim()).toBe(String(largePayload.length));
+      expect(result.exitCode).toBe(0);
+    });
+
     it("interactiveExec spawns process and returns exit code", async () => {
       const provider = noSandbox();
       const handle = await provider.create({

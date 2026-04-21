@@ -41,6 +41,7 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
 
     const handle: NoSandboxHandle = {
       worktreePath,
+      supportsStdinExec: true,
 
       exec: (
         command: string,
@@ -48,17 +49,28 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
           onLine?: (line: string) => void;
           cwd?: string;
           sudo?: boolean;
+          stdin?: string;
         },
       ): Promise<ExecResult> => {
         // sudo is a no-op for no-sandbox — the user is already on the host
         const cwd = opts?.cwd ?? worktreePath;
+        const stdinPayload = opts?.stdin;
+        const stdinMode: "pipe" | "ignore" =
+          stdinPayload !== undefined ? "pipe" : "ignore";
 
         return new Promise((resolve, reject) => {
           const proc = spawn("sh", ["-c", command], {
             cwd,
             env: processEnv,
-            stdio: ["ignore", "pipe", "pipe"],
+            stdio: [stdinMode, "pipe", "pipe"],
           });
+
+          if (stdinPayload !== undefined && proc.stdin) {
+            proc.stdin.on("error", (error: Error) => {
+              reject(new Error(`exec stdin failed: ${error.message}`));
+            });
+            proc.stdin.end(stdinPayload);
+          }
 
           const stdoutChunks: string[] = [];
           const stderrChunks: string[] = [];
