@@ -259,24 +259,53 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
           });
         },
 
-        interactiveExec: (
+        interactiveExec: async (
           args: string[],
           opts: InteractiveExecOptions,
         ): Promise<{ exitCode: number }> => {
-          return new Promise((resolve, reject) => {
-            const podmanArgs = ["exec"];
-            // Allocate a pseudo-terminal when stdin looks like a TTY
-            if (
-              "isTTY" in opts.stdin &&
-              (opts.stdin as { isTTY?: boolean }).isTTY
-            ) {
-              podmanArgs.push("-it");
-            } else {
-              podmanArgs.push("-i");
-            }
-            if (opts.cwd) podmanArgs.push("-w", opts.cwd);
-            podmanArgs.push(containerName, ...args);
+          // Wrap the agent in an interactive bash session so Ctrl+Z works:
+          // bash (with job control) runs the agent in a new process group, so
+          // SIGTSTP only suspends the agent while bash retains terminal control.
+          // PROMPT_COMMAND resets the terminal after suspend, and exits bash
+          // once the agent job is gone (normal exit) — but NOT when it's merely
+          // stopped, so `fg` correctly resumes it.
+          const shellQuote = (s: string) =>
+            "'" + s.replace(/'/g, "'\\''") + "'";
+          const cmd = args.map(shellQuote).join(" ");
+          const script =
+            [
+              "set -m",
+              "PROMPT_COMMAND='stty sane 2>/dev/null; jobs %1 &>/dev/null 2>&1 || exit'",
+              cmd,
+            ].join("\n") + "\n";
+          // Use base64 round-trip so the script survives any special characters.
+          const b64 = Buffer.from(script).toString("base64");
+          await handle.exec(
+            `printf '%s' '${b64}' | base64 -d > /tmp/.sc_init.sh`,
+          );
 
+          const podmanArgs = ["exec"];
+          if (
+            "isTTY" in opts.stdin &&
+            (opts.stdin as { isTTY?: boolean }).isTTY
+          ) {
+            podmanArgs.push("-it");
+          } else {
+            podmanArgs.push("-i");
+          }
+          if (opts.cwd) podmanArgs.push("-w", opts.cwd);
+          // Run bash interactively with our init script as the rcfile.
+          // The agent starts as a foreground job; Ctrl+Z suspends it and
+          // drops the user into the same shell, `fg` brings it back.
+          podmanArgs.push(
+            containerName,
+            "bash",
+            "--rcfile",
+            "/tmp/.sc_init.sh",
+            "-i",
+          );
+
+          return new Promise((resolve, reject) => {
             const proc = spawn("podman", podmanArgs, {
               stdio: [opts.stdin, opts.stdout, opts.stderr] as StdioOptions,
             });
