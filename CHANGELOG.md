@@ -1,5 +1,31 @@
 # @ai-hero/sandcastle
 
+## 0.5.2
+
+### Patch Changes
+
+- b707744: Add `signal?: AbortSignal` to `InteractiveOptions` and `WorktreeInteractiveOptions` for cancelling an interactive session. Aborting mid-session kills the agent subprocess; the rejected promise surfaces `signal.reason` verbatim.
+- 263ba98: Thread AbortSignal to lifecycle hooks so aborting a run also cancels in-flight hook commands (host.onWorktreeReady, host.onSandboxReady, sandbox.onSandboxReady).
+- 6673a8b: Add `signal?: AbortSignal` to `RunOptions` for cancelling a run. Aborting mid-iteration kills the in-flight agent subprocess; the worktree is preserved on disk. The rejected promise surfaces `signal.reason` verbatim.
+- 9da38a3: Add `signal?: AbortSignal` to `Sandbox.run()` and `Sandbox.interactive()` options. Aborting cancels the in-flight operation but leaves the `Sandbox` handle usable — call `.run()` again with a fresh signal, or `.close()` to tear down normally.
+- 9798855: Add `signal?: AbortSignal` to `WorktreeRunOptions` and `WorktreeInteractiveOptions` for cancelling operations on the Worktree handle. Aborting mid-operation kills the in-flight agent subprocess; the worktree is preserved on disk and the handle remains usable for subsequent calls.
+- 148905b: Expose per-iteration token usage on `IterationResult` via a new `usage?: IterationUsage` field. Claude Code sessions are parsed after capture to extract raw token counts (`inputTokens`, `cacheCreationInputTokens`, `cacheReadInputTokens`, `outputTokens`) from the last assistant message. Non-Claude agent providers return `undefined`.
+- 95ef2bd: Fix Codex agent provider not logging output by reading `item.text` instead of `item.content` from stream events
+- 6ca70c1: Fix session resume failing with `docker cp (in) failed` / `podman cp (in) failed` when the sandbox's `~/.claude/projects/<encoded>/` directory didn't yet exist. `sandboxSessionStore.writeSession` now creates the project directory inside the sandbox before copying the session JSONL in.
+- 8d4e8ef: Fix Windows paths breaking Docker/Podman volume mounts. Normalize backslashes to forward slashes in mount host paths and remap Windows-style sandbox paths to valid POSIX paths before they reach providers. Extract duplicated mount utilities (`defaultImageName`, `expandTilde`, `resolveHostPath`, `resolveSandboxPath`, `resolveUserMounts`) from Docker and Podman providers into a shared `mountUtils` module. `defaultImageName` now handles both `/` and `\` path separators. `expandTilde` now handles `~\` (Windows tilde paths).
+- a971e1e: Remove recursive chown from Docker and Podman sandbox startup. For Podman, use `--userns=keep-id:uid=N,gid=N` to align bind-mount and image ownership via namespace mapping instead. For Docker, rely on `--user` alone without post-start chown. Add `containerUid`/`containerGid` options to Podman provider.
+- 49c461e: Remove duplicate command logging in shell expression expansion. Each command now appears once in the task log (with its token count), instead of twice.
+- a2dff20: Remove `throwOnDuplicateWorktree` option; worktrees are now always reused — clean worktrees log a message, dirty worktrees log a warning.
+- 51d668c: Deliver prompts via stdin instead of argv to avoid Linux E2BIG when prompts exceed 128 KB
+
+  `AgentProvider.buildPrintCommand()` now returns `{ command, stdin? }` instead of a bare string. When `stdin` is set, the sandbox pipes the prompt to the child process's stdin rather than inlining it in the command-line arguments. This removes the 128 KB per-arg ceiling imposed by `execve(2)` on Linux.
+  - `claudeCode()`, `pi()`, and `codex()` providers set `stdin` to the prompt and omit it from argv
+  - `opencode()` provider keeps the prompt in argv (`stdin` undefined) — accepted limitation
+  - Docker, Podman, and no-sandbox `exec()` implementations accept `stdin?: string` and pipe it when set
+  - Orchestrator destructures `buildPrintCommand()` and forwards `stdin` to `sandbox.exec()`
+
+- 308a1f6: `Worktree.run()` (returned from `createWorktree()`) now accepts `resumeSession` to resume a prior Claude Code session by ID. Mirrors the validation on top-level `run()`: the session file must exist on the host, and `resumeSession` cannot be combined with `maxIterations > 1`.
+
 ## 0.5.1
 
 ### Patch Changes
