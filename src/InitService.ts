@@ -259,8 +259,8 @@ const BACKLOG_MANAGER_REGISTRY: BacklogManagerEntry[] = [
     label: "GitHub Issues",
     templateArgs: {
       LIST_TASKS_COMMAND: `gh issue list --state open --label Sandcastle --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`,
-      VIEW_TASK_COMMAND: "gh issue view {{TASK_ID}}",
-      CLOSE_TASK_COMMAND: `gh issue close {{TASK_ID}} --comment "Completed by Sandcastle"`,
+      VIEW_TASK_COMMAND: "gh issue view $TASK_ID",
+      CLOSE_TASK_COMMAND: `gh issue close $TASK_ID --comment "Completed by Sandcastle"`,
       BACKLOG_MANAGER_TOOLS: GITHUB_CLI_TOOLS,
     },
     envExample: `# GitHub personal access token
@@ -271,8 +271,8 @@ GH_TOKEN=`,
     label: "Beads",
     templateArgs: {
       LIST_TASKS_COMMAND: "bd ready --json",
-      VIEW_TASK_COMMAND: "bd show {{TASK_ID}}",
-      CLOSE_TASK_COMMAND: `bd close {{TASK_ID}} "Completed by Sandcastle"`,
+      VIEW_TASK_COMMAND: "bd show $TASK_ID",
+      CLOSE_TASK_COMMAND: `bd close $TASK_ID "Completed by Sandcastle"`,
       BACKLOG_MANAGER_TOOLS: BEADS_TOOLS,
     },
     envExample: "",

@@ -30,14 +30,18 @@ import { SandboxFactory } from "./SandboxFactory.js";
 import { encodeProjectPath } from "./SessionStore.js";
 import { defaultSessionPathsLayer, sessionPathsLayer } from "./SessionPaths.js";
 import type { BindMountSandboxHandle } from "./SandboxProvider.js";
+import { ProductionAgentInvokerLayer } from "./AgentInvoker.js";
+import { ProductionPromptPreprocessorLayer } from "./PromptPreprocessorTag.js";
 
 const execAsync = promisify(exec);
 
 const testProvider = claudeCode("test-model");
 
-const testDisplayLayer = Layer.merge(
+const testDisplayLayer = Layer.mergeAll(
   SilentDisplay.layer(Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([])),
   defaultSessionPathsLayer,
+  ProductionAgentInvokerLayer,
+  ProductionPromptPreprocessorLayer,
 );
 
 const initRepo = async (dir: string) => {
@@ -1114,6 +1118,8 @@ describe("Orchestrator tool call display integration", () => {
             mockLayer.factoryLayer,
             displayLayer,
             defaultSessionPathsLayer,
+            ProductionAgentInvokerLayer,
+            ProductionPromptPreprocessorLayer,
           ),
         ),
       ),
@@ -1758,7 +1764,7 @@ describe("Orchestrator Display integration", () => {
         prompt: "do some work",
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(factoryLayer, displayLayer, defaultSessionPathsLayer),
+          Layer.mergeAll(factoryLayer, displayLayer, defaultSessionPathsLayer, ProductionAgentInvokerLayer, ProductionPromptPreprocessorLayer),
         ),
       ),
     );
@@ -1825,7 +1831,7 @@ describe("Orchestrator Display integration", () => {
         prompt: "do some work",
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(factoryLayer, displayLayer, defaultSessionPathsLayer),
+          Layer.mergeAll(factoryLayer, displayLayer, defaultSessionPathsLayer, ProductionAgentInvokerLayer, ProductionPromptPreprocessorLayer),
         ),
       ),
     );
@@ -1903,7 +1909,7 @@ describe("Orchestrator Display integration", () => {
         name: "issue-42",
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(factoryLayer, displayLayer, defaultSessionPathsLayer),
+          Layer.mergeAll(factoryLayer, displayLayer, defaultSessionPathsLayer, ProductionAgentInvokerLayer, ProductionPromptPreprocessorLayer),
         ),
       ),
     );
@@ -1947,7 +1953,7 @@ describe("Orchestrator Display integration", () => {
         prompt: "do some work",
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(factoryLayer, displayLayer, defaultSessionPathsLayer),
+          Layer.mergeAll(factoryLayer, displayLayer, defaultSessionPathsLayer, ProductionAgentInvokerLayer, ProductionPromptPreprocessorLayer),
         ),
       ),
     );
@@ -2196,7 +2202,7 @@ describe("Orchestrator Display integration", () => {
         _idleWarningIntervalMs: 100, // fire warnings every 100ms for testing
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(factoryLayer, displayLayer, defaultSessionPathsLayer),
+          Layer.mergeAll(factoryLayer, displayLayer, defaultSessionPathsLayer, ProductionAgentInvokerLayer, ProductionPromptPreprocessorLayer),
         ),
         Effect.exit,
       ),
@@ -2289,7 +2295,7 @@ describe("Orchestrator Display integration", () => {
         _idleWarningIntervalMs: 100,
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(factoryLayer, displayLayer, defaultSessionPathsLayer),
+          Layer.mergeAll(factoryLayer, displayLayer, defaultSessionPathsLayer, ProductionAgentInvokerLayer, ProductionPromptPreprocessorLayer),
         ),
         Effect.exit,
       ),
@@ -2538,7 +2544,7 @@ describe("Orchestrator with pi provider", () => {
         prompt: "do some work",
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(factoryLayer, displayLayer, defaultSessionPathsLayer),
+          Layer.mergeAll(factoryLayer, displayLayer, defaultSessionPathsLayer, ProductionAgentInvokerLayer, ProductionPromptPreprocessorLayer),
         ),
       ),
     );
@@ -2626,7 +2632,7 @@ describe("Orchestrator with pi provider", () => {
         prompt: "do some work",
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(factoryLayer, displayLayer, defaultSessionPathsLayer),
+          Layer.mergeAll(factoryLayer, displayLayer, defaultSessionPathsLayer, ProductionAgentInvokerLayer, ProductionPromptPreprocessorLayer),
         ),
       ),
     );

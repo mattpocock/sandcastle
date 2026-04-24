@@ -1,13 +1,9 @@
-import { Deferred, Effect } from "effect";
+import { Effect } from "effect";
 import { Display } from "./Display.js";
-import { preprocessPrompt } from "./PromptPreprocessor.js";
-import {
-  AgentError,
-  AgentIdleTimeoutError,
-  SessionCaptureError,
-} from "./errors.js";
+import { PromptPreprocessor } from "./PromptPreprocessorTag.js";
+import { AgentInvoker } from "./AgentInvoker.js";
+import { SessionCaptureError } from "./errors.js";
 import type { SandboxError } from "./errors.js";
-import type { SandboxService } from "./SandboxFactory.js";
 import { SandboxFactory, SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 import { withSandboxLifecycle, type SandboxHooks } from "./SandboxLifecycle.js";
 import type { AgentProvider, IterationUsage } from "./AgentProvider.js";
@@ -20,144 +16,6 @@ import {
 import { SessionPaths } from "./SessionPaths.js";
 
 export type { ParsedStreamEvent, IterationUsage } from "./AgentProvider.js";
-
-const IDLE_WARNING_INTERVAL_MS = 60_000;
-
-const invokeAgent = (
-  sandbox: SandboxService,
-  sandboxRepoDir: string,
-  prompt: string,
-  provider: AgentProvider,
-  idleTimeoutMs: number,
-  onText: (text: string) => void,
-  onToolCall: (name: string, formattedArgs: string) => void,
-  onIdleWarning: (minutes: number) => void,
-  idleWarningIntervalMs: number = IDLE_WARNING_INTERVAL_MS,
-  resumeSession?: string,
-  signal?: AbortSignal,
-): Effect.Effect<{ result: string; sessionId?: string }, SandboxError> =>
-  Effect.gen(function* () {
-    let resultText = "";
-    let sessionId: string | undefined;
-
-    // Deferred that will be failed when the idle timer fires
-    const timeoutSignal = yield* Deferred.make<never, AgentIdleTimeoutError>();
-    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-
-    // Periodic idle warning state
-    let warningHandle: ReturnType<typeof setInterval> | null = null;
-    let idleMinuteCounter = 0;
-
-    const startWarningInterval = () => {
-      if (warningHandle !== null) clearInterval(warningHandle);
-      idleMinuteCounter = 0;
-      warningHandle = setInterval(() => {
-        idleMinuteCounter++;
-        onIdleWarning(idleMinuteCounter);
-      }, idleWarningIntervalMs);
-    };
-
-    const resetIdleTimer = () => {
-      if (timeoutHandle !== null) clearTimeout(timeoutHandle);
-      timeoutHandle = setTimeout(() => {
-        Effect.runPromise(
-          Deferred.fail(
-            timeoutSignal,
-            new AgentIdleTimeoutError({
-              message: `Agent idle for ${idleTimeoutMs / 1000} seconds — no output received. Consider increasing the idle timeout with --idle-timeout.`,
-              timeoutMs: idleTimeoutMs,
-            }),
-          ),
-        ).catch(() => {});
-      }, idleTimeoutMs);
-      // Reset warning interval on activity
-      startWarningInterval();
-    };
-
-    // Deferred that will be resolved (as a defect) when the AbortSignal fires.
-    // Uses Effect.die so the abort reason propagates as-is to run().
-    const abortDeferred = yield* Deferred.make<never, never>();
-    let abortCleanup: (() => void) | null = null;
-    if (signal) {
-      if (signal.aborted) {
-        return yield* Effect.die(signal.reason);
-      }
-      const onAbort = () => {
-        Effect.runPromise(Deferred.die(abortDeferred, signal.reason)).catch(
-          () => {},
-        );
-      };
-      signal.addEventListener("abort", onAbort, { once: true });
-      abortCleanup = () => signal.removeEventListener("abort", onAbort);
-    }
-
-    resetIdleTimer();
-
-    const execEffect = Effect.gen(function* () {
-      const printCmd = provider.buildPrintCommand({
-        prompt,
-        dangerouslySkipPermissions: true,
-        resumeSession,
-      });
-      const execResult = yield* sandbox.exec(printCmd.command, {
-        onLine: (line) => {
-          resetIdleTimer();
-          for (const parsed of provider.parseStreamLine(line)) {
-            if (parsed.type === "text") {
-              onText(parsed.text);
-            } else if (parsed.type === "result") {
-              resultText = parsed.result;
-            } else if (parsed.type === "tool_call") {
-              onToolCall(parsed.name, parsed.args);
-            } else if (parsed.type === "session_id") {
-              sessionId = parsed.sessionId;
-            }
-          }
-        },
-        cwd: sandboxRepoDir,
-        stdin: printCmd.stdin,
-      });
-
-      if (execResult.exitCode !== 0) {
-        return yield* Effect.fail(
-          new AgentError({
-            message: `${provider.name} exited with code ${execResult.exitCode}:\n${execResult.stderr}`,
-          }),
-        );
-      }
-
-      return { result: resultText || execResult.stdout, sessionId };
-    }).pipe(
-      Effect.ensuring(
-        Effect.sync(() => {
-          if (timeoutHandle !== null) {
-            clearTimeout(timeoutHandle);
-            timeoutHandle = null;
-          }
-          if (warningHandle !== null) {
-            clearInterval(warningHandle);
-            warningHandle = null;
-          }
-        }),
-      ),
-    );
-
-    let raced = Effect.raceFirst(execEffect, Deferred.await(timeoutSignal));
-    if (signal) {
-      raced = Effect.raceFirst(
-        raced,
-        Deferred.await(abortDeferred) as Effect.Effect<never, never>,
-      );
-    }
-
-    return yield* raced.pipe(
-      Effect.ensuring(
-        Effect.sync(() => {
-          abortCleanup?.();
-        }),
-      ),
-    );
-  });
 
 const DEFAULT_COMPLETION_SIGNAL = "<promise>COMPLETE</promise>";
 const DEFAULT_IDLE_TIMEOUT_SECONDS = 10 * 60; // 600 seconds
@@ -209,13 +67,15 @@ export const orchestrate = (
 ): Effect.Effect<
   OrchestrateResult,
   SandboxError,
-  SandboxFactory | Display | SessionPaths
+  SandboxFactory | Display | SessionPaths | AgentInvoker | PromptPreprocessor
 > => {
   const idleTimeoutMs =
     (options.idleTimeoutSeconds ?? DEFAULT_IDLE_TIMEOUT_SECONDS) * 1000;
   return Effect.gen(function* () {
     const factory = yield* SandboxFactory;
     const display = yield* Display;
+    const agentInvoker = yield* AgentInvoker;
+    const promptPreprocessor = yield* PromptPreprocessor;
     const { hostProjectsDir, sandboxProjectsDir } = yield* SessionPaths;
     const { hostRepoDir, iterations, hooks, prompt, branch, provider } =
       options;
@@ -283,7 +143,7 @@ export const orchestrate = (
                 }
 
                 // Preprocess prompt (run !`command` expressions inside sandbox)
-                const fullPrompt = yield* preprocessPrompt(
+                const fullPrompt = yield* promptPreprocessor.preprocess(
                   prompt,
                   ctx.sandbox,
                   ctx.sandboxRepoDir,
@@ -310,19 +170,20 @@ export const orchestrate = (
                       : `Agent idle for ${minutes} minutes`;
                   Effect.runPromise(display.status(label(msg), "warn"));
                 };
-                const { result: agentOutput, sessionId } = yield* invokeAgent(
-                  ctx.sandbox,
-                  ctx.sandboxRepoDir,
-                  fullPrompt,
-                  provider,
-                  idleTimeoutMs,
-                  onText,
-                  onToolCall,
-                  onIdleWarning,
-                  options._idleWarningIntervalMs,
-                  iterationResumeSession,
-                  options.signal,
-                );
+                const { result: agentOutput, sessionId } =
+                  yield* agentInvoker.invoke({
+                    sandbox: ctx.sandbox,
+                    sandboxRepoDir: ctx.sandboxRepoDir,
+                    prompt: fullPrompt,
+                    provider,
+                    idleTimeoutMs,
+                    onText,
+                    onToolCall,
+                    onIdleWarning,
+                    idleWarningIntervalMs: options._idleWarningIntervalMs,
+                    resumeSession: iterationResumeSession,
+                    signal: options.signal,
+                  });
 
                 // Flush any remaining buffered text deltas
                 textBuffer.dispose();

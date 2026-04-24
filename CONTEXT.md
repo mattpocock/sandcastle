@@ -78,6 +78,10 @@ _Avoid_: "agent adapter", "agent driver"
 
 ### Execution
 
+**Agent invoker**:
+An Effect `Context.Tag` wrapping the raw agent-spawn call inside the **orchestrator**. The production layer preserves today's behaviour; test layers can record or script invocations.
+_Avoid_: "agent runner", "agent caller"
+
 **Iteration**:
 A single invocation of the **agent** inside the **sandbox**, producing at most one commit against one **task**.
 _Avoid_: "run" (ambiguous with the JS `run()` function), "cycle", "loop"

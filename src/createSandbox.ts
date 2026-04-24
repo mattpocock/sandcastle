@@ -13,6 +13,8 @@ import { resolveEnv } from "./EnvResolver.js";
 import { mergeProviderEnv } from "./mergeProviderEnv.js";
 import { orchestrate, type IterationResult } from "./Orchestrator.js";
 import { defaultSessionPathsLayer } from "./SessionPaths.js";
+import { ProductionAgentInvokerLayer } from "./AgentInvoker.js";
+import { ProductionPromptPreprocessorLayer } from "./PromptPreprocessorTag.js";
 import {
   type PromptArgs,
   substitutePromptArgs,
@@ -289,6 +291,8 @@ const buildSandboxHandle = (
         reuseFactoryLayer,
         runDisplayLayer,
         defaultSessionPathsLayer,
+        ProductionAgentInvokerLayer,
+        ProductionPromptPreprocessorLayer,
       );
 
       let result;

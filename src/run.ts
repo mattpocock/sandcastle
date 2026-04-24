@@ -21,6 +21,8 @@ import {
   WorktreeDockerSandboxFactory,
   SandboxConfig,
 } from "./SandboxFactory.js";
+import { ProductionAgentInvokerLayer } from "./AgentInvoker.js";
+import { ProductionPromptPreprocessorLayer } from "./PromptPreprocessorTag.js";
 import type { SandboxProvider, BranchStrategy } from "./SandboxProvider.js";
 import { resolveEnv } from "./EnvResolver.js";
 import { formatErrorMessage } from "./ErrorHandler.js";
@@ -380,6 +382,8 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
     factoryLayer,
     displayLayer,
     defaultSessionPathsLayer,
+    ProductionAgentInvokerLayer,
+    ProductionPromptPreprocessorLayer,
   );
 
   const baseEffect = Effect.gen(function* () {

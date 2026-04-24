@@ -6,6 +6,8 @@ import { hostSessionStore } from "./SessionStore.js";
 import type { AgentProvider } from "./AgentProvider.js";
 import { ClackDisplay, Display, FileDisplay } from "./Display.js";
 import { preprocessPrompt } from "./PromptPreprocessor.js";
+import { ProductionAgentInvokerLayer } from "./AgentInvoker.js";
+import { ProductionPromptPreprocessorLayer } from "./PromptPreprocessorTag.js";
 import { resolvePrompt } from "./PromptResolver.js";
 import {
   SandboxFactory,
@@ -580,6 +582,8 @@ export const createWorktree = async (
         reuseFactoryLayer,
         runDisplayLayer,
         defaultSessionPathsLayer,
+        ProductionAgentInvokerLayer,
+        ProductionPromptPreprocessorLayer,
       );
 
       // 7. Run orchestration
