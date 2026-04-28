@@ -21,7 +21,11 @@ const TOOL_ARG_FIELDS: Record<string, string> = {
 const extractErrorMessage = (obj: any): string | undefined => {
   const err = obj.error;
   if (typeof err === "string") return err;
-  if (typeof err === "object" && err !== null && typeof err.message === "string") {
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    typeof err.message === "string"
+  ) {
     return err.message;
   }
   if (typeof obj.message === "string") return obj.message;
@@ -191,6 +195,8 @@ const parsePiStreamLine = (line: string): ParsedStreamEvent[] => {
 export interface PiOptions {
   /** Environment variables injected by this agent provider. */
   readonly env?: Record<string, string>;
+  /** Thinking level for the agent. Maps to pi's --thinking flag. */
+  readonly thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 }
 
 export const pi = (model: string, options?: PiOptions): AgentProvider => ({
@@ -199,14 +205,18 @@ export const pi = (model: string, options?: PiOptions): AgentProvider => ({
   captureSessions: false,
 
   buildPrintCommand({ prompt }: AgentCommandOptions): PrintCommand {
+    const thinkingFlag = options?.thinking
+      ? ` --thinking ${options.thinking}`
+      : "";
     return {
-      command: `pi -p --mode json --no-session --model ${shellEscape(model)}`,
+      command: `pi -p --mode json --no-session --model ${shellEscape(model)}${thinkingFlag}`,
       stdin: prompt,
     };
   },
 
   buildInteractiveArgs({ prompt }: AgentCommandOptions): string[] {
     const args = ["pi", "--model", model];
+    if (options?.thinking) args.push("--thinking", options.thinking);
     if (prompt) args.push(prompt);
     return args;
   },

@@ -758,6 +758,19 @@ agent: codex("gpt-5.4", { effort: "high" });
 | `effort` | `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` | —       | Codex reasoning effort level via `model_reasoning_effort` |
 | `env`    | `Record<string, string>`                       | `{}`    | Environment variables injected by this agent provider     |
 
+### `PiOptions`
+
+The `pi()` factory accepts an optional second argument for provider-specific options:
+
+```typescript
+agent: pi("zai/glm-5.1", { thinking: "high" });
+```
+
+| Option     | Type                                                                     | Default | Description                                           |
+| ---------- | ------------------------------------------------------------------------ | ------- | ----------------------------------------------------- |
+| `thinking` | `"off"` \| `"minimal"` \| `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` | —       | Pi thinking level via `--thinking`                    |
+| `env`      | `Record<string, string>`                                                 | `{}`    | Environment variables injected by this agent provider |
+
 ### Provider `env`
 
 Both **agent providers** and **sandbox providers** accept an optional `env: Record<string, string>` in their options. These environment variables are merged with the `.sandcastle/.env` resolver output at launch time:
