@@ -146,7 +146,8 @@ const result = await run({
     env: { DOCKER_SPECIFIC: "value" },
     // Optional: attach container to Docker network(s) — string or string[]
     network: "my-network",
-    // Optional: run against a specific Docker context instead of the active one
+    // Optional: run against a specific Docker context instead of the active one.
+    // Only set this in trusted configs; remote contexts run containers on that daemon.
     context: "colima",
   }),
 
