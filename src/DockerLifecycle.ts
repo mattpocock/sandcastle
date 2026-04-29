@@ -3,11 +3,25 @@ import { execFile } from "node:child_process";
 import { resolve } from "node:path";
 import { DockerError } from "./errors.js";
 
-const dockerExec = (args: string[]): Effect.Effect<string, DockerError> =>
+export interface DockerCommandOptions {
+  /** Docker context to run commands against. Uses Docker's active context when omitted. */
+  readonly context?: string;
+}
+
+export const dockerArgs = (
+  args: readonly string[],
+  options?: DockerCommandOptions,
+): string[] =>
+  options?.context ? ["--context", options.context, ...args] : [...args];
+
+const dockerExec = (
+  args: string[],
+  options?: DockerCommandOptions,
+): Effect.Effect<string, DockerError> =>
   Effect.async((resume) => {
     execFile(
       "docker",
-      args,
+      dockerArgs(args, options),
       { maxBuffer: 10 * 1024 * 1024 },
       (error, stdout, stderr) => {
         if (error) {
@@ -35,20 +49,26 @@ const dockerExec = (args: string[]): Effect.Effect<string, DockerError> =>
 export const buildImage = (
   imageName: string,
   dockerfileDir: string,
-  options?: { readonly dockerfile?: string },
+  options?: { readonly dockerfile?: string } & DockerCommandOptions,
 ): Effect.Effect<void, DockerError> =>
   Effect.gen(function* () {
     if (options?.dockerfile) {
-      yield* dockerExec([
-        "build",
-        "-t",
-        imageName,
-        "-f",
-        resolve(options.dockerfile),
-        process.cwd(),
-      ]);
+      yield* dockerExec(
+        [
+          "build",
+          "-t",
+          imageName,
+          "-f",
+          resolve(options.dockerfile),
+          process.cwd(),
+        ],
+        options,
+      );
     } else {
-      yield* dockerExec(["build", "-t", imageName, resolve(dockerfileDir)]);
+      yield* dockerExec(
+        ["build", "-t", imageName, resolve(dockerfileDir)],
+        options,
+      );
     }
   });
 
@@ -59,6 +79,8 @@ export interface StartContainerOptions {
   readonly user?: string;
   /** Docker network(s) to attach the container to. Passed as `--network` flags. */
   readonly network?: string | readonly string[];
+  /** Docker context to run commands against. Uses Docker's active context when omitted. */
+  readonly context?: string;
 }
 
 /**
@@ -72,14 +94,17 @@ export const startContainer = (
 ): Effect.Effect<void, DockerError> =>
   Effect.gen(function* () {
     // Check if container already exists
-    const existing = yield* dockerExec([
-      "ps",
-      "-a",
-      "--filter",
-      `name=^${containerName}$`,
-      "--format",
-      "{{.Names}}",
-    ]);
+    const existing = yield* dockerExec(
+      [
+        "ps",
+        "-a",
+        "--filter",
+        `name=^${containerName}$`,
+        "--format",
+        "{{.Names}}",
+      ],
+      options,
+    );
 
     if (existing.trim() === containerName) {
       yield* Effect.fail(
@@ -108,18 +133,21 @@ export const startContainer = (
       : [];
     const networkFlags = networks.flatMap((n) => ["--network", n]);
 
-    yield* dockerExec([
-      "run",
-      "-d",
-      "--name",
-      containerName,
-      ...envFlags,
-      ...volumeFlags,
-      ...workdirFlags,
-      ...userFlags,
-      ...networkFlags,
-      imageName,
-    ]);
+    yield* dockerExec(
+      [
+        "run",
+        "-d",
+        "--name",
+        containerName,
+        ...envFlags,
+        ...volumeFlags,
+        ...workdirFlags,
+        ...userFlags,
+        ...networkFlags,
+        imageName,
+      ],
+      options,
+    );
   });
 
 /**
@@ -127,12 +155,13 @@ export const startContainer = (
  */
 export const removeContainer = (
   containerName: string,
+  options?: DockerCommandOptions,
 ): Effect.Effect<void, DockerError> =>
   Effect.gen(function* () {
     // Stop container (ignore errors if already stopped)
-    yield* Effect.ignore(dockerExec(["stop", containerName]));
+    yield* Effect.ignore(dockerExec(["stop", containerName], options));
     // Remove container (ignore errors if not found)
-    yield* Effect.ignore(dockerExec(["rm", containerName]));
+    yield* Effect.ignore(dockerExec(["rm", containerName], options));
   });
 
 /**
@@ -140,7 +169,8 @@ export const removeContainer = (
  */
 export const removeImage = (
   imageName: string,
+  options?: DockerCommandOptions,
 ): Effect.Effect<void, DockerError> =>
   Effect.gen(function* () {
-    yield* dockerExec(["rmi", imageName]);
+    yield* dockerExec(["rmi", imageName], options);
   });

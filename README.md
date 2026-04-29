@@ -146,6 +146,8 @@ const result = await run({
     env: { DOCKER_SPECIFIC: "value" },
     // Optional: attach container to Docker network(s) — string or string[]
     network: "my-network",
+    // Optional: run against a specific Docker context instead of the active one
+    context: "colima",
   }),
 
   // Host repo directory — replaces process.cwd() as the anchor for
