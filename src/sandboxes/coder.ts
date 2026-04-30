@@ -128,6 +128,9 @@ const shellQuote = (value: string): string => {
 const displayCommand = (args: readonly string[]): string =>
   ["coder", ...args].map((arg) => shellQuote(arg)).join(" ");
 
+const displayOpenSshCommand = (args: readonly string[]): string =>
+  ["ssh", ...args].map((arg) => shellQuote(arg)).join(" ");
+
 const coderEnv = (options: CoderOptions): NodeJS.ProcessEnv => {
   const env: NodeJS.ProcessEnv = { ...process.env };
   if (options.url !== undefined) {
@@ -187,6 +190,74 @@ const runCoder = (
     proc.on("error", (error: Error) => {
       reject(
         new Error(`Failed to start ${displayCommand(args)}: ${error.message}`),
+      );
+    });
+
+    proc.on("close", (code: number | null) => {
+      resolve({
+        stdout: stdoutChunks.join(options.onStdoutLine ? "\n" : ""),
+        stderr: stderrChunks.join(""),
+        exitCode: code ?? 0,
+      });
+    });
+  });
+};
+
+/**
+ * Spawn OpenSSH with the same `ProxyCommand=coder ssh --stdio …` glue that
+ * `copyFileIn` / `copyFileOut` use. Needed for any `exec()` that pipes data
+ * over stdin: `coder ssh` does not propagate stdin EOF to the remote process,
+ * so e.g. `claude --print -p -` hangs waiting for input the host has already
+ * sent. OpenSSH handles EOF correctly.
+ */
+const runOpenSsh = (
+  args: readonly string[],
+  options: {
+    readonly env: NodeJS.ProcessEnv;
+    readonly stdin?: string;
+    readonly onStdoutLine?: (line: string) => void;
+  },
+): Promise<CoderCommandResult> => {
+  if (args.length === 0) {
+    throw new Error("runOpenSsh requires at least one CLI argument");
+  }
+
+  return new Promise((resolve, reject) => {
+    const proc = spawn("ssh", [...args], {
+      env: options.env,
+      stdio: [options.stdin !== undefined ? "pipe" : "ignore", "pipe", "pipe"],
+    });
+
+    if (options.stdin !== undefined) {
+      proc.stdin!.write(options.stdin);
+      proc.stdin!.end();
+    }
+
+    const stdoutChunks: string[] = [];
+    const stderrChunks: string[] = [];
+
+    if (options.onStdoutLine) {
+      const onStdoutLine = options.onStdoutLine;
+      const rl = createInterface({ input: proc.stdout! });
+      rl.on("line", (line) => {
+        stdoutChunks.push(line);
+        onStdoutLine(line);
+      });
+    } else {
+      proc.stdout!.on("data", (chunk: Buffer) => {
+        stdoutChunks.push(chunk.toString());
+      });
+    }
+
+    proc.stderr!.on("data", (chunk: Buffer) => {
+      stderrChunks.push(chunk.toString());
+    });
+
+    proc.on("error", (error: Error) => {
+      reject(
+        new Error(
+          `Failed to start ${displayOpenSshCommand(args)}: ${error.message}`,
+        ),
       );
     });
 
@@ -415,6 +486,15 @@ const selectWorkspaceAgent = (
 const WORKSPACE_AGENT_POLL_ATTEMPTS = 60;
 const WORKSPACE_AGENT_POLL_INTERVAL_MS = 1_000;
 
+// Coder prebuild claims can briefly report the new agent as `connected` while
+// the prior prebuild agent is still shutting down. The first `coder ssh` after
+// claim then lands on the disconnecting agent and fails with
+// `error: agent is shutting down`. Probe with `printf ready` until SSH
+// successfully round-trips real bytes; in practice the race resolves within
+// ~30s of the claim, so 60s is a generous guard.
+const SSH_READY_POLL_ATTEMPTS = 30;
+const SSH_READY_POLL_INTERVAL_MS = 2_000;
+
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -462,6 +542,49 @@ const waitForWorkspaceAgents = async (
   }
 
   return workspace;
+};
+
+/**
+ * Probe `coder ssh -- printf ready` until the workspace responds with real
+ * bytes. `coder list -o json` can briefly report a new prebuild claim's agent
+ * as `connected` while the prior agent is still shutting down, so the first
+ * `coder ssh` lands on the disconnecting agent and fails with
+ * `error: agent is shutting down`. Retrying around 30s after the failure
+ * always succeeds in our dogfood runs against `dev.coder.com`.
+ *
+ * Use the unchecked `runCoder` so transient non-zero exits don't throw — the
+ * loop owns retry-vs-throw.
+ */
+const waitForSshReady = async (
+  env: NodeJS.ProcessEnv,
+  sshRef: string,
+): Promise<void> => {
+  assertNonEmptyString(sshRef, "Coder SSH ref");
+
+  let lastResult: CoderCommandResult | undefined;
+  for (let attempt = 0; attempt < SSH_READY_POLL_ATTEMPTS; attempt++) {
+    const result = await runCoder(
+      buildSshArgs(sshRef, {}, remoteShell("printf ready")),
+      { env },
+    );
+    lastResult = result;
+
+    // `coder ssh` may prepend release-candidate banner lines on stdout, so
+    // require `endsWith("ready")` rather than equality.
+    if (result.exitCode === 0 && result.stdout.trim().endsWith("ready")) {
+      return;
+    }
+
+    if (attempt === SSH_READY_POLL_ATTEMPTS - 1) break;
+    await sleep(SSH_READY_POLL_INTERVAL_MS);
+  }
+
+  const exit = lastResult?.exitCode ?? "unknown";
+  const stderr = lastResult?.stderr ?? "";
+  const stdout = lastResult?.stdout ?? "";
+  throw new Error(
+    `Coder SSH ${sshRef} was not ready after waiting ${SSH_READY_POLL_ATTEMPTS * SSH_READY_POLL_INTERVAL_MS}ms; last exit code ${exit}\nstderr:\n${stderr}\nstdout:\n${stdout}`,
+  );
 };
 
 const getBuildStatus = (workspace: CoderWorkspace): string | undefined =>
@@ -550,6 +673,26 @@ const remoteShell = (command: string): string[] => [
   `sh -c ${shellQuote(command)}`,
 ];
 
+/**
+ * Build a `KEY1='V1' KEY2='V2' ` shell prefix that scopes env vars on the
+ * OpenSSH path. OpenSSH has no `--env KEY=VAL` flag like `coder ssh` does,
+ * so we inline the assignments before the actual remote command. Returns
+ * an empty string when `sandboxEnv` is empty so call sites stay uniform.
+ */
+const buildEnvPrefix = (sandboxEnv: Record<string, string>): string => {
+  const entries = Object.entries(sandboxEnv);
+  if (entries.length === 0) return "";
+  for (const [key] of entries) {
+    assertNonEmptyString(key, "Coder SSH env key");
+    if (key.includes("=")) {
+      throw new Error(`Coder SSH env key must not contain '=': ${key}`);
+    }
+  }
+  return `${entries
+    .map(([key, value]) => `${key}=${shellQuote(value)}`)
+    .join(" ")} `;
+};
+
 const ensureRemoteDirectory = async (
   env: NodeJS.ProcessEnv,
   sshRef: string,
@@ -624,6 +767,7 @@ const resolveCoderWorkspace = async (
   const agent = selectWorkspaceAgent(workspace, options.workspaceAgent);
   const sshRef = `${workspaceRef}.${agent.name}`;
   const sshHostname = buildSshHostname(workspaceRef, agent.name);
+  await waitForSshReady(env, sshRef);
   const worktreePath = await resolveWorktreePath(env, options, sshRef, agent);
   await ensureRemoteDirectory(env, sshRef, worktreePath);
 
@@ -877,13 +1021,34 @@ const createHandle = (
     assertNonEmptyString(command, "Coder exec command");
     const cwd = opts?.cwd ?? resolved.worktreePath;
     const effectiveCommand = opts?.sudo ? `sudo ${command}` : command;
+    const remoteShellArg = `cd ${shellQuote(cwd)} && ${effectiveCommand}`;
+
+    if (opts?.stdin !== undefined) {
+      // OpenSSH path: `coder ssh` does not propagate stdin EOF to the remote
+      // process, which makes commands like `claude --print -p -` hang waiting
+      // for input the host already sent. OpenSSH (via
+      // `ProxyCommand=coder ssh --stdio …`) handles stdin EOF correctly and
+      // is the same transport `copyFileIn` / `copyFileOut` already use.
+      const envPrefix = buildEnvPrefix(sandboxEnv);
+      return runOpenSsh(
+        buildOpenSshArgs(
+          resolved.sshHostname,
+          `${envPrefix}sh -c ${shellQuote(remoteShellArg)}`,
+        ),
+        {
+          env,
+          stdin: opts.stdin,
+          ...(opts.onLine === undefined ? {} : { onStdoutLine: opts.onLine }),
+        },
+      );
+    }
+
     return runCoder(
-      buildSshArgs(
-        resolved.sshRef,
-        sandboxEnv,
-        remoteShell(`cd ${shellQuote(cwd)} && ${effectiveCommand}`),
-      ),
-      { env, stdin: opts?.stdin, onStdoutLine: opts?.onLine },
+      buildSshArgs(resolved.sshRef, sandboxEnv, remoteShell(remoteShellArg)),
+      {
+        env,
+        ...(opts?.onLine === undefined ? {} : { onStdoutLine: opts.onLine }),
+      },
     );
   },
 
