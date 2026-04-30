@@ -64,6 +64,20 @@ const spawnResult = (options: {
   return proc as any;
 };
 
+/**
+ * Detect a `coder ssh` invocation that is exercising the readiness probe
+ * (`waitForSshReady`). The probe runs `sh -c 'printf ready'` on the remote
+ * before any real exec, so existing test mocks need to return `"ready"` on
+ * stdout to satisfy the `endsWith("ready")` check.
+ */
+const isSshReadinessProbe = (coderArgs: readonly string[]): boolean => {
+  if (coderArgs[0] !== "ssh") return false;
+  const remoteCommand = coderArgs.at(-1);
+  return (
+    typeof remoteCommand === "string" && remoteCommand.includes("printf ready")
+  );
+};
+
 const workspaceJson = (
   name: string,
   options?: {
@@ -187,6 +201,9 @@ describe("coder()", () => {
         return spawnResult({ stdout: workspaceJson(createdName) });
       }
       if (coderArgs[0] === "ssh") {
+        if (isSshReadinessProbe(coderArgs)) {
+          return spawnResult({ stdout: "ready" });
+        }
         return spawnResult({});
       }
       if (coderArgs[0] === "delete") {
@@ -236,6 +253,9 @@ describe("coder()", () => {
         });
       }
       if (coderArgs[0] === "ssh") {
+        if (isSshReadinessProbe(coderArgs)) {
+          return spawnResult({ stdout: "ready" });
+        }
         return spawnResult({});
       }
       return spawnResult({ exitCode: 1, stderr: `unexpected ${coderArgs[0]}` });
@@ -274,6 +294,9 @@ describe("coder()", () => {
         return spawnResult({});
       }
       if (coderArgs[0] === "ssh") {
+        if (isSshReadinessProbe(coderArgs)) {
+          return spawnResult({ stdout: "ready" });
+        }
         return spawnResult({});
       }
       return spawnResult({ exitCode: 1, stderr: `unexpected ${coderArgs[0]}` });
@@ -328,10 +351,15 @@ describe("coder()", () => {
     );
   });
 
-  it("executes commands through coder ssh with env, cwd, stdin, and line streaming", async () => {
-    let stdin = "";
-    mockSpawn.mockImplementation((_command, args) => {
+  it("executes non-stdin commands through coder ssh with env, cwd, sudo, and line streaming", async () => {
+    mockSpawn.mockImplementation((command, args) => {
       const coderArgs = args as string[];
+      if (command !== "coder") {
+        return spawnResult({
+          exitCode: 1,
+          stderr: `unexpected spawn target ${String(command)}`,
+        });
+      }
       if (coderArgs[0] === "whoami") {
         return spawnResult({ stdout: JSON.stringify([{ username: "me" }]) });
       }
@@ -339,14 +367,14 @@ describe("coder()", () => {
         return spawnResult({ stdout: workspaceJson("my-ws") });
       }
       if (coderArgs[0] === "ssh") {
+        if (isSshReadinessProbe(coderArgs)) {
+          return spawnResult({ stdout: "ready" });
+        }
         const remoteCommand = coderArgs.at(-1) ?? "";
         if (remoteCommand.includes("sudo printf hi")) {
           return spawnResult({
             stdout: "line1\nline2\n",
             exitCode: 7,
-            onStdin: (value) => {
-              stdin = value;
-            },
           });
         }
         return spawnResult({});
@@ -361,13 +389,11 @@ describe("coder()", () => {
     const result = await handle.exec("printf hi", {
       cwd: "/tmp/dir with space",
       sudo: true,
-      stdin: "payload",
       onLine: (line) => lines.push(line),
     });
 
     expect(result).toEqual({ stdout: "line1\nline2", stderr: "", exitCode: 7 });
     expect(lines).toEqual(["line1", "line2"]);
-    expect(stdin).toBe("payload");
     const sshCall = mockSpawn.mock.calls.find(
       ([command, args]) =>
         command === "coder" &&
@@ -383,4 +409,117 @@ describe("coder()", () => {
     expect(sshArgs.at(-1)).toContain("/tmp/dir with space");
     expect(sshArgs.at(-1)).toContain("sudo printf hi");
   });
+
+  it("routes stdin-bearing exec through OpenSSH ProxyCommand to propagate EOF", async () => {
+    let stdin = "";
+    mockSpawn.mockImplementation((command, args) => {
+      const argv = args as string[];
+      if (command === "coder") {
+        if (argv[0] === "whoami") {
+          return spawnResult({ stdout: JSON.stringify([{ username: "me" }]) });
+        }
+        if (argv[0] === "list") {
+          return spawnResult({ stdout: workspaceJson("my-ws") });
+        }
+        if (argv[0] === "ssh") {
+          if (isSshReadinessProbe(argv)) {
+            return spawnResult({ stdout: "ready" });
+          }
+          // Setup helpers (mkdir) still go through coder ssh.
+          return spawnResult({});
+        }
+        return spawnResult({
+          exitCode: 1,
+          stderr: `unexpected coder arg ${argv[0]}`,
+        });
+      }
+      if (command === "ssh") {
+        // Stdin-bearing exec must route through OpenSSH so EOF propagates.
+        return spawnResult({
+          stdout: "got-payload\n",
+          exitCode: 0,
+          onStdin: (value) => {
+            stdin = value;
+          },
+        });
+      }
+      return spawnResult({
+        exitCode: 1,
+        stderr: `unexpected spawn target ${String(command)}`,
+      });
+    });
+
+    const provider = coder({ workspace: "my-ws", onClose: "leave" });
+    const handle = await provider.create({ env: { API_KEY: "secret" } });
+
+    const result = await handle.exec("cat", {
+      cwd: "/home/coder/project",
+      stdin: "payload",
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("got-payload\n");
+    expect(stdin).toBe("payload");
+
+    const sshCall = mockSpawn.mock.calls.find(([cmd]) => cmd === "ssh");
+    expect(sshCall).toBeDefined();
+    const sshArgs = sshCall![1] as string[];
+    expect(sshArgs).toEqual(
+      expect.arrayContaining([
+        "-o",
+        "ProxyCommand=coder ssh --stdio --hostname-suffix coder %h",
+        "me--my-ws.dev.coder",
+      ]),
+    );
+    // env vars are scoped via shell prefix on the OpenSSH side because OpenSSH
+    // has no `--env` flag; the prefix is single-quoted to survive whitespace.
+    const remoteCommand = sshArgs.at(-1) ?? "";
+    expect(remoteCommand).toContain("API_KEY='secret'");
+    expect(remoteCommand).toContain("/home/coder/project");
+    expect(remoteCommand).toContain("cat");
+  });
+
+  it("retries SSH readiness probe when first attempt fails (prebuild claim race)", async () => {
+    let probeAttempts = 0;
+    mockSpawn.mockImplementation((_command, args) => {
+      const coderArgs = args as string[];
+      if (coderArgs[0] === "whoami") {
+        return spawnResult({ stdout: JSON.stringify([{ username: "me" }]) });
+      }
+      if (coderArgs[0] === "create") {
+        return spawnResult({});
+      }
+      if (coderArgs[0] === "list") {
+        return spawnResult({ stdout: workspaceJson("ws-prebuild-race") });
+      }
+      if (coderArgs[0] === "ssh") {
+        if (isSshReadinessProbe(coderArgs)) {
+          probeAttempts += 1;
+          if (probeAttempts === 1) {
+            // First attempt hits the disconnecting prebuild agent.
+            return spawnResult({
+              exitCode: 1,
+              stderr: "error: agent is shutting down\n",
+            });
+          }
+          return spawnResult({ stdout: "ready" });
+        }
+        return spawnResult({});
+      }
+      return spawnResult({ exitCode: 1, stderr: `unexpected ${coderArgs[0]}` });
+    });
+
+    const provider = coder({
+      template: "with-prebuild",
+      workspaceName: "ws-prebuild-race",
+      onClose: "leave",
+    });
+
+    const handle = await provider.create({ env: {} });
+
+    expect(probeAttempts).toBeGreaterThanOrEqual(2);
+    expect(handle.worktreePath).toBe(
+      "/home/coder/project/.sandcastle/worktree",
+    );
+  }, 20_000);
 });
