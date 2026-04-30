@@ -40,6 +40,14 @@ _Avoid_: "remote provider", "sync provider"
 A **sandbox provider** where no container is created -- the **agent** runs directly on the **host**.
 _Avoid_: "local provider", "none provider", "host provider"
 
+**Coder workspace**:
+A remote development environment provisioned by [Coder](https://coder.com) -- an external concept owned by Coder, not Sandcastle. The `coder()` **sandbox provider** maps a single **Coder workspace** onto a Sandcastle **sandbox** for the duration of a run. Always qualify as "**Coder workspace**" in code comments, docs, and conversation -- bare "workspace" is reserved (avoided) per the **sandbox** entry above. Field names like `workspaceId` / `workspaceName` are acceptable inside `CoderOptions` because the `coder` namespace already disambiguates them.
+_Avoid_: bare "workspace", "Coder sandbox", "Coder VM"
+
+**Coder workspace agent**:
+The daemon Coder runs inside a **Coder workspace** that the Coder control plane connects to for SSH/exec. Distinct from Sandcastle's **agent** (the AI tool). A single **Coder workspace** may have multiple **Coder workspace agents** (one per Terraform resource). The `coder()` provider exposes a `workspaceAgent` option to select one when the **Coder workspace** has more than one. Always qualify as "**Coder workspace agent**" in code comments and docs to avoid collision with Sandcastle's **agent**.
+_Avoid_: bare "agent" (already taken), "Coder agent" (ambiguous between control-plane and workspace-side), "host agent"
+
 ### Branching
 
 **Branch strategy**:

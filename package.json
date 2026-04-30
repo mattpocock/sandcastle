@@ -26,6 +26,10 @@
       "import": "./dist/sandboxes/daytona.js",
       "types": "./dist/sandboxes/daytona.d.ts"
     },
+    "./sandboxes/coder": {
+      "import": "./dist/sandboxes/coder.js",
+      "types": "./dist/sandboxes/coder.d.ts"
+    },
     "./sandboxes/no-sandbox": {
       "import": "./dist/sandboxes/no-sandbox.js",
       "types": "./dist/sandboxes/no-sandbox.d.ts"
@@ -47,6 +51,7 @@
     "sandcastle": "npm run build && tsx .sandcastle/run.ts",
     "test-podman": "npm run build && tsx --env-file=.sandcastle/.env .sandcastle/test-podman.ts",
     "test-vercel": "npm run build && tsx --env-file=.sandcastle/.env .sandcastle/test-vercel.ts",
+    "test-coder": "npm run build && tsx --env-file=.sandcastle/.env .sandcastle/test-coder.ts",
     "test-interactive": "npm run build && tsx --env-file=.sandcastle/.env .sandcastle/test-interactive.ts"
   },
   "keywords": [
