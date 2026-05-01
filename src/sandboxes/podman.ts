@@ -77,6 +77,19 @@ export interface PodmanOptions {
    * When omitted, Podman's default network is used.
    */
   readonly network?: string | readonly string[];
+  /**
+   * Host ports to publish from the sandbox container.
+   *
+   * Each entry is passed as a `-p` flag to `podman run`:
+   * - `number` → symmetric: `-p <port>:<port>`
+   * - `string` → explicit mapping: `-p <hostPort>:<containerPort>` (e.g. `"3001:3000"`)
+   *
+   * @example
+   *   podman({ ports: [3000, 8000, 4321] })
+   * @example
+   *   podman({ ports: ["3001:3000"] })
+   */
+  readonly ports?: readonly (number | string)[];
 }
 
 /**
@@ -146,6 +159,10 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
           : [options.network]
         : [];
       const networkArgs = networks.flatMap((n) => ["--network", n]);
+      const portArgs = (options?.ports ?? []).flatMap((p) => [
+        "-p",
+        typeof p === "number" ? `${p}:${p}` : p,
+      ]);
 
       // Start container via podman run
       await new Promise<void>((resolve, reject) => {
@@ -159,6 +176,7 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
             ...userArgs,
             ...usernsArgs,
             ...networkArgs,
+            ...portArgs,
             "-w",
             worktreePath,
             ...envArgs,

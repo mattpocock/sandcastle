@@ -489,6 +489,135 @@ describe("podman()", () => {
     await handle.close();
   });
 
+  it("accepts a ports option", () => {
+    const provider = podman({ ports: [3000, 5173] });
+    expect(provider.tag).toBe("bind-mount");
+  });
+
+  it("accepts a ports option with string entries for asymmetric mapping", () => {
+    const provider = podman({ ports: ["3001:3000"] });
+    expect(provider.tag).toBe("bind-mount");
+  });
+
+  it("accepts a ports option mixing numbers and strings", () => {
+    const provider = podman({ ports: [5173, "3001:3000"] });
+    expect(provider.tag).toBe("bind-mount");
+  });
+
+  it("passes -p flag when ports contains a single port", async () => {
+    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      callback(null, "", "");
+      return undefined as any;
+    });
+
+    const provider = podman({ ports: [3000] });
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    const runArgs = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    )?.[1] as string[];
+
+    const idx = runArgs.indexOf("-p");
+    expect(idx).toBeGreaterThan(-1);
+    expect(runArgs[idx + 1]).toBe("3000:3000");
+
+    await handle.close();
+  });
+
+  it("passes multiple -p flags when ports has multiple values", async () => {
+    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      callback(null, "", "");
+      return undefined as any;
+    });
+
+    const provider = podman({ ports: [3000, 5173] });
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    const runArgs = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    )?.[1] as string[];
+
+    const firstIdx = runArgs.indexOf("-p");
+    expect(firstIdx).toBeGreaterThan(-1);
+    expect(runArgs[firstIdx + 1]).toBe("3000:3000");
+
+    const secondIdx = runArgs.indexOf("-p", firstIdx + 1);
+    expect(secondIdx).toBeGreaterThan(-1);
+    expect(runArgs[secondIdx + 1]).toBe("5173:5173");
+
+    await handle.close();
+  });
+
+  it("passes string port entry as-is for asymmetric host:container mapping", async () => {
+    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      callback(null, "", "");
+      return undefined as any;
+    });
+
+    const provider = podman({ ports: ["3001:3000"] });
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    const runArgs = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    )?.[1] as string[];
+
+    const idx = runArgs.indexOf("-p");
+    expect(idx).toBeGreaterThan(-1);
+    expect(runArgs[idx + 1]).toBe("3001:3000");
+
+    await handle.close();
+  });
+
+  it("does not pass -p when ports is omitted", async () => {
+    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      callback(null, "", "");
+      return undefined as any;
+    });
+
+    const provider = podman();
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    const runArgs = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    )?.[1] as string[];
+
+    expect(runArgs).not.toContain("-p");
+
+    await handle.close();
+  });
+
   it("does not run chown after container start", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
       const callback = rest[rest.length - 1];
@@ -509,9 +638,7 @@ describe("podman()", () => {
     // Verify no chown exec call was made
     const chownCall = mockExecFile.mock.calls.find(
       ([cmd, args]) =>
-        cmd === "podman" &&
-        Array.isArray(args) &&
-        args.includes("chown"),
+        cmd === "podman" && Array.isArray(args) && args.includes("chown"),
     );
     expect(chownCall).toBeUndefined();
 
