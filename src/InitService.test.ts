@@ -1142,6 +1142,12 @@ describe("InitService scaffold", () => {
       expect(manager!.templateArgs.CLOSE_TASK_COMMAND).toContain(
         "gh issue close",
       );
+      expect(manager!.templateArgs.VIEW_TASK_COMMAND).not.toMatch(
+        /\{\{.+?\}\}/,
+      );
+      expect(manager!.templateArgs.CLOSE_TASK_COMMAND).not.toMatch(
+        /\{\{.+?\}\}/,
+      );
       expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).toContain(
         "GitHub CLI",
       );
@@ -1155,6 +1161,12 @@ describe("InitService scaffold", () => {
       expect(manager!.templateArgs.LIST_TASKS_COMMAND).toBe("bd ready --json");
       expect(manager!.templateArgs.VIEW_TASK_COMMAND).toContain("bd show");
       expect(manager!.templateArgs.CLOSE_TASK_COMMAND).toContain("bd close");
+      expect(manager!.templateArgs.VIEW_TASK_COMMAND).not.toMatch(
+        /\{\{.+?\}\}/,
+      );
+      expect(manager!.templateArgs.CLOSE_TASK_COMMAND).not.toMatch(
+        /\{\{.+?\}\}/,
+      );
       expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).toContain("beads");
       expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).toContain("libicu72");
       expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).toContain(
