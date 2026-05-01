@@ -64,12 +64,7 @@ const spawnResult = (options: {
   return proc as any;
 };
 
-/**
- * Detect a `coder ssh` invocation that is exercising the readiness probe
- * (`waitForSshReady`). The probe runs `sh -c 'printf ready'` on the remote
- * before any real exec, so existing test mocks need to return `"ready"` on
- * stdout to satisfy the `endsWith("ready")` check.
- */
+// Mocks that return stdout "ready" for this match satisfy waitForSshReady.
 const isSshReadinessProbe = (coderArgs: readonly string[]): boolean => {
   if (coderArgs[0] !== "ssh") return false;
   const remoteCommand = coderArgs.at(-1);

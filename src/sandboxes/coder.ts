@@ -141,16 +141,11 @@ const coderEnv = (options: CoderOptions): NodeJS.ProcessEnv => {
   return env;
 };
 
-/**
- * Spawn `coder` or `ssh` and collect stdout/stderr.
- *
- * Both transports share the same lifecycle (pipe stdin, optional line
- * streaming, capture stderr, resolve on `close`). The OpenSSH branch exists
- * because `coder ssh` does not propagate stdin EOF to the remote process —
- * `claude --print -p -` and similar commands hang waiting for input the host
- * has already sent. OpenSSH (via `ProxyCommand=coder ssh --stdio ...`,
- * the same transport `copyFileIn` / `copyFileOut` use) handles EOF correctly.
- */
+// `binary` is `"ssh"` only when the caller needs stdin EOF propagation
+// (copyFileIn, copyFileOut, exec with stdin); `coder ssh -- <cmd>` does not
+// half-close the remote stdin, so commands like `cat` or `claude --print -p -`
+// hang. OpenSSH via `ProxyCommand=coder ssh --stdio ...` handles EOF
+// correctly. See coder/coder#24861.
 const runChildProcess = (
   binary: "coder" | "ssh",
   args: readonly string[],
@@ -504,17 +499,7 @@ const waitForWorkspaceAgents = async (
   return workspace;
 };
 
-/**
- * Probe `coder ssh -- printf ready` until the workspace responds with real
- * bytes. `coder list -o json` can briefly report a new prebuild claim's agent
- * as `connected` while the prior agent is still shutting down, so the first
- * `coder ssh` lands on the disconnecting agent and fails with
- * `error: agent is shutting down`. Retrying around 30s after the failure
- * always succeeds in our dogfood runs against `dev.coder.com`.
- *
- * Use the unchecked `runCoder` so transient non-zero exits don't throw — the
- * loop owns retry-vs-throw.
- */
+// See SSH_READY_POLL_* for why this exists.
 const waitForSshReady = async (
   env: NodeJS.ProcessEnv,
   sshRef: string,
@@ -983,10 +968,7 @@ const createHandle = (
     const remoteShellArg = `cd ${shellQuote(cwd)} && ${effectiveCommand}`;
     const onStdoutLine = opts?.onLine;
 
-    // Stdin-bearing exec routes through OpenSSH (the same transport
-    // copyFileIn / copyFileOut use) because `coder ssh` does not propagate
-    // stdin EOF — see runChildProcess. Non-stdin exec stays on direct
-    // `coder ssh` to minimise blast radius.
+    // Stdin-bearing exec needs OpenSSH for EOF propagation; see runChildProcess.
     if (opts?.stdin !== undefined) {
       const envPrefix = buildEnvPrefix(sandboxEnv);
       return runOpenSsh(
@@ -1017,9 +999,8 @@ const createHandle = (
     ];
 
     return new Promise((resolve, reject) => {
-      // Current Coder CLI exposes no explicit force-PTY flag; when callers pass
-      // real TTY streams, forwarding those descriptors lets `coder ssh` perform
-      // its normal TTY auto-detection instead of seeing a Node pipe.
+      // Forwarding the host TTY descriptors lets `coder ssh` auto-detect a TTY;
+      // there is no explicit force-PTY flag.
       const proc = spawn(
         "coder",
         buildSshArgs(resolved.sshRef, sandboxEnv, remoteArgs),
