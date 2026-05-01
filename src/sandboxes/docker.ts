@@ -27,6 +27,8 @@ import {
 import type { MountConfig } from "../MountConfig.js";
 import { defaultImageName, resolveUserMounts } from "../mountUtils.js";
 
+export type DockerUserMode = "auto" | "container" | "host" | "image";
+
 export interface DockerOptions {
   /** Docker image name (default: derived from repo directory name). */
   readonly imageName?: string;
@@ -48,6 +50,24 @@ export interface DockerOptions {
    * When omitted, Docker's default bridge network is used.
    */
   readonly network?: string | readonly string[];
+  /**
+   * User mode for commands inside the container.
+   *
+   * - `"auto"` (default) uses host uid:gid on Linux and container uid:gid on
+   *   macOS/Windows. This preserves Linux bind-mount ownership while keeping
+   *   image-owned paths such as `/home/agent` writable on Docker Desktop.
+   * - `"container"` runs as `containerUid:containerGid`, matching
+   *   Sandcastle's generated Dockerfiles.
+   * - `"host"` runs as the host uid:gid. This is useful for some Linux bind
+   *   mount setups, but can make image-owned files unwritable when the host UID
+   *   differs from the image user UID.
+   * - `"image"` omits `--user` and uses the Dockerfile's `USER`.
+   */
+  readonly user?: DockerUserMode;
+  /** UID used when `user` is `"container"`. Defaults to 1000. */
+  readonly containerUid?: number;
+  /** GID used when `user` is `"container"`. Defaults to 1000. */
+  readonly containerGid?: number;
 }
 
 /**
@@ -59,6 +79,9 @@ export interface DockerOptions {
 export const docker = (options?: DockerOptions): SandboxProvider => {
   const configuredImageName = options?.imageName;
   const sandboxHomedir = "/home/agent";
+  const userMode = options?.user ?? "auto";
+  const containerUid = options?.containerUid ?? 1000;
+  const containerGid = options?.containerGid ?? 1000;
   const userMounts = options?.mounts
     ? resolveUserMounts(options.mounts, sandboxHomedir)
     : [];
@@ -88,8 +111,15 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
       const imageName =
         configuredImageName ?? defaultImageName(createOptions.hostRepoPath);
 
-      const hostUid = process.getuid?.() ?? 1000;
-      const hostGid = process.getgid?.() ?? 1000;
+      const hostUser = `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`;
+      const containerUser = `${containerUid}:${containerGid}`;
+      const user =
+        userMode === "image"
+          ? undefined
+          : userMode === "host" ||
+              (userMode === "auto" && process.platform === "linux")
+            ? hostUser
+            : containerUser;
 
       // Start container
       await Effect.runPromise(
@@ -103,7 +133,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
           {
             volumeMounts,
             workdir: worktreePath,
-            user: `${hostUid}:${hostGid}`,
+            user,
             network: options?.network,
           },
         ),
