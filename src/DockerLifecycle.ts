@@ -61,9 +61,11 @@ export interface StartContainerOptions {
   readonly network?: string | readonly string[];
   /**
    * Host ports to publish from the container.
-   * Each entry produces a `-p <port>:<port>` flag in the `docker run` command.
+   *
+   * - `number` → symmetric mapping: `-p <port>:<port>`
+   * - `string` → pass-through: `-p <hostPort>:<containerPort>` (e.g. `"3001:3000"`)
    */
-  readonly ports?: readonly number[];
+  readonly ports?: readonly (number | string)[];
 }
 
 /**
@@ -115,7 +117,7 @@ export const startContainer = (
 
     const portFlags = (options?.ports ?? []).flatMap((p) => [
       "-p",
-      `${p}:${p}`,
+      typeof p === "number" ? `${p}:${p}` : p,
     ]);
 
     yield* dockerExec([

@@ -136,6 +136,16 @@ describe("docker()", () => {
     expect(provider.tag).toBe("bind-mount");
   });
 
+  it("accepts a ports option with string entries for asymmetric mapping", () => {
+    const provider = docker({ ports: ["3001:3000", "8081:8000"] });
+    expect(provider.tag).toBe("bind-mount");
+  });
+
+  it("accepts a ports option mixing numbers and strings", () => {
+    const provider = docker({ ports: [5173, "3001:3000"] });
+    expect(provider.tag).toBe("bind-mount");
+  });
+
   it("copyFileIn calls docker cp with correct arguments", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
       const callback = rest[rest.length - 1];

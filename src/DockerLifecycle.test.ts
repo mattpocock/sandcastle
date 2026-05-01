@@ -132,4 +132,24 @@ describe("startContainer", () => {
     const runArgs = runCall![1] as string[];
     expect(runArgs).not.toContain("-p");
   });
+
+  it("passes string port entry as-is for asymmetric host:container mapping", async () => {
+    mockExecFile.mockImplementation((_cmd, _args, _opts, cb: any) => {
+      cb(null, "", "");
+      return undefined as any;
+    });
+
+    await Effect.runPromise(
+      startContainer("ctr", "img", {}, { ports: ["3001:3000"] }),
+    );
+
+    const runCall = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    );
+    expect(runCall).toBeDefined();
+    const runArgs = runCall![1] as string[];
+    const idx = runArgs.indexOf("-p");
+    expect(idx).toBeGreaterThan(-1);
+    expect(runArgs[idx + 1]).toBe("3001:3000");
+  });
 });

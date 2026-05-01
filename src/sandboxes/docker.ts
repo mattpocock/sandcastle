@@ -51,13 +51,19 @@ export interface DockerOptions {
   /**
    * Host ports to publish from the sandbox container.
    *
-   * Each port produces a `-p <port>:<port>` flag, making the port reachable
-   * from the host. Declare every port the agent may listen on upfront.
+   * Each entry is passed as a `-p` flag to `docker run`:
+   * - `number` → symmetric: `-p <port>:<port>` — use when host and container port are the same
+   * - `string` → explicit mapping: `-p <hostPort>:<containerPort>` — use when ports differ
    *
    * @example
-   *   docker({ ports: [3000, 5173] })
+   *   // Symmetric — same port on host and in container
+   *   docker({ ports: [3000, 8000, 4321] })
+   *
+   * @example
+   *   // Asymmetric — host port 3001 maps to container port 3000
+   *   docker({ ports: ["3001:3000"] })
    */
-  readonly ports?: readonly number[];
+  readonly ports?: readonly (number | string)[];
 }
 
 /**
