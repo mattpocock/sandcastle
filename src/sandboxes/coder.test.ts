@@ -142,6 +142,7 @@ describe("coder()", () => {
         preset: "small",
         workspaceName: "sandcastle-manual",
         organization: "org-a",
+        useParameterDefaults: true,
         workspaceAgent: "dev",
         workdir: "/tmp/sandcastle",
       }).tag,
@@ -223,6 +224,54 @@ describe("coder()", () => {
       "coder",
       ["delete", `me/${createdName}`, "--yes"],
       expect.anything(),
+    );
+  });
+
+  it("forwards --use-parameter-defaults only when useParameterDefaults is true", async () => {
+    const captured: { withFlag?: string[]; withoutFlag?: string[] } = {};
+    const runOnce = async (
+      key: "withFlag" | "withoutFlag",
+      provider: ReturnType<typeof coder>,
+    ) => {
+      let createdName = "";
+      mockSpawn.mockImplementation((_command, args) => {
+        const coderArgs = args as string[];
+        if (coderArgs[0] === "whoami") {
+          return spawnResult({ stdout: JSON.stringify([{ username: "me" }]) });
+        }
+        if (coderArgs[0] === "create") {
+          captured[key] = coderArgs;
+          createdName = coderArgs[1]!;
+          return spawnResult({});
+        }
+        if (coderArgs[0] === "list") {
+          return spawnResult({ stdout: workspaceJson(createdName) });
+        }
+        if (coderArgs[0] === "ssh") {
+          return spawnResult({
+            stdout: isSshReadinessProbe(coderArgs) ? "ready" : "",
+          });
+        }
+        return spawnResult({});
+      });
+      await provider.create({ env: {} });
+    };
+
+    await runOnce(
+      "withFlag",
+      coder({
+        template: "node",
+        onClose: "leave",
+        useParameterDefaults: true,
+      }),
+    );
+    await runOnce("withoutFlag", coder({ template: "node", onClose: "leave" }));
+
+    expect(captured.withFlag).toEqual(
+      expect.arrayContaining(["--use-parameter-defaults"]),
+    );
+    expect(captured.withoutFlag).toEqual(
+      expect.not.arrayContaining(["--use-parameter-defaults"]),
     );
   });
 

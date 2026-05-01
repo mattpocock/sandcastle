@@ -33,6 +33,7 @@ export interface CoderCreateFromTemplateOptions extends CoderCommonOptions {
   readonly preset?: string;
   readonly workspaceName?: string;
   readonly organization?: string;
+  readonly useParameterDefaults?: boolean;
 }
 
 export interface CoderAttachToWorkspaceOptions extends CoderCommonOptions {
@@ -743,6 +744,9 @@ const createCoderWorkspace = async (
   }
   if (options.organization) {
     args.push("--org", options.organization);
+  }
+  if (options.useParameterDefaults) {
+    args.push("--use-parameter-defaults");
   }
   args.push("--yes");
 
