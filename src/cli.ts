@@ -233,18 +233,24 @@ const initCommand = Command.make(
         selectedTemplate = selected as string;
       }
 
-      // Offer to create the "Sandcastle" label on the repo (skip for non-GitHub backlog managers)
+      // Offer to create the "Sandcastle" label for issue-backed backlog managers.
       let shouldCreateLabel: boolean | symbol = false;
-      if (selectedBacklogManager.name === "github-issues") {
+      if (
+        selectedBacklogManager.name === "github-issues" ||
+        selectedBacklogManager.createLabelCommand
+      ) {
         shouldCreateLabel = yield* Effect.promise(() =>
           clack.confirm({
             message:
-              'Create a "Sandcastle" GitHub label? (Templates filter issues by this label)',
+              'Create a "Sandcastle" label? (Templates filter issues by this label)',
             initialValue: true,
           }),
         );
 
-        if (shouldCreateLabel === true) {
+        if (
+          selectedBacklogManager.name === "github-issues" &&
+          shouldCreateLabel === true
+        ) {
           yield* Effect.try({
             try: () =>
               execSync(

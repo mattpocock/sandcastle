@@ -592,7 +592,7 @@ Tell the agent to output your chosen string(s) in the prompt, and the orchestrat
 
 ### Templates
 
-`sandcastle init` prompts you to choose a sandbox provider (Docker or Podman), a backlog manager (GitHub Issues or Beads), and a template, which scaffolds a ready-to-use prompt and `main.mts` suited to a specific workflow. If your project's `package.json` has `"type": "module"`, the file will be named `main.ts` instead. Five templates are available:
+`sandcastle init` prompts you to choose a sandbox provider (Docker or Podman), a backlog manager (GitHub Issues, Gitea / Forgejo Issues, or Beads), and a template, which scaffolds a ready-to-use prompt and `main.mts` suited to a specific workflow. If your project's `package.json` has `"type": "module"`, the file will be named `main.ts` instead. Five templates are available:
 
 | Template                       | Description                                                               |
 | ------------------------------ | ------------------------------------------------------------------------- |
@@ -601,6 +601,12 @@ Tell the agent to output your chosen string(s) in the prompt, and the orchestrat
 | `sequential-reviewer`          | Implements issues one by one, with a code review step after each          |
 | `parallel-planner`             | Plans parallelizable issues, executes on separate branches, then merges   |
 | `parallel-planner-with-review` | Plans parallelizable issues, executes with per-branch review, then merges |
+
+Backlog manager env vars are generated in `.sandcastle/.env.example`:
+
+- GitHub Issues uses `GH_TOKEN`.
+- Gitea / Forgejo Issues uses `GITEA_SERVER_URL` and `GITEA_ACCESS_TOKEN`.
+- Beads stores backlog state locally and does not require a token.
 
 Select a template during `sandcastle init` when prompted, or re-run init in a fresh repo to try a different one.
 
