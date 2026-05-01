@@ -126,6 +126,16 @@ describe("docker()", () => {
     expect(provider.tag).toBe("bind-mount");
   });
 
+  it("accepts a ports option", () => {
+    const provider = docker({ ports: [3000, 5173] });
+    expect(provider.tag).toBe("bind-mount");
+  });
+
+  it("accepts a ports option with a single port", () => {
+    const provider = docker({ ports: [8080] });
+    expect(provider.tag).toBe("bind-mount");
+  });
+
   it("copyFileIn calls docker cp with correct arguments", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
       const callback = rest[rest.length - 1];

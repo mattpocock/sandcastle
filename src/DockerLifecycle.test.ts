@@ -72,4 +72,64 @@ describe("startContainer", () => {
     const runArgs = runCall![1] as string[];
     expect(runArgs).not.toContain("--network");
   });
+
+  it("passes -p flag when ports contains a single port", async () => {
+    mockExecFile.mockImplementation((_cmd, _args, _opts, cb: any) => {
+      cb(null, "", "");
+      return undefined as any;
+    });
+
+    await Effect.runPromise(
+      startContainer("ctr", "img", {}, { ports: [3000] }),
+    );
+
+    const runCall = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    );
+    expect(runCall).toBeDefined();
+    const runArgs = runCall![1] as string[];
+    const idx = runArgs.indexOf("-p");
+    expect(idx).toBeGreaterThan(-1);
+    expect(runArgs[idx + 1]).toBe("3000:3000");
+  });
+
+  it("passes multiple -p flags when ports has multiple values", async () => {
+    mockExecFile.mockImplementation((_cmd, _args, _opts, cb: any) => {
+      cb(null, "", "");
+      return undefined as any;
+    });
+
+    await Effect.runPromise(
+      startContainer("ctr", "img", {}, { ports: [3000, 5173] }),
+    );
+
+    const runCall = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    );
+    expect(runCall).toBeDefined();
+    const runArgs = runCall![1] as string[];
+
+    const firstIdx = runArgs.indexOf("-p");
+    expect(firstIdx).toBeGreaterThan(-1);
+    expect(runArgs[firstIdx + 1]).toBe("3000:3000");
+
+    const secondIdx = runArgs.indexOf("-p", firstIdx + 1);
+    expect(secondIdx).toBeGreaterThan(-1);
+    expect(runArgs[secondIdx + 1]).toBe("5173:5173");
+  });
+
+  it("does not pass -p when ports is omitted", async () => {
+    mockExecFile.mockImplementation((_cmd, _args, _opts, cb: any) => {
+      cb(null, "", "");
+      return undefined as any;
+    });
+
+    await Effect.runPromise(startContainer("ctr", "img", {}));
+
+    const runCall = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    );
+    const runArgs = runCall![1] as string[];
+    expect(runArgs).not.toContain("-p");
+  });
 });

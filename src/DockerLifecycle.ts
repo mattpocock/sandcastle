@@ -59,6 +59,11 @@ export interface StartContainerOptions {
   readonly user?: string;
   /** Docker network(s) to attach the container to. Passed as `--network` flags. */
   readonly network?: string | readonly string[];
+  /**
+   * Host ports to publish from the container.
+   * Each entry produces a `-p <port>:<port>` flag in the `docker run` command.
+   */
+  readonly ports?: readonly number[];
 }
 
 /**
@@ -108,6 +113,11 @@ export const startContainer = (
       : [];
     const networkFlags = networks.flatMap((n) => ["--network", n]);
 
+    const portFlags = (options?.ports ?? []).flatMap((p) => [
+      "-p",
+      `${p}:${p}`,
+    ]);
+
     yield* dockerExec([
       "run",
       "-d",
@@ -118,6 +128,7 @@ export const startContainer = (
       ...workdirFlags,
       ...userFlags,
       ...networkFlags,
+      ...portFlags,
       imageName,
     ]);
   });

@@ -48,6 +48,16 @@ export interface DockerOptions {
    * When omitted, Docker's default bridge network is used.
    */
   readonly network?: string | readonly string[];
+  /**
+   * Host ports to publish from the sandbox container.
+   *
+   * Each port produces a `-p <port>:<port>` flag, making the port reachable
+   * from the host. Declare every port the agent may listen on upfront.
+   *
+   * @example
+   *   docker({ ports: [3000, 5173] })
+   */
+  readonly ports?: readonly number[];
 }
 
 /**
@@ -105,6 +115,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
             workdir: worktreePath,
             user: `${hostUid}:${hostGid}`,
             network: options?.network,
+            ports: options?.ports,
           },
         ),
       );
