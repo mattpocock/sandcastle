@@ -123,6 +123,7 @@ await run({
     template: "node",
     parameters: { region: "us" },
     preset: "small",
+    useParameterDefaults: true, // optional — accept template parameter defaults non-interactively
     onClose: "delete",
   }),
   prompt: "Fix the failing tests.",
