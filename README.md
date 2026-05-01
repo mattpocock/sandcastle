@@ -613,7 +613,7 @@ Scaffolds the `.sandcastle/` config directory and builds the container image. Th
 | Option         | Required | Default                      | Description                                                          |
 | -------------- | -------- | ---------------------------- | -------------------------------------------------------------------- |
 | `--image-name` | No       | `sandcastle:<repo-dir-name>` | Docker image name                                                    |
-| `--agent`      | No       | Interactive prompt           | Agent to use (`claude-code`, `pi`, `codex`, `opencode`)              |
+| `--agent`      | No       | Interactive prompt           | Agent to use (`claude-code`, `pi`, `codex`, `opencode`, `cursor`)    |
 | `--model`      | No       | Agent's default model        | Model to use (e.g. `claude-sonnet-4-6`). Defaults to agent's default |
 | `--template`   | No       | Interactive prompt           | Template to scaffold (e.g. `blank`, `simple-loop`)                   |
 
@@ -767,6 +767,20 @@ agent: codex("gpt-5.4", { effort: "high" });
 | -------- | ---------------------------------------------- | ------- | --------------------------------------------------------- |
 | `effort` | `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` | —       | Codex reasoning effort level via `model_reasoning_effort` |
 | `env`    | `Record<string, string>`                       | `{}`    | Environment variables injected by this agent provider     |
+
+### `CursorOptions`
+
+The `cursor()` factory accepts an optional model string and provider-specific options:
+
+```typescript
+agent: cursor("auto", { env: { CURSOR_API_KEY: "key" } });
+```
+
+If no model is provided, Sandcastle uses `auto` so Cursor can route to the account-supported model pool.
+
+| Option | Type                     | Default | Description                                           |
+| ------ | ------------------------ | ------- | ----------------------------------------------------- |
+| `env`  | `Record<string, string>` | `{}`    | Environment variables injected by this agent provider |
 
 ### Provider `env`
 

@@ -164,6 +164,7 @@ describe("sandcastle CLI", () => {
       const output = stdout + stderr;
       expect(output).toContain("nonexistent");
       expect(output).toContain("claude-code");
+      expect(output).toContain("cursor");
     }
   });
 });

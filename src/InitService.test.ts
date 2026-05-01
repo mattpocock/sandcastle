@@ -25,6 +25,7 @@ const claudeCodeAgent = getAgent("claude-code")!;
 const piAgent = getAgent("pi")!;
 const codexAgent = getAgent("codex")!;
 const opencodeAgent = getAgent("opencode")!;
+const cursorAgent = getAgent("cursor")!;
 
 const defaultOptions: ScaffoldOptions = {
   agent: claudeCodeAgent,
@@ -107,6 +108,22 @@ describe("Agent registry", () => {
     expect(agent!.dockerfileTemplate).toContain("FROM");
     expect(agent!.dockerfileTemplate).toContain("opencode-ai");
   });
+
+  it("listAgents includes cursor", () => {
+    const agents = listAgents();
+    expect(agents.some((a) => a.name === "cursor")).toBe(true);
+  });
+
+  it("getAgent returns cursor entry with expected fields", () => {
+    const agent = getAgent("cursor");
+    expect(agent).toBeDefined();
+    expect(agent!.name).toBe("cursor");
+    expect(agent!.defaultModel).toBe("auto");
+    expect(agent!.factoryImport).toBe("cursor");
+    expect(agent!.dockerfileTemplate).toContain("FROM");
+    expect(agent!.dockerfileTemplate).toContain("cursor.com/install");
+    expect(agent!.dockerfileTemplate).toContain("/home/agent/.local/bin");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -152,6 +169,12 @@ describe("InitService scaffold", () => {
     {
       agent: opencodeAgent,
       expectedKey: "OPENCODE_API_KEY=",
+      unexpectedKey: "ANTHROPIC_API_KEY=",
+      expectIssue191Link: false,
+    },
+    {
+      agent: cursorAgent,
+      expectedKey: "CURSOR_API_KEY=",
       unexpectedKey: "ANTHROPIC_API_KEY=",
       expectIssue191Link: false,
     },
@@ -347,6 +370,22 @@ describe("InitService scaffold", () => {
       "utf-8",
     );
     expect(mainTs).toContain('claudeCode("claude-opus-4-6")');
+  });
+
+  it("scaffolds main.mts with cursor factory and default auto model", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      agent: cursorAgent,
+      model: cursorAgent.defaultModel,
+    });
+
+    const mainTs = await readFile(
+      join(dir, ".sandcastle", "main.mts"),
+      "utf-8",
+    );
+    expect(mainTs).toContain("cursor");
+    expect(mainTs).toContain('cursor("auto")');
+    expect(mainTs).not.toContain("claudeCode");
   });
 
   // --- Template-specific tests ---

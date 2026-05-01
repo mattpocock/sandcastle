@@ -21,7 +21,11 @@ const TOOL_ARG_FIELDS: Record<string, string> = {
 const extractErrorMessage = (obj: any): string | undefined => {
   const err = obj.error;
   if (typeof err === "string") return err;
-  if (typeof err === "object" && err !== null && typeof err.message === "string") {
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    typeof err.message === "string"
+  ) {
     return err.message;
   }
   if (typeof obj.message === "string") return obj.message;
@@ -295,6 +299,109 @@ export const codex = (
 
   parseStreamLine(line: string): ParsedStreamEvent[] {
     return parseCodexStreamLine(line);
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Cursor agent provider
+// ---------------------------------------------------------------------------
+
+const CURSOR_TOOL_CALLS: Record<
+  string,
+  { readonly name: string; readonly argField: string }
+> = {
+  bashToolCall: { name: "Bash", argField: "command" },
+  readToolCall: { name: "Read", argField: "path" },
+  writeToolCall: { name: "Write", argField: "path" },
+  searchToolCall: { name: "Search", argField: "query" },
+};
+
+const parseCursorStreamLine = (line: string): ParsedStreamEvent[] => {
+  if (!line.startsWith("{")) return [];
+  try {
+    const obj = JSON.parse(line);
+    if (obj.type === "assistant" && Array.isArray(obj.message?.content)) {
+      const texts: string[] = [];
+      for (const block of obj.message.content as {
+        type: string;
+        text?: string;
+      }[]) {
+        if (block.type === "text" && typeof block.text === "string") {
+          texts.push(block.text);
+        }
+      }
+      return texts.length > 0 ? [{ type: "text", text: texts.join("") }] : [];
+    }
+    if (obj.type === "result" && typeof obj.result === "string") {
+      return [{ type: "result", result: obj.result }];
+    }
+    if (
+      obj.type === "system" &&
+      obj.subtype === "init" &&
+      typeof obj.session_id === "string"
+    ) {
+      return [{ type: "session_id", sessionId: obj.session_id }];
+    }
+    if (obj.type === "tool_call" && obj.subtype === "started") {
+      const toolCall = obj.tool_call;
+      if (typeof toolCall !== "object" || toolCall === null) return [];
+      for (const [key, config] of Object.entries(CURSOR_TOOL_CALLS)) {
+        const call = (toolCall as Record<string, unknown>)[key];
+        if (typeof call !== "object" || call === null) continue;
+        const args = (call as Record<string, unknown>).args;
+        if (typeof args !== "object" || args === null) continue;
+        const argValue = (args as Record<string, unknown>)[config.argField];
+        if (typeof argValue !== "string") continue;
+        return [{ type: "tool_call", name: config.name, args: argValue }];
+      }
+    }
+  } catch {
+    // Not valid JSON — skip
+  }
+  return [];
+};
+
+/** Options for the cursor agent provider. */
+export interface CursorOptions {
+  /** Environment variables injected by this agent provider. */
+  readonly env?: Record<string, string>;
+}
+
+export const cursor = (
+  model = "auto",
+  options?: CursorOptions,
+): AgentProvider => ({
+  name: "cursor",
+  env: options?.env ?? {},
+  captureSessions: false,
+
+  buildPrintCommand({
+    prompt,
+    dangerouslySkipPermissions,
+    resumeSession,
+  }: AgentCommandOptions): PrintCommand {
+    const forceFlag = dangerouslySkipPermissions ? " --force" : "";
+    const resumeFlag = resumeSession
+      ? ` --resume ${shellEscape(resumeSession)}`
+      : "";
+    return {
+      command: `cursor-agent --print --output-format stream-json --model ${shellEscape(model)}${forceFlag}${resumeFlag}`,
+      stdin: prompt,
+    };
+  },
+
+  buildInteractiveArgs({
+    prompt,
+    dangerouslySkipPermissions,
+  }: AgentCommandOptions): string[] {
+    const args = ["cursor-agent", "--model", model];
+    if (dangerouslySkipPermissions) args.push("--force");
+    if (prompt) args.push(prompt);
+    return args;
+  },
+
+  parseStreamLine(line: string): ParsedStreamEvent[] {
+    return parseCursorStreamLine(line);
   },
 });
 

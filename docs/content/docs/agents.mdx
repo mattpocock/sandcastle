@@ -34,6 +34,17 @@ Required environment variables:
 | --- | --- |
 | `GH_TOKEN` | GitHub personal access token |
 
+### Cursor
+
+Uses Cursor Agent CLI as the AI coding agent. Sandcastle uses Cursor's headless `--print` mode with `stream-json` output.
+
+Required environment variables:
+
+| Variable | Description |
+| --- | --- |
+| `CURSOR_API_KEY` | Cursor API key |
+| `GH_TOKEN` | GitHub personal access token |
+
 ## Custom Providers
 
 Agent providers are swappable. To add support for a different AI coding tool, create a new provider that implements the agent provider interface with its own env manifest, env check, and Dockerfile template.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { claudeCode, codex, opencode, pi } from "./AgentProvider.js";
+import { claudeCode, codex, cursor, opencode, pi } from "./AgentProvider.js";
 import type { AgentCommandOptions } from "./AgentProvider.js";
 
 /** Shorthand: build options with dangerouslySkipPermissions: true (mirrors existing sandbox callers). */
@@ -688,6 +688,195 @@ describe("codex factory", () => {
 });
 
 // ---------------------------------------------------------------------------
+// cursor factory
+// ---------------------------------------------------------------------------
+
+describe("cursor factory", () => {
+  it("returns a provider with name 'cursor'", () => {
+    const provider = cursor();
+    expect(provider.name).toBe("cursor");
+  });
+
+  it("does not expose envManifest or dockerfileTemplate", () => {
+    const provider = cursor();
+    expect(provider).not.toHaveProperty("envManifest");
+    expect(provider).not.toHaveProperty("dockerfileTemplate");
+  });
+
+  it("buildPrintCommand includes the default auto model and stream-json flags", () => {
+    const provider = cursor();
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).toContain("cursor-agent");
+    expect(command).toContain("--print");
+    expect(command).toContain("--output-format stream-json");
+    expect(command).toContain("--model 'auto'");
+  });
+
+  it("buildPrintCommand includes the configured model", () => {
+    const provider = cursor("composer-2");
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).toContain("--model 'composer-2'");
+  });
+
+  it("buildPrintCommand delivers prompt via stdin, not argv", () => {
+    const provider = cursor();
+    const { command, stdin } = provider.buildPrintCommand(opts("it's a test"));
+    expect(command).not.toContain("it's a test");
+    expect(stdin).toBe("it's a test");
+  });
+
+  it("buildPrintCommand shell-escapes the model", () => {
+    const provider = cursor("model with ' quote");
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).toContain("--model 'model with '\\'' quote'");
+  });
+
+  it("buildPrintCommand includes --force when dangerouslySkipPermissions is true", () => {
+    const provider = cursor();
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+    });
+    expect(command).toContain("--force");
+  });
+
+  it("buildPrintCommand omits --force when dangerouslySkipPermissions is false", () => {
+    const provider = cursor();
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: false,
+    });
+    expect(command).not.toContain("--force");
+  });
+
+  it("buildPrintCommand includes --resume when resumeSession is set", () => {
+    const provider = cursor();
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+      resumeSession: "abc-123",
+    });
+    expect(command).toContain("--resume 'abc-123'");
+  });
+
+  it("buildInteractiveArgs includes model, force, and prompt", () => {
+    const provider = cursor("auto");
+    const args = provider.buildInteractiveArgs!({
+      prompt: "do something",
+      dangerouslySkipPermissions: true,
+    });
+    expect(args).toEqual([
+      "cursor-agent",
+      "--model",
+      "auto",
+      "--force",
+      "do something",
+    ]);
+  });
+
+  it("buildInteractiveArgs omits --force when dangerouslySkipPermissions is false", () => {
+    const provider = cursor("auto");
+    const args = provider.buildInteractiveArgs!({
+      prompt: "do something",
+      dangerouslySkipPermissions: false,
+    });
+    expect(args).not.toContain("--force");
+  });
+
+  it("parseStreamLine extracts text from assistant message", () => {
+    const provider = cursor();
+    const line = JSON.stringify({
+      type: "assistant",
+      message: { content: [{ type: "text", text: "Hello world" }] },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "text", text: "Hello world" },
+    ]);
+  });
+
+  it("parseStreamLine extracts result from result message", () => {
+    const provider = cursor();
+    const line = JSON.stringify({
+      type: "result",
+      result: "Final answer <promise>COMPLETE</promise>",
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      {
+        type: "result",
+        result: "Final answer <promise>COMPLETE</promise>",
+      },
+    ]);
+  });
+
+  it("parseStreamLine emits session_id from system init line", () => {
+    const provider = cursor();
+    const line = JSON.stringify({
+      type: "system",
+      subtype: "init",
+      session_id: "cursor-session",
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "session_id", sessionId: "cursor-session" },
+    ]);
+  });
+
+  it.each([
+    ["bashToolCall", { command: "npm test" }, "Bash", "npm test"],
+    ["readToolCall", { path: "src/main.ts" }, "Read", "src/main.ts"],
+    ["writeToolCall", { path: "summary.txt" }, "Write", "summary.txt"],
+    ["searchToolCall", { query: "AgentProvider" }, "Search", "AgentProvider"],
+  ])(
+    "parseStreamLine extracts %s as a tool call",
+    (toolKey, args, expectedName, expectedArgs) => {
+      const provider = cursor();
+      const line = JSON.stringify({
+        type: "tool_call",
+        subtype: "started",
+        tool_call: {
+          [toolKey]: { args },
+        },
+      });
+      expect(provider.parseStreamLine(line)).toEqual([
+        { type: "tool_call", name: expectedName, args: expectedArgs },
+      ]);
+    },
+  );
+
+  it("parseStreamLine ignores unknown cursor tool calls", () => {
+    const provider = cursor();
+    const line = JSON.stringify({
+      type: "tool_call",
+      subtype: "started",
+      tool_call: {
+        unknownToolCall: { args: { path: "src/main.ts" } },
+      },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([]);
+  });
+
+  it("parseStreamLine returns empty array for malformed JSON", () => {
+    const provider = cursor();
+    expect(provider.parseStreamLine("{bad json")).toEqual([]);
+  });
+
+  it("parseStreamLine returns empty array for non-JSON lines", () => {
+    const provider = cursor();
+    expect(provider.parseStreamLine("not json")).toEqual([]);
+    expect(provider.parseStreamLine("")).toEqual([]);
+  });
+
+  it("accepts an env option and exposes it on the provider", () => {
+    const provider = cursor("auto", { env: { CURSOR_API_KEY: "key" } });
+    expect(provider.env).toEqual({ CURSOR_API_KEY: "key" });
+  });
+
+  it("defaults env to empty object when not provided", () => {
+    const provider = cursor();
+    expect(provider.env).toEqual({});
+  });
+});
+
+// ---------------------------------------------------------------------------
 // opencode factory
 // ---------------------------------------------------------------------------
 
@@ -809,6 +998,16 @@ describe("resumeSession on non-Claude providers", () => {
     });
     expect(command).not.toContain("--resume");
     expect(command).not.toContain("abc-123");
+  });
+
+  it("cursor passes resumeSession through to cursor-agent", () => {
+    const provider = cursor();
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+      resumeSession: "abc-123",
+    });
+    expect(command).toContain("--resume 'abc-123'");
   });
 });
 
@@ -938,5 +1137,9 @@ describe("captureSessions flag", () => {
 
   it("opencode has captureSessions false", () => {
     expect(opencode("opencode-model").captureSessions).toBe(false);
+  });
+
+  it("cursor has captureSessions false", () => {
+    expect(cursor("auto").captureSessions).toBe(false);
   });
 });
