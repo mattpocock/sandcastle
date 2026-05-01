@@ -125,11 +125,8 @@ const shellQuote = (value: string): string => {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 };
 
-const displayCommand = (args: readonly string[]): string =>
-  ["coder", ...args].map((arg) => shellQuote(arg)).join(" ");
-
-const displayOpenSshCommand = (args: readonly string[]): string =>
-  ["ssh", ...args].map((arg) => shellQuote(arg)).join(" ");
+const displayCommand = (binary: string, args: readonly string[]): string =>
+  [binary, ...args].map((arg) => shellQuote(arg)).join(" ");
 
 const coderEnv = (options: CoderOptions): NodeJS.ProcessEnv => {
   const env: NodeJS.ProcessEnv = { ...process.env };
@@ -144,73 +141,18 @@ const coderEnv = (options: CoderOptions): NodeJS.ProcessEnv => {
   return env;
 };
 
-const runCoder = (
-  args: readonly string[],
-  options: {
-    readonly env: NodeJS.ProcessEnv;
-    readonly stdin?: string;
-    readonly onStdoutLine?: (line: string) => void;
-  },
-): Promise<CoderCommandResult> => {
-  if (args.length === 0) {
-    throw new Error("runCoder requires at least one CLI argument");
-  }
-
-  return new Promise((resolve, reject) => {
-    const proc = spawn("coder", [...args], {
-      env: options.env,
-      stdio: [options.stdin !== undefined ? "pipe" : "ignore", "pipe", "pipe"],
-    });
-
-    if (options.stdin !== undefined) {
-      proc.stdin!.write(options.stdin);
-      proc.stdin!.end();
-    }
-
-    const stdoutChunks: string[] = [];
-    const stderrChunks: string[] = [];
-
-    if (options.onStdoutLine) {
-      const onStdoutLine = options.onStdoutLine;
-      const rl = createInterface({ input: proc.stdout! });
-      rl.on("line", (line) => {
-        stdoutChunks.push(line);
-        onStdoutLine(line);
-      });
-    } else {
-      proc.stdout!.on("data", (chunk: Buffer) => {
-        stdoutChunks.push(chunk.toString());
-      });
-    }
-
-    proc.stderr!.on("data", (chunk: Buffer) => {
-      stderrChunks.push(chunk.toString());
-    });
-
-    proc.on("error", (error: Error) => {
-      reject(
-        new Error(`Failed to start ${displayCommand(args)}: ${error.message}`),
-      );
-    });
-
-    proc.on("close", (code: number | null) => {
-      resolve({
-        stdout: stdoutChunks.join(options.onStdoutLine ? "\n" : ""),
-        stderr: stderrChunks.join(""),
-        exitCode: code ?? 0,
-      });
-    });
-  });
-};
-
 /**
- * Spawn OpenSSH with the same `ProxyCommand=coder ssh --stdio …` glue that
- * `copyFileIn` / `copyFileOut` use. Needed for any `exec()` that pipes data
- * over stdin: `coder ssh` does not propagate stdin EOF to the remote process,
- * so e.g. `claude --print -p -` hangs waiting for input the host has already
- * sent. OpenSSH handles EOF correctly.
+ * Spawn `coder` or `ssh` and collect stdout/stderr.
+ *
+ * Both transports share the same lifecycle (pipe stdin, optional line
+ * streaming, capture stderr, resolve on `close`). The OpenSSH branch exists
+ * because `coder ssh` does not propagate stdin EOF to the remote process —
+ * `claude --print -p -` and similar commands hang waiting for input the host
+ * has already sent. OpenSSH (via `ProxyCommand=coder ssh --stdio ...`,
+ * the same transport `copyFileIn` / `copyFileOut` use) handles EOF correctly.
  */
-const runOpenSsh = (
+const runChildProcess = (
+  binary: "coder" | "ssh",
   args: readonly string[],
   options: {
     readonly env: NodeJS.ProcessEnv;
@@ -219,11 +161,11 @@ const runOpenSsh = (
   },
 ): Promise<CoderCommandResult> => {
   if (args.length === 0) {
-    throw new Error("runOpenSsh requires at least one CLI argument");
+    throw new Error(`${binary} requires at least one CLI argument`);
   }
 
   return new Promise((resolve, reject) => {
-    const proc = spawn("ssh", [...args], {
+    const proc = spawn(binary, [...args], {
       env: options.env,
       stdio: [options.stdin !== undefined ? "pipe" : "ignore", "pipe", "pipe"],
     });
@@ -256,7 +198,7 @@ const runOpenSsh = (
     proc.on("error", (error: Error) => {
       reject(
         new Error(
-          `Failed to start ${displayOpenSshCommand(args)}: ${error.message}`,
+          `Failed to start ${displayCommand(binary, args)}: ${error.message}`,
         ),
       );
     });
@@ -271,6 +213,24 @@ const runOpenSsh = (
   });
 };
 
+const runCoder = (
+  args: readonly string[],
+  options: {
+    readonly env: NodeJS.ProcessEnv;
+    readonly stdin?: string;
+    readonly onStdoutLine?: (line: string) => void;
+  },
+): Promise<CoderCommandResult> => runChildProcess("coder", args, options);
+
+const runOpenSsh = (
+  args: readonly string[],
+  options: {
+    readonly env: NodeJS.ProcessEnv;
+    readonly stdin?: string;
+    readonly onStdoutLine?: (line: string) => void;
+  },
+): Promise<CoderCommandResult> => runChildProcess("ssh", args, options);
+
 const runCoderChecked = async (
   args: readonly string[],
   options: { readonly env: NodeJS.ProcessEnv; readonly stdin?: string },
@@ -279,7 +239,7 @@ const runCoderChecked = async (
   const result = await runCoder(args, options);
   if (result.exitCode !== 0) {
     throw new Error(
-      `${description} failed with exit code ${result.exitCode}: ${displayCommand(args)}\n${result.stderr}${result.stdout}`,
+      `${description} failed with exit code ${result.exitCode}: ${displayCommand("coder", args)}\n${result.stderr}${result.stdout}`,
     );
   }
   return result;
@@ -652,6 +612,13 @@ const buildOpenSshArgs = (
   remoteCommand,
 ];
 
+const assertEnvKey = (key: string): void => {
+  assertNonEmptyString(key, "Coder SSH env key");
+  if (key.includes("=")) {
+    throw new Error(`Coder SSH env key must not contain '=': ${key}`);
+  }
+};
+
 const buildSshArgs = (
   sshRef: string,
   sandboxEnv: Record<string, string>,
@@ -659,10 +626,7 @@ const buildSshArgs = (
 ): string[] => {
   const args = ["ssh"];
   for (const [key, value] of Object.entries(sandboxEnv)) {
-    assertNonEmptyString(key, "Coder SSH env key");
-    if (key.includes("=")) {
-      throw new Error(`Coder SSH env key must not contain '=': ${key}`);
-    }
+    assertEnvKey(key);
     args.push("--env", `${key}=${value}`);
   }
   args.push(sshRef, "--", ...remoteArgs);
@@ -682,12 +646,7 @@ const remoteShell = (command: string): string[] => [
 const buildEnvPrefix = (sandboxEnv: Record<string, string>): string => {
   const entries = Object.entries(sandboxEnv);
   if (entries.length === 0) return "";
-  for (const [key] of entries) {
-    assertNonEmptyString(key, "Coder SSH env key");
-    if (key.includes("=")) {
-      throw new Error(`Coder SSH env key must not contain '=': ${key}`);
-    }
-  }
+  for (const [key] of entries) assertEnvKey(key);
   return `${entries
     .map(([key, value]) => `${key}=${shellQuote(value)}`)
     .join(" ")} `;
@@ -1022,33 +981,26 @@ const createHandle = (
     const cwd = opts?.cwd ?? resolved.worktreePath;
     const effectiveCommand = opts?.sudo ? `sudo ${command}` : command;
     const remoteShellArg = `cd ${shellQuote(cwd)} && ${effectiveCommand}`;
+    const onStdoutLine = opts?.onLine;
 
+    // Stdin-bearing exec routes through OpenSSH (the same transport
+    // copyFileIn / copyFileOut use) because `coder ssh` does not propagate
+    // stdin EOF — see runChildProcess. Non-stdin exec stays on direct
+    // `coder ssh` to minimise blast radius.
     if (opts?.stdin !== undefined) {
-      // OpenSSH path: `coder ssh` does not propagate stdin EOF to the remote
-      // process, which makes commands like `claude --print -p -` hang waiting
-      // for input the host already sent. OpenSSH (via
-      // `ProxyCommand=coder ssh --stdio …`) handles stdin EOF correctly and
-      // is the same transport `copyFileIn` / `copyFileOut` already use.
       const envPrefix = buildEnvPrefix(sandboxEnv);
       return runOpenSsh(
         buildOpenSshArgs(
           resolved.sshHostname,
           `${envPrefix}sh -c ${shellQuote(remoteShellArg)}`,
         ),
-        {
-          env,
-          stdin: opts.stdin,
-          ...(opts.onLine === undefined ? {} : { onStdoutLine: opts.onLine }),
-        },
+        { env, stdin: opts.stdin, onStdoutLine },
       );
     }
 
     return runCoder(
       buildSshArgs(resolved.sshRef, sandboxEnv, remoteShell(remoteShellArg)),
-      {
-        env,
-        ...(opts?.onLine === undefined ? {} : { onStdoutLine: opts.onLine }),
-      },
+      { env, onStdoutLine },
     );
   },
 
