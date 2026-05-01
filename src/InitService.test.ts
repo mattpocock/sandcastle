@@ -12,10 +12,15 @@ import {
   listTemplates,
   listBacklogManagers,
   getBacklogManager,
+  initializeBacklogManager,
   listSandboxProviders,
   getSandboxProvider,
 } from "./InitService.js";
-import type { AgentEntry, ScaffoldOptions } from "./InitService.js";
+import type {
+  AgentEntry,
+  BacklogManagerInitResult,
+  ScaffoldOptions,
+} from "./InitService.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 import { SKELETON_PROMPT } from "./templates.js";
 
@@ -37,6 +42,59 @@ const runScaffold = (repoDir: string, options?: Partial<ScaffoldOptions>) =>
       Effect.provide(NodeFileSystem.layer),
     ),
   );
+
+const stripSandcastleLabelInit: BacklogManagerInitResult = {
+  rewritePromptFile: (content) => content.replaceAll(" --label Sandcastle", ""),
+};
+
+const createFakeShell = (options?: { throwOnRun?: Error }) => {
+  const commands: string[] = [];
+  return {
+    commands,
+    shell: {
+      run: (command: string) => {
+        commands.push(command);
+        if (options?.throwOnRun) {
+          throw options.throwOnRun;
+        }
+      },
+    },
+  };
+};
+
+const runBacklogManagerInit = (
+  managerName: string,
+  options: {
+    confirm: boolean | symbol;
+    shell: {
+      run: (command: string) => void;
+    };
+  },
+) => {
+  const manager = getBacklogManager(managerName)!;
+  const prompts: string[] = [];
+
+  const result = Effect.runPromise(
+    initializeBacklogManager(manager, {
+      managerLabel: manager.label,
+      confirm: async ({ message }) => {
+        prompts.push(message);
+        return options.confirm;
+      },
+      shell: {
+        run: (command) => {
+          options.shell.run(command);
+        },
+      },
+    }),
+  );
+
+  return {
+    manager,
+    prompts,
+    result,
+  };
+};
 
 // ---------------------------------------------------------------------------
 // Agent registry
@@ -198,6 +256,22 @@ describe("InitService scaffold", () => {
       join(dir, ".sandcastle", ".env.example"),
       "utf-8",
     );
+    expect(envExample).not.toContain("GH_TOKEN=");
+  });
+
+  it("generates .env.example with Linear env vars when backlog manager is linear", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      backlogManager: getBacklogManager("linear"),
+    });
+
+    const envExample = await readFile(
+      join(dir, ".sandcastle", ".env.example"),
+      "utf-8",
+    );
+    expect(envExample).toContain("LINEAR_API_KEY=");
+    expect(envExample).not.toContain("LINEAR_WORKSPACE=");
+    expect(envExample).toContain("LINEAR_DONE_STATE=Done");
     expect(envExample).not.toContain("GH_TOKEN=");
   });
 
@@ -695,11 +769,11 @@ describe("InitService scaffold", () => {
     expect(mainTs).not.toContain("claudeCode");
   });
 
-  // --- createLabel option ---
+  // --- backlogManagerInit option ---
 
-  it("simple-loop prompt.md retains --label Sandcastle when createLabel is true", async () => {
+  it("simple-loop prompt.md retains --label Sandcastle with default init result", async () => {
     const dir = await makeDir();
-    await runScaffold(dir, { templateName: "simple-loop", createLabel: true });
+    await runScaffold(dir, { templateName: "simple-loop" });
 
     const prompt = await readFile(
       join(dir, ".sandcastle", "prompt.md"),
@@ -708,9 +782,12 @@ describe("InitService scaffold", () => {
     expect(prompt).toContain("--label Sandcastle");
   });
 
-  it("simple-loop prompt.md strips --label Sandcastle when createLabel is false", async () => {
+  it("simple-loop prompt.md strips --label Sandcastle when init result rewrites prompts", async () => {
     const dir = await makeDir();
-    await runScaffold(dir, { templateName: "simple-loop", createLabel: false });
+    await runScaffold(dir, {
+      templateName: "simple-loop",
+      backlogManagerInit: stripSandcastleLabelInit,
+    });
 
     const prompt = await readFile(
       join(dir, ".sandcastle", "prompt.md"),
@@ -723,11 +800,11 @@ describe("InitService scaffold", () => {
     expect(prompt).not.toMatch(/gh issue list {2}/);
   });
 
-  it("parallel-planner plan-prompt.md strips --label Sandcastle when createLabel is false", async () => {
+  it("parallel-planner plan-prompt.md strips --label Sandcastle when init result rewrites prompts", async () => {
     const dir = await makeDir();
     await runScaffold(dir, {
       templateName: "parallel-planner",
-      createLabel: false,
+      backlogManagerInit: stripSandcastleLabelInit,
     });
 
     const prompt = await readFile(
@@ -738,11 +815,11 @@ describe("InitService scaffold", () => {
     expect(prompt).toContain("gh issue list");
   });
 
-  it("sequential-reviewer implement-prompt.md strips --label Sandcastle when createLabel is false", async () => {
+  it("sequential-reviewer implement-prompt.md strips --label Sandcastle when init result rewrites prompts", async () => {
     const dir = await makeDir();
     await runScaffold(dir, {
       templateName: "sequential-reviewer",
-      createLabel: false,
+      backlogManagerInit: stripSandcastleLabelInit,
     });
 
     const prompt = await readFile(
@@ -755,7 +832,7 @@ describe("InitService scaffold", () => {
 
   it("scaffolded prompts that lack a runtime TASK_ID do not contain {{TASK_ID}}", async () => {
     // Regression test for #477: the {{TASK_ID}} placeholder inside
-    // VIEW_TASK_COMMAND / CLOSE_TASK_COMMAND used to leak into prompts
+    // VIEW_TASK_SOURCE / CLOSE_TASK_SOURCE used to leak into prompts
     // whose runtime promptArgs do not include TASK_ID (simple-loop,
     // sequential-reviewer's implement, parallel-planner*'s merge),
     // causing PromptArgumentSubstitution to throw on every iteration.
@@ -773,7 +850,7 @@ describe("InitService scaffold", () => {
     }
   });
 
-  it("createLabel defaults to true (label retained when not specified)", async () => {
+  it("backlogManagerInit defaults to retaining generated prompts", async () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "simple-loop" });
 
@@ -1141,25 +1218,24 @@ describe("InitService scaffold", () => {
   // --- Backlog manager ---
 
   describe("Backlog manager registry", () => {
-    it("listBacklogManagers returns github-issues and beads", () => {
+    it("listBacklogManagers returns github-issues, beads, and linear", () => {
       const managers = listBacklogManagers();
       expect(managers.some((m) => m.name === "github-issues")).toBe(true);
       expect(managers.some((m) => m.name === "beads")).toBe(true);
+      expect(managers.some((m) => m.name === "linear")).toBe(true);
     });
 
     it("getBacklogManager returns github-issues entry with expected templateArgs", () => {
       const manager = getBacklogManager("github-issues");
       expect(manager).toBeDefined();
       expect(manager!.label).toBe("GitHub Issues");
-      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain(
+      expect(manager!.templateArgs.LIST_TASKS_SOURCE).toContain(
         "gh issue list",
       );
-      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain("labels");
-      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain("comments");
-      expect(manager!.templateArgs.VIEW_TASK_COMMAND).toContain(
-        "gh issue view",
-      );
-      expect(manager!.templateArgs.CLOSE_TASK_COMMAND).toContain(
+      expect(manager!.templateArgs.LIST_TASKS_SOURCE).toContain("labels");
+      expect(manager!.templateArgs.LIST_TASKS_SOURCE).toContain("comments");
+      expect(manager!.templateArgs.VIEW_TASK_SOURCE).toContain("gh issue view");
+      expect(manager!.templateArgs.CLOSE_TASK_SOURCE).toContain(
         "gh issue close",
       );
       expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).toContain(
@@ -1172,9 +1248,11 @@ describe("InitService scaffold", () => {
       const manager = getBacklogManager("beads");
       expect(manager).toBeDefined();
       expect(manager!.label).toBe("Beads");
-      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toBe("bd ready --json");
-      expect(manager!.templateArgs.VIEW_TASK_COMMAND).toContain("bd show");
-      expect(manager!.templateArgs.CLOSE_TASK_COMMAND).toContain("bd close");
+      expect(manager!.templateArgs.LIST_TASKS_SOURCE).toBe(
+        "!`bd ready --json`",
+      );
+      expect(manager!.templateArgs.VIEW_TASK_SOURCE).toContain("bd show");
+      expect(manager!.templateArgs.CLOSE_TASK_SOURCE).toContain("bd close");
       expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).toContain("beads");
       expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).toContain("libicu72");
       expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).toContain(
@@ -1189,12 +1267,174 @@ describe("InitService scaffold", () => {
       );
     });
 
+    it("getBacklogManager returns linear entry with expected templateArgs", () => {
+      const manager = getBacklogManager("linear");
+      expect(manager).toBeDefined();
+      expect(manager!.label).toBe("Linear");
+      expect(manager!.templateArgs.LIST_TASKS_SOURCE).toContain(
+        "official Linear MCP server",
+      );
+      expect(manager!.templateArgs.LIST_TASKS_SOURCE).toContain(
+        "https://mcp.linear.app/mcp",
+      );
+      expect(manager!.templateArgs.LIST_TASKS_SOURCE).toContain("Sandcastle");
+      expect(manager!.templateArgs.VIEW_TASK_SOURCE).toContain("Linear MCP");
+      expect(manager!.templateArgs.CLOSE_TASK_SOURCE).toContain("Linear MCP");
+      expect(manager!.templateArgs.CLOSE_TASK_SOURCE).toContain(
+        "LINEAR_DONE_STATE",
+      );
+      expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).toContain(
+        "https://mcp.linear.app/mcp",
+      );
+      expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).not.toContain(
+        "@schpet/linear-cli",
+      );
+      expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).not.toContain("gh");
+      expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).not.toContain(
+        "beads",
+      );
+    });
+
     it("getBacklogManager returns undefined for unknown manager", () => {
       expect(getBacklogManager("nonexistent")).toBeUndefined();
     });
   });
 
   describe("Backlog manager scaffold", () => {
+    it("label-based managers create their backlog labels and keep prompt filters when accepted", async () => {
+      const cases = [
+        {
+          name: "github-issues",
+          command:
+            'gh label create "Sandcastle" --description "Issues for Sandcastle to work on" --color "F9A825" 2>/dev/null',
+          promptCommand: "gh issue list",
+        },
+      ];
+
+      for (const testCase of cases) {
+        const dir = await makeDir();
+        const fakeShell = createFakeShell();
+        const init = runBacklogManagerInit(testCase.name, {
+          confirm: true,
+          shell: fakeShell.shell,
+        });
+        const backlogManagerInit = await init.result;
+
+        await runScaffold(dir, {
+          templateName: "simple-loop",
+          backlogManager: init.manager,
+          backlogManagerInit,
+        });
+
+        const prompt = await readFile(
+          join(dir, ".sandcastle", "prompt.md"),
+          "utf-8",
+        );
+        expect(init.prompts, testCase.name).toEqual([
+          `Create a "Sandcastle" ${init.manager.label} label? (Templates filter tasks by this label)`,
+        ]);
+        expect(fakeShell.commands, testCase.name).toEqual([testCase.command]);
+        expect(prompt, testCase.name).toContain(testCase.promptCommand);
+        expect(prompt, testCase.name).toContain("--label Sandcastle");
+      }
+    });
+
+    it("label-based managers remove prompt filters when label setup is declined", async () => {
+      const cases = [{ name: "github-issues", promptCommand: "gh issue list" }];
+
+      for (const testCase of cases) {
+        const dir = await makeDir();
+        const fakeShell = createFakeShell();
+        const init = runBacklogManagerInit(testCase.name, {
+          confirm: false,
+          shell: fakeShell.shell,
+        });
+        const backlogManagerInit = await init.result;
+
+        await runScaffold(dir, {
+          templateName: "simple-loop",
+          backlogManager: init.manager,
+          backlogManagerInit,
+        });
+
+        const prompt = await readFile(
+          join(dir, ".sandcastle", "prompt.md"),
+          "utf-8",
+        );
+        expect(fakeShell.commands, testCase.name).toEqual([]);
+        expect(prompt, testCase.name).toContain(testCase.promptCommand);
+        expect(prompt, testCase.name).not.toContain("--label Sandcastle");
+      }
+    });
+
+    it("linear init does not prompt or run shell commands", async () => {
+      const fakeShell = createFakeShell();
+      const init = runBacklogManagerInit("linear", {
+        confirm: true,
+        shell: fakeShell.shell,
+      });
+      const backlogManagerInit = await init.result;
+
+      expect(init.prompts).toEqual([]);
+      expect(fakeShell.commands).toEqual([]);
+      expect(backlogManagerInit.rewritePromptFile("Use Linear MCP")).toBe(
+        "Use Linear MCP",
+      );
+    });
+
+    it("label command failures do not prevent scaffolded prompts from using the label filter", async () => {
+      const dir = await makeDir();
+      const fakeShell = createFakeShell({
+        throwOnRun: new Error("label already exists"),
+      });
+      const init = runBacklogManagerInit("github-issues", {
+        confirm: true,
+        shell: fakeShell.shell,
+      });
+      const backlogManagerInit = await init.result;
+
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        backlogManager: init.manager,
+        backlogManagerInit,
+      });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "prompt.md"),
+        "utf-8",
+      );
+      expect(fakeShell.commands).toEqual([
+        'gh label create "Sandcastle" --description "Issues for Sandcastle to work on" --color "F9A825" 2>/dev/null',
+      ]);
+      expect(prompt).toContain("gh issue list");
+      expect(prompt).toContain("--label Sandcastle");
+    });
+
+    it("beads scaffolds without backlog manager setup prompts or commands", async () => {
+      const dir = await makeDir();
+      const fakeShell = createFakeShell();
+      const init = runBacklogManagerInit("beads", {
+        confirm: true,
+        shell: fakeShell.shell,
+      });
+      const backlogManagerInit = await init.result;
+
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        backlogManager: init.manager,
+        backlogManagerInit,
+      });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "prompt.md"),
+        "utf-8",
+      );
+      expect(init.prompts).toEqual([]);
+      expect(fakeShell.commands).toEqual([]);
+      expect(prompt).toContain("bd ready --json");
+      expect(prompt).not.toContain("--label Sandcastle");
+    });
+
     it("simple-loop with github-issues produces prompt with gh issue commands (richer version)", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
@@ -1210,8 +1450,8 @@ describe("InitService scaffold", () => {
       expect(prompt).toContain("labels");
       expect(prompt).toContain("comments");
       expect(prompt).toContain("gh issue close");
-      expect(prompt).not.toContain("{{LIST_TASKS_COMMAND}}");
-      expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
+      expect(prompt).not.toContain("{{LIST_TASKS_SOURCE}}");
+      expect(prompt).not.toContain("{{CLOSE_TASK_SOURCE}}");
     });
 
     it("simple-loop with beads produces prompt with bd commands", async () => {
@@ -1228,8 +1468,32 @@ describe("InitService scaffold", () => {
       expect(prompt).toContain("bd ready --json");
       expect(prompt).toContain("bd close");
       expect(prompt).not.toContain("gh issue");
-      expect(prompt).not.toContain("{{LIST_TASKS_COMMAND}}");
-      expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
+      expect(prompt).not.toContain("{{LIST_TASKS_SOURCE}}");
+      expect(prompt).not.toContain("{{CLOSE_TASK_SOURCE}}");
+    });
+
+    it("simple-loop with linear produces prompt with Linear MCP instructions", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        backlogManager: getBacklogManager("linear"),
+      });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).toContain("official Linear MCP server");
+      expect(prompt).toContain("Sandcastle");
+      expect(prompt).toContain("https://mcp.linear.app/mcp");
+      expect(prompt).toContain("Completed by Sandcastle");
+      expect(prompt).toContain("LINEAR_DONE_STATE");
+      expect(prompt).not.toContain("linear issue");
+      expect(prompt).not.toContain("@schpet/linear-cli");
+      expect(prompt).not.toContain("gh issue");
+      expect(prompt).not.toContain("bd ");
+      expect(prompt).not.toContain("{{LIST_TASKS_SOURCE}}");
+      expect(prompt).not.toContain("{{CLOSE_TASK_SOURCE}}");
     });
 
     it("simple-loop with beads skips --label Sandcastle (no label to strip)", async () => {
@@ -1246,12 +1510,27 @@ describe("InitService scaffold", () => {
       expect(prompt).not.toContain("--label Sandcastle");
     });
 
-    it("simple-loop with github-issues retains --label Sandcastle when createLabel is true", async () => {
+    it("simple-loop with linear leaves MCP instructions unchanged by default init", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        backlogManager: getBacklogManager("linear"),
+      });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).toContain("official Linear MCP server");
+      expect(prompt).toContain("Sandcastle");
+      expect(prompt).not.toContain("linear issue");
+    });
+
+    it("simple-loop with github-issues retains --label Sandcastle with default init result", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
         templateName: "simple-loop",
         backlogManager: getBacklogManager("github-issues"),
-        createLabel: true,
       });
 
       const prompt = await readFile(
@@ -1261,12 +1540,12 @@ describe("InitService scaffold", () => {
       expect(prompt).toContain("--label Sandcastle");
     });
 
-    it("simple-loop with github-issues strips --label Sandcastle when createLabel is false", async () => {
+    it("simple-loop with github-issues strips --label Sandcastle when init result rewrites prompts", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
         templateName: "simple-loop",
         backlogManager: getBacklogManager("github-issues"),
-        createLabel: false,
+        backlogManagerInit: stripSandcastleLabelInit,
       });
 
       const prompt = await readFile(
@@ -1287,7 +1566,7 @@ describe("InitService scaffold", () => {
       );
       // Should default to github-issues and replace placeholders
       expect(prompt).toContain("gh issue list");
-      expect(prompt).not.toContain("{{LIST_TASKS_COMMAND}}");
+      expect(prompt).not.toContain("{{LIST_TASKS_SOURCE}}");
     });
 
     // --- sequential-reviewer ---
@@ -1307,8 +1586,8 @@ describe("InitService scaffold", () => {
       expect(prompt).toContain("labels");
       expect(prompt).toContain("comments");
       expect(prompt).toContain("gh issue close");
-      expect(prompt).not.toContain("{{LIST_TASKS_COMMAND}}");
-      expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
+      expect(prompt).not.toContain("{{LIST_TASKS_SOURCE}}");
+      expect(prompt).not.toContain("{{CLOSE_TASK_SOURCE}}");
     });
 
     it("sequential-reviewer with beads produces implement-prompt with bd commands", async () => {
@@ -1325,8 +1604,29 @@ describe("InitService scaffold", () => {
       expect(prompt).toContain("bd ready --json");
       expect(prompt).toContain("bd close");
       expect(prompt).not.toContain("gh issue");
-      expect(prompt).not.toContain("{{LIST_TASKS_COMMAND}}");
-      expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
+      expect(prompt).not.toContain("{{LIST_TASKS_SOURCE}}");
+      expect(prompt).not.toContain("{{CLOSE_TASK_SOURCE}}");
+    });
+
+    it("sequential-reviewer with linear produces implement-prompt with Linear MCP instructions", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "sequential-reviewer",
+        backlogManager: getBacklogManager("linear"),
+      });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "implement-prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).toContain("official Linear MCP server");
+      expect(prompt).toContain("Sandcastle");
+      expect(prompt).toContain("Completed by Sandcastle");
+      expect(prompt).toContain("LINEAR_DONE_STATE");
+      expect(prompt).not.toContain("linear issue");
+      expect(prompt).not.toContain("gh issue");
+      expect(prompt).not.toContain("{{LIST_TASKS_SOURCE}}");
+      expect(prompt).not.toContain("{{CLOSE_TASK_SOURCE}}");
     });
 
     // --- blank ---
@@ -1343,7 +1643,7 @@ describe("InitService scaffold", () => {
         "utf-8",
       );
       expect(prompt).toContain("gh issue list");
-      expect(prompt).not.toContain("{{LIST_TASKS_COMMAND}}");
+      expect(prompt).not.toContain("{{LIST_TASKS_SOURCE}}");
     });
 
     it("blank with beads produces prompt with bd ready example", async () => {
@@ -1359,7 +1659,25 @@ describe("InitService scaffold", () => {
       );
       expect(prompt).toContain("bd ready --json");
       expect(prompt).not.toContain("gh issue");
-      expect(prompt).not.toContain("{{LIST_TASKS_COMMAND}}");
+      expect(prompt).not.toContain("{{LIST_TASKS_SOURCE}}");
+    });
+
+    it("blank with linear produces prompt with official Linear MCP server example", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "blank",
+        backlogManager: getBacklogManager("linear"),
+      });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).toContain("official Linear MCP server");
+      expect(prompt).toContain("Sandcastle");
+      expect(prompt).not.toContain("linear issue");
+      expect(prompt).not.toContain("gh issue");
+      expect(prompt).not.toContain("{{LIST_TASKS_SOURCE}}");
     });
 
     // --- parallel-planner ---
@@ -1378,7 +1696,7 @@ describe("InitService scaffold", () => {
       expect(planPrompt).toContain("gh issue list");
       expect(planPrompt).toContain("labels");
       expect(planPrompt).toContain("comments");
-      expect(planPrompt).not.toContain("{{LIST_TASKS_COMMAND}}");
+      expect(planPrompt).not.toContain("{{LIST_TASKS_SOURCE}}");
     });
 
     it("parallel-planner with beads produces plan-prompt with bd commands", async () => {
@@ -1394,7 +1712,26 @@ describe("InitService scaffold", () => {
       );
       expect(planPrompt).toContain("bd ready --json");
       expect(planPrompt).not.toContain("gh issue");
-      expect(planPrompt).not.toContain("{{LIST_TASKS_COMMAND}}");
+      expect(planPrompt).not.toContain("{{LIST_TASKS_SOURCE}}");
+    });
+
+    it("parallel-planner with linear produces plan-prompt with Linear MCP instructions", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "parallel-planner",
+        backlogManager: getBacklogManager("linear"),
+      });
+
+      const planPrompt = await readFile(
+        join(dir, ".sandcastle", "plan-prompt.md"),
+        "utf-8",
+      );
+      expect(planPrompt).toContain("official Linear MCP server");
+      expect(planPrompt).toContain("Sandcastle");
+      expect(planPrompt).toContain("https://mcp.linear.app/mcp");
+      expect(planPrompt).not.toContain("linear issue");
+      expect(planPrompt).not.toContain("gh issue");
+      expect(planPrompt).not.toContain("{{LIST_TASKS_SOURCE}}");
     });
 
     it("parallel-planner main.mts uses id:string and TASK_ID", async () => {
@@ -1440,7 +1777,7 @@ describe("InitService scaffold", () => {
         "utf-8",
       );
       expect(prompt).toContain("gh issue view");
-      expect(prompt).not.toContain("{{VIEW_TASK_COMMAND}}");
+      expect(prompt).not.toContain("{{VIEW_TASK_SOURCE}}");
     });
 
     it("parallel-planner with beads produces implement-prompt with bd show", async () => {
@@ -1456,7 +1793,23 @@ describe("InitService scaffold", () => {
       );
       expect(prompt).toContain("bd show");
       expect(prompt).not.toContain("gh issue");
-      expect(prompt).not.toContain("{{VIEW_TASK_COMMAND}}");
+      expect(prompt).not.toContain("{{VIEW_TASK_SOURCE}}");
+    });
+
+    it("parallel-planner with linear produces implement-prompt with Linear MCP tools", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "parallel-planner",
+        backlogManager: getBacklogManager("linear"),
+      });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "implement-prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).toContain("Linear MCP tools");
+      expect(prompt).not.toContain("gh issue");
+      expect(prompt).not.toContain("{{VIEW_TASK_SOURCE}}");
     });
 
     it("parallel-planner with github-issues produces merge-prompt with gh issue close", async () => {
@@ -1471,7 +1824,7 @@ describe("InitService scaffold", () => {
         "utf-8",
       );
       expect(prompt).toContain("gh issue close");
-      expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
+      expect(prompt).not.toContain("{{CLOSE_TASK_SOURCE}}");
     });
 
     it("parallel-planner with beads produces merge-prompt with bd close", async () => {
@@ -1487,7 +1840,24 @@ describe("InitService scaffold", () => {
       );
       expect(prompt).toContain("bd close");
       expect(prompt).not.toContain("gh issue");
-      expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
+      expect(prompt).not.toContain("{{CLOSE_TASK_SOURCE}}");
+    });
+
+    it("parallel-planner with linear produces merge-prompt with Linear MCP completion instructions", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "parallel-planner",
+        backlogManager: getBacklogManager("linear"),
+      });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "merge-prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).toContain("Completed by Sandcastle");
+      expect(prompt).toContain("LINEAR_DONE_STATE");
+      expect(prompt).not.toContain("gh issue");
+      expect(prompt).not.toContain("{{CLOSE_TASK_SOURCE}}");
     });
 
     it("parallel-planner implement-prompt does not contain close-issue instruction", async () => {
@@ -1499,7 +1869,7 @@ describe("InitService scaffold", () => {
         "utf-8",
       );
       expect(prompt).not.toContain("close the issue when done");
-      expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
+      expect(prompt).not.toContain("{{CLOSE_TASK_SOURCE}}");
     });
 
     it("parallel-planner implement-prompt uses backlog-agnostic language", async () => {
@@ -1531,7 +1901,7 @@ describe("InitService scaffold", () => {
       expect(planPrompt).toContain("gh issue list");
       expect(planPrompt).toContain("labels");
       expect(planPrompt).toContain("comments");
-      expect(planPrompt).not.toContain("{{LIST_TASKS_COMMAND}}");
+      expect(planPrompt).not.toContain("{{LIST_TASKS_SOURCE}}");
     });
 
     it("parallel-planner-with-review with beads produces plan-prompt with bd commands", async () => {
@@ -1547,7 +1917,26 @@ describe("InitService scaffold", () => {
       );
       expect(planPrompt).toContain("bd ready --json");
       expect(planPrompt).not.toContain("gh issue");
-      expect(planPrompt).not.toContain("{{LIST_TASKS_COMMAND}}");
+      expect(planPrompt).not.toContain("{{LIST_TASKS_SOURCE}}");
+    });
+
+    it("parallel-planner-with-review with linear produces plan-prompt with Linear MCP instructions", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "parallel-planner-with-review",
+        backlogManager: getBacklogManager("linear"),
+      });
+
+      const planPrompt = await readFile(
+        join(dir, ".sandcastle", "plan-prompt.md"),
+        "utf-8",
+      );
+      expect(planPrompt).toContain("official Linear MCP server");
+      expect(planPrompt).toContain("Sandcastle");
+      expect(planPrompt).toContain("https://mcp.linear.app/mcp");
+      expect(planPrompt).not.toContain("linear issue");
+      expect(planPrompt).not.toContain("gh issue");
+      expect(planPrompt).not.toContain("{{LIST_TASKS_SOURCE}}");
     });
 
     it("parallel-planner-with-review main.mts uses id:string and TASK_ID", async () => {
@@ -1578,7 +1967,7 @@ describe("InitService scaffold", () => {
         "utf-8",
       );
       expect(prompt).not.toContain("close the issue when done");
-      expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
+      expect(prompt).not.toContain("{{CLOSE_TASK_SOURCE}}");
     });
 
     it("parallel-planner-with-review implement-prompt uses TASK_ID placeholder", async () => {
@@ -1607,7 +1996,7 @@ describe("InitService scaffold", () => {
         "utf-8",
       );
       expect(prompt).toContain("gh issue view");
-      expect(prompt).not.toContain("{{VIEW_TASK_COMMAND}}");
+      expect(prompt).not.toContain("{{VIEW_TASK_SOURCE}}");
     });
 
     it("parallel-planner-with-review with beads produces implement-prompt with bd show", async () => {
@@ -1623,7 +2012,23 @@ describe("InitService scaffold", () => {
       );
       expect(prompt).toContain("bd show");
       expect(prompt).not.toContain("gh issue");
-      expect(prompt).not.toContain("{{VIEW_TASK_COMMAND}}");
+      expect(prompt).not.toContain("{{VIEW_TASK_SOURCE}}");
+    });
+
+    it("parallel-planner-with-review with linear produces implement-prompt with Linear MCP tools", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "parallel-planner-with-review",
+        backlogManager: getBacklogManager("linear"),
+      });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "implement-prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).toContain("Linear MCP tools");
+      expect(prompt).not.toContain("gh issue");
+      expect(prompt).not.toContain("{{VIEW_TASK_SOURCE}}");
     });
 
     it("parallel-planner-with-review with github-issues produces merge-prompt with gh issue close", async () => {
@@ -1638,7 +2043,7 @@ describe("InitService scaffold", () => {
         "utf-8",
       );
       expect(prompt).toContain("gh issue close");
-      expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
+      expect(prompt).not.toContain("{{CLOSE_TASK_SOURCE}}");
     });
 
     it("parallel-planner-with-review with beads produces merge-prompt with bd close", async () => {
@@ -1654,7 +2059,24 @@ describe("InitService scaffold", () => {
       );
       expect(prompt).toContain("bd close");
       expect(prompt).not.toContain("gh issue");
-      expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
+      expect(prompt).not.toContain("{{CLOSE_TASK_SOURCE}}");
+    });
+
+    it("parallel-planner-with-review with linear produces merge-prompt with Linear MCP completion instructions", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "parallel-planner-with-review",
+        backlogManager: getBacklogManager("linear"),
+      });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "merge-prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).toContain("Completed by Sandcastle");
+      expect(prompt).toContain("LINEAR_DONE_STATE");
+      expect(prompt).not.toContain("gh issue");
+      expect(prompt).not.toContain("{{CLOSE_TASK_SOURCE}}");
     });
 
     it("parallel-planner-with-review implement-prompt uses backlog-agnostic language", async () => {
@@ -1706,6 +2128,24 @@ describe("InitService scaffold", () => {
       expect(dockerfile).toContain("dpkg-architecture -qDEB_HOST_MULTIARCH");
     });
 
+    it("scaffold with linear produces Dockerfile with official MCP guidance (no Linear CLI)", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        backlogManager: getBacklogManager("linear"),
+      });
+
+      const dockerfile = await readFile(
+        join(dir, ".sandcastle", "Dockerfile"),
+        "utf-8",
+      );
+      expect(dockerfile).toContain("https://mcp.linear.app/mcp");
+      expect(dockerfile).not.toContain("@schpet/linear-cli");
+      expect(dockerfile).not.toContain("linear-cli");
+      expect(dockerfile).not.toContain("GitHub CLI");
+      expect(dockerfile).not.toContain("beads");
+      expect(dockerfile).not.toContain("{{BACKLOG_MANAGER_TOOLS}}");
+    });
+
     it("scaffold with beads + podman produces Containerfile with beads install", async () => {
       const dir = await makeDir();
       const podmanProvider = getSandboxProvider("podman")!;
@@ -1724,6 +2164,26 @@ describe("InitService scaffold", () => {
       expect(containerfile).not.toContain("{{BACKLOG_MANAGER_TOOLS}}");
       expect(containerfile).not.toContain("x86_64-linux-gnu");
       expect(containerfile).toContain("dpkg-architecture -qDEB_HOST_MULTIARCH");
+    });
+
+    it("scaffold with linear + podman produces Containerfile with official MCP guidance", async () => {
+      const dir = await makeDir();
+      const podmanProvider = getSandboxProvider("podman")!;
+      await runScaffold(dir, {
+        backlogManager: getBacklogManager("linear"),
+        sandboxProvider: podmanProvider,
+      });
+
+      const containerfile = await readFile(
+        join(dir, ".sandcastle", "Containerfile"),
+        "utf-8",
+      );
+      expect(containerfile).toContain("https://mcp.linear.app/mcp");
+      expect(containerfile).not.toContain("@schpet/linear-cli");
+      expect(containerfile).not.toContain("linear-cli");
+      expect(containerfile).not.toContain("GitHub CLI");
+      expect(containerfile).not.toContain("beads");
+      expect(containerfile).not.toContain("{{BACKLOG_MANAGER_TOOLS}}");
     });
 
     it("scaffold with beads + pi agent produces Dockerfile with beads install and pi agent", async () => {

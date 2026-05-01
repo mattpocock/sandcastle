@@ -25,10 +25,10 @@ The `config.json` file controls how Sandcastle operates:
 
 ### Options
 
-| Option | Description | Default |
-| --- | --- | --- |
-| `agent` | The agent provider to use | `"claude-code"` |
-| `maxIterations` | Maximum iterations per run | `10` |
+| Option          | Description                | Default         |
+| --------------- | -------------------------- | --------------- |
+| `agent`         | The agent provider to use  | `"claude-code"` |
+| `maxIterations` | Maximum iterations per run | `10`            |
 
 ## Prompt
 
@@ -36,6 +36,16 @@ The `prompt.md` file is the instruction text passed to the agent at the start of
 
 - **Prompt arguments** -- `{{KEY}}` placeholders replaced with values from `promptArgs`
 - **Shell expressions** -- `` !`command` `` markers that evaluate shell commands inside the sandbox
+
+## Backlog Managers
+
+`sandcastle init` can scaffold prompts for GitHub Issues, Beads, or Linear.
+
+- **GitHub Issues** uses the `gh` CLI and filters open issues with the `Sandcastle` label by default.
+- **Beads** uses the `bd` CLI and reads ready tasks from Beads.
+- **Linear** uses Linear's official remote MCP server at `https://mcp.linear.app/mcp`; generated prompts ask the agent to work from `Sandcastle`-labelled Linear issues through MCP tools.
+
+For Linear, configure your agent with the official MCP endpoint before running Sandcastle. For Codex, run `codex mcp add linear --url https://mcp.linear.app/mcp`; for Claude Code, run `claude mcp add --transport http linear-server https://mcp.linear.app/mcp`. You can also set `LINEAR_API_KEY` in `.sandcastle/.env` and configure the MCP client to pass it as a bearer token. Set `LINEAR_DONE_STATE` if your completion state is not the default `Done`.
 
 ## Environment Variables
 

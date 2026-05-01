@@ -1,7 +1,7 @@
 # Context
 
 <!-- Use !`command` to pull in dynamic context. Commands run inside the sandbox. -->
-<!-- Example: !`git log --oneline -10` or !`{{LIST_TASKS_COMMAND}}` -->
+<!-- Example: !`git log --oneline -10` or {{LIST_TASKS_SOURCE}} -->
 
 # Task
 

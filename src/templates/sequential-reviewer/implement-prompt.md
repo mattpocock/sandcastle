@@ -2,7 +2,7 @@
 
 ## Open issues
 
-!`{{LIST_TASKS_COMMAND}}`
+{{LIST_TASKS_SOURCE}}
 
 ## Recent RALPH commits (last 10)
 
@@ -35,7 +35,7 @@ Pick the highest-priority open issue that is not blocked by another open issue.
    - List key decisions made
    - List files changed
    - Note any blockers for the next iteration
-6. **Close** — close the issue with `{{CLOSE_TASK_COMMAND}}` explaining what was done.
+6. **Close** — close the issue with {{CLOSE_TASK_SOURCE}} explaining what was done.
 
 ## Rules
 

@@ -1,12 +1,8 @@
 # ISSUES
 
-Here are the open issues in the repo:
+Use the configured backlog source to find open issues:
 
-<issues-json>
-
-!`{{LIST_TASKS_COMMAND}}`
-
-</issues-json>
+{{LIST_TASKS_SOURCE}}
 
 # TASK
 

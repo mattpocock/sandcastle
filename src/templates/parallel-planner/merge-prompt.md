@@ -17,7 +17,7 @@ After all branches are merged, make a single commit summarizing the merge.
 
 For each branch that was merged, close its issue using the following command:
 
-`{{CLOSE_TASK_COMMAND}}`
+{{CLOSE_TASK_SOURCE}}
 
 Here are all the issues:
 

@@ -592,17 +592,29 @@ Tell the agent to output your chosen string(s) in the prompt, and the orchestrat
 
 ### Templates
 
-`sandcastle init` prompts you to choose a sandbox provider (Docker or Podman), a backlog manager (GitHub Issues or Beads), and a template, which scaffolds a ready-to-use prompt and `main.mts` suited to a specific workflow. If your project's `package.json` has `"type": "module"`, the file will be named `main.ts` instead. Five templates are available:
+`sandcastle init` prompts you to choose a sandbox provider (Docker or Podman), a backlog manager (GitHub Issues, Beads, or Linear), and a template, which scaffolds a ready-to-use prompt and `main.mts` suited to a specific workflow. If your project's `package.json` has `"type": "module"`, the file will be named `main.ts` instead. Five templates are available:
 
-| Template                       | Description                                                               |
-| ------------------------------ | ------------------------------------------------------------------------- |
-| `blank`                        | Bare scaffold — write your own prompt and orchestration                   |
-| `simple-loop`                  | Picks GitHub issues one by one and closes them                            |
-| `sequential-reviewer`          | Implements issues one by one, with a code review step after each          |
-| `parallel-planner`             | Plans parallelizable issues, executes on separate branches, then merges   |
-| `parallel-planner-with-review` | Plans parallelizable issues, executes with per-branch review, then merges |
+| Template                       | Description                                                              |
+| ------------------------------ | ------------------------------------------------------------------------ |
+| `blank`                        | Bare scaffold — write your own prompt and orchestration                  |
+| `simple-loop`                  | Picks tasks one by one and closes them                                   |
+| `sequential-reviewer`          | Implements tasks one by one, with a code review step after each          |
+| `parallel-planner`             | Plans parallelizable tasks, executes on separate branches, then merges   |
+| `parallel-planner-with-review` | Plans parallelizable tasks, executes with per-branch review, then merges |
 
 Select a template during `sandcastle init` when prompted, or re-run init in a fresh repo to try a different one.
+
+### Backlog managers
+
+Templates are parameterized by the backlog manager selected during `sandcastle init`:
+
+- **GitHub Issues** installs `gh`, lists open issues with the `Sandcastle` label, views issues with `gh issue view`, and closes issues with a completion comment.
+- **Beads** installs `bd` and uses `bd ready`, `bd show`, and `bd close`.
+- **Linear** uses Linear's official remote MCP server at `https://mcp.linear.app/mcp`; generated prompts ask the agent to find `Sandcastle`-labelled Linear issues, inspect them with MCP tools, and complete them by adding a comment and moving them to the configured done state.
+
+GitHub Issues offers to create the `Sandcastle` label during init. If you decline, the generated prompts remove the `--label Sandcastle` filter.
+
+For Linear, configure your agent to use the official MCP endpoint before running Sandcastle. For Codex, run `codex mcp add linear --url https://mcp.linear.app/mcp`; for Claude Code, run `claude mcp add --transport http linear-server https://mcp.linear.app/mcp`. You can also set `LINEAR_API_KEY` in `.sandcastle/.env` and configure the MCP client to pass it as a bearer token. To use a different completion state, set `LINEAR_DONE_STATE`.
 
 ## CLI commands
 
@@ -1109,7 +1121,7 @@ The `.sandcastle/Dockerfile` controls the sandbox environment. The default templ
 
 - **Node.js 22** (base image)
 - **git**, **curl**, **jq** (system dependencies)
-- **GitHub CLI** (`gh`)
+- Backlog manager tooling for the selected backlog manager, such as **GitHub CLI** (`gh`) or **Beads** (`bd`); Linear uses the official remote MCP server instead of installing a CLI.
 - **Claude Code CLI**
 - A non-root `agent` user (required — Claude runs as this user)
 
@@ -1117,7 +1129,7 @@ When customizing the Dockerfile, ensure you keep:
 
 - A non-root user (the default `agent` user) for Claude to run as
 - `git` (required for commits and branch operations)
-- `gh` (required for issue fetching)
+- The selected backlog manager CLI (required for task fetching)
 - Claude Code CLI installed and on PATH
 
 Add your project-specific dependencies (e.g., language runtimes, build tools) to the Dockerfile as needed.

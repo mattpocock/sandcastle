@@ -224,13 +224,35 @@ export interface BacklogManagerEntry {
   readonly name: string;
   readonly label: string;
   readonly templateArgs: {
-    readonly LIST_TASKS_COMMAND: string;
-    readonly VIEW_TASK_COMMAND: string;
-    readonly CLOSE_TASK_COMMAND: string;
+    readonly LIST_TASKS_SOURCE: string;
+    readonly VIEW_TASK_SOURCE: string;
+    readonly CLOSE_TASK_SOURCE: string;
     readonly BACKLOG_MANAGER_TOOLS: string;
   };
   /** Lines to append to `.env.example` for this backlog manager, or empty string if none needed. */
   readonly envExample: string;
+  readonly init: BacklogManagerInitWorkflow;
+}
+
+export interface BacklogManagerInitWorkflow {
+  readonly run: (
+    context: BacklogManagerInitContext,
+  ) => Effect.Effect<BacklogManagerInitResult, never>;
+}
+
+export interface BacklogManagerInitContext {
+  readonly managerLabel: string;
+  readonly confirm: (options: {
+    message: string;
+    initialValue: boolean;
+  }) => Promise<boolean | symbol>;
+  readonly shell: {
+    readonly run: (command: string) => void;
+  };
+}
+
+export interface BacklogManagerInitResult {
+  readonly rewritePromptFile: (content: string) => string;
 }
 
 const GITHUB_CLI_TOOLS = `# Install GitHub CLI
@@ -255,29 +277,96 @@ RUN curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/i
 
 RUN corepack enable`;
 
+const LINEAR_MCP_SERVER_URL = "https://mcp.linear.app/mcp";
+
+const LINEAR_MCP_TOOLS = `# Linear uses the official remote MCP server.
+# Configure your agent with ${LINEAR_MCP_SERVER_URL} before running Sandcastle.`;
+
+const identityBacklogManagerInitResult: BacklogManagerInitResult = {
+  rewritePromptFile: (content) => content,
+};
+
+const noBacklogManagerInit: BacklogManagerInitWorkflow = {
+  run: () => Effect.succeed(identityBacklogManagerInitResult),
+};
+
+const labelBacklogManagerInit = (options: {
+  labelName: string;
+  createCommand: string;
+  removeFilter: (content: string) => string;
+}): BacklogManagerInitWorkflow => ({
+  run: ({ managerLabel, confirm, shell }) =>
+    Effect.gen(function* () {
+      const shouldCreateLabel = yield* Effect.promise(() =>
+        confirm({
+          message: `Create a "${options.labelName}" ${managerLabel} label? (Templates filter tasks by this label)`,
+          initialValue: true,
+        }),
+      );
+
+      if (shouldCreateLabel === true) {
+        yield* Effect.try({
+          try: () => shell.run(options.createCommand),
+          catch: () => undefined,
+        }).pipe(Effect.ignore);
+
+        return identityBacklogManagerInitResult;
+      }
+
+      return {
+        rewritePromptFile: options.removeFilter,
+      };
+    }),
+});
+
 const BACKLOG_MANAGER_REGISTRY: BacklogManagerEntry[] = [
   {
     name: "github-issues",
     label: "GitHub Issues",
     templateArgs: {
-      LIST_TASKS_COMMAND: `gh issue list --state open --label Sandcastle --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`,
-      VIEW_TASK_COMMAND: "gh issue view <ID>",
-      CLOSE_TASK_COMMAND: `gh issue close <ID> --comment "Completed by Sandcastle"`,
+      LIST_TASKS_SOURCE: `!\`gh issue list --state open --label Sandcastle --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'\``,
+      VIEW_TASK_SOURCE: "`gh issue view <ID>`",
+      CLOSE_TASK_SOURCE:
+        '`gh issue close <ID> --comment "Completed by Sandcastle"`',
       BACKLOG_MANAGER_TOOLS: GITHUB_CLI_TOOLS,
     },
     envExample: `# GitHub personal access token
 GH_TOKEN=`,
+    init: labelBacklogManagerInit({
+      labelName: "Sandcastle",
+      createCommand:
+        'gh label create "Sandcastle" --description "Issues for Sandcastle to work on" --color "F9A825" 2>/dev/null',
+      removeFilter: (content) => content.replaceAll(" --label Sandcastle", ""),
+    }),
   },
   {
     name: "beads",
     label: "Beads",
     templateArgs: {
-      LIST_TASKS_COMMAND: "bd ready --json",
-      VIEW_TASK_COMMAND: "bd show <ID>",
-      CLOSE_TASK_COMMAND: `bd close <ID> "Completed by Sandcastle"`,
+      LIST_TASKS_SOURCE: "!`bd ready --json`",
+      VIEW_TASK_SOURCE: "`bd show <ID>`",
+      CLOSE_TASK_SOURCE: '`bd close <ID> "Completed by Sandcastle"`',
       BACKLOG_MANAGER_TOOLS: BEADS_TOOLS,
     },
     envExample: "",
+    init: noBacklogManagerInit,
+  },
+  {
+    name: "linear",
+    label: "Linear",
+    templateArgs: {
+      LIST_TASKS_SOURCE: `Use the official Linear MCP server (${LINEAR_MCP_SERVER_URL}) to find actionable Linear issues with the "Sandcastle" label in triage, backlog, unstarted, or started states. If the "Sandcastle" label does not exist, create it with the Linear MCP tools before listing issues.`,
+      VIEW_TASK_SOURCE: "the Linear MCP tools to read issue <ID>",
+      CLOSE_TASK_SOURCE:
+        'the Linear MCP tools to add a "Completed by Sandcastle" comment and move the issue to the `LINEAR_DONE_STATE` value, defaulting to "Done"',
+      BACKLOG_MANAGER_TOOLS: LINEAR_MCP_TOOLS,
+    },
+    envExample: `# Linear personal API key
+LINEAR_API_KEY=
+
+# Optional Linear workflow state used when Sandcastle completes an issue
+LINEAR_DONE_STATE=Done`,
+    init: noBacklogManagerInit,
   },
 ];
 
@@ -288,6 +377,12 @@ export const getBacklogManager = (
   name: string,
 ): BacklogManagerEntry | undefined =>
   BACKLOG_MANAGER_REGISTRY.find((b) => b.name === name);
+
+export const initializeBacklogManager = (
+  backlogManager: BacklogManagerEntry,
+  context: BacklogManagerInitContext,
+): Effect.Effect<BacklogManagerInitResult, never> =>
+  backlogManager.init.run(context);
 
 export const getAgent = (name: string): AgentEntry | undefined =>
   AGENT_REGISTRY.find((a) => a.name === name);
@@ -480,12 +575,11 @@ const rewriteMainTs = (
   });
 
 /**
- * When the user opted out of the Sandcastle label, strip ` --label Sandcastle`
- * from all `.md` files in the scaffolded config directory so that `gh issue list`
- * commands work without a label filter.
+ * Let the selected backlog manager's init result adjust scaffolded `.md` files.
  */
 const rewritePromptFiles = (
   configDir: string,
+  backlogManagerInit: BacklogManagerInitResult,
 ): Effect.Effect<void, Error, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -500,7 +594,7 @@ const rewritePromptFiles = (
           const content = yield* fs
             .readFileString(filePath)
             .pipe(Effect.mapError((e) => new Error(e.message)));
-          const updated = content.replace(/ --label Sandcastle/g, "");
+          const updated = backlogManagerInit.rewritePromptFile(content);
           if (updated !== content) {
             yield* fs
               .writeFileString(filePath, updated)
@@ -582,8 +676,8 @@ export interface ScaffoldOptions {
   agent: AgentEntry;
   model: string;
   templateName?: string;
-  createLabel?: boolean;
   backlogManager?: BacklogManagerEntry;
+  backlogManagerInit?: BacklogManagerInitResult;
   sandboxProvider?: SandboxProviderEntry;
 }
 
@@ -625,8 +719,8 @@ export const scaffold = (
       agent,
       model,
       templateName = "blank",
-      createLabel = true,
       backlogManager = BACKLOG_MANAGER_REGISTRY[0]!, // default: github-issues
+      backlogManagerInit = identityBacklogManagerInitResult,
       sandboxProvider = SANDBOX_PROVIDER_REGISTRY[0]!, // default: docker
     } = options;
     const fs = yield* FileSystem.FileSystem;
@@ -683,10 +777,8 @@ export const scaffold = (
     // Replace backlog manager template arguments in all text files (must run before label stripping)
     yield* substituteTemplateArgs(configDir, backlogManager);
 
-    // Strip --label Sandcastle from prompt files when the user declined label creation
-    if (!createLabel) {
-      yield* rewritePromptFiles(configDir);
-    }
+    // Let the selected backlog manager's init result adjust generated prompt files.
+    yield* rewritePromptFiles(configDir, backlogManagerInit);
 
     return { mainFilename };
   });
