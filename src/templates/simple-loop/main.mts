@@ -5,12 +5,22 @@ import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 // Run this with: npx tsx .sandcastle/main.mts
 // Or add to package.json scripts: "sandcastle": "npx tsx .sandcastle/main.mts"
 
+const sandboxConfig = {
+  env: {
+    GIT_CONFIG_GLOBAL: "/home/agent/workspace/.sandcastle/.gitconfig",
+    /* {{SANDBOX_ENV_ENTRIES}} */
+  },
+  mounts: [
+    /* {{SANDBOX_MOUNT_ENTRIES}} */
+  ],
+};
+
 await run({
   // A name for this run, shown as a prefix in log output.
   name: "worker",
 
   // Sandbox provider — Docker is the default runtime.
-  sandbox: docker(),
+  sandbox: docker(sandboxConfig),
 
   // The agent provider. Pass a model string to claudeCode() — sonnet balances
   // capability and speed for most tasks. Switch to claude-opus-4-6 for harder
@@ -44,7 +54,9 @@ await run({
       // onSandboxReady runs once after the sandbox is initialised and the repo is
       // synced in, before the agent starts. Use it to install dependencies or run
       // any other setup steps your project needs.
-      onSandboxReady: [{ command: "npm install" }],
+      onSandboxReady: [
+        /* {{CODEX_AUTH_READY_HOOK}} */ { command: "npm install" },
+      ],
     },
   },
 });

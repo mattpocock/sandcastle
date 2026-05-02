@@ -27,10 +27,24 @@ import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 // Each cycle works on one issue. Raise this to process more issues per run.
 const MAX_ITERATIONS = 10;
 
+const sandboxConfig = {
+  env: {
+    GIT_CONFIG_GLOBAL: "/home/agent/workspace/.sandcastle/.gitconfig",
+    /* {{SANDBOX_ENV_ENTRIES}} */
+  },
+  mounts: [
+    /* {{SANDBOX_MOUNT_ENTRIES}} */
+  ],
+};
+
 // Hooks run inside the sandbox before the agent starts each iteration.
 // npm install ensures the sandbox always has fresh dependencies.
 const hooks = {
-  sandbox: { onSandboxReady: [{ command: "npm install" }] },
+  sandbox: {
+    onSandboxReady: [
+      /* {{CODEX_AUTH_READY_HOOK}} */ { command: "npm install" },
+    ],
+  },
 };
 
 // Copy node_modules from the host into the worktree before each sandbox
@@ -58,7 +72,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   const implement = await sandcastle.run({
     hooks,
     copyToWorktree,
-    sandbox: docker(),
+    sandbox: docker(sandboxConfig),
     branchStrategy: { type: "merge-to-head" },
     name: "implementer",
     maxIterations: 100,
@@ -87,7 +101,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   await sandcastle.run({
     hooks,
     copyToWorktree,
-    sandbox: docker(),
+    sandbox: docker(sandboxConfig),
     branchStrategy: { type: "branch", branch },
     name: "reviewer",
     maxIterations: 1,

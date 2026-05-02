@@ -230,6 +230,8 @@ describe("InitService scaffold", () => {
       "utf-8",
     );
     expect(gitignore).toContain(".env");
+    expect(gitignore).toContain(".gitconfig");
+    expect(gitignore).toContain("codex-home/");
     expect(gitignore).toContain("logs/");
     expect(gitignore).toContain("worktrees/");
     expect(gitignore).not.toContain("patches/");
@@ -693,6 +695,57 @@ describe("InitService scaffold", () => {
     );
     expect(mainTs).toContain('codex("gpt-5.4-mini")');
     expect(mainTs).not.toContain("claudeCode");
+  });
+
+  it("scaffolds codex API-key auth mode without subscription auth mounts", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      agent: codexAgent,
+      model: "gpt-5.4-mini",
+      codexAuthMode: "api-key",
+    });
+
+    const mainTs = await readFile(
+      join(dir, ".sandcastle", "main.mts"),
+      "utf-8",
+    );
+    const envExample = await readFile(
+      join(dir, ".sandcastle", ".env.example"),
+      "utf-8",
+    );
+    expect(mainTs).toContain(
+      'GIT_CONFIG_GLOBAL: "/home/agent/workspace/.sandcastle/.gitconfig"',
+    );
+    expect(mainTs).not.toContain("~/.codex/auth.json");
+    expect(mainTs).not.toContain("CODEX_HOME");
+    expect(envExample).toContain("OPENAI_KEY=");
+  });
+
+  it("scaffolds codex subscription auth mode with a read-only auth source and writable CODEX_HOME", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      agent: codexAgent,
+      model: "gpt-5.4-mini",
+      codexAuthMode: "subscription",
+    });
+
+    const mainTs = await readFile(
+      join(dir, ".sandcastle", "main.mts"),
+      "utf-8",
+    );
+    const envExample = await readFile(
+      join(dir, ".sandcastle", ".env.example"),
+      "utf-8",
+    );
+    expect(mainTs).toContain('hostPath: "~/.codex/auth.json"');
+    expect(mainTs).toContain('sandboxPath: "/mnt/codex-auth/auth.json"');
+    expect(mainTs).toContain("readonly: true");
+    expect(mainTs).toContain(
+      'CODEX_HOME: "/home/agent/workspace/.sandcastle/codex-home"',
+    );
+    expect(mainTs).toContain("cp /mnt/codex-auth/auth.json");
+    expect(envExample).toContain("Run `codex login`");
+    expect(envExample).not.toContain("OPENAI_KEY=");
   });
 
   // --- createLabel option ---
@@ -1891,6 +1944,22 @@ describe("InitService scaffold", () => {
       );
       expect(containerfile).toContain("FROM node:22-bookworm");
       expect(containerfile).not.toContain("{{BACKLOG_MANAGER_TOOLS}}");
+    });
+
+    it("selecting podman rewrites generated main file to use podman", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { sandboxProvider: podmanProvider });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain(
+        'import { podman } from "@ai-hero/sandcastle/sandboxes/podman";',
+      );
+      expect(mainTs).toContain("sandbox: podman(sandboxConfig)");
+      expect(mainTs).not.toContain("sandboxes/docker");
+      expect(mainTs).not.toContain("docker(");
     });
 
     it("selecting podman does not write Dockerfile", async () => {
