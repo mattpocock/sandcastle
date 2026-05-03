@@ -241,6 +241,11 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \\
   && apt-get update && apt-get install -y gh \\
   && rm -rf /var/lib/apt/lists/*`;
 
+const AZURE_DEVOPS_CLI_TOOLS = `# Install Azure CLI + Azure DevOps extension
+RUN curl -fsSL https://aka.ms/InstallAzureCLIDeb | bash \\
+  && az extension add --name azure-devops \\
+  && rm -rf /var/lib/apt/lists/*`;
+
 const BEADS_TOOLS = `# Install system dependencies for Beads
 RUN apt-get update && apt-get install -y \\
   dpkg-dev \\
@@ -278,6 +283,22 @@ GH_TOKEN=`,
       BACKLOG_MANAGER_TOOLS: BEADS_TOOLS,
     },
     envExample: "",
+  },
+  {
+    name: "azure-devops",
+    label: "Azure DevOps Work Items",
+    templateArgs: {
+      LIST_TASKS_COMMAND: `az boards query --wiql "SELECT [System.Id],[System.Title],[System.Description],[System.State],[System.Tags] FROM WorkItems WHERE [System.Tags] CONTAINS 'Sandcastle' AND [System.State] <> 'Closed' AND [System.State] <> 'Removed'" --org "$AZURE_DEVOPS_ORG" -p "$AZURE_DEVOPS_PROJECT" --output json`,
+      VIEW_TASK_COMMAND: `az boards work-item show --id <ID> --org "$AZURE_DEVOPS_ORG" --output json`,
+      CLOSE_TASK_COMMAND: `az boards work-item update --id <ID> --state Done --discussion "Completed by Sandcastle" --org "$AZURE_DEVOPS_ORG"`,
+      BACKLOG_MANAGER_TOOLS: AZURE_DEVOPS_CLI_TOOLS,
+    },
+    envExample: `# Azure DevOps personal access token
+AZURE_DEVOPS_EXT_PAT=
+# Azure DevOps organization URL (e.g. https://dev.azure.com/yourorg)
+AZURE_DEVOPS_ORG=
+# Azure DevOps project name
+AZURE_DEVOPS_PROJECT=`,
   },
 ];
 

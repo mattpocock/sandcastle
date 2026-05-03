@@ -201,6 +201,22 @@ describe("InitService scaffold", () => {
     expect(envExample).not.toContain("GH_TOKEN=");
   });
 
+  it("generates .env.example with Azure DevOps vars when backlog manager is azure-devops", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      backlogManager: getBacklogManager("azure-devops"),
+    });
+
+    const envExample = await readFile(
+      join(dir, ".sandcastle", ".env.example"),
+      "utf-8",
+    );
+    expect(envExample).toContain("AZURE_DEVOPS_EXT_PAT=");
+    expect(envExample).toContain("AZURE_DEVOPS_ORG=");
+    expect(envExample).toContain("AZURE_DEVOPS_PROJECT=");
+    expect(envExample).not.toContain("GH_TOKEN=");
+  });
+
   it("does not scaffold config.json for blank template", async () => {
     const dir = await makeDir();
     await runScaffold(dir);
@@ -1189,6 +1205,36 @@ describe("InitService scaffold", () => {
       );
     });
 
+    it("getBacklogManager returns azure-devops entry with expected templateArgs", () => {
+      const manager = getBacklogManager("azure-devops");
+      expect(manager).toBeDefined();
+      expect(manager!.label).toBe("Azure DevOps Work Items");
+      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain(
+        "az boards query",
+      );
+      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain("Sandcastle");
+      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain(
+        "AZURE_DEVOPS_ORG",
+      );
+      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain(
+        "AZURE_DEVOPS_PROJECT",
+      );
+      expect(manager!.templateArgs.VIEW_TASK_COMMAND).toContain(
+        "az boards work-item show",
+      );
+      expect(manager!.templateArgs.CLOSE_TASK_COMMAND).toContain(
+        "az boards work-item update",
+      );
+      expect(manager!.templateArgs.CLOSE_TASK_COMMAND).toContain("Done");
+      expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).toContain(
+        "Azure CLI",
+      );
+      expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).toContain(
+        "azure-devops",
+      );
+      expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).not.toContain("gh");
+    });
+
     it("getBacklogManager returns undefined for unknown manager", () => {
       expect(getBacklogManager("nonexistent")).toBeUndefined();
     });
@@ -1741,6 +1787,40 @@ describe("InitService scaffold", () => {
       expect(dockerfile).toContain("beads");
       expect(dockerfile).toContain("@mariozechner/pi-coding-agent");
       expect(dockerfile).not.toContain("GitHub CLI");
+    });
+
+    it("scaffold with azure-devops produces Dockerfile with Azure CLI install (no GitHub CLI)", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        backlogManager: getBacklogManager("azure-devops"),
+      });
+
+      const dockerfile = await readFile(
+        join(dir, ".sandcastle", "Dockerfile"),
+        "utf-8",
+      );
+      expect(dockerfile).toContain("Azure CLI");
+      expect(dockerfile).toContain("azure-devops");
+      expect(dockerfile).not.toContain("GitHub CLI");
+      expect(dockerfile).not.toContain("{{BACKLOG_MANAGER_TOOLS}}");
+    });
+
+    it("scaffold with azure-devops + podman produces Containerfile with Azure CLI install", async () => {
+      const dir = await makeDir();
+      const podmanProvider = getSandboxProvider("podman")!;
+      await runScaffold(dir, {
+        backlogManager: getBacklogManager("azure-devops"),
+        sandboxProvider: podmanProvider,
+      });
+
+      const containerfile = await readFile(
+        join(dir, ".sandcastle", "Containerfile"),
+        "utf-8",
+      );
+      expect(containerfile).toContain("Azure CLI");
+      expect(containerfile).toContain("azure-devops");
+      expect(containerfile).not.toContain("GitHub CLI");
+      expect(containerfile).not.toContain("{{BACKLOG_MANAGER_TOOLS}}");
     });
   });
 
