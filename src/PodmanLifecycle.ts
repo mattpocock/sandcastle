@@ -25,6 +25,36 @@ const podmanExec = (args: string[]): Effect.Effect<string, PodmanError> =>
     );
   });
 
+export type PodmanHealth = "ok" | "not-installed" | "not-running";
+
+/**
+ * Probe whether the podman CLI is on PATH and the machine/daemon is reachable.
+ *
+ * Returns "not-installed" if the binary is missing, "not-running" if the
+ * machine is unreachable, "ok" otherwise.
+ */
+export const checkPodmanHealth: Effect.Effect<PodmanHealth> = Effect.async(
+  (resume) => {
+    execFile(
+      "podman",
+      ["info", "--format", "{{.Version.Version}}"],
+      { maxBuffer: 1024 * 1024 },
+      (error) => {
+        if (!error) {
+          resume(Effect.succeed("ok"));
+          return;
+        }
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === "ENOENT") {
+          resume(Effect.succeed("not-installed"));
+          return;
+        }
+        resume(Effect.succeed("not-running"));
+      },
+    );
+  },
+);
+
 /**
  * Build the sandcastle Podman image.
  *
