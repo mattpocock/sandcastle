@@ -25,6 +25,36 @@ const dockerExec = (args: string[]): Effect.Effect<string, DockerError> =>
     );
   });
 
+export type DockerHealth = "ok" | "not-installed" | "not-running";
+
+/**
+ * Probe whether the docker CLI is on PATH and the daemon is reachable.
+ *
+ * Returns "not-installed" if the binary is missing, "not-running" if the
+ * daemon is unreachable, "ok" otherwise.
+ */
+export const checkDockerHealth: Effect.Effect<DockerHealth> = Effect.async(
+  (resume) => {
+    execFile(
+      "docker",
+      ["info", "--format", "{{.ServerVersion}}"],
+      { maxBuffer: 1024 * 1024 },
+      (error) => {
+        if (!error) {
+          resume(Effect.succeed("ok"));
+          return;
+        }
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === "ENOENT") {
+          resume(Effect.succeed("not-installed"));
+          return;
+        }
+        resume(Effect.succeed("not-running"));
+      },
+    );
+  },
+);
+
 /**
  * Build the sandcastle Docker image.
  *

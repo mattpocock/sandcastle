@@ -8,11 +8,17 @@ import { join } from "node:path";
 import { styleText } from "node:util";
 
 import { Display } from "./Display.js";
-import { buildImage, removeImage } from "./DockerLifecycle.js";
+import {
+  buildImage,
+  checkDockerHealth,
+  removeImage,
+} from "./DockerLifecycle.js";
 import {
   buildImage as podmanBuildImage,
+  checkPodmanHealth,
   removeImage as podmanRemoveImage,
 } from "./PodmanLifecycle.js";
+import { formatErrorMessage } from "./ErrorHandler.js";
 import {
   scaffold,
   listTemplates,
@@ -30,6 +36,7 @@ import type {
   BacklogManagerEntry,
   SandboxProviderEntry,
 } from "./InitService.js";
+import type { SandboxError } from "./errors.js";
 import { ConfigDirError, InitError } from "./errors.js";
 
 const require = createRequire(import.meta.url);
@@ -277,6 +284,9 @@ const initCommand = Command.make(
 
       // Prompt user before building image
       const providerLabel = selectedSandboxProvider.label;
+      const providerNamespace = selectedSandboxProvider.cliNamespace;
+      const skipBuildMessage = `Init complete! Run \`sandcastle ${providerNamespace} build-image\` to build the ${providerLabel} image later.`;
+
       const shouldBuild = yield* Effect.promise(() =>
         clack.confirm({
           message: `Build the default ${providerLabel} image now?`,
@@ -285,24 +295,77 @@ const initCommand = Command.make(
       );
 
       if (shouldBuild === true) {
-        const containerfileDir = join(cwd, CONFIG_DIR);
-        if (selectedSandboxProvider.name === "podman") {
-          yield* d.spinner(
+        // Pre-flight the container runtime; loop on retry if the daemon is down
+        const checkHealth =
+          selectedSandboxProvider.name === "podman"
+            ? checkPodmanHealth
+            : checkDockerHealth;
+
+        let outcome: "build" | "skip" | "not-installed" = "skip";
+        let resolved = false;
+        while (!resolved) {
+          const health = yield* checkHealth;
+          if (health === "ok") {
+            outcome = "build";
+            resolved = true;
+          } else if (health === "not-installed") {
+            outcome = "not-installed";
+            resolved = true;
+          } else {
+            const choice = yield* Effect.promise(() =>
+              clack.select({
+                message: `${providerLabel} doesn't seem to be running. Start it, then choose what to do.`,
+                options: [
+                  {
+                    value: "retry",
+                    label: `I started ${providerLabel} — retry`,
+                  },
+                  {
+                    value: "skip",
+                    label: "Skip the build, I'll run it later",
+                  },
+                ],
+              }),
+            );
+            if (clack.isCancel(choice) || choice === "skip") {
+              outcome = "skip";
+              resolved = true;
+            }
+          }
+        }
+
+        if (outcome === "build") {
+          const containerfileDir = join(cwd, CONFIG_DIR);
+          const containerBuild: Effect.Effect<void, SandboxError> =
+            selectedSandboxProvider.name === "podman"
+              ? podmanBuildImage(imageName, containerfileDir)
+              : buildImage(imageName, containerfileDir);
+
+          // Catch locally so a build failure doesn't trip the global exit handler — scaffolded .sandcastle/ is preserved
+          const buildResult = yield* d.spinner(
             `Building ${providerLabel} image '${imageName}'...`,
-            podmanBuildImage(imageName, containerfileDir),
+            Effect.either(containerBuild),
+          );
+
+          if (buildResult._tag === "Right") {
+            yield* d.status(
+              "Init complete! Image built successfully.",
+              "success",
+            );
+          } else {
+            yield* d.status(formatErrorMessage(buildResult.left), "error");
+            yield* d.status(skipBuildMessage, "info");
+          }
+        } else if (outcome === "not-installed") {
+          yield* d.status(
+            `${providerLabel} doesn't appear to be installed. Install it, then run \`sandcastle ${providerNamespace} build-image\` to build the image.`,
+            "warn",
           );
         } else {
-          yield* d.spinner(
-            `Building ${providerLabel} image '${imageName}'...`,
-            buildImage(imageName, containerfileDir),
-          );
+          yield* d.status(skipBuildMessage, "success");
         }
-        yield* d.status("Init complete! Image built successfully.", "success");
       } else {
-        yield* d.status(
-          `Init complete! Run \`sandcastle ${selectedSandboxProvider.cliNamespace} build-image\` to build the ${providerLabel} image later.`,
-          "success",
-        );
+        yield* d.status(skipBuildMessage, "success");
       }
 
       // Show template-specific next steps
