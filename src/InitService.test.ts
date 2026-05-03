@@ -231,9 +231,9 @@ describe("InitService scaffold", () => {
     );
     expect(gitignore).toContain(".env");
     expect(gitignore).toContain(".gitconfig");
-    expect(gitignore).toContain("codex-home/");
     expect(gitignore).toContain("logs/");
     expect(gitignore).toContain("worktrees/");
+    expect(gitignore).not.toContain("codex-home/");
     expect(gitignore).not.toContain("patches/");
   });
 
@@ -645,6 +645,17 @@ describe("InitService scaffold", () => {
       const joined = lines.join("\n");
       expect(joined).not.toContain("CODING_STANDARDS.md");
     });
+
+    it("codex subscription next steps do not mention Claude subscription auth", () => {
+      const lines = getNextStepsLines("simple-loop", "main.mts", {
+        agent: codexAgent,
+        codexAuthMode: "subscription",
+      });
+      const joined = lines.join("\n");
+      expect(joined).toContain("Codex subscription auth");
+      expect(joined).not.toContain("Claude subscription");
+      expect(joined).not.toContain("issues/191");
+    });
   });
 
   it("scaffolds pi agent with pi Dockerfile", async () => {
@@ -746,6 +757,12 @@ describe("InitService scaffold", () => {
     expect(mainTs).toContain("cp /mnt/codex-auth/auth.json");
     expect(envExample).toContain("Run `codex login`");
     expect(envExample).not.toContain("OPENAI_KEY=");
+
+    const gitignore = await readFile(
+      join(dir, ".sandcastle", ".gitignore"),
+      "utf-8",
+    );
+    expect(gitignore).toContain("codex-home/");
   });
 
   // --- createLabel option ---
