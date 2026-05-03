@@ -15,7 +15,11 @@ import {
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import { Effect } from "effect";
-import { startContainer, removeContainer } from "../DockerLifecycle.js";
+import {
+  dockerArgs,
+  startContainer,
+  removeContainer,
+} from "../DockerLifecycle.js";
 import {
   createBindMountSandboxProvider,
   type SandboxProvider,
@@ -48,6 +52,14 @@ export interface DockerOptions {
    * When omitted, Docker's default bridge network is used.
    */
   readonly network?: string | readonly string[];
+  /**
+   * Docker context to use for sandbox containers.
+   *
+   * When omitted, Sandcastle uses Docker's active context. Set this to any
+   * configured Docker context name (for example `"colima"`, `"orbstack"`, or a
+   * remote context) to make Sandcastle run against that daemon explicitly.
+   */
+  readonly context?: string;
 }
 
 /**
@@ -105,6 +117,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
             workdir: worktreePath,
             user: `${hostUid}:${hostGid}`,
             network: options?.network,
+            context: options?.context,
           },
         ),
       );
@@ -112,9 +125,13 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
       // Set up signal handlers for cleanup
       const onExit = () => {
         try {
-          execFileSync("docker", ["rm", "-f", containerName], {
-            stdio: "ignore",
-          });
+          execFileSync(
+            "docker",
+            dockerArgs(["rm", "-f", containerName], options),
+            {
+              stdio: "ignore",
+            },
+          );
         } catch {
           /* best-effort */
         }
@@ -140,7 +157,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
           },
         ): Promise<ExecResult> => {
           const effectiveCommand = opts?.sudo ? `sudo ${command}` : command;
-          const args = ["exec"];
+          const args = dockerArgs(["exec"], options);
           if (opts?.stdin !== undefined) args.push("-i");
           if (opts?.cwd) args.push("-w", opts.cwd);
           args.push(containerName, "sh", "-c", effectiveCommand);
@@ -198,20 +215,20 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
           opts: InteractiveExecOptions,
         ): Promise<{ exitCode: number }> => {
           return new Promise((resolve, reject) => {
-            const dockerArgs = ["exec"];
+            const dockerExecArgs = dockerArgs(["exec"], options);
             // Allocate a pseudo-terminal when stdin looks like a TTY
             if (
               "isTTY" in opts.stdin &&
               (opts.stdin as { isTTY?: boolean }).isTTY
             ) {
-              dockerArgs.push("-it");
+              dockerExecArgs.push("-it");
             } else {
-              dockerArgs.push("-i");
+              dockerExecArgs.push("-i");
             }
-            if (opts.cwd) dockerArgs.push("-w", opts.cwd);
-            dockerArgs.push(containerName, ...args);
+            if (opts.cwd) dockerExecArgs.push("-w", opts.cwd);
+            dockerExecArgs.push(containerName, ...args);
 
-            const proc = spawn("docker", dockerArgs, {
+            const proc = spawn("docker", dockerExecArgs, {
               stdio: [opts.stdin, opts.stdout, opts.stderr] as StdioOptions,
             });
 
@@ -229,7 +246,10 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
           new Promise((resolve, reject) => {
             execFile(
               "docker",
-              ["cp", hostPath, `${containerName}:${sandboxPath}`],
+              dockerArgs(
+                ["cp", hostPath, `${containerName}:${sandboxPath}`],
+                options,
+              ),
               (error) => {
                 if (error) {
                   reject(new Error(`docker cp (in) failed: ${error.message}`));
@@ -244,7 +264,10 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
           new Promise((resolve, reject) => {
             execFile(
               "docker",
-              ["cp", `${containerName}:${sandboxPath}`, hostPath],
+              dockerArgs(
+                ["cp", `${containerName}:${sandboxPath}`, hostPath],
+                options,
+              ),
               (error) => {
                 if (error) {
                   reject(new Error(`docker cp (out) failed: ${error.message}`));
@@ -259,7 +282,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
           process.removeListener("exit", onExit);
           process.removeListener("SIGINT", onSignal);
           process.removeListener("SIGTERM", onSignal);
-          await Effect.runPromise(removeContainer(containerName));
+          await Effect.runPromise(removeContainer(containerName, options));
         },
       };
 

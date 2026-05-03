@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { EventEmitter } from "node:events";
 
 vi.mock("node:child_process", async () => {
   const actual =
@@ -14,14 +15,16 @@ vi.mock("node:child_process", async () => {
   };
 });
 
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { docker } from "./docker.js";
 import type { BindMountSandboxHandle } from "../SandboxProvider.js";
 
 const mockExecFile = vi.mocked(execFile);
+const mockSpawn = vi.mocked(spawn);
 
 afterEach(() => {
   mockExecFile.mockReset();
+  mockSpawn.mockReset();
 });
 
 describe("docker()", () => {
@@ -124,6 +127,82 @@ describe("docker()", () => {
   it("accepts a network option as an array", () => {
     const provider = docker({ network: ["net1", "net2"] });
     expect(provider.tag).toBe("bind-mount");
+  });
+
+  it("passes context to docker lifecycle commands", async () => {
+    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      callback(null, "", "");
+      return undefined as any;
+    });
+    mockSpawn.mockImplementation(() => {
+      const proc = new EventEmitter() as any;
+      proc.stdout = new EventEmitter();
+      proc.stderr = new EventEmitter();
+      proc.stdin = { write: vi.fn(), end: vi.fn() };
+      queueMicrotask(() => proc.emit("close", 0));
+      return proc;
+    });
+
+    const provider = docker({ context: "colima" });
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "docker",
+      expect.arrayContaining(["--context", "colima", "ps"]),
+      expect.any(Object),
+      expect.any(Function),
+    );
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "docker",
+      expect.arrayContaining(["--context", "colima", "run"]),
+      expect.any(Object),
+      expect.any(Function),
+    );
+
+    await handle.exec("echo hello");
+
+    expect(mockSpawn).toHaveBeenCalledWith(
+      "docker",
+      expect.arrayContaining(["--context", "colima", "exec"]),
+      expect.any(Object),
+    );
+
+    const bmHandle = handle as BindMountSandboxHandle;
+    await bmHandle.copyFileIn("/host/file.txt", "/sandbox/file.txt");
+    await bmHandle.copyFileOut("/sandbox/output.txt", "/host/output.txt");
+
+    const cpCalls = mockExecFile.mock.calls.filter(
+      ([cmd, args]) =>
+        cmd === "docker" &&
+        Array.isArray(args) &&
+        args.includes("--context") &&
+        args.includes("colima") &&
+        args.includes("cp"),
+    );
+    expect(cpCalls).toHaveLength(2);
+
+    await handle.close();
+
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "docker",
+      expect.arrayContaining(["--context", "colima", "stop"]),
+      expect.any(Object),
+      expect.any(Function),
+    );
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "docker",
+      expect.arrayContaining(["--context", "colima", "rm"]),
+      expect.any(Object),
+      expect.any(Function),
+    );
   });
 
   it("copyFileIn calls docker cp with correct arguments", async () => {
