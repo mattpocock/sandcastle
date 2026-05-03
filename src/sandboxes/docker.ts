@@ -48,6 +48,22 @@ export interface DockerOptions {
    * When omitted, Docker's default bridge network is used.
    */
   readonly network?: string | readonly string[];
+  /**
+   * Host ports to publish from the sandbox container.
+   *
+   * Each entry is passed as a `-p` flag to `docker run`:
+   * - `number` → symmetric: `-p <port>:<port>` — use when host and container port are the same
+   * - `string` → explicit mapping: `-p <hostPort>:<containerPort>` — use when ports differ
+   *
+   * @example
+   *   // Symmetric — same port on host and in container
+   *   docker({ ports: [3000, 8000, 4321] })
+   *
+   * @example
+   *   // Asymmetric — host port 3001 maps to container port 3000
+   *   docker({ ports: ["3001:3000"] })
+   */
+  readonly ports?: readonly (number | string)[];
 }
 
 /**
@@ -105,6 +121,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
             workdir: worktreePath,
             user: `${hostUid}:${hostGid}`,
             network: options?.network,
+            ports: options?.ports,
           },
         ),
       );
