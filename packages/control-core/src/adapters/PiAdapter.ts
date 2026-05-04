@@ -1,4 +1,3 @@
-import type { CommandCard, SkillCard } from "@sandcastle/protocol";
 import type {
   AgentProviderAdapter,
   ProviderAdapterInput,

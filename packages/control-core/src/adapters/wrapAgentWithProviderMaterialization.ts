@@ -1,10 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type {
-  AgentCommandOptions,
-  AgentProvider,
-  PrintCommand,
-} from "@ai-hero/sandcastle";
+import type { AgentProvider, PrintCommand } from "@ai-hero/sandcastle";
 import type { ProviderAdapterOutput } from "./AgentProviderAdapter.js";
 
 export const withProviderMaterialization = (input: {

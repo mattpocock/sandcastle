@@ -1,11 +1,5 @@
 import { createRequire } from "node:module";
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type {
   ActivityEvent,
@@ -59,10 +53,7 @@ export class SqliteStore {
   constructor(repoRoot: string) {
     const dbPath = join(repoRoot, ".sandcastle", "state", "sandcastle.sqlite");
     mkdirSync(dirname(dbPath), { recursive: true });
-    const Database = loadBetterSqlite3();
-    this.driver = Database
-      ? new BetterSqliteDriver(Database, dbPath)
-      : new JsonFallbackDriver(`${dbPath}.json`);
+    this.driver = new BetterSqliteDriver(loadBetterSqlite3(), dbPath);
   }
 
   upsertRun(run: Run): void {
@@ -139,13 +130,9 @@ export class SqliteStore {
 
 type BetterSqlite3Constructor = new (path: string) => any;
 
-const loadBetterSqlite3 = (): BetterSqlite3Constructor | undefined => {
-  try {
-    const require = createRequire(import.meta.url);
-    return require("better-sqlite3") as BetterSqlite3Constructor;
-  } catch {
-    return undefined;
-  }
+const loadBetterSqlite3 = (): BetterSqlite3Constructor => {
+  const require = createRequire(import.meta.url);
+  return require("better-sqlite3") as BetterSqlite3Constructor;
 };
 
 class BetterSqliteDriver implements StoreDriver {
@@ -473,185 +460,11 @@ CREATE INDEX IF NOT EXISTS idx_activity_events_repo_at
   }
 }
 
-interface JsonData {
-  readonly runs: Record<string, Run>;
-  readonly events: Record<string, StoredRunEvent[]>;
-  readonly repoTelemetry?: Record<string, RepoTelemetry>;
-  readonly domainCache?: Record<string, DomainCache<unknown>>;
-  readonly xpLedger?: XpLedgerEntry[];
-  readonly activity?: Record<string, ActivityEvent[]>;
-}
-
-class JsonFallbackDriver implements StoreDriver {
-  private data: JsonData;
-
-  constructor(private readonly path: string) {
-    this.data = existsSync(path)
-      ? (JSON.parse(readFileSync(path, "utf8")) as JsonData)
-      : { runs: {}, events: {} };
-  }
-
-  upsertRun(run: Run): void {
-    this.data.runs[run.id] = run;
-    this.flush();
-  }
-
-  appendEvent(runId: string, event: RunEvent): number {
-    const events = this.data.events[runId] ?? [];
-    const seq = (events.at(-1)?.seq ?? 0) + 1;
-    this.data.events[runId] = [...events, { seq, event }];
-    this.flush();
-    return seq;
-  }
-
-  getRun(id: string): Run | undefined {
-    return this.data.runs[id];
-  }
-
-  listRuns(): Run[] {
-    return Object.values(this.data.runs);
-  }
-
-  listEvents(runId: string): StoredRunEvent[] {
-    return (this.data.events[runId] ?? []).map((entry) => ({
-      ...entry,
-      event: reviveEvent(entry.event),
-    }));
-  }
-
-  getRepoTelemetry(repoId: string): RepoTelemetry | undefined {
-    return this.data.repoTelemetry?.[repoId];
-  }
-
-  upsertRepoTelemetry(repoId: string, telemetry: RepoTelemetry): void {
-    this.data = {
-      ...this.data,
-      repoTelemetry: {
-        ...(this.data.repoTelemetry ?? {}),
-        [repoId]: telemetry,
-      },
-    };
-    this.flush();
-  }
-
-  clearRepoTelemetry(repoId: string): void {
-    const { [repoId]: _removed, ...rest } = this.data.repoTelemetry ?? {};
-    this.data = { ...this.data, repoTelemetry: rest };
-    this.flush();
-  }
-
-  getDomainCache<T>(
-    repoRoot: string,
-    domain: string,
-  ): DomainCache<T> | undefined {
-    return this.data.domainCache?.[domainCacheKey(repoRoot, domain)] as
-      | DomainCache<T>
-      | undefined;
-  }
-
-  setDomainCache(repoRoot: string, domain: string, value: unknown): void {
-    this.data = {
-      ...this.data,
-      domainCache: {
-        ...(this.data.domainCache ?? {}),
-        [domainCacheKey(repoRoot, domain)]: {
-          indexedAt: new Date().toISOString(),
-          value,
-        },
-      },
-    };
-    this.flush();
-  }
-
-  insertXpEntry(entry: XpLedgerEntry): boolean {
-    const entries = this.data.xpLedger ?? [];
-    if (
-      entries.some(
-        (existing) =>
-          existing.repoRoot === entry.repoRoot &&
-          existing.patchHash === entry.patchHash,
-      )
-    ) {
-      return false;
-    }
-    this.data = { ...this.data, xpLedger: [entry, ...entries] };
-    this.flush();
-    return true;
-  }
-
-  listXpEntries(filter?: XpEntryFilter): XpLedgerEntry[] {
-    return [...(this.data.xpLedger ?? [])]
-      .filter(
-        (entry) =>
-          (!filter?.runId || entry.runId === filter.runId) &&
-          (!filter?.operativeId || entry.operativeId === filter.operativeId) &&
-          (!filter?.repoRoot || entry.repoRoot === filter.repoRoot),
-      )
-      .sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
-  }
-
-  markXpReverted(
-    repoRoot: string,
-    patchHash: string,
-    revertedAt: string,
-  ): void {
-    this.data = {
-      ...this.data,
-      xpLedger: (this.data.xpLedger ?? []).map((entry) =>
-        entry.repoRoot === repoRoot &&
-        entry.patchHash === patchHash &&
-        entry.revertedAt === null
-          ? { ...entry, revertedAt, netXp: 0 }
-          : entry,
-      ),
-    };
-    this.flush();
-  }
-
-  appendActivity(repoRoot: string, event: ActivityEvent): void {
-    const scoped = repoRootScopedActivityId(repoRoot, event.id);
-    const events = this.data.activity?.[repoRoot] ?? [];
-    if (
-      events.some(
-        (existing) =>
-          repoRootScopedActivityId(repoRoot, existing.id) === scoped,
-      )
-    ) {
-      return;
-    }
-    this.data = {
-      ...this.data,
-      activity: {
-        ...(this.data.activity ?? {}),
-        [repoRoot]: [event, ...events],
-      },
-    };
-    this.flush();
-  }
-
-  listActivity(repoRoot: string, limit: number): ActivityEvent[] {
-    return [...(this.data.activity?.[repoRoot] ?? [])]
-      .sort((a, b) => b.at.localeCompare(a.at))
-      .slice(0, Math.max(1, Math.min(500, limit)));
-  }
-
-  close(): void {}
-
-  private flush(): void {
-    const tmpPath = `${this.path}.${process.pid}.tmp`;
-    writeFileSync(tmpPath, JSON.stringify(this.data, null, 2));
-    renameSync(tmpPath, this.path);
-  }
-}
-
 const reviveEvent = (event: RunEvent): RunEvent =>
   ({
     ...event,
     timestamp: new Date(event.timestamp),
   }) as RunEvent;
-
-const domainCacheKey = (repoRoot: string, domain: string): string =>
-  `${repoRoot}\0${domain}`;
 
 const repoRootScopedActivityId = (repoRoot: string, id: string): string =>
   `${repoRoot}\0${id}`;

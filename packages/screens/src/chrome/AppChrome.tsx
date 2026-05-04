@@ -22,12 +22,7 @@ import {
   useFleetSocket,
   useTransport,
 } from "@sandcastle/transport";
-import {
-  queryKeys,
-  useCreateRun,
-  useDecideRun,
-  useMergeAllGreen,
-} from "../api/queries";
+import { queryKeys, useCreateRun, useMergeAllGreen } from "../api/queries";
 import { useFleetStore } from "../state/fleetStore";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -158,7 +153,12 @@ export function AppChrome(): JSX.Element {
         }
 
         const settled = await Promise.allSettled(
-          effectiveTargets.map((target) =>
+          // The `_target` arg is intentionally unused: multi-target routing
+          // sends one createRun per target but the server resolves the planet
+          // from its own context (single-repo through Phase 6). When
+          // multi-repo routing lands, the target id will be threaded through
+          // here. Failures are still surfaced per-target downstream.
+          effectiveTargets.map((_target) =>
             apiClient.createRun({
               directive,
               ...(operativeId ? { operativeId } : {}),
