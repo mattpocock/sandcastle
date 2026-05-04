@@ -11,7 +11,6 @@ import {
   type DockerError,
 } from "./errors.js";
 import type {
-  SandboxProvider,
   BindMountSandboxProvider,
   BindMountSandboxHandle,
   IsolatedSandboxProvider,
