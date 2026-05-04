@@ -166,6 +166,31 @@ const handleRequest = async (ctx: {
   readonly snapshotProjector: SnapshotProjector;
 }): Promise<void> => {
   const { req, res } = ctx;
+
+  // CORS: the bearer token gates every real route, so the origin reflection
+  // is safe — without it the @sandcastle/web build cannot reach the local
+  // control server from a different port. Preflight short-circuits before
+  // auth so browsers can probe the endpoint with a token they haven't
+  // sent yet.
+  const origin = req.headers.origin;
+  if (typeof origin === "string" && origin.length > 0) {
+    res.setHeader("access-control-allow-origin", origin);
+    res.setHeader("access-control-allow-credentials", "true");
+    res.setHeader("vary", "Origin");
+  }
+  if (req.method === "OPTIONS") {
+    res.setHeader("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
+    res.setHeader(
+      "access-control-allow-headers",
+      req.headers["access-control-request-headers"] ??
+        "authorization, content-type",
+    );
+    res.setHeader("access-control-max-age", "600");
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
   if (!isAuthorized(req, ctx.token)) {
     writeJson(res, 401, {
       error: {
