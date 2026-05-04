@@ -89,6 +89,34 @@ const initModelOption = Options.text("model").pipe(
   Options.optional,
 );
 
+const sandboxProviderOption = Options.text("sandbox-provider").pipe(
+  Options.withDescription("Sandbox provider to use (docker or podman)"),
+  Options.optional,
+);
+
+const backlogManagerOption = Options.text("backlog-manager").pipe(
+  Options.withDescription("Backlog manager to use (github-issues or beads)"),
+  Options.optional,
+);
+
+const createLabelOption = Options.boolean("create-label", {
+  ifPresent: true,
+  negationNames: ["no-create-label"],
+}).pipe(
+  Options.withDescription(
+    'Create the "Sandcastle" GitHub label when using GitHub Issues',
+  ),
+  Options.optional,
+);
+
+const buildImageNowOption = Options.boolean("build-image", {
+  ifPresent: true,
+  negationNames: ["no-build-image"],
+}).pipe(
+  Options.withDescription("Build the sandbox image during init"),
+  Options.optional,
+);
+
 const initCommand = Command.make(
   "init",
   {
@@ -96,12 +124,20 @@ const initCommand = Command.make(
     template: templateOption,
     agent: agentOption,
     model: initModelOption,
+    sandboxProvider: sandboxProviderOption,
+    backlogManager: backlogManagerOption,
+    createLabel: createLabelOption,
+    buildImageNow: buildImageNowOption,
   },
   ({
     imageName: imageNameFlag,
     template,
     agent: agentFlag,
     model: modelFlag,
+    sandboxProvider: sandboxProviderFlag,
+    backlogManager: backlogManagerFlag,
+    createLabel: createLabelFlag,
+    buildImageNow: buildImageNowFlag,
   }) =>
     Effect.gen(function* () {
       const d = yield* Display;
@@ -162,10 +198,21 @@ const initCommand = Command.make(
           ? modelFlag.value
           : selectedAgent.defaultModel;
 
-      // Resolve sandbox provider: interactive select (no default — user must choose)
+      // Resolve sandbox provider: CLI flag > interactive select
       const sandboxProviders = listSandboxProviders();
       let selectedSandboxProvider: SandboxProviderEntry;
-      {
+      if (sandboxProviderFlag._tag === "Some") {
+        const entry = getSandboxProvider(sandboxProviderFlag.value);
+        if (!entry) {
+          const names = sandboxProviders.map((p) => p.name).join(", ");
+          yield* Effect.fail(
+            new InitError({
+              message: `Unknown sandbox provider "${sandboxProviderFlag.value}". Available: ${names}`,
+            }),
+          );
+        }
+        selectedSandboxProvider = entry!;
+      } else {
         const selected = yield* Effect.promise(() =>
           clack.select({
             message: "Select a sandbox provider:",
@@ -185,10 +232,21 @@ const initCommand = Command.make(
         selectedSandboxProvider = getSandboxProvider(selected as string)!;
       }
 
-      // Resolve backlog manager: interactive select
+      // Resolve backlog manager: CLI flag > interactive select
       const backlogManagers = listBacklogManagers();
       let selectedBacklogManager: BacklogManagerEntry;
-      {
+      if (backlogManagerFlag._tag === "Some") {
+        const entry = getBacklogManager(backlogManagerFlag.value);
+        if (!entry) {
+          const names = backlogManagers.map((b) => b.name).join(", ");
+          yield* Effect.fail(
+            new InitError({
+              message: `Unknown backlog manager "${backlogManagerFlag.value}". Available: ${names}`,
+            }),
+          );
+        }
+        selectedBacklogManager = entry!;
+      } else {
         const selected = yield* Effect.promise(() =>
           clack.select({
             message: "Select a backlog manager:",
@@ -236,13 +294,16 @@ const initCommand = Command.make(
       // Offer to create the "Sandcastle" label on the repo (skip for non-GitHub backlog managers)
       let shouldCreateLabel: boolean | symbol = false;
       if (selectedBacklogManager.name === "github-issues") {
-        shouldCreateLabel = yield* Effect.promise(() =>
-          clack.confirm({
-            message:
-              'Create a "Sandcastle" GitHub label? (Templates filter issues by this label)',
-            initialValue: true,
-          }),
-        );
+        shouldCreateLabel =
+          createLabelFlag._tag === "Some"
+            ? createLabelFlag.value
+            : yield* Effect.promise(() =>
+                clack.confirm({
+                  message:
+                    'Create a "Sandcastle" GitHub label? (Templates filter issues by this label)',
+                  initialValue: true,
+                }),
+              );
 
         if (shouldCreateLabel === true) {
           yield* Effect.try({
@@ -277,12 +338,15 @@ const initCommand = Command.make(
 
       // Prompt user before building image
       const providerLabel = selectedSandboxProvider.label;
-      const shouldBuild = yield* Effect.promise(() =>
-        clack.confirm({
-          message: `Build the default ${providerLabel} image now?`,
-          initialValue: true,
-        }),
-      );
+      const shouldBuild =
+        buildImageNowFlag._tag === "Some"
+          ? buildImageNowFlag.value
+          : yield* Effect.promise(() =>
+              clack.confirm({
+                message: `Build the default ${providerLabel} image now?`,
+                initialValue: true,
+              }),
+            );
 
       if (shouldBuild === true) {
         const containerfileDir = join(cwd, CONFIG_DIR);
