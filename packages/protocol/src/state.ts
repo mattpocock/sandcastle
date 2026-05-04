@@ -79,6 +79,14 @@ export const zDeck = z.object({
 });
 export type Deck = z.infer<typeof zDeck>;
 
+export const zRegisteredRepo = z.object({
+  id: z.string(),
+  root: z.string(),
+  addedAt: z.string(),
+  lastOpenedAt: z.string(),
+});
+export type RegisteredRepo = z.infer<typeof zRegisteredRepo>;
+
 export const zOperativeIdentity = z.object({
   id: z.string(),
   codename: z.string(),
@@ -109,6 +117,19 @@ export const zOperativeRepoRecord = z.object({
 });
 export type OperativeRepoRecord = z.infer<typeof zOperativeRepoRecord>;
 
+export const zRepoTelemetry = z.object({
+  coveragePct: z.number().nullable(),
+  ciGreenRate30d: z.number().nullable(),
+  openIssues: z.number().nullable(),
+  churnScore: z.number().nullable(),
+  ageDays: z.number().nullable(),
+  testCount: z.number().nullable(),
+  branch: z.string().nullable(),
+  lastCommitAt: z.string().nullable(),
+  lastIndexedAt: z.string().nullable(),
+});
+export type RepoTelemetry = z.infer<typeof zRepoTelemetry>;
+
 export const zPlanet = z.object({
   id: z.string(),
   repoName: z.string(),
@@ -118,15 +139,7 @@ export const zPlanet = z.object({
   scars: z.array(z.string()),
   wards: z.array(z.string()),
   deck: zDeck,
-  telemetry: z.object({
-    coveragePct: z.number().nullable(),
-    ciGreenRate30d: z.number().nullable(),
-    openIssues: z.number().nullable(),
-    churnScore: z.number().nullable(),
-    ageDays: z.number().nullable(),
-    testCount: z.number().nullable(),
-    lastIndexedAt: z.string().nullable(),
-  }),
+  telemetry: zRepoTelemetry,
   activeRunIds: z.array(z.string()),
   lastRunAt: z.string().nullable(),
 });

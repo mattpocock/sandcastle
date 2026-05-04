@@ -1,5 +1,13 @@
 import { z } from "zod";
-import { zFleetState, zRun } from "./state.js";
+import {
+  zDeck,
+  zFleetState,
+  zOperativeIdentity,
+  zOperativeRepoRecord,
+  zRegisteredRepo,
+  zRepoTelemetry,
+  zRun,
+} from "./state.js";
 
 export const zPostRunsRequest = z.object({
   directive: z.string().min(1),
@@ -33,3 +41,39 @@ export const zGetRepoResponse = z.object({
   branch: z.string(),
 });
 export type GetRepoResponse = z.infer<typeof zGetRepoResponse>;
+
+export const zGetReposResponse = z.object({
+  repos: z.array(zRegisteredRepo),
+});
+export type GetReposResponse = z.infer<typeof zGetReposResponse>;
+
+export const zPostReposRequest = z.object({
+  root: z.string().min(1),
+});
+export type PostReposRequest = z.infer<typeof zPostReposRequest>;
+
+export const zPostReposResponse = zRegisteredRepo;
+export type PostReposResponse = z.infer<typeof zPostReposResponse>;
+
+export const zDeleteRepoResponse = z.object({
+  removed: z.boolean(),
+});
+export type DeleteRepoResponse = z.infer<typeof zDeleteRepoResponse>;
+
+export const zGetRepoDeckResponse = zDeck;
+export type GetRepoDeckResponse = z.infer<typeof zGetRepoDeckResponse>;
+
+export const zGetRepoTelemetryResponse = zRepoTelemetry;
+export type GetRepoTelemetryResponse = z.infer<
+  typeof zGetRepoTelemetryResponse
+>;
+
+export const zGetOperativesResponse = z.object({
+  operatives: z.array(zOperativeIdentity),
+});
+export type GetOperativesResponse = z.infer<typeof zGetOperativesResponse>;
+
+export const zGetOperativeResponse = zOperativeIdentity.extend({
+  repoRecord: zOperativeRepoRecord.optional(),
+});
+export type GetOperativeResponse = z.infer<typeof zGetOperativeResponse>;

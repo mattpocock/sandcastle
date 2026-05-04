@@ -9,6 +9,8 @@ import {
   zPhase,
   zPlanet,
   zProviderId,
+  zRegisteredRepo,
+  zRepoTelemetry,
   zRun,
   zRunStatus,
 } from "../src/index.js";
@@ -66,6 +68,13 @@ const deck = {
   order: [mode.id, skill.id, command.id],
 };
 
+const registeredRepo = {
+  id: "repo_123",
+  root: "/repo",
+  addedAt: "2026-01-01T00:00:00.000Z",
+  lastOpenedAt: "2026-01-02T00:00:00.000Z",
+};
+
 const operative = {
   id: "pi-default",
   codename: "Pi Default",
@@ -110,6 +119,8 @@ const planet = {
     churnScore: null,
     ageDays: null,
     testCount: null,
+    branch: "main",
+    lastCommitAt: "2026-01-01T00:00:00.000Z",
     lastIndexedAt: null,
   },
   activeRunIds: ["run_123"],
@@ -173,8 +184,10 @@ describe("state schemas", () => {
   });
 
   it("round-trips operative fixtures", () => {
+    expect(zRegisteredRepo.parse(registeredRepo)).toEqual(registeredRepo);
     expect(zOperativeIdentity.parse(operative)).toEqual(operative);
     expect(zOperativeRepoRecord.parse(repoRecord)).toEqual(repoRecord);
+    expect(zRepoTelemetry.parse(planet.telemetry)).toEqual(planet.telemetry);
   });
 
   it("round-trips planet, phase, run, and fleet fixtures", () => {
