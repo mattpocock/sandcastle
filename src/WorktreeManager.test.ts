@@ -109,6 +109,18 @@ describe("generateTempBranchName", () => {
     expect(name).toMatch(/^sandcastle\/my-run\/\d{8}-\d{6}$/);
   });
 
+  it("uses runId when provided", () => {
+    expect(generateTempBranchName(undefined, "run_123")).toBe(
+      "sandcastle/run_123",
+    );
+  });
+
+  it("uses sanitized name and runId when both are provided", () => {
+    expect(generateTempBranchName("My Run!", "run_123")).toBe(
+      "sandcastle/my-run-/run_123",
+    );
+  });
+
   it("sanitizes the name in the branch", () => {
     const name = generateTempBranchName("My Run!");
     expect(name).toMatch(/^sandcastle\/my-run-\/\d{8}-\d{6}$/);
@@ -141,6 +153,13 @@ describe("WorktreeManager.create", () => {
     const repoDir = await setupRepo();
     const { branch } = await run(create(repoDir, { name: "my-run" }));
     expect(branch).toMatch(/^sandcastle\/my-run\/\d{8}-\d{6}$/);
+  });
+
+  it("uses runId in branch and worktree directory when specified", async () => {
+    const repoDir = await setupRepo();
+    const { branch, path } = await run(create(repoDir, { runId: "run_123" }));
+    expect(branch).toBe("sandcastle/run_123");
+    expect(path).toMatch(/sandcastle-run_123$/);
   });
 
   it("includes name in worktree directory when name is specified", async () => {

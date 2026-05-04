@@ -32,6 +32,10 @@ const formatTimestamp = (date: Date): string => {
 export const sanitizeName = (name: string): string =>
   name.toLowerCase().replace(/[^a-z0-9]/g, "-");
 
+/** Sanitize a run id for use in branch names and directory names. */
+const sanitizeRunId = (runId: string): string =>
+  runId.replace(/[^A-Za-z0-9._-]/g, "-");
+
 const execGit = (
   args: string[],
   cwd: string,
@@ -54,15 +58,21 @@ const execGit = (
 
 /**
  * Generates a temporary branch name.
- * When name is provided: `sandcastle/<sanitized-name>/<YYYYMMDD-HHMMSS>`.
- * Otherwise: `sandcastle/<YYYYMMDD-HHMMSS>`.
+ * When runId is provided: `sandcastle/<runId>`.
+ * When name and runId are provided: `sandcastle/<sanitized-name>/<runId>`.
+ *
+ * @deprecated Omitting runId falls back to timestamp-only branch names for
+ * compatibility. New concurrent callers should pass runId to avoid collisions.
  */
-export const generateTempBranchName = (name?: string): string => {
-  const ts = formatTimestamp(new Date());
+export const generateTempBranchName = (
+  name?: string,
+  runId?: string,
+): string => {
+  const suffix = runId ? sanitizeRunId(runId) : formatTimestamp(new Date());
   if (name) {
-    return `sandcastle/${sanitizeName(name)}/${ts}`;
+    return `sandcastle/${sanitizeName(name)}/${suffix}`;
   }
-  return `sandcastle/${ts}`;
+  return `sandcastle/${suffix}`;
 };
 
 /** Returns the name of the currently checked-out branch in the given repo directory. */
@@ -132,6 +142,13 @@ export const create = (
     branch?: string;
     baseBranch?: string;
     name?: string;
+    /**
+     * Unique run id to use for temporary branch/worktree names.
+     *
+     * @deprecated Omitting runId falls back to timestamp-only names for
+     * compatibility. New concurrent callers should pass runId.
+     */
+    runId?: string;
   },
 ): Effect.Effect<
   WorktreeInfo,
@@ -152,14 +169,16 @@ export const create = (
       branch = opts.branch;
       worktreeName = branch.replace(/\//g, "-");
     } else {
-      const timestamp = formatTimestamp(new Date());
+      const suffix = opts?.runId
+        ? sanitizeRunId(opts.runId)
+        : formatTimestamp(new Date());
       if (opts?.name) {
         const sanitized = sanitizeName(opts.name);
-        branch = `sandcastle/${sanitized}/${timestamp}`;
-        worktreeName = `sandcastle-${sanitized}-${timestamp}`;
+        branch = `sandcastle/${sanitized}/${suffix}`;
+        worktreeName = `sandcastle-${sanitized}-${suffix}`;
       } else {
-        branch = `sandcastle/${timestamp}`;
-        worktreeName = `sandcastle-${timestamp}`;
+        branch = `sandcastle/${suffix}`;
+        worktreeName = `sandcastle-${suffix}`;
       }
     }
 
