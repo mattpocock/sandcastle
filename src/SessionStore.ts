@@ -1,14 +1,14 @@
 /**
  * SessionStore — keyed collection of agent session JSONLs.
  *
- * Provides read/write access to Claude Code session files, with two
- * implementations: host-backed (filesystem) and sandbox-backed (via
- * bind-mount handle file-transfer primitives). The `transferSession`
+ * Provides read/write access to agent session files, with two implementations:
+ * host-backed (filesystem) and sandbox-backed (via bind-mount handle
+ * file-transfer primitives). The `transferSession`
  * function copies a session between stores, rewriting `cwd` fields in
  * the JSONL entries from source cwd to target cwd.
  */
 
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BindMountSandboxHandle } from "./SandboxProvider.js";
@@ -34,7 +34,7 @@ export interface SessionStore {
 // ---------------------------------------------------------------------------
 
 /**
- * Encode a cwd into the Claude Code `~/.claude/projects/<encoded>/` layout.
+ * Encode a cwd into Sandcastle's `projects/<encoded>/` session layout.
  * Replaces path separators with hyphens, matching Claude Code's convention.
  */
 export const encodeProjectPath = (cwd: string): string => {
@@ -43,13 +43,31 @@ export const encodeProjectPath = (cwd: string): string => {
   return normalized.replace(/^([A-Za-z]):/, "$1").replace(/[\\/]/g, "-");
 };
 
+const shellEscape = (s: string): string => "'" + s.replace(/'/g, "'\\''") + "'";
+
+const findHostSessionFile = async (
+  projectDir: string,
+  id: string,
+): Promise<string> => {
+  const exactFile = `${id}.jsonl`;
+  const exactPath = join(projectDir, exactFile);
+  try {
+    const files = await readdir(projectDir);
+    if (files.includes(exactFile)) return exactPath;
+    const suffix = `_${id}.jsonl`;
+    const match = files.find((file) => file.endsWith(suffix));
+    if (match) return join(projectDir, match);
+  } catch {}
+  return exactPath;
+};
+
 // ---------------------------------------------------------------------------
 // Host-backed SessionStore
 // ---------------------------------------------------------------------------
 
 /**
  * Create a host-backed SessionStore that reads/writes session JSONLs on the
- * host filesystem using Claude Code's `~/.claude/projects/<encoded>/` layout.
+ * host filesystem using Sandcastle's `projects/<encoded>/` layout.
  *
  * @param cwd - The host repo directory this store is associated with.
  * @param projectsDir - Override for the projects directory (default: `~/.claude/projects`).
@@ -67,7 +85,7 @@ export const hostSessionStore = (
     cwd,
     sessionFilePath: (id: string): string => join(projectDir, `${id}.jsonl`),
     readSession: async (id: string): Promise<string> => {
-      return await readFile(join(projectDir, `${id}.jsonl`), "utf-8");
+      return await readFile(await findHostSessionFile(projectDir, id), "utf-8");
     },
     writeSession: async (id: string, content: string): Promise<void> => {
       await mkdir(projectDir, { recursive: true });
@@ -96,11 +114,20 @@ export const sandboxSessionStore = (
   const encoded = encodeProjectPath(cwd);
   const projectDir = join(projectsDir, encoded);
 
+  const findSandboxSessionFile = async (id: string): Promise<string> => {
+    const exactPath = join(projectDir, `${id}.jsonl`);
+    const result = await handle.exec(
+      `find ${shellEscape(projectDir)} -maxdepth 1 -type f \\( -name ${shellEscape(`${id}.jsonl`)} -o -name ${shellEscape(`*_${id}.jsonl`)} \\) -print -quit`,
+    );
+    const match = result.stdout.trim().split("\n")[0];
+    return match || exactPath;
+  };
+
   return {
     cwd,
     sessionFilePath: (id: string): string => join(projectDir, `${id}.jsonl`),
     readSession: async (id: string): Promise<string> => {
-      const sandboxPath = join(projectDir, `${id}.jsonl`);
+      const sandboxPath = await findSandboxSessionFile(id);
       const tmpPath = join(
         tmpdir(),
         `sandcastle-session-${id}-${Date.now()}.jsonl`,

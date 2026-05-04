@@ -1,3 +1,4 @@
+import { dirname } from "node:path";
 import { Deferred, Effect } from "effect";
 import { AgentStreamEmitter } from "./AgentStreamEmitter.js";
 import { Display } from "./Display.js";
@@ -36,6 +37,7 @@ const invokeAgent = (
   idleWarningIntervalMs: number = IDLE_WARNING_INTERVAL_MS,
   resumeSession?: string,
   signal?: AbortSignal,
+  sessionDir?: string,
 ): Effect.Effect<{ result: string; sessionId?: string }, SandboxError> =>
   Effect.gen(function* () {
     let resultText = "";
@@ -99,6 +101,7 @@ const invokeAgent = (
         prompt,
         dangerouslySkipPermissions: true,
         resumeSession,
+        sessionDir,
       });
       const execResult = yield* sandbox.exec(printCmd.command, {
         onLine: (line) => {
@@ -127,9 +130,7 @@ const invokeAgent = (
           errorDetail = resultText;
         }
         if (!errorDetail.trim()) {
-          const lines = execResult.stdout
-            .split("\n")
-            .filter((l) => l.trim());
+          const lines = execResult.stdout.split("\n").filter((l) => l.trim());
           errorDetail = lines.slice(-20).join("\n");
         }
         return yield* Effect.fail(
@@ -189,7 +190,7 @@ export interface OrchestrateOptions {
   readonly name?: string;
   /** @internal Test-only override for the idle warning interval in milliseconds. Default: 60000 (1 minute). */
   readonly _idleWarningIntervalMs?: number;
-  /** Resume a prior Claude Code session by ID. Applied to iteration 1 only. */
+  /** Resume a prior agent session by ID. Applied to iteration 1 only. */
   readonly resumeSession?: string;
   /** An AbortSignal that cancels the orchestration when aborted. */
   readonly signal?: AbortSignal;
@@ -199,9 +200,9 @@ export interface OrchestrateOptions {
 
 /** Per-iteration result carrying an optional session ID. */
 export interface IterationResult {
-  /** Claude Code session ID extracted from the init line, or undefined for non-Claude agents. */
+  /** Agent session ID extracted from the stream, or undefined when unavailable. */
   readonly sessionId?: string;
-  /** Absolute host path to the captured session JSONL, or undefined when capture is disabled or provider is non-Claude. */
+  /** Absolute host path to the captured session JSONL, or undefined when capture is disabled or unavailable. */
   readonly sessionFilePath?: string;
   /** Token usage snapshot from the last assistant message in the session, or undefined when capture is disabled or provider does not support usage parsing. */
   readonly usage?: IterationUsage;
@@ -279,13 +280,21 @@ export const orchestrate = (
                 // Resume session: transfer JSONL from host to sandbox before iteration 1
                 const iterationResumeSession =
                   i === 1 ? options.resumeSession : undefined;
-                if (iterationResumeSession && bindMountHandle) {
+                const sbStore =
+                  bindMountHandle &&
+                  (provider.captureSessions || iterationResumeSession)
+                    ? sandboxSessionStore(
+                        ctx.sandboxRepoDir,
+                        bindMountHandle,
+                        sandboxProjectsDir,
+                      )
+                    : undefined;
+                const sessionDir = sbStore
+                  ? dirname(sbStore.sessionFilePath("__sandcastle__"))
+                  : undefined;
+
+                if (iterationResumeSession && sbStore) {
                   yield* display.status(label("Resuming session"), "info");
-                  const sbStore = sandboxSessionStore(
-                    ctx.sandboxRepoDir,
-                    bindMountHandle,
-                    sandboxProjectsDir,
-                  );
                   const hStore = hostSessionStore(hostRepoDir, hostProjectsDir);
                   yield* Effect.tryPromise({
                     try: () =>
@@ -358,6 +367,7 @@ export const orchestrate = (
                   options._idleWarningIntervalMs,
                   iterationResumeSession,
                   options.signal,
+                  sessionDir,
                 );
 
                 // Flush any remaining buffered text deltas
@@ -368,13 +378,8 @@ export const orchestrate = (
                 // Capture session while sandbox is still alive
                 let sessionFilePath: string | undefined;
                 let usage: IterationUsage | undefined;
-                if (provider.captureSessions && sessionId && bindMountHandle) {
+                if (provider.captureSessions && sessionId && sbStore) {
                   yield* display.status(label("Capturing session"), "info");
-                  const sbStore = sandboxSessionStore(
-                    ctx.sandboxRepoDir,
-                    bindMountHandle,
-                    sandboxProjectsDir,
-                  );
                   const hStore = hostSessionStore(hostRepoDir, hostProjectsDir);
                   yield* Effect.tryPromise({
                     try: () => transferSession(sbStore, hStore, sessionId),

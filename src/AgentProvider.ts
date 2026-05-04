@@ -21,7 +21,11 @@ const TOOL_ARG_FIELDS: Record<string, string> = {
 const extractErrorMessage = (obj: any): string | undefined => {
   const err = obj.error;
   if (typeof err === "string") return err;
-  if (typeof err === "object" && err !== null && typeof err.message === "string") {
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    typeof err.message === "string"
+  ) {
     return err.message;
   }
   if (typeof obj.message === "string") return obj.message;
@@ -90,6 +94,8 @@ export interface AgentCommandOptions {
   readonly dangerouslySkipPermissions: boolean;
   /** When set, the agent should resume the given session ID instead of starting fresh. */
   readonly resumeSession?: string;
+  /** Directory where the agent should persist session files, when supported. */
+  readonly sessionDir?: string;
 }
 
 /** Return type of buildPrintCommand — command string plus optional stdin content.
@@ -112,12 +118,12 @@ export interface AgentProvider {
   readonly name: string;
   /** Environment variables injected by this agent provider. Merged at launch time with env resolver and sandbox provider env. */
   readonly env: Record<string, string>;
-  /** When true, session capture is enabled for this provider. Default: true for Claude Code, false for others. */
+  /** When true, session capture is enabled for this provider. */
   readonly captureSessions: boolean;
   buildPrintCommand(options: AgentCommandOptions): PrintCommand;
   buildInteractiveArgs?(options: AgentCommandOptions): string[];
   parseStreamLine(line: string): ParsedStreamEvent[];
-  /** Parse token usage from the captured session JSONL content. Only implemented by Claude Code. */
+  /** Parse token usage from the captured session JSONL content. */
   parseSessionUsage?(content: string): IterationUsage | undefined;
 }
 
@@ -131,6 +137,10 @@ const parsePiStreamLine = (line: string): ParsedStreamEvent[] => {
   if (!line.startsWith("{")) return [];
   try {
     const obj = JSON.parse(line);
+    // Pi JSON mode emits the session header as its first stdout line.
+    if (obj.type === "session" && typeof obj.id === "string") {
+      return [{ type: "session_id", sessionId: obj.id }];
+    }
     if (obj.type === "message_update" && obj.assistantMessageEvent) {
       const evt = obj.assistantMessageEvent as {
         type: string;
@@ -196,11 +206,21 @@ export interface PiOptions {
 export const pi = (model: string, options?: PiOptions): AgentProvider => ({
   name: "pi",
   env: options?.env ?? {},
-  captureSessions: false,
+  captureSessions: true,
 
-  buildPrintCommand({ prompt }: AgentCommandOptions): PrintCommand {
+  buildPrintCommand({
+    prompt,
+    resumeSession,
+    sessionDir,
+  }: AgentCommandOptions): PrintCommand {
+    const sessionDirFlag = sessionDir
+      ? ` --session-dir ${shellEscape(sessionDir)}`
+      : "";
+    const sessionFlag = resumeSession
+      ? ` --session ${shellEscape(resumeSession)}`
+      : "";
     return {
-      command: `pi -p --mode json --no-session --model ${shellEscape(model)}`,
+      command: `pi -p --mode json --model ${shellEscape(model)}${sessionDirFlag}${sessionFlag}`,
       stdin: prompt,
     };
   },

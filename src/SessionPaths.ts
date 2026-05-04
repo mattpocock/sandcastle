@@ -2,15 +2,15 @@ import { join } from "node:path";
 import { Context, Layer } from "effect";
 
 /**
- * Host- and sandbox-side Claude `projects` directories used by the
- * orchestrator when capturing and resuming agent sessions.
+ * Host- and sandbox-side `projects` directories used by the orchestrator when
+ * capturing and resuming agent sessions.
  */
 export class SessionPaths extends Context.Tag("SessionPaths")<
   SessionPaths,
   {
-    /** Host path to the Claude Code projects directory. */
+    /** Host path to the agent session projects directory. */
     readonly hostProjectsDir: string;
-    /** Sandbox path to the Claude Code projects directory. */
+    /** Sandbox path to the agent session projects directory. */
     readonly sandboxProjectsDir: string;
   }
 >() {}
@@ -22,9 +22,9 @@ export const sessionPathsLayer = (config: {
 }): Layer.Layer<SessionPaths> => Layer.succeed(SessionPaths, config);
 
 /**
- * Default `SessionPaths` layer using Claude Code's conventional locations:
- * `~/.claude/projects` on the host and `/home/agent/.claude/projects` in the
- * sandbox.
+ * Default `SessionPaths` layer using Sandcastle's conventional session
+ * locations: `~/.claude/projects` on the host and
+ * `/home/agent/.claude/projects` in the sandbox.
  */
 export const defaultSessionPathsLayer: Layer.Layer<SessionPaths> = Layer.sync(
   SessionPaths,

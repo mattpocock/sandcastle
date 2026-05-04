@@ -251,7 +251,7 @@ describe("pi factory", () => {
     const { command } = provider.buildPrintCommand(opts("do something"));
     expect(command).toContain("claude-sonnet-4-6");
     expect(command).toContain("--mode json");
-    expect(command).toContain("--no-session");
+    expect(command).not.toContain("--no-session");
     expect(command).toContain("-p");
   });
 
@@ -266,6 +266,43 @@ describe("pi factory", () => {
     const provider = pi("claude-sonnet-4-6");
     const { command } = provider.buildPrintCommand(opts("do something"));
     expect(command).toContain("--model 'claude-sonnet-4-6'");
+  });
+
+  it("buildPrintCommand passes sessionDir to pi", () => {
+    const provider = pi("claude-sonnet-4-6");
+    const { command } = provider.buildPrintCommand({
+      ...opts("do something"),
+      sessionDir: "/home/agent/.claude/projects/-workspace-repo",
+    });
+    expect(command).toContain(
+      "--session-dir '/home/agent/.claude/projects/-workspace-repo'",
+    );
+  });
+
+  it("buildPrintCommand passes resumeSession via --session", () => {
+    const provider = pi("claude-sonnet-4-6");
+    const { command } = provider.buildPrintCommand({
+      ...opts("do something"),
+      resumeSession: "abc-123",
+    });
+    expect(command).toContain("--session 'abc-123'");
+    expect(command).not.toContain("--resume");
+  });
+
+  it("parseStreamLine emits session_id from Pi session header", () => {
+    const provider = pi("claude-sonnet-4-6");
+    const line = JSON.stringify({
+      type: "session",
+      version: 3,
+      id: "019df133-2c28-710f-9bd0-40e8a550cb6c",
+      cwd: "/workspace",
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      {
+        type: "session_id",
+        sessionId: "019df133-2c28-710f-9bd0-40e8a550cb6c",
+      },
+    ]);
   });
 
   it("parseStreamLine extracts text from message_update event", () => {
@@ -777,18 +814,7 @@ describe("opencode factory", () => {
   });
 });
 
-describe("resumeSession on non-Claude providers", () => {
-  it("pi ignores resumeSession in buildPrintCommand", () => {
-    const provider = pi("claude-sonnet-4-6");
-    const { command } = provider.buildPrintCommand({
-      prompt: "test",
-      dangerouslySkipPermissions: true,
-      resumeSession: "abc-123",
-    });
-    expect(command).not.toContain("--resume");
-    expect(command).not.toContain("abc-123");
-  });
-
+describe("resumeSession on providers without session support", () => {
   it("codex ignores resumeSession in buildPrintCommand", () => {
     const provider = codex("gpt-5.4-mini");
     const { command } = provider.buildPrintCommand({
@@ -928,8 +954,8 @@ describe("captureSessions flag", () => {
     ).toBe(false);
   });
 
-  it("pi has captureSessions false", () => {
-    expect(pi("pi-model").captureSessions).toBe(false);
+  it("pi has captureSessions true", () => {
+    expect(pi("pi-model").captureSessions).toBe(true);
   });
 
   it("codex has captureSessions false", () => {

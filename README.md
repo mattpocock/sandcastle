@@ -449,7 +449,7 @@ await sandbox.close();
 | `hooks`              | SandboxHooks           | —       | Lifecycle hooks (`host.*`, `sandbox.*`)                                                                                             |
 | `promptArgs`         | PromptArgs             | —       | Key-value map for `{{KEY}}` placeholder substitution                                                                                |
 | `env`                | Record<string, string> | —       | Environment variables to inject into the sandbox                                                                                    |
-| `resumeSession`      | string                 | —       | Resume a prior Claude Code session by ID. Incompatible with `maxIterations > 1`. Session file must exist on host.                   |
+| `resumeSession`      | string                 | —       | Resume a prior Claude Code or Pi session by ID. Incompatible with `maxIterations > 1`. Session file must exist on host.             |
 | `signal`             | AbortSignal            | —       | Cancel the run when aborted. Kills the in-flight agent subprocess; the worktree is preserved on disk. Rejects with `signal.reason`. |
 
 #### `WorktreeRunResult`
@@ -681,7 +681,7 @@ Removes the Podman image.
 | `logging`            | object             | file (auto-generated)         | `{ type: 'file', path }` or `{ type: 'stdout' }`                                                                                                                |
 | `completionSignal`   | string \| string[] | `<promise>COMPLETE</promise>` | String or array of strings the agent emits to stop the iteration loop early                                                                                     |
 | `idleTimeoutSeconds` | number             | `600`                         | Idle timeout in seconds — resets on each agent output event                                                                                                     |
-| `resumeSession`      | string             | —                             | Resume a prior Claude Code session by ID. Incompatible with `maxIterations > 1`. Session file must exist on host.                                               |
+| `resumeSession`      | string             | —                             | Resume a prior Claude Code or Pi session by ID. Incompatible with `maxIterations > 1`. Session file must exist on host.                                         |
 | `signal`             | AbortSignal        | —                             | Cancel the run when aborted. Kills the in-flight agent subprocess and cancels lifecycle hooks; the worktree is preserved on disk. Rejects with `signal.reason`. |
 | `timeouts`           | Timeouts           | —                             | Override default timeouts for built-in lifecycle steps. Currently supports `{ copyToWorktreeMs?: number }` (default: 60 000).                                   |
 
@@ -700,7 +700,7 @@ Removes the Podman image.
 
 | Field             | Type              | Description                                                                                                                         |
 | ----------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `sessionId`       | string?           | Claude Code session ID from the init line, or `undefined` for non-Claude agents                                                     |
+| `sessionId`       | string?           | Captured Claude Code or Pi session ID, or `undefined` for providers without session support                                         |
 | `sessionFilePath` | string?           | Absolute host path to the captured session JSONL, or `undefined` when capture is off                                                |
 | `usage`           | `IterationUsage`? | Token usage snapshot from the last assistant message, or `undefined` when capture is off or provider does not support usage parsing |
 
@@ -715,13 +715,13 @@ Removes the Podman image.
 
 ### Session capture
 
-After each Claude Code iteration, Sandcastle automatically captures the agent's session JSONL from the sandbox to the host at `~/.claude/projects/<encoded-path>/sessions/<session-id>.jsonl`. The `cwd` fields inside each JSONL entry are rewritten to match the host repo root, so `claude --resume` works natively.
+After each Claude Code or Pi iteration, Sandcastle automatically captures the agent's session JSONL from the sandbox to the host at `~/.claude/projects/<encoded-path>/<session-id>.jsonl`. The `cwd` fields inside each JSONL entry are rewritten to match the host repo root, so supported providers can resume natively.
 
-Session capture is enabled by default for `claudeCode()` and can be opted out via `captureSessions: false`. Non-Claude agent providers never attempt capture. Capture failure fails the run.
+Session capture is enabled by default for `claudeCode()` and `pi()`. Claude Code can be opted out via `captureSessions: false`. Providers without session support never attempt capture. Capture failure fails the run.
 
 ### Session resume
 
-Pass `resumeSession` to `run()` to continue a prior Claude Code conversation inside a new sandbox:
+Pass `resumeSession` to `run()` to continue a prior Claude Code or Pi conversation inside a new sandbox:
 
 ```typescript
 const result = await run({
@@ -732,14 +732,14 @@ const result = await run({
 });
 ```
 
-Before the sandbox starts, Sandcastle validates that the session file exists on the host and transfers it into the sandbox with `cwd` fields rewritten to match the sandbox-side path. The Claude Code agent receives `--resume <id>` on its print command for iteration 1.
+Before the sandbox starts, Sandcastle validates that the session file exists on the host and transfers it into the sandbox with `cwd` fields rewritten to match the sandbox-side path. Claude Code receives `--resume <id>`; Pi receives `--session <id>` plus Sandcastle's sandbox session directory.
 
 Constraints:
 
 - `resumeSession` is incompatible with `maxIterations > 1` (throws before sandbox creation).
-- The session file must exist at `~/.claude/projects/<encoded-path>/sessions/<id>.jsonl` (throws before sandbox creation).
+- The session file must exist at `~/.claude/projects/<encoded-path>/<id>.jsonl` (throws before sandbox creation).
 - Only iteration 1 receives the resume flag; subsequent iterations (if any) start fresh.
-- Non-Claude agent providers ignore `resumeSession`.
+- Providers without session support ignore `resumeSession`.
 
 ### `ClaudeCodeOptions`
 
@@ -749,11 +749,11 @@ The `claudeCode()` factory accepts an optional second argument for provider-spec
 agent: claudeCode("claude-opus-4-6", { effort: "high" });
 ```
 
-| Option            | Type                                         | Default | Description                                               |
-| ----------------- | -------------------------------------------- | ------- | --------------------------------------------------------- |
-| `effort`          | `"low"` \| `"medium"` \| `"high"` \| `"max"` | —       | Claude Code reasoning effort level (`max` is Opus only)   |
-| `env`             | `Record<string, string>`                     | `{}`    | Environment variables injected by this agent provider     |
-| `captureSessions` | `boolean`                                    | `true`  | Capture agent session JSONL to host for `claude --resume` |
+| Option            | Type                                         | Default | Description                                             |
+| ----------------- | -------------------------------------------- | ------- | ------------------------------------------------------- |
+| `effort`          | `"low"` \| `"medium"` \| `"high"` \| `"max"` | —       | Claude Code reasoning effort level (`max` is Opus only) |
+| `env`             | `Record<string, string>`                     | `{}`    | Environment variables injected by this agent provider   |
+| `captureSessions` | `boolean`                                    | `true`  | Capture Claude Code session JSONL to host for resume    |
 
 ### `CodexOptions`
 
