@@ -82,9 +82,7 @@ describe("encodeProjectPath", () => {
   });
 
   it("strips multiple trailing backslashes", () => {
-    expect(encodeProjectPath("D:\\projekts\\app\\\\")).toBe(
-      "D-projekts-app",
-    );
+    expect(encodeProjectPath("D:\\projekts\\app\\\\")).toBe("D-projekts-app");
   });
 });
 
@@ -241,6 +239,24 @@ describe("hostSessionStore", () => {
     }
   });
 
+  it("reads Pi-style timestamp-prefixed session files by ID", async () => {
+    const dir = await setup();
+    try {
+      const store = hostSessionStore("/my/repo", dir);
+      const encoded = encodeProjectPath("/my/repo");
+      const projectDir = join(dir, encoded);
+      const jsonl = JSON.stringify({ type: "session", id: "s1" });
+      await mkdir(projectDir, { recursive: true });
+      await writeFile(join(projectDir, "2026-01-01T00-00-00_s1.jsonl"), jsonl);
+
+      const result = await store.readSession("s1");
+
+      expect(result).toBe(jsonl);
+    } finally {
+      await teardown();
+    }
+  });
+
   it("throws on read of non-existent session", async () => {
     const dir = await setup();
     try {
@@ -306,6 +322,51 @@ describe("sandboxSessionStore", () => {
 
       expect(copyFileOutCalls.length).toBe(1);
       expect(copyFileOutCalls[0]!.from).toContain("s1.jsonl");
+      expect(result).toBe(jsonl);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("reads Pi-style timestamp-prefixed sandbox session files by ID", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "sandcastle-sbx-store-"));
+    try {
+      const jsonl = JSON.stringify({ type: "session", id: "s1" });
+      const sandboxCwd = "/workspace";
+      const encoded = encodeProjectPath(sandboxCwd);
+      const sandboxProjectDir = join(tempDir, ".claude", "projects", encoded);
+      const sandboxSessionPath = join(
+        sandboxProjectDir,
+        "2026-01-01T00-00-00_s1.jsonl",
+      );
+      await mkdir(sandboxProjectDir, { recursive: true });
+      await writeFile(sandboxSessionPath, jsonl);
+
+      const handle: Pick<
+        BindMountSandboxHandle,
+        "copyFileIn" | "copyFileOut" | "exec"
+      > = {
+        copyFileIn: async () => {},
+        copyFileOut: async (sandboxPath: string, hostPath: string) => {
+          const content = await readFile(sandboxPath, "utf-8");
+          await mkdir(join(hostPath, ".."), { recursive: true });
+          await writeFile(hostPath, content);
+        },
+        exec: async () => ({
+          stdout: `${sandboxSessionPath}\n`,
+          stderr: "",
+          exitCode: 0,
+        }),
+      };
+
+      const store = sandboxSessionStore(
+        sandboxCwd,
+        handle as BindMountSandboxHandle,
+        join(tempDir, ".claude", "projects"),
+      );
+
+      const result = await store.readSession("s1");
+
       expect(result).toBe(jsonl);
     } finally {
       await rm(tempDir, { recursive: true, force: true });
