@@ -2,3 +2,4 @@ node_modules
 dist
 .env.*
 .vercel
+apps/*/out

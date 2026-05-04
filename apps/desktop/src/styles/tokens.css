@@ -1,0 +1,29 @@
+:root {
+  --void: #03060a;
+  --hull-0: #060a10;
+  --hull-1: #0a1018;
+  --hull-2: #11181f;
+  --hull-3: #1a232c;
+  --hull-4: #243140;
+  --frost: #dceaf3;
+  --mist: #9eb3c2;
+  --steel: #5b6b7a;
+  --gunmetal: #3a4754;
+  --rule: rgba(120, 200, 220, 0.07);
+  --rule-2: rgba(120, 200, 220, 0.13);
+  --rule-3: rgba(120, 200, 220, 0.22);
+  --cyan: #50e3ff;
+  --cyan-dim: rgba(80, 227, 255, 0.16);
+  --cyan-ink: rgba(80, 227, 255, 0.06);
+  --magenta: #ff4dd2;
+  --magenta-dim: rgba(255, 77, 210, 0.16);
+  --magenta-ink: rgba(255, 77, 210, 0.07);
+  --plasma: #4dffaa;
+  --plasma-dim: rgba(77, 255, 170, 0.14);
+  --amber: #ffb84d;
+  --amber-dim: rgba(255, 184, 77, 0.14);
+  --crimson: #ff4d6d;
+  --crimson-dim: rgba(255, 77, 109, 0.14);
+  --mono: "JetBrains Mono", "Cascadia Mono", Consolas, ui-monospace, monospace;
+  --display: "Chakra Petch", "Segoe UI", system-ui, sans-serif;
+}

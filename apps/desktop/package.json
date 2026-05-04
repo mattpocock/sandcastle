@@ -1,0 +1,28 @@
+{
+  "name": "@sandcastle/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck": "tsgo --noEmit"
+  },
+  "dependencies": {
+    "@sandcastle/protocol": "*",
+    "@tanstack/react-query": "5.90.20",
+    "lucide-react": "0.577.0",
+    "react": "19.2.5",
+    "react-dom": "19.2.5",
+    "react-router-dom": "^7.9.0",
+    "zustand": "5.0.12"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "41.1.1",
+    "electron-vite": "5.0.0",
+    "tailwindcss": "4.2.2"
+  }
+}
