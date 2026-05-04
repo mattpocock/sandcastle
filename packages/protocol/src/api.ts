@@ -8,6 +8,7 @@ import {
   zRepoTelemetry,
   zRun,
   zMergeAllGreenResponse,
+  zParsedPhase,
   zRunDecisionKind,
 } from "./state.js";
 
@@ -34,6 +35,39 @@ export type PostRunsRequest = z.infer<typeof zPostRunsRequest>;
 
 export const zPostRunsResponse = z.object({ runId: z.string() });
 export type PostRunsResponse = z.infer<typeof zPostRunsResponse>;
+
+export const zPostQuestForgeParseRequest = z.object({
+  directive: z.string(),
+});
+export type PostQuestForgeParseRequest = z.infer<
+  typeof zPostQuestForgeParseRequest
+>;
+
+export const zPostQuestForgeParseResponse = z.object({
+  phases: z.array(zParsedPhase),
+});
+export type PostQuestForgeParseResponse = z.infer<
+  typeof zPostQuestForgeParseResponse
+>;
+
+export const zPostQuestForgeEngageRequest = z.object({
+  directive: z.string().min(1),
+  phases: z.array(zParsedPhase).optional(),
+  provider: z.enum(["claude-code", "codex", "pi", "opencode"]).optional(),
+  model: z.string().optional(),
+  operativeId: z.string().optional(),
+  branchStrategy: zRunBranchStrategy.optional(),
+  maxIterations: z.number().int().positive().optional(),
+  completionSignal: z.union([z.string(), z.array(z.string())]).optional(),
+});
+export type PostQuestForgeEngageRequest = z.infer<
+  typeof zPostQuestForgeEngageRequest
+>;
+
+export const zPostQuestForgeEngageResponse = z.object({ runId: z.string() });
+export type PostQuestForgeEngageResponse = z.infer<
+  typeof zPostQuestForgeEngageResponse
+>;
 
 export const zPostRunCancelRequest = z.object({ id: z.string() });
 export type PostRunCancelRequest = z.infer<typeof zPostRunCancelRequest>;

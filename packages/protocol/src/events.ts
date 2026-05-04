@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { zRunStatus } from "./state.js";
+import { zPhase, zRunStatus, zVerifyRule, zVerifyRuleResult } from "./state.js";
 
 const zTimestamp = z.coerce.date();
 const zBase = z.object({
@@ -58,6 +58,35 @@ export const zVerificationFinishedEvent = zBase.extend({
   type: z.literal("verification.finished"),
   allGreen: z.boolean(),
   failedChecks: z.array(z.string()),
+  failedPhaseId: z.string().optional(),
+});
+
+export const zPhaseStartedEvent = zBase.extend({
+  type: z.literal("phase.started"),
+  runId: z.string(),
+  phaseId: z.string(),
+  phase: zPhase,
+});
+
+export const zPhaseVerifyingEvent = zBase.extend({
+  type: z.literal("phase.verifying"),
+  runId: z.string(),
+  phaseId: z.string(),
+  rules: z.array(zVerifyRule),
+});
+
+export const zPhaseVerifiedEvent = zBase.extend({
+  type: z.literal("phase.verified"),
+  runId: z.string(),
+  phaseId: z.string(),
+  results: z.array(zVerifyRuleResult),
+});
+
+export const zPhaseFailedEvent = zBase.extend({
+  type: z.literal("phase.failed"),
+  runId: z.string(),
+  phaseId: z.string(),
+  results: z.array(zVerifyRuleResult),
 });
 
 export const zDecisionRequiredEvent = zBase.extend({
@@ -86,6 +115,10 @@ export const zRunEvent = z.discriminatedUnion("type", [
   zToolFinishedEvent,
   zVerificationStartedEvent,
   zVerificationFinishedEvent,
+  zPhaseStartedEvent,
+  zPhaseVerifyingEvent,
+  zPhaseVerifiedEvent,
+  zPhaseFailedEvent,
   zDecisionRequiredEvent,
   zRunResolvedEvent,
   zInterventionUsedEvent,

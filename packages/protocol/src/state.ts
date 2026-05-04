@@ -145,6 +145,47 @@ export const zPlanet = z.object({
 });
 export type Planet = z.infer<typeof zPlanet>;
 
+export const zVerifyRule = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("command"),
+    command: z.string().min(1),
+    expectExit: z.number().int().optional(),
+  }),
+  z.object({
+    kind: z.literal("tests"),
+    pattern: z.string().min(1).optional(),
+  }),
+  z.object({
+    kind: z.literal("file"),
+    path: z.string().min(1),
+    mustExist: z.boolean(),
+  }),
+  z.object({
+    kind: z.literal("commits"),
+    minCount: z.number().int().nonnegative(),
+  }),
+]);
+export type VerifyRule = z.infer<typeof zVerifyRule>;
+
+export const zVerifyRuleResult = z.object({
+  rule: zVerifyRule,
+  ok: z.boolean(),
+  output: z.string().optional(),
+  durationMs: z.number(),
+});
+export type VerifyRuleResult = z.infer<typeof zVerifyRuleResult>;
+
+export const zParsedPhase = z.object({
+  id: z.string(),
+  ordinal: z.number().int().positive(),
+  title: z.string().max(60),
+  directiveSlice: z.string(),
+  objective: z.string(),
+  xpEstimate: z.number(),
+  verifyRules: z.array(zVerifyRule),
+});
+export type ParsedPhase = z.infer<typeof zParsedPhase>;
+
 export const zPhase = z.object({
   id: z.string(),
   runId: z.string(),
@@ -153,7 +194,7 @@ export const zPhase = z.object({
   directiveSlice: z.string(),
   objective: z.string(),
   xpEstimate: z.number(),
-  verifyRules: z.array(z.string()),
+  verifyRules: z.array(zVerifyRule),
   status: z.enum(["pending", "active", "verified", "failed", "skipped"]),
   startedAt: z.string().nullable(),
   endedAt: z.string().nullable(),
@@ -177,6 +218,7 @@ export const zRun = z.object({
   verification: z.object({
     allGreen: z.boolean(),
     failedChecks: z.array(z.string()),
+    failedPhaseId: z.string().optional(),
   }),
   totals: z.object({
     toolCalls: z.number(),

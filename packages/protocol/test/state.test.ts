@@ -138,7 +138,7 @@ const phase = {
   directiveSlice: "Do it",
   objective: "Done",
   xpEstimate: 10,
-  verifyRules: ["npm test"],
+  verifyRules: [{ kind: "tests" as const, pattern: "all" }],
   status: "active" as const,
   startedAt: "2026-01-01T00:00:00.000Z",
   endedAt: null,
