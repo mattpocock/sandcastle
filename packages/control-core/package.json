@@ -1,0 +1,31 @@
+{
+  "name": "@sandcastle/control-core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "sandcastle-control": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsgo --project tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsgo --noEmit",
+    "dev": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@sandcastle/protocol": "*",
+    "@ai-hero/sandcastle": "*",
+    "better-sqlite3": "^11.0.0",
+    "effect": "^3.20.0",
+    "@effect/platform": "^0.95.0",
+    "@effect/platform-node": "^0.105.0",
+    "ws": "^8.18.0",
+    "nanoid": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/ws": "^8.5.0"
+  }
+}

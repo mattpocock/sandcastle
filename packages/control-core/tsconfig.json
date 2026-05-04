@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "./dist",
+    "types": ["node", "vitest"],
+    "paths": {
+      "@sandcastle/protocol": ["../protocol/src/index.ts"],
+      "@ai-hero/sandcastle": ["../../src/index.ts"],
+      "@ai-hero/sandcastle/sandboxes/no-sandbox": [
+        "../../src/sandboxes/no-sandbox.ts"
+      ]
+    }
+  },
+  "include": ["src", "test"],
+  "exclude": ["dist", "node_modules"]
+}
