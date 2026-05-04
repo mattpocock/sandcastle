@@ -5,14 +5,16 @@ import {
   type ServerResponse,
 } from "node:http";
 import { URL } from "node:url";
-import { resolve } from "node:path";
-import { zPostRunsRequest } from "@sandcastle/protocol";
+import { zPostReposRequest, zPostRunsRequest } from "@sandcastle/protocol";
 import type { FleetState } from "@sandcastle/protocol";
 import { resolveToken } from "./auth/token.js";
+import { DeckLoader } from "./deck/DeckLoader.js";
+import { OperativeStore } from "./operatives/OperativeStore.js";
 import { SnapshotProjector } from "./projector/SnapshotProjector.js";
 import { RepoRegistry } from "./repos/RepoRegistry.js";
 import { RunSupervisor } from "./runs/RunSupervisor.js";
 import { SqliteStore } from "./telemetry/SqliteStore.js";
+import { TelemetryIndexer } from "./telemetry/TelemetryIndexer.js";
 import { WsHub } from "./ws/WsHub.js";
 
 export interface StartServerOptions {
@@ -22,6 +24,8 @@ export interface StartServerOptions {
   readonly runSupervisor?: RunSupervisor;
   readonly repoRegistry?: RepoRegistry;
   readonly store?: SqliteStore;
+  readonly deckLoader?: DeckLoader;
+  readonly operativeStore?: OperativeStore;
 }
 
 export type startServerOptions = StartServerOptions;
@@ -31,6 +35,8 @@ export interface AppContext {
   readonly repoRegistry: RepoRegistry;
   readonly runSupervisor: RunSupervisor;
   readonly store: SqliteStore;
+  readonly deckLoader: DeckLoader;
+  readonly operativeStore: OperativeStore;
   readonly snapshotProjector: SnapshotProjector;
   readonly wsHub: WsHub;
   readonly handle: (req: IncomingMessage, res: ServerResponse) => void;
@@ -54,7 +60,14 @@ export const createApp = (options?: StartServerOptions): AppContext => {
   const runSupervisor =
     options?.runSupervisor ??
     new RunSupervisor({ repoRoot: repoRegistry.root, store });
-  const snapshotProjector = new SnapshotProjector(repoRegistry, runSupervisor);
+  const deckLoader = options?.deckLoader ?? new DeckLoader();
+  const operativeStore = options?.operativeStore ?? new OperativeStore();
+  const snapshotProjector = new SnapshotProjector(
+    repoRegistry,
+    runSupervisor,
+    deckLoader,
+    operativeStore,
+  );
   const wsHub = new WsHub({
     getFleetSnapshot: () => snapshotProjector.getFleetState(),
   });
@@ -67,6 +80,9 @@ export const createApp = (options?: StartServerOptions): AppContext => {
       token,
       repoRegistry,
       runSupervisor,
+      store,
+      deckLoader,
+      operativeStore,
       snapshotProjector,
     });
   };
@@ -76,6 +92,8 @@ export const createApp = (options?: StartServerOptions): AppContext => {
     repoRegistry,
     runSupervisor,
     store,
+    deckLoader,
+    operativeStore,
     snapshotProjector,
     wsHub,
     handle,
@@ -132,6 +150,9 @@ const handleRequest = async (ctx: {
   readonly token: string;
   readonly repoRegistry: RepoRegistry;
   readonly runSupervisor: RunSupervisor;
+  readonly store: SqliteStore;
+  readonly deckLoader: DeckLoader;
+  readonly operativeStore: OperativeStore;
   readonly snapshotProjector: SnapshotProjector;
 }): Promise<void> => {
   const { req, res } = ctx;
@@ -153,6 +174,97 @@ const handleRequest = async (ctx: {
     if (req.method === "POST" && url.pathname === "/runs") {
       const body = zPostRunsRequest.parse(await readJson(req));
       writeJson(res, 200, await ctx.runSupervisor.startRun(body));
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/repos") {
+      writeJson(res, 200, { repos: ctx.repoRegistry.listRepos() });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/repos") {
+      const body = zPostReposRequest.parse(await readJson(req));
+      const repo = ctx.repoRegistry.registerRepo(body.root);
+      writeJson(res, 200, repo);
+      return;
+    }
+
+    const repoMatch = url.pathname.match(/^\/repos\/([^/]+)$/);
+    if (req.method === "DELETE" && repoMatch) {
+      writeJson(res, 200, {
+        removed: ctx.repoRegistry.removeRepo(decodeURIComponent(repoMatch[1]!)),
+      });
+      return;
+    }
+
+    const repoDeckMatch = url.pathname.match(/^\/repos\/([^/]+)\/deck$/);
+    if (req.method === "GET" && repoDeckMatch) {
+      const repo = ctx.repoRegistry.getRepoById(
+        decodeURIComponent(repoDeckMatch[1]!),
+      );
+      if (!repo) {
+        writeJson(res, 404, {
+          error: { code: "NOT_FOUND", message: "Repo not found" },
+        });
+        return;
+      }
+      writeJson(res, 200, ctx.deckLoader.loadDeck(repo.root));
+      return;
+    }
+
+    const repoTelemetryMatch = url.pathname.match(
+      /^\/repos\/([^/]+)\/telemetry$/,
+    );
+    if (req.method === "GET" && repoTelemetryMatch) {
+      const repo = ctx.repoRegistry.getRepoById(
+        decodeURIComponent(repoTelemetryMatch[1]!),
+      );
+      if (!repo) {
+        writeJson(res, 404, {
+          error: { code: "NOT_FOUND", message: "Repo not found" },
+        });
+        return;
+      }
+      const telemetryStore =
+        repo.root === ctx.repoRegistry.root
+          ? ctx.store
+          : new SqliteStore(repo.root);
+      try {
+        writeJson(
+          res,
+          200,
+          await new TelemetryIndexer(telemetryStore).getTelemetry(repo, {
+            force: url.searchParams.get("force") === "true",
+          }),
+        );
+      } finally {
+        if (telemetryStore !== ctx.store) telemetryStore.close();
+      }
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/operatives") {
+      writeJson(res, 200, {
+        operatives: ctx.operativeStore.listIdentities(),
+      });
+      return;
+    }
+
+    const operativeMatch = url.pathname.match(/^\/operatives\/([^/]+)$/);
+    if (req.method === "GET" && operativeMatch) {
+      const id = decodeURIComponent(operativeMatch[1]!);
+      const identity = ctx.operativeStore.getIdentity(id);
+      if (!identity) {
+        writeJson(res, 404, {
+          error: { code: "NOT_FOUND", message: "Operative not found" },
+        });
+        return;
+      }
+      const repoRecord = ctx.operativeStore.getRepoRecord(
+        ctx.repoRegistry.root,
+        id,
+      );
+      writeJson(res, 200, repoRecord ? { ...identity, repoRecord } : identity);
       return;
     }
 

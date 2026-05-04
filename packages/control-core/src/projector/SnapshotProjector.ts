@@ -1,89 +1,79 @@
-import type {
-  Deck,
-  FleetState,
-  OperativeIdentity,
-  Planet,
-  Run,
-} from "@sandcastle/protocol";
+import type { FleetState, Planet, Run } from "@sandcastle/protocol";
+import { DeckLoader } from "../deck/DeckLoader.js";
+import { OperativeStore } from "../operatives/OperativeStore.js";
 import type { RepoRegistry } from "../repos/RepoRegistry.js";
 import type { RunSupervisor } from "../runs/RunSupervisor.js";
-
-const emptyMode = {
-  id: "mode-default",
-  type: "mode" as const,
-  slug: "default",
-  title: "Default Mode",
-  summary: "Phase 0 synthetic mode",
-  sourcePath: ".sandcastle/agents.md",
-  enabled: true,
-  tags: [],
-  body: "",
-  updatedAt: new Date(0).toISOString(),
-  constraints: [],
-};
-
-const emptyDeck: Deck = {
-  version: 1,
-  mode: emptyMode,
-  skills: [],
-  commands: [],
-  order: [emptyMode.id],
-};
-
-const operative: OperativeIdentity = {
-  id: "pi-default",
-  codename: "Pi Default",
-  provider: "pi",
-  model: "pi",
-  species: "synthetic",
-  className: "Surgeon",
-  level: 1,
-  globalXp: 0,
-  bond: 0,
-  streak: 0,
-  concurrencyCap: 1,
-  sleeveCardIds: [],
-  unlockedTraits: [],
-};
+import { SqliteStore } from "../telemetry/SqliteStore.js";
+import { TelemetryIndexer } from "../telemetry/TelemetryIndexer.js";
 
 export class SnapshotProjector {
   constructor(
     private readonly repoRegistry: RepoRegistry,
     private readonly runSupervisor: RunSupervisor,
+    private readonly deckLoader = new DeckLoader(),
+    private readonly operativeStore = new OperativeStore(),
   ) {}
 
   async getFleetState(): Promise<FleetState> {
     const repo = await this.repoRegistry.getRepo();
+    const repos = this.repoRegistry.listRepos();
     const runs = this.runSupervisor.listRuns();
     const runsById = Object.fromEntries(runs.map((run) => [run.id, run]));
     const activeRunIds = runs
       .filter((run) => !["victory", "defeat", "aborted"].includes(run.status))
       .map((run) => run.id);
-    const planet: Planet = {
-      id: "planet-local",
-      repoName: repo.repoName,
-      repoRoot: repo.root,
-      defaultBranch: repo.branch,
-      terraformStage: 0,
-      scars: [],
-      wards: [],
-      deck: emptyDeck,
-      telemetry: {
-        coveragePct: null,
-        ciGreenRate30d: null,
-        openIssues: null,
-        churnScore: null,
-        ageDays: null,
-        testCount: null,
-        lastIndexedAt: null,
-      },
-      activeRunIds,
-      lastRunAt: runs.at(-1)?.startedAt ?? null,
-    };
+    const planets = await Promise.all(
+      repos.map(async (registered) => {
+        const isCurrent = registered.id === repo.id;
+        const store = new SqliteStore(registered.root);
+        try {
+          const telemetry = await new TelemetryIndexer(store).getTelemetry(
+            registered,
+          );
+          const planet: Planet = {
+            id: isCurrent ? "planet-local" : registered.id,
+            repoName: registered.root.split(/[\\/]/).at(-1) ?? registered.root,
+            repoRoot: registered.root,
+            defaultBranch: isCurrent
+              ? repo.branch
+              : (telemetry.branch ?? "unknown"),
+            terraformStage: 0,
+            scars: [],
+            wards: [],
+            deck: this.deckLoader.loadDeck(registered.root),
+            telemetry,
+            activeRunIds: isCurrent ? activeRunIds : [],
+            lastRunAt: isCurrent ? (runs.at(-1)?.startedAt ?? null) : null,
+          };
+          return planet;
+        } finally {
+          store.close();
+        }
+      }),
+    );
+    const operatives = this.operativeStore.listIdentities();
+    const operativesById = Object.fromEntries(
+      operatives.map((identity) => {
+        const repoRecord = this.operativeStore.getRepoRecord(
+          repo.root,
+          identity.id,
+        );
+        return [
+          identity.id,
+          repoRecord ? { ...identity, repoRecord } : identity,
+        ];
+      }),
+    );
+    const maxCapacity = operatives.reduce(
+      (max, identity) => max + identity.concurrencyCap,
+      0,
+    );
 
     return {
-      planetsById: { [planet.id]: planet },
-      operativesById: { [operative.id]: operative },
+      planetsById: Object.fromEntries(
+        planets.map((planet) => [planet.id, planet]),
+      ),
+      operativesById,
       runsById: runsById as Record<string, Run>,
       phasesById: {},
       dockOrder: runs.map((run) => run.id),
@@ -99,7 +89,7 @@ export class SnapshotProjector {
               ? ("merge" as const)
               : ("revise" as const),
         })),
-      capacity: { used: activeRunIds.length, max: operative.concurrencyCap },
+      capacity: { used: activeRunIds.length, max: maxCapacity },
       updatedAt: new Date().toISOString(),
     };
   }

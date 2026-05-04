@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { Run, RunEvent } from "@sandcastle/protocol";
+import type { RepoTelemetry, Run, RunEvent } from "@sandcastle/protocol";
 
 export interface StoredRunEvent {
   readonly seq: number;
@@ -14,6 +14,9 @@ interface StoreDriver {
   getRun(id: string): Run | undefined;
   listRuns(): Run[];
   listEvents(runId: string): StoredRunEvent[];
+  getRepoTelemetry(repoId: string): RepoTelemetry | undefined;
+  upsertRepoTelemetry(repoId: string, telemetry: RepoTelemetry): void;
+  clearRepoTelemetry(repoId: string): void;
   close(): void;
 }
 
@@ -47,6 +50,18 @@ export class SqliteStore {
 
   listEvents(runId: string): StoredRunEvent[] {
     return this.driver.listEvents(runId);
+  }
+
+  getRepoTelemetry(repoId: string): RepoTelemetry | undefined {
+    return this.driver.getRepoTelemetry(repoId);
+  }
+
+  upsertRepoTelemetry(repoId: string, telemetry: RepoTelemetry): void {
+    this.driver.upsertRepoTelemetry(repoId, telemetry);
+  }
+
+  clearRepoTelemetry(repoId: string): void {
+    this.driver.clearRepoTelemetry(repoId);
   }
 
   close(): void {
@@ -99,6 +114,11 @@ CREATE TABLE IF NOT EXISTS run_events (
   FOREIGN KEY (run_id) REFERENCES runs(id)
 );
 CREATE INDEX IF NOT EXISTS idx_run_events_run_id_seq ON run_events(run_id, seq);
+CREATE TABLE IF NOT EXISTS repo_telemetry (
+  repo_id TEXT PRIMARY KEY,
+  indexed_at INTEGER NOT NULL,
+  raw_json TEXT NOT NULL
+);
 `);
   }
 
@@ -190,6 +210,33 @@ CREATE INDEX IF NOT EXISTS idx_run_events_run_id_seq ON run_events(run_id, seq);
     }));
   }
 
+  getRepoTelemetry(repoId: string): RepoTelemetry | undefined {
+    const row = this.db
+      .prepare("SELECT raw_json FROM repo_telemetry WHERE repo_id = ?")
+      .get(repoId) as { raw_json: string } | undefined;
+    return row ? (JSON.parse(row.raw_json) as RepoTelemetry) : undefined;
+  }
+
+  upsertRepoTelemetry(repoId: string, telemetry: RepoTelemetry): void {
+    this.db
+      .prepare(
+        `INSERT INTO repo_telemetry (repo_id, indexed_at, raw_json)
+         VALUES (?, ?, ?)
+         ON CONFLICT(repo_id) DO UPDATE SET
+           indexed_at = excluded.indexed_at,
+           raw_json = excluded.raw_json`,
+      )
+      .run(
+        repoId,
+        telemetry.lastIndexedAt ? Date.parse(telemetry.lastIndexedAt) : 0,
+        JSON.stringify(telemetry),
+      );
+  }
+
+  clearRepoTelemetry(repoId: string): void {
+    this.db.prepare("DELETE FROM repo_telemetry WHERE repo_id = ?").run(repoId);
+  }
+
   close(): void {
     this.db.close();
   }
@@ -198,6 +245,7 @@ CREATE INDEX IF NOT EXISTS idx_run_events_run_id_seq ON run_events(run_id, seq);
 interface JsonData {
   readonly runs: Record<string, Run>;
   readonly events: Record<string, StoredRunEvent[]>;
+  readonly repoTelemetry?: Record<string, RepoTelemetry>;
 }
 
 class JsonFallbackDriver implements StoreDriver {
@@ -235,6 +283,27 @@ class JsonFallbackDriver implements StoreDriver {
       ...entry,
       event: reviveEvent(entry.event),
     }));
+  }
+
+  getRepoTelemetry(repoId: string): RepoTelemetry | undefined {
+    return this.data.repoTelemetry?.[repoId];
+  }
+
+  upsertRepoTelemetry(repoId: string, telemetry: RepoTelemetry): void {
+    this.data = {
+      ...this.data,
+      repoTelemetry: {
+        ...(this.data.repoTelemetry ?? {}),
+        [repoId]: telemetry,
+      },
+    };
+    this.flush();
+  }
+
+  clearRepoTelemetry(repoId: string): void {
+    const { [repoId]: _removed, ...rest } = this.data.repoTelemetry ?? {};
+    this.data = { ...this.data, repoTelemetry: rest };
+    this.flush();
   }
 
   close(): void {}

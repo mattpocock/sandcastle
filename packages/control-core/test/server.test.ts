@@ -1,10 +1,34 @@
 import WebSocket from "ws";
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import { startServer } from "../src/server.js";
 import { RunSupervisor } from "../src/runs/RunSupervisor.js";
 import { SqliteStore } from "../src/telemetry/SqliteStore.js";
+import { GlobalRepoStore } from "../src/repos/GlobalRepoStore.js";
+import { OperativeStore } from "../src/operatives/OperativeStore.js";
+import { RepoRegistry } from "../src/repos/RepoRegistry.js";
 import { fakeAgent, makeRepo, waitFor } from "./helpers.js";
 import type { WsServerMessage } from "@sandcastle/protocol";
+
+const homes: string[] = [];
+
+const isolatedDeps = (repo: string) => {
+  const home = mkdtempSync(join(tmpdir(), "sandcastle-home-"));
+  homes.push(home);
+  const sandcastleHome = join(home, ".sandcastle");
+  return {
+    repoRegistry: new RepoRegistry(repo, new GlobalRepoStore(sandcastleHome)),
+    operativeStore: new OperativeStore(sandcastleHome),
+  };
+};
+
+afterEach(() => {
+  for (const home of homes.splice(0)) {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
 
 describe("server", () => {
   it("boots, serves HTTP routes, starts runs, and streams WS events", async () => {
@@ -16,10 +40,10 @@ describe("server", () => {
       agentFactory: () => fakeAgent(),
     });
     const server = await startServer({
-      repo,
       token: "secret",
       runSupervisor,
       store,
+      ...isolatedDeps(repo),
     });
     const auth = { authorization: "Bearer secret" };
     try {
@@ -64,7 +88,10 @@ describe("server", () => {
 
   it("rejects WS handshakes without the token", async () => {
     const repo = makeRepo();
-    const server = await startServer({ repo, token: "secret" });
+    const server = await startServer({
+      token: "secret",
+      ...isolatedDeps(repo),
+    });
     try {
       const ws = new WebSocket(`ws://127.0.0.1:${server.port}/`);
       await expect(
