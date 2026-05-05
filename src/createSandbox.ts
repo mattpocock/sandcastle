@@ -37,7 +37,6 @@ import {
   Sandbox as SandboxTag,
   SandboxFactory,
   SANDBOX_REPO_DIR,
-  resolveGitMounts,
 } from "./SandboxFactory.js";
 import type {
   SandboxProvider,
@@ -46,7 +45,6 @@ import type {
 } from "./SandboxProvider.js";
 import { startSandbox } from "./startSandbox.js";
 import { syncOut } from "./syncOut.js";
-import * as WorktreeManager from "./WorktreeManager.js";
 import { copyToWorktree } from "./CopyToWorktree.js";
 import { resolveCwd } from "./resolveCwd.js";
 import type { VersionControlProvider } from "./VersionControl.js";
@@ -341,6 +339,7 @@ const buildSandboxHandle = (
               name: runOptions.name,
               signal: runOptions.signal,
               skipPromptExpansion: isInlinePrompt,
+              vcs,
             });
           }).pipe(Effect.provide(runLayer)),
         );
@@ -424,6 +423,7 @@ const buildSandboxHandle = (
                 branch,
                 hostWorktreePath: worktreePath,
                 applyToHost,
+                vcs,
               },
               (ctx) =>
                 Effect.gen(function* () {
@@ -578,8 +578,17 @@ export const createSandboxFromWorktree = async (
         copyPaths: options.copyToWorktree,
       });
     } else {
-      startEffect = resolveGitMounts(join(hostRepoDir, ".git")).pipe(
-        Effect.provide(NodeFileSystem.layer),
+      // createSandboxFromWorktree is called by createWorktree which doesn't
+      // currently thread vcs into its options; default to git() here.
+      const localVcs = git();
+      startEffect = Effect.tryPromise({
+        try: () =>
+          localVcs.resolveRepoMounts({
+            checkoutPath: worktreePath,
+            gitPath: join(hostRepoDir, ".git"),
+          }),
+        catch: () => undefined,
+      }).pipe(
         Effect.catchAll(() => Effect.succeed([])),
         Effect.flatMap((gitMounts) =>
           startSandbox({
@@ -750,8 +759,14 @@ export const createSandbox = async (
         copyPaths: options.copyToWorktree,
       });
     } else {
-      startEffect = resolveGitMounts(join(hostRepoDir, ".git")).pipe(
-        Effect.provide(NodeFileSystem.layer),
+      startEffect = Effect.tryPromise({
+        try: () =>
+          vcs.resolveRepoMounts({
+            checkoutPath: worktreePath,
+            gitPath: join(hostRepoDir, ".git"),
+          }),
+        catch: () => undefined,
+      }).pipe(
         Effect.catchAll(() => Effect.succeed([])),
         Effect.flatMap((gitMounts) =>
           startSandbox({
@@ -809,7 +824,8 @@ export const createSandbox = async (
   // 5. Build applyToHost callback (once, reused across runs)
   const applyToHost =
     isIsolated && providerHandle
-      ? () => syncOut(worktreePath, providerHandle as IsolatedSandboxHandle)
+      ? () =>
+          syncOut(worktreePath, providerHandle as IsolatedSandboxHandle, vcs)
       : () => Effect.void;
 
   // 6. Set up signal handlers

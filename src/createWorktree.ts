@@ -10,7 +10,6 @@ import { resolvePrompt } from "./PromptResolver.js";
 import {
   SandboxFactory,
   makeSandboxLayerFromHandle,
-  resolveGitMounts,
   SANDBOX_REPO_DIR,
 } from "./SandboxFactory.js";
 import {
@@ -42,7 +41,6 @@ import { resolveEnv } from "./EnvResolver.js";
 import { mergeProviderEnv } from "./mergeProviderEnv.js";
 import { startSandbox } from "./startSandbox.js";
 import { syncOut } from "./syncOut.js";
-import * as WorktreeManager from "./WorktreeManager.js";
 import { copyToWorktree } from "./CopyToWorktree.js";
 import { resolveCwd } from "./resolveCwd.js";
 import {
@@ -363,7 +361,12 @@ export const createWorktree = async (
         handle = startResult.handle;
       } else {
         const gitPath = join(hostRepoDir, ".git");
-        const gitMounts = yield* resolveGitMounts(gitPath);
+        const gitMounts = yield* Effect.promise(() =>
+          vcs.resolveRepoMounts({
+            checkoutPath: worktreeInfo.path,
+            gitPath,
+          }),
+        );
         const startResult = yield* d.taskLog("Starting sandbox", () =>
           startSandbox({
             provider: resolvedSandbox,
@@ -391,7 +394,8 @@ export const createWorktree = async (
 
         const applyToHost =
           resolvedSandbox.tag === "isolated"
-            ? () => syncOut(worktreeInfo.path, handle as IsolatedSandboxHandle)
+            ? () =>
+                syncOut(worktreeInfo.path, handle as IsolatedSandboxHandle, vcs)
             : () => Effect.void;
 
         const lifecycleEffect = withSandboxLifecycle(
@@ -402,6 +406,7 @@ export const createWorktree = async (
             branch: worktreeInfo.branch,
             hostWorktreePath: worktreeInfo.path,
             applyToHost,
+            vcs,
           },
           (ctx) =>
             Effect.gen(function* () {
@@ -552,7 +557,12 @@ export const createWorktree = async (
         sandboxRepoDir = startResult.worktreePath;
       } else {
         const gitPath = join(hostRepoDir, ".git");
-        const gitMounts = yield* resolveGitMounts(gitPath);
+        const gitMounts = yield* Effect.promise(() =>
+          vcs.resolveRepoMounts({
+            checkoutPath: worktreeInfo.path,
+            gitPath,
+          }),
+        );
         const startResult = yield* startSandbox({
           provider: sandboxProvider,
           hostRepoDir,
@@ -568,7 +578,8 @@ export const createWorktree = async (
       const sandboxLayer = makeSandboxLayerFromHandle(handle);
       const applyToHost =
         sandboxProvider.tag === "isolated"
-          ? () => syncOut(worktreeInfo.path, handle as IsolatedSandboxHandle)
+          ? () =>
+              syncOut(worktreeInfo.path, handle as IsolatedSandboxHandle, vcs)
           : () => Effect.void;
 
       // 5. Resolve logging
@@ -643,6 +654,7 @@ export const createWorktree = async (
           resumeSession: opts.resumeSession,
           signal: opts.signal,
           skipPromptExpansion: isInlinePrompt,
+          vcs,
         });
       }).pipe(
         Effect.provide(runLayer),

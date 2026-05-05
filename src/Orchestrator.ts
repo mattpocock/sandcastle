@@ -11,6 +11,7 @@ import type { SandboxError } from "./errors.js";
 import type { SandboxService } from "./SandboxFactory.js";
 import { SandboxFactory, SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 import { withSandboxLifecycle, type SandboxHooks } from "./SandboxLifecycle.js";
+import type { VersionControlProvider } from "./VersionControl.js";
 import type { AgentProvider, IterationUsage } from "./AgentProvider.js";
 import { TextDeltaBuffer } from "./TextDeltaBuffer.js";
 import {
@@ -127,9 +128,7 @@ const invokeAgent = (
           errorDetail = resultText;
         }
         if (!errorDetail.trim()) {
-          const lines = execResult.stdout
-            .split("\n")
-            .filter((l) => l.trim());
+          const lines = execResult.stdout.split("\n").filter((l) => l.trim());
           errorDetail = lines.slice(-20).join("\n");
         }
         return yield* Effect.fail(
@@ -195,6 +194,8 @@ export interface OrchestrateOptions {
   readonly signal?: AbortSignal;
   /** When true, skip prompt expansion (shell expression evaluation). Set for dynamic inline prompts. */
   readonly skipPromptExpansion?: boolean;
+  /** VCS provider — defaults to git() inside withSandboxLifecycle when omitted. */
+  readonly vcs?: VersionControlProvider;
 }
 
 /** Per-iteration result carrying an optional session ID. */
@@ -273,6 +274,7 @@ export const orchestrate = (
               hostWorktreePath,
               applyToHost,
               signal: options.signal,
+              vcs: options.vcs,
             },
             (ctx) =>
               Effect.gen(function* () {

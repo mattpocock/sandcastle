@@ -8,7 +8,6 @@ import { preprocessPrompt } from "./PromptPreprocessor.js";
 import { resolvePrompt } from "./PromptResolver.js";
 import {
   makeSandboxLayerFromHandle,
-  resolveGitMounts,
   SANDBOX_REPO_DIR,
 } from "./SandboxFactory.js";
 import {
@@ -325,7 +324,12 @@ export const interactive = async (
       handle = startResult.handle;
     } else {
       const gitPath = join(hostRepoDir, ".git");
-      const gitMounts = yield* resolveGitMounts(gitPath);
+      const gitMounts = yield* Effect.promise(() =>
+        vcs.resolveRepoMounts({
+          checkoutPath: isHeadMode ? hostRepoDir : worktreeInfo!.path,
+          gitPath,
+        }),
+      );
       const startResult = yield* d.taskLog("Starting sandbox", () =>
         startSandbox({
           provider: sandboxProvider,
@@ -356,7 +360,8 @@ export const interactive = async (
 
       const applyToHost =
         sandboxProvider.tag === "isolated" && worktreeInfo
-          ? () => syncOut(worktreeInfo!.path, handle as IsolatedSandboxHandle)
+          ? () =>
+              syncOut(worktreeInfo!.path, handle as IsolatedSandboxHandle, vcs)
           : () => Effect.void; // bind-mount and no-sandbox don't need sync
 
       const lifecycleEffect = withSandboxLifecycle(
@@ -367,6 +372,7 @@ export const interactive = async (
           branch: lifecycleBranch,
           hostWorktreePath: isHeadMode ? hostRepoDir : worktreeInfo?.path,
           applyToHost,
+          vcs,
         },
         (ctx) =>
           Effect.gen(function* () {

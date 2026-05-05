@@ -408,7 +408,11 @@ export const WorktreeDockerSandboxFactory = {
                   hostWorktreePath: worktreeInfo.path,
                   sandboxRepoPath: worktreePath,
                   applyToHost: () =>
-                    syncOut(worktreeInfo.path, handle as IsolatedSandboxHandle),
+                    syncOut(
+                      worktreeInfo.path,
+                      handle as IsolatedSandboxHandle,
+                      vcs,
+                    ),
                 }).pipe(Effect.provide(sandboxLayer)) as Effect.Effect<
                   A,
                   E | SandboxError,
@@ -446,13 +450,18 @@ export const WorktreeDockerSandboxFactory = {
                 ? runHostHooks(hooks.host.onWorktreeReady, hostRepoDir, signal)
                 : Effect.void
             ).pipe(
-              Effect.andThen(resolveGitMounts(gitPath)),
-              Effect.provideService(FileSystem.FileSystem, fileSystem),
-              Effect.mapError(
-                (e) =>
-                  new WorktreeError({
-                    message: `Failed to resolve git mounts: ${e}`,
-                  }) as E | SandboxError,
+              Effect.andThen(
+                Effect.tryPromise({
+                  try: () =>
+                    vcs.resolveRepoMounts({
+                      checkoutPath: hostRepoDir,
+                      gitPath,
+                    }),
+                  catch: (e) =>
+                    new WorktreeError({
+                      message: `Failed to resolve git mounts: ${e instanceof Error ? e.message : String(e)}`,
+                    }) as E | SandboxError,
+                }),
               ),
               Effect.flatMap((gitMounts) =>
                 // Patch git mounts for Windows worktree compatibility (ADR-0006)
@@ -539,14 +548,17 @@ export const WorktreeDockerSandboxFactory = {
               ),
               Effect.flatMap((worktreeInfo) => {
                 const gitPath = join(hostRepoDir, ".git");
-                return resolveGitMounts(gitPath).pipe(
-                  Effect.provideService(FileSystem.FileSystem, fileSystem),
-                  Effect.mapError(
-                    (e) =>
-                      new WorktreeError({
-                        message: `Failed to resolve git mounts: ${e}`,
-                      }),
-                  ),
+                return Effect.tryPromise({
+                  try: () =>
+                    vcs.resolveRepoMounts({
+                      checkoutPath: worktreeInfo.path,
+                      gitPath,
+                    }),
+                  catch: (e) =>
+                    new WorktreeError({
+                      message: `Failed to resolve git mounts: ${e instanceof Error ? e.message : String(e)}`,
+                    }),
+                }).pipe(
                   // Patch git mounts for Windows worktree compatibility (ADR-0006)
                   Effect.flatMap((gitMounts) =>
                     Effect.tryPromise({

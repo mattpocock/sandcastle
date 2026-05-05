@@ -506,6 +506,7 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
       resumeSession: options.resumeSession,
       signal: options.signal,
       skipPromptExpansion: isInlinePrompt,
+      vcs,
     });
 
     const completion = buildCompletionMessage(

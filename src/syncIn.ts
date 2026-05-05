@@ -12,31 +12,8 @@ import { join } from "node:path";
 import { Effect } from "effect";
 import type { IsolatedSandboxHandle } from "./SandboxProvider.js";
 import { SyncError } from "./errors.js";
-
-/**
- * Execute a command on the host side, returning stdout.
- * Fails with SyncError on non-zero exit.
- */
-const execHost = (
-  command: string,
-  cwd: string,
-): Effect.Effect<string, SyncError> =>
-  Effect.tryPromise({
-    try: async () => {
-      const { exec } = await import("node:child_process");
-      const { promisify } = await import("node:util");
-      const execAsync = promisify(exec);
-      const { stdout } = await execAsync(command, {
-        cwd,
-        maxBuffer: 10 * 1024 * 1024,
-      });
-      return stdout;
-    },
-    catch: (e) =>
-      new SyncError({
-        message: `Host command failed: ${command}\n${e instanceof Error ? e.message : String(e)}`,
-      }),
-  });
+import type { VersionControlProvider } from "./VersionControl.js";
+import { git } from "./vcs/git.js";
 
 /**
  * Execute a command in the sandbox, failing with SyncError if it exits non-zero.
@@ -80,13 +57,18 @@ const execOk = (
 export const syncIn = (
   hostRepoDir: string,
   handle: IsolatedSandboxHandle,
+  vcsOpt?: VersionControlProvider,
 ): Effect.Effect<{ branch: string }, SyncError> =>
   Effect.gen(function* () {
+    const vcs = vcsOpt ?? git();
     // Get current branch from host
-    const branch = (yield* execHost(
-      "git rev-parse --abbrev-ref HEAD",
-      hostRepoDir,
-    )).trim();
+    const branch = yield* Effect.tryPromise({
+      try: () => vcs.currentBranch(hostRepoDir),
+      catch: (e) =>
+        new SyncError({
+          message: `Failed to read host branch: ${e instanceof Error ? e.message : String(e)}`,
+        }),
+    });
 
     // Create git bundle on host capturing all refs
     const bundleDir = yield* Effect.tryPromise({
@@ -100,10 +82,13 @@ export const syncIn = (
 
     yield* Effect.ensuring(
       Effect.gen(function* () {
-        yield* execHost(
-          `git bundle create "${bundleHostPath}" --all`,
-          hostRepoDir,
-        );
+        yield* Effect.tryPromise({
+          try: () => vcs.bundleAllRefs(hostRepoDir, bundleHostPath),
+          catch: (e) =>
+            new SyncError({
+              message: `Failed to bundle host repo: ${e instanceof Error ? e.message : String(e)}`,
+            }),
+        });
 
         // Create temp dir in sandbox and copy bundle in
         const mkTempResult = yield* execOk(
@@ -121,23 +106,21 @@ export const syncIn = (
             }),
         });
 
-        // Clone from bundle into the worktree
+        // Clone from bundle into the worktree.
+        // Sandbox-side: agent environment is always git, even when host vcs is
+        // jj. Command strings come from vcs.cloneFromBundleCommands so the
+        // abstraction owns the strings even though execution is via handle.exec.
         const worktreePath = handle.worktreePath;
-        yield* execOk(
-          handle,
-          `git clone "${bundleSandboxPath}" "${worktreePath}_clone"`,
-        );
-
-        // Move contents from clone into worktree (git clone requires empty target)
-        yield* execOk(
-          handle,
-          `rm -rf "${worktreePath}" && mv "${worktreePath}_clone" "${worktreePath}"`,
-        );
-
-        // Checkout the correct branch
-        yield* execOk(handle, `git checkout "${branch}"`, {
-          cwd: worktreePath,
+        const cloneCmds = vcs.cloneFromBundleCommands({
+          bundlePath: bundleSandboxPath,
+          targetPath: worktreePath,
+          branch,
         });
+        // The first two commands need no cwd (operate via absolute paths). The
+        // third uses an embedded `cd "${targetPath}"` so a cwd is also unneeded.
+        for (const cmd of cloneCmds) {
+          yield* execOk(handle, cmd);
+        }
 
         // Clean up sandbox temp files
         yield* Effect.tryPromise({
@@ -147,10 +130,14 @@ export const syncIn = (
         });
 
         // Verify sync succeeded
-        const hostHead = (yield* execHost(
-          "git rev-parse HEAD",
-          hostRepoDir,
-        )).trim();
+        const hostHead = yield* Effect.tryPromise({
+          try: () => vcs.headRef(hostRepoDir),
+          catch: (e) =>
+            new SyncError({
+              message: `Failed to read host HEAD: ${e instanceof Error ? e.message : String(e)}`,
+            }),
+        });
+        // Sandbox-side: agent environment is always git, even when host vcs is jj.
         const sandboxHead = (yield* execOk(handle, "git rev-parse HEAD", {
           cwd: worktreePath,
         })).stdout.trim();

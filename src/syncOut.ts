@@ -28,6 +28,8 @@ import { Effect } from "effect";
 import type { IsolatedSandboxHandle } from "./SandboxProvider.js";
 import { buildRecoveryMessage, type FailedStep } from "./RecoveryMessage.js";
 import { SyncError } from "./errors.js";
+import type { VersionControlProvider } from "./VersionControl.js";
+import { git } from "./vcs/git.js";
 
 /**
  * Execute a command on the host side, returning stdout.
@@ -164,31 +166,41 @@ const createPatchDir = (
 export const syncOut = (
   hostRepoDir: string,
   handle: IsolatedSandboxHandle,
+  vcsOpt?: VersionControlProvider,
 ): Effect.Effect<void, SyncError> =>
   Effect.gen(function* () {
+    const vcs = vcsOpt ?? git();
     const worktreePath = handle.worktreePath;
 
-    const hostHead = (yield* execHost(
-      "git rev-parse HEAD",
-      hostRepoDir,
-    )).trim();
+    const hostHead = yield* Effect.tryPromise({
+      try: () => vcs.headRef(hostRepoDir),
+      catch: (e) =>
+        new SyncError({
+          message: `Failed to read host HEAD: ${e instanceof Error ? e.message : String(e)}`,
+        }),
+    });
+    // Sandbox-side: agent environment is always git, even when host vcs is jj.
     const sandboxHead = (yield* execOk(handle, "git rev-parse HEAD", {
       cwd: worktreePath,
     })).stdout.trim();
 
     const hasCommits = hostHead !== sandboxHead;
 
-    // Check for uncommitted changes
-    const diffResult = yield* execSandbox(handle, "git diff HEAD", {
-      cwd: worktreePath,
-    });
+    // Check for uncommitted changes (sandbox-side; command string from vcs).
+    const diffResult = yield* execSandbox(
+      handle,
+      vcs.diffWorkingTreeCommand(),
+      {
+        cwd: worktreePath,
+      },
+    );
     const hasDiff =
       diffResult.exitCode === 0 && diffResult.stdout.trim().length > 0;
 
-    // Check for untracked files
+    // Check for untracked files (sandbox-side; command string from vcs).
     const lsFilesResult = yield* execSandbox(
       handle,
-      "git ls-files --others --exclude-standard",
+      vcs.listUntrackedCommand(),
       { cwd: worktreePath },
     );
     const hasUntracked =
@@ -221,9 +233,13 @@ export const syncOut = (
       const sandboxPatchDir = mkTempResult.stdout.trim();
 
       try {
+        // Sandbox-side: agent environment is always git; command string from vcs.
         yield* execOk(
           handle,
-          `git format-patch "${hostHead}..HEAD" -o "${sandboxPatchDir}"`,
+          vcs.exportPatchesCommand({
+            base: hostHead,
+            outDir: sandboxPatchDir,
+          }),
           { cwd: worktreePath },
         );
 
@@ -306,7 +322,7 @@ export const syncOut = (
     if (!failedStep && hasDiff) {
       const diffPath = join(patchDir, "changes.patch");
       const applyResult = yield* Effect.either(
-        execHost(`git apply "${diffPath}"`, hostRepoDir),
+        execHost(vcs.applyPatchCommand({ patchPath: diffPath }), hostRepoDir),
       );
       if (applyResult._tag === "Left") {
         failedStep = "diff";
