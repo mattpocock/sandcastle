@@ -35,7 +35,11 @@ import type { SandboxHooks } from "./SandboxLifecycle.js";
 import { mergeProviderEnv } from "./mergeProviderEnv.js";
 import { hostSessionStore } from "./SessionStore.js";
 import { defaultSessionPathsLayer } from "./SessionPaths.js";
-import { generateTempBranchName, getCurrentBranch } from "./WorktreeManager.js";
+import {
+  generateTempBranchName,
+  getCurrentBranch,
+  resolveNamespace,
+} from "./WorktreeManager.js";
 import {
   type PromptArgs,
   substitutePromptArgs,
@@ -205,14 +209,25 @@ export interface RunOptions {
   readonly sandbox: SandboxProvider;
   /**
    * Host repo directory. Replaces `process.cwd()` as the anchor for
-   * `.sandcastle/worktrees/`, `.sandcastle/.env`, `.sandcastle/logs/`,
-   * `.sandcastle/patches/`, and git operations.
+   * `.<namespace>/worktrees/`, `.sandcastle/.env`, `.<namespace>/logs/`,
+   * `.<namespace>/patches/`, and git operations.
    *
    * - Relative paths are resolved against `process.cwd()`.
    * - Absolute paths are used as-is.
    * - Defaults to `process.cwd()` when omitted.
    */
   readonly cwd?: string;
+  /**
+   * Prefix used for the worktree branch (`<namespace>/<timestamp>`),
+   * worktree directory (`<namespace>-<timestamp>`), worktree parent
+   * directory (`.<namespace>/worktrees/`), log directory
+   * (`.<namespace>/logs/`), and patches directory (`.<namespace>/patches/`).
+   *
+   * Defaults to `"sandcastle"`, which preserves current behavior.
+   * Sanitized using the same rules as `name`. Empty strings are rejected.
+   * The `.sandcastle/.env` location is unaffected.
+   */
+  readonly namespace?: string;
   /** Inline prompt string (mutually exclusive with promptFile) */
   readonly prompt?: string;
   /**
@@ -229,7 +244,7 @@ export interface RunOptions {
   readonly hooks?: SandboxHooks;
   /** Key-value map for {{KEY}} placeholder substitution in prompts */
   readonly promptArgs?: PromptArgs;
-  /** Logging mode (default: { type: 'file' } with auto-generated path under .sandcastle/logs/) */
+  /** Logging mode (default: { type: 'file' } with auto-generated path under .<namespace>/logs/) */
   readonly logging?: LoggingOption;
   /** Substring(s) the agent emits to stop the iteration loop early. Matched via `includes` against agent output. (default: `"<promise>COMPLETE</promise>"`) */
   readonly completionSignal?: string | string[];
@@ -282,6 +297,8 @@ export interface RunResult {
 export const run = async (options: RunOptions): Promise<RunResult> => {
   // If signal is already aborted, reject immediately without any setup
   options.signal?.throwIfAborted();
+
+  const namespace = resolveNamespace(options.namespace);
 
   const {
     prompt,
@@ -377,7 +394,7 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
   const resolvedBranch =
     effectiveBranchType === "head"
       ? currentHostBranch
-      : (branch ?? generateTempBranchName(options.name));
+      : (branch ?? generateTempBranchName(options.name, namespace));
 
   // When using a temp branch, prefix the log filename with the target branch
   // (the host's current branch) so developers can tell which branch was targeted.
@@ -389,7 +406,7 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
     type: "file",
     path: join(
       hostRepoDir,
-      ".sandcastle",
+      `.${namespace}`,
       "logs",
       buildLogFilename(resolvedBranch, targetBranch, options.name),
     ),
@@ -418,6 +435,7 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
         hostRepoDir,
         copyToWorktree: options.copyToWorktree,
         name: options.name,
+        namespace,
         sandboxProvider: options.sandbox,
         branchStrategy,
         hooks,

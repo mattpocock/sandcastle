@@ -16,10 +16,12 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import {
   create,
+  DEFAULT_NAMESPACE,
   generateTempBranchName,
   hasUncommittedChanges,
   pruneStale,
   remove,
+  resolveNamespace,
   sanitizeName,
 } from "./WorktreeManager.js";
 
@@ -91,10 +93,60 @@ describe("sanitizeName", () => {
   });
 });
 
+describe("resolveNamespace", () => {
+  it("returns the default namespace when undefined", () => {
+    expect(resolveNamespace(undefined)).toBe(DEFAULT_NAMESPACE);
+    expect(resolveNamespace()).toBe("sandcastle");
+  });
+
+  it("returns the input unchanged when already lowercase alphanumeric", () => {
+    expect(resolveNamespace("triage-bot")).toBe("triage-bot");
+    expect(resolveNamespace("feature123")).toBe("feature123");
+  });
+
+  it("sanitizes mixed-case and special characters", () => {
+    expect(resolveNamespace("Triage Bot!")).toBe("triage-bot-");
+    expect(resolveNamespace("My/Agent.v2")).toBe("my-agent-v2");
+  });
+
+  it("rejects an empty string", () => {
+    expect(() => resolveNamespace("")).toThrowError(/non-empty/i);
+  });
+
+  it("rejects a value that sanitizes to no alphanumeric characters", () => {
+    expect(() => resolveNamespace("///")).toThrowError(/alphanumeric/i);
+    expect(() => resolveNamespace("!!!")).toThrowError(/alphanumeric/i);
+  });
+});
+
 describe("generateTempBranchName", () => {
   it("returns a string in sandcastle/<YYYYMMDD-HHMMSS> format", () => {
     const name = generateTempBranchName();
     expect(name).toMatch(/^sandcastle\/\d{8}-\d{6}$/);
+  });
+
+  it("uses the namespace prefix when provided", () => {
+    expect(generateTempBranchName(undefined, "triage-bot")).toMatch(
+      /^triage-bot\/\d{8}-\d{6}$/,
+    );
+  });
+
+  it("combines namespace and name when both provided", () => {
+    expect(generateTempBranchName("my-run", "triage-bot")).toMatch(
+      /^triage-bot\/my-run\/\d{8}-\d{6}$/,
+    );
+  });
+
+  it("sanitizes the namespace", () => {
+    expect(generateTempBranchName(undefined, "Triage Bot!")).toMatch(
+      /^triage-bot-\/\d{8}-\d{6}$/,
+    );
+  });
+
+  it("throws when namespace is an empty string", () => {
+    expect(() => generateTempBranchName(undefined, "")).toThrowError(
+      /non-empty/i,
+    );
   });
 
   it("returns different names when called at different times", async () => {
@@ -430,6 +482,42 @@ describe("WorktreeManager.create", () => {
 
     await run(remove(path));
   });
+
+  it("uses a custom namespace for branch and worktree directory", async () => {
+    const repoDir = await setupRepo();
+    const { path, branch } = await run(
+      create(repoDir, { namespace: "triage-bot" }),
+    );
+
+    expect(branch).toMatch(/^triage-bot\/\d{8}-\d{6}$/);
+    expect(path).toContain(join(repoDir, ".triage-bot", "worktrees"));
+    expect(path).toMatch(/triage-bot-\d{8}-\d{6}$/);
+
+    await run(remove(path));
+  });
+
+  it("combines a custom namespace with a name in the branch and directory", async () => {
+    const repoDir = await setupRepo();
+    const { path, branch } = await run(
+      create(repoDir, { namespace: "triage-bot", name: "my-run" }),
+    );
+
+    expect(branch).toMatch(/^triage-bot\/my-run\/\d{8}-\d{6}$/);
+    expect(path).toContain(join(repoDir, ".triage-bot", "worktrees"));
+    expect(path).toMatch(/triage-bot-my-run-\d{8}-\d{6}$/);
+
+    await run(remove(path));
+  });
+
+  it("preserves default behaviour when no namespace is provided", async () => {
+    const repoDir = await setupRepo();
+    const { path, branch } = await run(create(repoDir));
+
+    expect(branch).toMatch(/^sandcastle\/\d{8}-\d{6}$/);
+    expect(path).toContain(join(repoDir, ".sandcastle", "worktrees"));
+
+    await run(remove(path));
+  });
 });
 
 describe("WorktreeManager.remove", () => {
@@ -522,6 +610,34 @@ describe("WorktreeManager.pruneStale", () => {
     expect(s.isDirectory()).toBe(true);
 
     await run(remove(path));
+  });
+
+  it("operates on .<namespace>/worktrees/ when a namespace is provided", async () => {
+    const repoDir = await setupRepo();
+    const worktreesDir = join(repoDir, ".triage-bot", "worktrees");
+    await mkdir(worktreesDir, { recursive: true });
+
+    const orphanDir = join(worktreesDir, "orphan-dir");
+    await mkdir(orphanDir);
+
+    await run(pruneStale(repoDir, "triage-bot"));
+
+    const entries = await readdir(worktreesDir).catch(() => []);
+    expect(entries).not.toContain("orphan-dir");
+  });
+
+  it("does not touch the namespaced worktrees directory when called with the default namespace", async () => {
+    const repoDir = await setupRepo();
+    const customWorktreesDir = join(repoDir, ".triage-bot", "worktrees");
+    await mkdir(customWorktreesDir, { recursive: true });
+    const orphanDir = join(customWorktreesDir, "orphan-dir");
+    await mkdir(orphanDir);
+
+    // Default namespace prune should leave the triage-bot tree alone
+    await run(pruneStale(repoDir));
+
+    const entries = await readdir(customWorktreesDir);
+    expect(entries).toContain("orphan-dir");
   });
 });
 

@@ -62,13 +62,23 @@ export interface CreateSandboxOptions {
   readonly sandbox: SandboxProvider;
   /**
    * Host repo directory. Replaces `process.cwd()` as the anchor for
-   * `.sandcastle/worktrees/`, `.sandcastle/.env`, and git operations.
+   * `.<namespace>/worktrees/`, `.sandcastle/.env`, and git operations.
    *
    * - Relative paths are resolved against `process.cwd()`.
    * - Absolute paths are used as-is.
    * - Defaults to `process.cwd()` when omitted.
    */
   readonly cwd?: string;
+  /**
+   * Prefix used for the worktree branch (`<namespace>/<timestamp>`),
+   * worktree directory (`<namespace>-<timestamp>`), worktree parent
+   * directory (`.<namespace>/worktrees/`), log directory
+   * (`.<namespace>/logs/`), and patches directory (`.<namespace>/patches/`).
+   *
+   * Defaults to `"sandcastle"`. Sanitized like `name`. Empty strings rejected.
+   * The `.sandcastle/.env` location is unaffected.
+   */
+  readonly namespace?: string;
   /** Lifecycle hooks grouped by execution location (host or sandbox). */
   readonly hooks?: SandboxHooks;
   /** Paths relative to the host repo root to copy into the worktree at creation time. */
@@ -183,6 +193,7 @@ interface SandboxHandleContext {
   readonly worktreePath: string;
   readonly hostRepoDir: string;
   readonly sandboxRepoDir: string;
+  readonly namespace: string;
   readonly sandboxLayer: Layer.Layer<SandboxTag>;
   readonly providerHandle:
     | BindMountSandboxHandle
@@ -206,6 +217,7 @@ const buildSandboxHandle = (
     worktreePath,
     hostRepoDir,
     sandboxRepoDir,
+    namespace,
     sandboxLayer,
     providerHandle,
     applyToHost,
@@ -267,7 +279,7 @@ const buildSandboxHandle = (
         type: "file",
         path: join(
           hostRepoDir,
-          ".sandcastle",
+          `.${namespace}`,
           "logs",
           buildLogFilename(branch, undefined, runOptions.name),
         ),
@@ -498,6 +510,8 @@ export interface CreateSandboxFromWorktreeOptions {
   readonly branch: string;
   readonly worktreePath: string;
   readonly hostRepoDir: string;
+  /** Resolved namespace prefix used for log + patches paths. Defaults to `"sandcastle"`. */
+  readonly namespace?: string;
   readonly sandbox: SandboxProvider;
   readonly hooks?: SandboxHooks;
   readonly copyToWorktree?: string[];
@@ -518,6 +532,7 @@ export const createSandboxFromWorktree = async (
   options: CreateSandboxFromWorktreeOptions,
 ): Promise<Sandbox> => {
   const { branch, worktreePath, hostRepoDir } = options;
+  const namespace = WorktreeManager.resolveNamespace(options.namespace);
   const isTestMode = !!options._test?.buildSandboxLayer;
 
   // 1. Copy files if requested (bind-mount only)
@@ -527,7 +542,12 @@ export const createSandboxFromWorktree = async (
     options.sandbox.tag !== "isolated"
   ) {
     await Effect.runPromise(
-      copyToWorktree(options.copyToWorktree, hostRepoDir, worktreePath, options.timeouts?.copyToWorktreeMs),
+      copyToWorktree(
+        options.copyToWorktree,
+        hostRepoDir,
+        worktreePath,
+        options.timeouts?.copyToWorktreeMs,
+      ),
     );
   }
 
@@ -621,7 +641,12 @@ export const createSandboxFromWorktree = async (
   // 4. Build applyToHost callback
   const applyToHost =
     isIsolated && providerHandle
-      ? () => syncOut(worktreePath, providerHandle as IsolatedSandboxHandle)
+      ? () =>
+          syncOut(
+            worktreePath,
+            providerHandle as IsolatedSandboxHandle,
+            namespace,
+          )
       : () => Effect.void;
 
   // 5. Build and return sandbox handle — container-only close (worktree owns worktree)
@@ -633,6 +658,7 @@ export const createSandboxFromWorktree = async (
       worktreePath,
       hostRepoDir,
       sandboxRepoDir,
+      namespace,
       sandboxLayer,
       providerHandle,
       applyToHost,
@@ -655,18 +681,20 @@ export const createSandbox = async (
   options: CreateSandboxOptions,
 ): Promise<Sandbox> => {
   const { branch } = options;
+  const namespace = WorktreeManager.resolveNamespace(options.namespace);
   const isTestMode = !!options._test?.buildSandboxLayer;
 
   // 1. Resolve cwd, prune stale worktrees + create worktree on the explicit branch
   const { hostRepoDir, worktreeInfo } = await Effect.runPromise(
     Effect.gen(function* () {
       const hostRepoDir = yield* resolveCwd(options.cwd);
-      yield* WorktreeManager.pruneStale(hostRepoDir).pipe(
+      yield* WorktreeManager.pruneStale(hostRepoDir, namespace).pipe(
         Effect.catchAll(() => Effect.void),
       );
       const worktreeInfo = yield* WorktreeManager.create(hostRepoDir, {
         branch,
         baseBranch: options.baseBranch,
+        namespace,
       });
       return { hostRepoDir, worktreeInfo };
     }).pipe(Effect.provide(NodeContext.layer)),
@@ -681,7 +709,12 @@ export const createSandbox = async (
     options.sandbox.tag !== "isolated"
   ) {
     await Effect.runPromise(
-      copyToWorktree(options.copyToWorktree, hostRepoDir, worktreePath, options.timeouts?.copyToWorktreeMs),
+      copyToWorktree(
+        options.copyToWorktree,
+        hostRepoDir,
+        worktreePath,
+        options.timeouts?.copyToWorktreeMs,
+      ),
     );
   }
 
@@ -785,7 +818,12 @@ export const createSandbox = async (
   // 5. Build applyToHost callback (once, reused across runs)
   const applyToHost =
     isIsolated && providerHandle
-      ? () => syncOut(worktreePath, providerHandle as IsolatedSandboxHandle)
+      ? () =>
+          syncOut(
+            worktreePath,
+            providerHandle as IsolatedSandboxHandle,
+            namespace,
+          )
       : () => Effect.void;
 
   // 6. Set up signal handlers
@@ -843,6 +881,7 @@ export const createSandbox = async (
       worktreePath,
       hostRepoDir,
       sandboxRepoDir,
+      namespace,
       sandboxLayer,
       providerHandle,
       applyToHost,
