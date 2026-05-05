@@ -26,7 +26,6 @@ describe("git() factory", () => {
       "bundleAllRefs",
       "cloneFromBundleCommands",
       "exportPatchesCommand",
-      "importPatchesCommand",
       "diffWorkingTreeCommand",
       "applyPatchCommand",
       "listUntrackedCommand",
@@ -155,11 +154,6 @@ describe("git() transport command builders", () => {
   it("builds the apply command", () => {
     expect(git().applyPatchCommand({ patchPath: "/tmp/x.patch" })).toBe(
       `git apply "/tmp/x.patch"`,
-    );
-  });
-  it("builds the import patches command", () => {
-    expect(git().importPatchesCommand({ patchDir: "/tmp/patches" })).toBe(
-      `git am --3way "/tmp/patches"/*.patch`,
     );
   });
   it("builds diff working tree command", () => {

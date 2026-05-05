@@ -73,7 +73,6 @@ export interface VersionControlProvider {
   // ----- Sync-out command builders (run inside the sandbox or against
   // a checkout) -----
   exportPatchesCommand(args: { base: string; outDir: string }): string;
-  importPatchesCommand(args: { patchDir: string }): string;
   diffWorkingTreeCommand(): string;
   applyPatchCommand(args: { patchPath: string }): string;
   listUntrackedCommand(): string;

@@ -109,8 +109,6 @@ export const git = (): VersionControlProvider => ({
   exportPatchesCommand: ({ base, outDir }) =>
     `git format-patch "${base}..HEAD" -o "${outDir}"`,
 
-  importPatchesCommand: ({ patchDir }) => `git am --3way "${patchDir}"/*.patch`,
-
   diffWorkingTreeCommand: () => `git diff HEAD`,
 
   applyPatchCommand: ({ patchPath }) => `git apply "${patchPath}"`,
