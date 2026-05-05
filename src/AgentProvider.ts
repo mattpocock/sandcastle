@@ -21,7 +21,11 @@ const TOOL_ARG_FIELDS: Record<string, string> = {
 const extractErrorMessage = (obj: any): string | undefined => {
   const err = obj.error;
   if (typeof err === "string") return err;
-  if (typeof err === "object" && err !== null && typeof err.message === "string") {
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    typeof err.message === "string"
+  ) {
     return err.message;
   }
   if (typeof obj.message === "string") return obj.message;
@@ -302,6 +306,74 @@ export const codex = (
 // OpenCode agent provider
 // ---------------------------------------------------------------------------
 
+/**
+ * Maps OpenCode tool names (lowercase) to the input field containing the
+ * primary display argument.  Tools not listed here are still emitted — with
+ * a best-effort summary of their input — so that the stream callback always
+ * surfaces every tool invocation.
+ */
+const OPENCODE_TOOL_ARG_FIELDS: Record<string, string> = {
+  bash: "command",
+  read: "filePath",
+  write: "filePath",
+  edit: "filePath",
+  glob: "pattern",
+  grep: "pattern",
+  webfetch: "url",
+  task: "prompt",
+};
+
+const parseOpenCodeStreamLine = (line: string): ParsedStreamEvent[] => {
+  if (!line.startsWith("{")) return [];
+  try {
+    const obj = JSON.parse(line);
+
+    // Text event — agent prose output
+    if (obj.type === "text" && typeof obj.part?.text === "string") {
+      return [{ type: "text", text: obj.part.text }];
+    }
+
+    // Tool use event — every tool invocation, not just an allowlist
+    if (obj.type === "tool_use" && typeof obj.part?.tool === "string") {
+      const toolName = obj.part.tool as string;
+      const input = obj.part.state?.input as
+        | Record<string, unknown>
+        | undefined;
+
+      let displayArg = "";
+      const knownField = OPENCODE_TOOL_ARG_FIELDS[toolName];
+      if (knownField && input && typeof input[knownField] === "string") {
+        displayArg = input[knownField] as string;
+      } else if (input) {
+        // Fallback: stringify the full input for visibility
+        displayArg = JSON.stringify(input);
+      }
+
+      return [{ type: "tool_call", name: toolName, args: displayArg }];
+    }
+
+    // Error event — surface as result so orchestrator fallback picks it up.
+    // OpenCode errors use { error: { name, data: { message } } }.
+    if (obj.type === "error") {
+      const msg =
+        extractErrorMessage(obj) ??
+        extractErrorMessage(obj.error ?? {}) ??
+        (typeof obj.error?.data?.message === "string"
+          ? obj.error.data.message
+          : undefined);
+      return msg ? [{ type: "result", result: msg }] : [];
+    }
+
+    // Session ID — captured from the first event
+    if (typeof obj.sessionID === "string" && obj.type === "step_start") {
+      return [{ type: "session_id", sessionId: obj.sessionID }];
+    }
+  } catch {
+    // Not valid JSON — skip
+  }
+  return [];
+};
+
 /** Options for the opencode agent provider. */
 export interface OpenCodeOptions {
   /** Environment variables injected by this agent provider. */
@@ -316,9 +388,15 @@ export const opencode = (
   env: options?.env ?? {},
   captureSessions: false,
 
-  buildPrintCommand({ prompt }: AgentCommandOptions): PrintCommand {
+  buildPrintCommand({
+    prompt,
+    dangerouslySkipPermissions,
+  }: AgentCommandOptions): PrintCommand {
+    const skipPerms = dangerouslySkipPermissions
+      ? " --dangerously-skip-permissions"
+      : "";
     return {
-      command: `opencode run --model ${shellEscape(model)} ${shellEscape(prompt)}`,
+      command: `opencode run --format json${skipPerms} --model ${shellEscape(model)} ${shellEscape(prompt)}`,
     };
   },
 
@@ -328,8 +406,8 @@ export const opencode = (
     return args;
   },
 
-  parseStreamLine(_line: string): ParsedStreamEvent[] {
-    return [];
+  parseStreamLine(line: string): ParsedStreamEvent[] {
+    return parseOpenCodeStreamLine(line);
   },
 });
 
