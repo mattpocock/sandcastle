@@ -355,9 +355,12 @@ export const withSandboxLifecycle = <A>(
       // moved) and the diverged case (host branch has new commits since the worktree started).
 
       // Check if there are any new commits on the temp branch
+      const currentHead = yield* Effect.promise(() =>
+        vcs.headRef(hostSideWorktreePath),
+      );
       const hasNewCommits = yield* Effect.promise(() =>
         vcs
-          .commitsBetween(hostSideWorktreePath, baseHead, "HEAD")
+          .commitsBetween(hostSideWorktreePath, baseHead, currentHead)
           .then((cs) => cs.length > 0)
           .catch(() => false),
       );

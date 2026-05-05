@@ -50,6 +50,11 @@ export interface VersionControlProvider {
   // ----- Repo introspection -----
   currentBranch(repoDir: string): Promise<string>;
   headRef(repoDir: string): Promise<string>;
+  /**
+   * Returns commits in `base..head` order. `base` and `head` MUST be resolved
+   * commit identifiers (use {@link headRef} to resolve), not symbolic refs
+   * such as `"HEAD"` — the latter has no meaning under non-git backends.
+   */
   commitsBetween(
     repoDir: string,
     base: string,
