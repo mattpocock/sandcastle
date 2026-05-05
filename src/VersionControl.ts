@@ -97,4 +97,13 @@ export interface VersionControlProvider {
     patchDir: string;
     targetBranch: string;
   }): string;
+
+  /**
+   * Returns a user-facing recovery hint shown after a merge-back failure.
+   * Backend-specific: git returns `git merge` instructions; jj returns `jj rebase` instructions.
+   */
+  mergeFailureHint(args: {
+    sourceBranch: string;
+    targetBranch: string;
+  }): string;
 }

@@ -34,6 +34,7 @@ describe("git() factory", () => {
       "deleteBranch",
       "resolveRepoMounts",
       "recoveryInstructions",
+      "mergeFailureHint",
     ] as const;
 
     for (const method of expectedMethods) {
@@ -178,6 +179,17 @@ describe("git() transport command builders", () => {
     expect(git().applyPatchCommand({ patchPath: "/tmp/O'Brien.patch" })).toBe(
       `git apply '/tmp/O'\\''Brien.patch'`,
     );
+  });
+});
+
+describe("git().mergeFailureHint", () => {
+  it("returns git-specific retry instructions", () => {
+    const hint = git().mergeFailureHint({
+      sourceBranch: "feature/abc",
+      targetBranch: "main",
+    });
+    expect(hint).toContain("git merge feature/abc");
+    expect(hint).toContain("git branch -D feature/abc");
   });
 });
 

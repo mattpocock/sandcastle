@@ -150,6 +150,9 @@ export const git = (): VersionControlProvider => ({
     }));
   },
 
+  mergeFailureHint: ({ sourceBranch, targetBranch: _targetBranch }) =>
+    `To retry: git merge ${sourceBranch}, then clean up: git branch -D ${sourceBranch}`,
+
   // ----- Recovery instructions -----
   recoveryInstructions: ({ patchDir, targetBranch }) => {
     const sq = shellSingleQuote;

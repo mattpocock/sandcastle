@@ -382,8 +382,10 @@ export const withSandboxLifecycle = <A>(
                 throw new Error(
                   `Merge of '${resolvedBranch}' onto '${hostCurrentBranch}' failed. ` +
                     `The temporary branch '${resolvedBranch}' has been preserved. ` +
-                    `To retry: git merge ${resolvedBranch}, ` +
-                    `then clean up: git branch -D ${resolvedBranch}`,
+                    vcs.mergeFailureHint({
+                      sourceBranch: resolvedBranch,
+                      targetBranch: hostCurrentBranch ?? "",
+                    }),
                 );
               }
             },
