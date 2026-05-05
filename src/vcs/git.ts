@@ -124,8 +124,11 @@ export const git = (): VersionControlProvider => ({
     });
   },
 
-  mergeBranchInto: async ({ repoDir, sourceBranch, targetBranch }) => {
-    await execFileAsync("git", ["checkout", targetBranch], { cwd: repoDir });
+  mergeBranchInto: async ({
+    repoDir,
+    sourceBranch,
+    targetBranch: _targetBranch,
+  }) => {
     await execFileAsync("git", ["merge", sourceBranch], { cwd: repoDir });
   },
 
