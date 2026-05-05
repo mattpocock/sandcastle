@@ -97,11 +97,14 @@ export const git = (): VersionControlProvider => ({
   // cloneFromBundleCommands returns multiple commands rather than chaining with
   // && because the existing syncIn.ts flow runs them as separate handle.exec
   // calls. Preserving that boundary keeps step-level error reporting intact.
-  cloneFromBundleCommands: ({ bundlePath, targetPath, branch }) => [
-    `git clone "${bundlePath}" "${targetPath}_clone"`,
-    `rm -rf "${targetPath}" && mv "${targetPath}_clone" "${targetPath}"`,
-    `cd "${targetPath}" && git checkout "${branch}"`,
-  ],
+  cloneFromBundleCommands: ({ bundlePath, targetPath, branch }) => {
+    const sq = shellSingleQuote;
+    return [
+      `git clone ${sq(bundlePath)} ${sq(targetPath + "_clone")}`,
+      `rm -rf ${sq(targetPath)} && mv ${sq(targetPath + "_clone")} ${sq(targetPath)}`,
+      `cd ${sq(targetPath)} && git checkout ${sq(branch)}`,
+    ];
+  },
 
   exportPatchesCommand: ({ base, outDir }) =>
     `git format-patch "${base}..HEAD" -o "${outDir}"`,

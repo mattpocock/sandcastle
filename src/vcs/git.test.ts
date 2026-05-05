@@ -125,6 +125,27 @@ describe("git().writeUserIdentityCommands", () => {
   });
 });
 
+describe("git().cloneFromBundleCommands", () => {
+  it("uses single-quote escaping for all interpolated paths", () => {
+    const cmds = git().cloneFromBundleCommands({
+      bundlePath: "/tmp/b",
+      targetPath: "/work",
+      branch: "main",
+    });
+    expect(cmds[0]).toBe(`git clone '/tmp/b' '/work_clone'`);
+    expect(cmds[1]).toBe(`rm -rf '/work' && mv '/work_clone' '/work'`);
+    expect(cmds[2]).toBe(`cd '/work' && git checkout 'main'`);
+  });
+  it("escapes shell metacharacters in branch names", () => {
+    const cmds = git().cloneFromBundleCommands({
+      bundlePath: "/tmp/b",
+      targetPath: "/work",
+      branch: "main; rm -rf /",
+    });
+    expect(cmds[2]).toBe(`cd '/work' && git checkout 'main; rm -rf /'`);
+  });
+});
+
 describe("git() transport command builders", () => {
   it("builds the format-patch command", () => {
     expect(git().exportPatchesCommand({ base: "abc", outDir: "/tmp/p" })).toBe(
