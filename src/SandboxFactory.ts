@@ -15,6 +15,8 @@ import {
 import type { Timeouts } from "./run.js";
 import * as WorktreeManager from "./WorktreeManager.js";
 import { copyToWorktree } from "./CopyToWorktree.js";
+import type { VersionControlProvider } from "./VersionControl.js";
+import { git } from "./vcs/git.js";
 import { Display } from "./Display.js";
 import type {
   SandboxProvider,
@@ -189,6 +191,8 @@ export class SandboxConfig extends Context.Tag("SandboxConfig")<
     readonly signal?: AbortSignal;
     /** Override default timeouts for built-in lifecycle steps. */
     readonly timeouts?: Timeouts;
+    /** VCS provider — defaults to git(). */
+    readonly vcs?: VersionControlProvider;
   }
 >() {}
 
@@ -211,9 +215,11 @@ const printWorktreePreservedMessage = (
 const cleanupWorktree = (
   worktreePath: string,
   exit: Exit.Exit<unknown, unknown>,
+  vcs: VersionControlProvider,
 ): Effect.Effect<string | undefined, WorktreeError> =>
-  WorktreeManager.hasUncommittedChanges(worktreePath).pipe(
-    Effect.catchAll(() => Effect.succeed(false)),
+  Effect.promise(() =>
+    vcs.hasUncommittedChanges(worktreePath).catch(() => false),
+  ).pipe(
     Effect.flatMap((isDirty) => {
       if (isDirty) {
         printWorktreePreservedMessage(
@@ -227,8 +233,10 @@ const cleanupWorktree = (
       if (!Exit.isSuccess(exit)) {
         console.error(`\nWorktree removed (no uncommitted changes)`);
       }
-      return WorktreeManager.remove(worktreePath).pipe(
-        Effect.map(() => undefined as string | undefined),
+      return Effect.promise(() =>
+        vcs
+          .removeCheckout(worktreePath)
+          .then(() => undefined as string | undefined),
       );
     }),
   );
@@ -297,7 +305,7 @@ export const resolveGitMounts = (
 
 /** Shared acquire result type for the worktree-mode acquireUseRelease. */
 interface AcquireResult {
-  worktreeInfo: WorktreeManager.WorktreeInfo;
+  worktreeInfo: { path: string; branch: string };
   handle: BindMountSandboxHandle | IsolatedSandboxHandle;
   sandboxLayer: Layer.Layer<Sandbox>;
   worktreePath: string;
@@ -317,7 +325,9 @@ export const WorktreeDockerSandboxFactory = {
         hooks,
         signal,
         timeouts,
+        vcs: vcsOpt,
       } = yield* SandboxConfig;
+      const vcs = vcsOpt ?? git();
 
       const isHeadMode = branchStrategy.type === "head";
       const branch =
@@ -331,21 +341,25 @@ export const WorktreeDockerSandboxFactory = {
 
       /** Prune stale worktrees (best-effort), then create a fresh one. */
       const pruneAndCreate = () =>
-        WorktreeManager.pruneStale(hostRepoDir).pipe(
-          Effect.catchAll((e) =>
-            Effect.sync(() => {
-              console.error(
-                "[sandcastle] Warning: failed to prune stale worktrees:",
-                e.message,
-              );
-            }),
-          ),
+        Effect.promise(() =>
+          vcs.pruneStaleCheckouts(hostRepoDir).catch((e) => {
+            console.error(
+              "[sandcastle] Warning: failed to prune stale worktrees:",
+              e instanceof Error ? e.message : String(e),
+            );
+          }),
+        ).pipe(
           Effect.andThen(
-            branch
-              ? WorktreeManager.create(hostRepoDir, { branch, baseBranch })
-              : WorktreeManager.create(hostRepoDir, { name }),
+            Effect.promise(() =>
+              vcs.createCheckout({
+                repoDir: hostRepoDir,
+                // When no explicit branch is given, pre-generate the temp branch
+                // name here (preserving name-based naming from WorktreeManager).
+                branch: branch ?? WorktreeManager.generateTempBranchName(name),
+                baseBranch,
+              }),
+            ),
           ),
-          Effect.provideService(FileSystem.FileSystem, fileSystem),
         );
 
       return {
@@ -406,7 +420,7 @@ export const WorktreeDockerSandboxFactory = {
                   try: () => handle.close(),
                   catch: () => undefined,
                 }).pipe(
-                  Effect.andThen(cleanupWorktree(worktreeInfo.path, exit)),
+                  Effect.andThen(cleanupWorktree(worktreeInfo.path, exit, vcs)),
                   Effect.tap((p) => {
                     preservedPath = p;
                   }),
@@ -504,7 +518,12 @@ export const WorktreeDockerSandboxFactory = {
                 (copyPaths && copyPaths.length > 0
                   ? display.spinner(
                       "Copying to worktree",
-                      copyToWorktree(copyPaths, hostRepoDir, worktreeInfo.path, timeouts?.copyToWorktreeMs),
+                      copyToWorktree(
+                        copyPaths,
+                        hostRepoDir,
+                        worktreeInfo.path,
+                        timeouts?.copyToWorktreeMs,
+                      ),
                     )
                   : Effect.succeed(undefined)
                 ).pipe(Effect.map(() => worktreeInfo)),
@@ -587,7 +606,7 @@ export const WorktreeDockerSandboxFactory = {
                 try: () => handle.close(),
                 catch: () => undefined,
               }).pipe(
-                Effect.andThen(cleanupWorktree(worktreeInfo.path, exit)),
+                Effect.andThen(cleanupWorktree(worktreeInfo.path, exit, vcs)),
                 Effect.tap((p) => {
                   preservedWorktreePath = p;
                 }),

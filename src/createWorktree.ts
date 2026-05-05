@@ -234,13 +234,12 @@ export const createWorktree = async (
 
   const { hostRepoDir, worktreeInfo } = await Effect.gen(function* () {
     const hostRepoDir = yield* resolveCwd(options.cwd);
-    yield* WorktreeManager.pruneStale(hostRepoDir).pipe(
-      Effect.catchAll(() => Effect.void),
+    yield* Effect.promise(() =>
+      vcs.pruneStaleCheckouts(hostRepoDir).catch(() => {}),
     );
-    const info = yield* WorktreeManager.create(hostRepoDir, {
-      branch,
-      baseBranch,
-    });
+    const info = yield* Effect.promise(() =>
+      vcs.createCheckout({ repoDir: hostRepoDir, branch, baseBranch }),
+    );
     if (options.copyToWorktree && options.copyToWorktree.length > 0) {
       yield* copyToWorktree(
         options.copyToWorktree,
@@ -262,21 +261,17 @@ export const createWorktree = async (
     if (closed) return { preservedWorktreePath: undefined };
     closed = true;
 
-    return Effect.gen(function* () {
-      const isDirty = yield* WorktreeManager.hasUncommittedChanges(
-        worktreeInfo.path,
-      ).pipe(Effect.catchAll(() => Effect.succeed(false)));
+    const isDirty = await vcs
+      .hasUncommittedChanges(worktreeInfo.path)
+      .catch(() => false);
 
-      if (isDirty) {
-        return { preservedWorktreePath: worktreeInfo.path } as CloseResult;
-      }
+    if (isDirty) {
+      return { preservedWorktreePath: worktreeInfo.path } as CloseResult;
+    }
 
-      yield* WorktreeManager.remove(worktreeInfo.path).pipe(
-        Effect.catchAll(() => Effect.void),
-      );
+    await vcs.removeCheckout(worktreeInfo.path).catch(() => {});
 
-      return { preservedWorktreePath: undefined } as CloseResult;
-    }).pipe(Effect.runPromise);
+    return { preservedWorktreePath: undefined } as CloseResult;
   };
 
   const worktreeInteractive = async (

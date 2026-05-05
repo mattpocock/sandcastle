@@ -256,18 +256,20 @@ export const interactive = async (
     });
 
     // 5. Create worktree (unless head mode)
-    let worktreeInfo: WorktreeManager.WorktreeInfo | undefined;
+    let worktreeInfo: { path: string; branch: string } | undefined;
 
     if (!isHeadMode) {
       worktreeInfo = yield* d.taskLog("Creating worktree", () =>
-        WorktreeManager.pruneStale(hostRepoDir).pipe(
-          Effect.catchAll(() => Effect.void),
-          Effect.andThen(
-            branch
-              ? WorktreeManager.create(hostRepoDir, { branch })
-              : WorktreeManager.create(hostRepoDir, { name: options.name }),
-          ),
-        ),
+        Effect.promise(async () => {
+          await vcs.pruneStaleCheckouts(hostRepoDir).catch(() => {});
+          return vcs.createCheckout({
+            repoDir: hostRepoDir,
+            // Pre-generate the branch name when no explicit branch is given so
+            // the name option is preserved (WorktreeManager naming convention).
+            branch:
+              branch ?? WorktreeManager.generateTempBranchName(options.name),
+          });
+        }),
       );
 
       // Copy files to worktree (bind-mount and no-sandbox, non-head)
@@ -410,9 +412,9 @@ export const interactive = async (
       // Check for uncommitted changes (worktree mode only)
       let preservedWorktreePath: string | undefined;
       if (worktreeInfo) {
-        const hasUncommitted = yield* WorktreeManager.hasUncommittedChanges(
-          worktreeInfo.path,
-        ).pipe(Effect.catchAll(() => Effect.succeed(false)));
+        const hasUncommitted = yield* Effect.promise(() =>
+          vcs.hasUncommittedChanges(worktreeInfo!.path).catch(() => false),
+        );
         if (hasUncommitted) {
           preservedWorktreePath = worktreeInfo.path;
         }
@@ -420,8 +422,8 @@ export const interactive = async (
 
       // Clean up worktree if not preserved
       if (worktreeInfo && !preservedWorktreePath) {
-        yield* WorktreeManager.remove(worktreeInfo.path).pipe(
-          Effect.catchAll(() => Effect.void),
+        yield* Effect.promise(() =>
+          vcs.removeCheckout(worktreeInfo!.path).catch(() => {}),
         );
       }
 
@@ -445,8 +447,8 @@ export const interactive = async (
       // On error, always clean up worktree (on success, handled above with preserve check)
       Effect.tapError(() =>
         worktreeInfo
-          ? WorktreeManager.remove(worktreeInfo.path).pipe(
-              Effect.catchAll(() => Effect.void),
+          ? Effect.promise(() =>
+              vcs.removeCheckout(worktreeInfo!.path).catch(() => {}),
             )
           : Effect.void,
       ),

@@ -209,6 +209,7 @@ interface SandboxHandleContext {
 const buildSandboxHandle = (
   ctx: SandboxHandleContext,
   close: () => Promise<CloseResult>,
+  vcs: import("./VersionControl.js").VersionControlProvider,
 ): Sandbox => {
   const {
     branch,
@@ -244,9 +245,7 @@ const buildSandboxHandle = (
       const isInlinePrompt = resolved.source === "inline";
 
       const userArgs = runOptions.promptArgs ?? {};
-      const currentHostBranch = await Effect.runPromise(
-        WorktreeManager.getCurrentBranch(hostRepoDir),
-      );
+      const currentHostBranch = await vcs.currentBranch(hostRepoDir);
 
       const displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
       const silentDisplayLayer = SilentDisplay.layer(displayRef);
@@ -393,8 +392,9 @@ const buildSandboxHandle = (
             const isInlinePrompt = resolved.source === "inline";
 
             const userArgs = interactiveOptions.promptArgs ?? {};
-            const currentHostBranch =
-              yield* WorktreeManager.getCurrentBranch(hostRepoDir);
+            const currentHostBranch: string = yield* Effect.promise(() =>
+              vcs.currentBranch(hostRepoDir),
+            );
 
             let resolvedPrompt: string;
             if (isInlinePrompt) {
@@ -657,6 +657,7 @@ export const createSandboxFromWorktree = async (
       if (providerHandle) await providerHandle.close();
       return { preservedWorktreePath: undefined };
     },
+    git(),
   );
 };
 
@@ -676,13 +677,16 @@ export const createSandbox = async (
   const { hostRepoDir, worktreeInfo } = await Effect.runPromise(
     Effect.gen(function* () {
       const hostRepoDir = yield* resolveCwd(options.cwd);
-      yield* WorktreeManager.pruneStale(hostRepoDir).pipe(
-        Effect.catchAll(() => Effect.void),
+      yield* Effect.promise(() =>
+        vcs.pruneStaleCheckouts(hostRepoDir).catch(() => {}),
       );
-      const worktreeInfo = yield* WorktreeManager.create(hostRepoDir, {
-        branch,
-        baseBranch: options.baseBranch,
-      });
+      const worktreeInfo = yield* Effect.promise(() =>
+        vcs.createCheckout({
+          repoDir: hostRepoDir,
+          branch,
+          baseBranch: options.baseBranch,
+        }),
+      );
       return { hostRepoDir, worktreeInfo };
     }).pipe(Effect.provide(NodeContext.layer)),
   );
@@ -836,22 +840,16 @@ export const createSandbox = async (
     }
 
     // Check for uncommitted changes
-    const isDirty = await Effect.runPromise(
-      WorktreeManager.hasUncommittedChanges(worktreePath).pipe(
-        Effect.catchAll(() => Effect.succeed(false)),
-      ),
-    );
+    const isDirty = await vcs
+      .hasUncommittedChanges(worktreePath)
+      .catch(() => false);
 
     if (isDirty) {
       return { preservedWorktreePath: worktreePath };
     }
 
     // Remove worktree
-    await Effect.runPromise(
-      WorktreeManager.remove(worktreePath).pipe(
-        Effect.catchAll(() => Effect.void),
-      ),
-    );
+    await vcs.removeCheckout(worktreePath).catch(() => {});
 
     return { preservedWorktreePath: undefined };
   };
@@ -872,5 +870,6 @@ export const createSandbox = async (
       process.removeListener("SIGTERM", onSignal);
       return doClose();
     },
+    vcs,
   );
 };

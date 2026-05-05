@@ -434,6 +434,7 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
         hooks,
         signal: options.signal,
         timeouts: options.timeouts,
+        vcs,
       }),
       NodeFileSystem.layer,
       displayLayer,
