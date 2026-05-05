@@ -29,7 +29,7 @@ import type { IsolatedSandboxHandle } from "./SandboxProvider.js";
 import { buildRecoveryMessage, type FailedStep } from "./RecoveryMessage.js";
 import { SyncError } from "./errors.js";
 import type { VersionControlProvider } from "./VersionControl.js";
-import { git } from "./vcs/git.js";
+import { git, shellSingleQuote } from "./vcs/git.js";
 
 /**
  * Execute a command on the host side, returning stdout.
@@ -309,7 +309,7 @@ export const syncOut = (
         execHost("git am --abort", hostRepoDir),
       );
       void abortResult; // ignore abort failures
-      const patchArgs = nonEmptyPatches.map((p) => `"${p}"`).join(" ");
+      const patchArgs = nonEmptyPatches.map(shellSingleQuote).join(" ");
       const applyResult = yield* Effect.either(
         execHost(`git am --3way ${patchArgs}`, hostRepoDir),
       );
