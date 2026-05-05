@@ -8,6 +8,8 @@ import { resolveGitMounts } from "../SandboxFactory.js";
 
 const execFileAsync = promisify(execFile);
 
+const shellSingleQuote = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
+
 export const git = (): VersionControlProvider => ({
   tag: "git",
 
@@ -79,11 +81,9 @@ export const git = (): VersionControlProvider => ({
   writeUserIdentityCommands: ({ name, email }) => {
     const cmds: string[] = [];
     if (name)
-      cmds.push(`git config --global user.name "${name.replace(/"/g, '\\"')}"`);
+      cmds.push(`git config --global user.name ${shellSingleQuote(name)}`);
     if (email)
-      cmds.push(
-        `git config --global user.email "${email.replace(/"/g, '\\"')}"`,
-      );
+      cmds.push(`git config --global user.email ${shellSingleQuote(email)}`);
     return cmds;
   },
 

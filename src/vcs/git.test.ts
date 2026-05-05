@@ -101,19 +101,27 @@ describe("git().writeUserIdentityCommands", () => {
     expect(
       git().writeUserIdentityCommands({ name: "Ada", email: "a@b" }),
     ).toEqual([
-      `git config --global user.name "Ada"`,
-      `git config --global user.email "a@b"`,
+      `git config --global user.name 'Ada'`,
+      `git config --global user.email 'a@b'`,
     ]);
   });
-  it("escapes embedded quotes", () => {
-    expect(git().writeUserIdentityCommands({ name: 'A"B', email: "" })).toEqual(
-      [`git config --global user.name "A\\"B"`],
+  it("escapes embedded single quotes", () => {
+    expect(git().writeUserIdentityCommands({ name: "A'B", email: "" })).toEqual(
+      ["git config --global user.name 'A'\\''B'"],
     );
   });
   it("returns empty when both fields are empty", () => {
     expect(git().writeUserIdentityCommands({ name: "", email: "" })).toEqual(
       [],
     );
+  });
+  it("escapes shell metacharacters safely", () => {
+    expect(
+      git().writeUserIdentityCommands({
+        name: "Alice$(rm -rf /);`bad`",
+        email: "",
+      }),
+    ).toEqual([`git config --global user.name 'Alice$(rm -rf /);\`bad\`'`]);
   });
 });
 
