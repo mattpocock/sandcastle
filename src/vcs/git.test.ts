@@ -1,9 +1,9 @@
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
-import { git } from "./git.js";
+import { git, shellSingleQuote } from "./git.js";
 
 describe("git() factory", () => {
   it("returns a provider tagged 'git'", () => {
@@ -148,12 +148,12 @@ describe("git().cloneFromBundleCommands", () => {
 describe("git() transport command builders", () => {
   it("builds the format-patch command", () => {
     expect(git().exportPatchesCommand({ base: "abc", outDir: "/tmp/p" })).toBe(
-      `git format-patch "abc..HEAD" -o "/tmp/p"`,
+      `git format-patch 'abc..HEAD' -o '/tmp/p'`,
     );
   });
   it("builds the apply command", () => {
     expect(git().applyPatchCommand({ patchPath: "/tmp/x.patch" })).toBe(
-      `git apply "/tmp/x.patch"`,
+      `git apply '/tmp/x.patch'`,
     );
   });
   it("builds diff working tree command", () => {
@@ -164,6 +164,21 @@ describe("git() transport command builders", () => {
       `git ls-files --others --exclude-standard`,
     );
   });
+  it("escapes $() injection in exportPatchesCommand", () => {
+    expect(
+      git().exportPatchesCommand({ base: "$(rm -rf /)", outDir: "/tmp/p" }),
+    ).toBe(`git format-patch '$(rm -rf /)..HEAD' -o '/tmp/p'`);
+  });
+  it("escapes backtick injection in applyPatchCommand", () => {
+    expect(git().applyPatchCommand({ patchPath: "`evil`" })).toBe(
+      `git apply '\`evil\`'`,
+    );
+  });
+  it("escapes single quotes in applyPatchCommand", () => {
+    expect(git().applyPatchCommand({ patchPath: "/tmp/O'Brien.patch" })).toBe(
+      `git apply '/tmp/O'\\''Brien.patch'`,
+    );
+  });
 });
 
 describe("git() recovery instructions", () => {
@@ -172,8 +187,23 @@ describe("git() recovery instructions", () => {
       patchDir: "/tmp/x",
       targetBranch: "main",
     });
-    expect(out).toContain("git checkout main");
-    expect(out).toContain("git am --3way /tmp/x/*.patch");
-    expect(out).toContain("git apply /tmp/x/changes.patch");
+    expect(out).toContain("git checkout 'main'");
+    expect(out).toContain("git am --3way '/tmp/x'/*.patch");
+    expect(out).toContain("git apply '/tmp/x'/changes.patch");
+  });
+  it("escapes $() injection in patchDir", () => {
+    const out = git().recoveryInstructions({
+      patchDir: "$(rm -rf /)",
+      targetBranch: "main",
+    });
+    expect(out).toContain(`git am --3way '$(rm -rf /)'/*.patch`);
+    expect(out).toContain(`git apply '$(rm -rf /)'/changes.patch`);
+  });
+  it("escapes $() injection in targetBranch", () => {
+    const out = git().recoveryInstructions({
+      patchDir: "/tmp/x",
+      targetBranch: "$(evil)",
+    });
+    expect(out).toContain(`git checkout '$(evil)'`);
   });
 });

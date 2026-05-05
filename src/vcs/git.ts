@@ -8,7 +8,7 @@ import { resolveGitMounts } from "../SandboxFactory.js";
 
 const execFileAsync = promisify(execFile);
 
-const shellSingleQuote = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
+export const shellSingleQuote = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
 
 export const git = (): VersionControlProvider => ({
   tag: "git",
@@ -106,12 +106,15 @@ export const git = (): VersionControlProvider => ({
     ];
   },
 
-  exportPatchesCommand: ({ base, outDir }) =>
-    `git format-patch "${base}..HEAD" -o "${outDir}"`,
+  exportPatchesCommand: ({ base, outDir }) => {
+    const sq = shellSingleQuote;
+    return `git format-patch ${sq(base + "..HEAD")} -o ${sq(outDir)}`;
+  },
 
   diffWorkingTreeCommand: () => `git diff HEAD`,
 
-  applyPatchCommand: ({ patchPath }) => `git apply "${patchPath}"`,
+  applyPatchCommand: ({ patchPath }) =>
+    `git apply ${shellSingleQuote(patchPath)}`,
 
   listUntrackedCommand: () => `git ls-files --others --exclude-standard`,
 
@@ -149,10 +152,11 @@ export const git = (): VersionControlProvider => ({
 
   // ----- Recovery instructions -----
   recoveryInstructions: ({ patchDir, targetBranch }) => {
+    const sq = shellSingleQuote;
     const lines: string[] = [
-      `git checkout ${targetBranch}`,
-      `git am --3way ${patchDir}/*.patch`,
-      `git apply ${patchDir}/changes.patch`,
+      `git checkout ${sq(targetBranch)}`,
+      `git am --3way ${sq(patchDir)}/*.patch`,
+      `git apply ${sq(patchDir)}/changes.patch`,
     ];
     return lines.join("\n");
   },
