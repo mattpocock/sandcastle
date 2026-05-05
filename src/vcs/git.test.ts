@@ -5,6 +5,22 @@ import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import { git, shellSingleQuote } from "./git.js";
 
+describe("shellSingleQuote", () => {
+  it("wraps simple input in single quotes", () => {
+    expect(shellSingleQuote("hello")).toBe("'hello'");
+  });
+  it("escapes embedded single quote with the POSIX trick", () => {
+    expect(shellSingleQuote("O'Brien")).toBe(`'O'\\''Brien'`);
+  });
+  it("does not expand $() or backticks", () => {
+    expect(shellSingleQuote("$(rm -rf /)")).toBe(`'$(rm -rf /)'`);
+    expect(shellSingleQuote("`bad`")).toBe(`'\`bad\`'`);
+  });
+  it("handles empty string", () => {
+    expect(shellSingleQuote("")).toBe("''");
+  });
+});
+
 describe("git() factory", () => {
   it("returns a provider tagged 'git'", () => {
     const provider = git();
