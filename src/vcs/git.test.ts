@@ -182,6 +182,53 @@ describe("git() transport command builders", () => {
   });
 });
 
+describe("git().mergeBranchInto (real git)", () => {
+  it("merges a feature branch into the current branch", async () => {
+    const repoDir = mkdtempSync(join(tmpdir(), "vcs-merge-test-"));
+    try {
+      execFileSync("git", ["init", "-q"], { cwd: repoDir });
+      execFileSync("git", ["config", "user.email", "t@t"], { cwd: repoDir });
+      execFileSync("git", ["config", "user.name", "T"], { cwd: repoDir });
+      writeFileSync(join(repoDir, "README"), "x\n");
+      execFileSync("git", ["add", "."], { cwd: repoDir });
+      execFileSync("git", ["commit", "-qm", "init"], { cwd: repoDir });
+
+      // Capture the initial branch name (could be main or master)
+      const initialBranch = execFileSync(
+        "git",
+        ["rev-parse", "--abbrev-ref", "HEAD"],
+        { cwd: repoDir },
+      )
+        .toString()
+        .trim();
+
+      // Create feature branch with a commit
+      execFileSync("git", ["checkout", "-q", "-b", "feature"], {
+        cwd: repoDir,
+      });
+      writeFileSync(join(repoDir, "feature-file"), "y\n");
+      execFileSync("git", ["add", "."], { cwd: repoDir });
+      execFileSync("git", ["commit", "-qm", "feature work"], { cwd: repoDir });
+
+      // Switch back to initial branch
+      execFileSync("git", ["checkout", "-q", initialBranch], { cwd: repoDir });
+
+      // Merge feature into current
+      const provider = git();
+      await provider.mergeBranchInto({
+        repoDir,
+        sourceBranch: "feature",
+        targetBranch: initialBranch,
+      });
+
+      // Verify feature-file now exists on the main/master branch
+      expect(existsSync(join(repoDir, "feature-file"))).toBe(true);
+    } finally {
+      rmSync(repoDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("git().mergeFailureHint", () => {
   it("returns git-specific retry instructions", () => {
     const hint = git().mergeFailureHint({
