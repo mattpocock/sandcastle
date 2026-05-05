@@ -42,6 +42,8 @@ import { noSandbox } from "./sandboxes/no-sandbox.js";
 import { raceAbortSignal } from "./raceAbortSignal.js";
 import { resolveCwd } from "./resolveCwd.js";
 import type { Timeouts } from "./run.js";
+import type { VersionControlProvider } from "./VersionControl.js";
+import { git } from "./vcs/git.js";
 
 export interface InteractiveOptions {
   /** Agent provider to use (e.g. claudeCode("claude-opus-4-6")) */
@@ -86,6 +88,13 @@ export interface InteractiveOptions {
   readonly signal?: AbortSignal;
   /** Override default timeouts for built-in lifecycle steps. Unset keys keep their defaults. */
   readonly timeouts?: Timeouts;
+  /**
+   * Version-control backend used for worktree/workspace creation, identity
+   * propagation, and host-side merge-back. Defaults to {@link git}.
+   *
+   * @default git()
+   */
+  readonly vcs?: VersionControlProvider;
 }
 
 export interface InteractiveResult {
@@ -115,6 +124,8 @@ export const interactive = async (
 ): Promise<InteractiveResult> => {
   // If signal is already aborted, reject immediately without any setup
   options.signal?.throwIfAborted();
+
+  const vcs = options.vcs ?? git();
 
   const { prompt, promptFile, hooks, agent: provider } = options;
 
