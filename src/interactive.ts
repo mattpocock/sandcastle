@@ -8,7 +8,6 @@ import { preprocessPrompt } from "./PromptPreprocessor.js";
 import { resolvePrompt } from "./PromptResolver.js";
 import {
   makeSandboxLayerFromHandle,
-  resolveGitMounts,
   SANDBOX_REPO_DIR,
 } from "./SandboxFactory.js";
 import {
@@ -42,6 +41,8 @@ import { noSandbox } from "./sandboxes/no-sandbox.js";
 import { raceAbortSignal } from "./raceAbortSignal.js";
 import { resolveCwd } from "./resolveCwd.js";
 import type { Timeouts } from "./run.js";
+import type { VersionControlProvider } from "./VersionControl.js";
+import { git } from "./vcs/git.js";
 
 export interface InteractiveOptions {
   /** Agent provider to use (e.g. claudeCode("claude-opus-4-6")) */
@@ -86,6 +87,13 @@ export interface InteractiveOptions {
   readonly signal?: AbortSignal;
   /** Override default timeouts for built-in lifecycle steps. Unset keys keep their defaults. */
   readonly timeouts?: Timeouts;
+  /**
+   * Version-control backend used for worktree/workspace creation, identity
+   * propagation, and host-side merge-back. Defaults to {@link git}.
+   *
+   * @default git()
+   */
+  readonly vcs?: VersionControlProvider;
 }
 
 export interface InteractiveResult {
@@ -115,6 +123,8 @@ export const interactive = async (
 ): Promise<InteractiveResult> => {
   // If signal is already aborted, reject immediately without any setup
   options.signal?.throwIfAborted();
+
+  const vcs = options.vcs ?? git();
 
   const { prompt, promptFile, hooks, agent: provider } = options;
 
@@ -245,18 +255,20 @@ export const interactive = async (
     });
 
     // 5. Create worktree (unless head mode)
-    let worktreeInfo: WorktreeManager.WorktreeInfo | undefined;
+    let worktreeInfo: { path: string; branch: string } | undefined;
 
     if (!isHeadMode) {
       worktreeInfo = yield* d.taskLog("Creating worktree", () =>
-        WorktreeManager.pruneStale(hostRepoDir).pipe(
-          Effect.catchAll(() => Effect.void),
-          Effect.andThen(
-            branch
-              ? WorktreeManager.create(hostRepoDir, { branch })
-              : WorktreeManager.create(hostRepoDir, { name: options.name }),
-          ),
-        ),
+        Effect.promise(async () => {
+          await vcs.pruneStaleCheckouts(hostRepoDir).catch(() => {});
+          return vcs.createCheckout({
+            repoDir: hostRepoDir,
+            // Pre-generate the branch name when no explicit branch is given so
+            // the name option is preserved (WorktreeManager naming convention).
+            branch:
+              branch ?? WorktreeManager.generateTempBranchName(options.name),
+          });
+        }),
       );
 
       // Copy files to worktree (bind-mount and no-sandbox, non-head)
@@ -312,7 +324,12 @@ export const interactive = async (
       handle = startResult.handle;
     } else {
       const gitPath = join(hostRepoDir, ".git");
-      const gitMounts = yield* resolveGitMounts(gitPath);
+      const gitMounts = yield* Effect.promise(() =>
+        vcs.resolveRepoMounts({
+          checkoutPath: isHeadMode ? hostRepoDir : worktreeInfo!.path,
+          gitPath,
+        }),
+      );
       const startResult = yield* d.taskLog("Starting sandbox", () =>
         startSandbox({
           provider: sandboxProvider,
@@ -343,7 +360,8 @@ export const interactive = async (
 
       const applyToHost =
         sandboxProvider.tag === "isolated" && worktreeInfo
-          ? () => syncOut(worktreeInfo!.path, handle as IsolatedSandboxHandle)
+          ? () =>
+              syncOut(worktreeInfo!.path, handle as IsolatedSandboxHandle, vcs)
           : () => Effect.void; // bind-mount and no-sandbox don't need sync
 
       const lifecycleEffect = withSandboxLifecycle(
@@ -354,6 +372,7 @@ export const interactive = async (
           branch: lifecycleBranch,
           hostWorktreePath: isHeadMode ? hostRepoDir : worktreeInfo?.path,
           applyToHost,
+          vcs,
         },
         (ctx) =>
           Effect.gen(function* () {
@@ -399,9 +418,9 @@ export const interactive = async (
       // Check for uncommitted changes (worktree mode only)
       let preservedWorktreePath: string | undefined;
       if (worktreeInfo) {
-        const hasUncommitted = yield* WorktreeManager.hasUncommittedChanges(
-          worktreeInfo.path,
-        ).pipe(Effect.catchAll(() => Effect.succeed(false)));
+        const hasUncommitted = yield* Effect.promise(() =>
+          vcs.hasUncommittedChanges(worktreeInfo!.path).catch(() => false),
+        );
         if (hasUncommitted) {
           preservedWorktreePath = worktreeInfo.path;
         }
@@ -409,8 +428,8 @@ export const interactive = async (
 
       // Clean up worktree if not preserved
       if (worktreeInfo && !preservedWorktreePath) {
-        yield* WorktreeManager.remove(worktreeInfo.path).pipe(
-          Effect.catchAll(() => Effect.void),
+        yield* Effect.promise(() =>
+          vcs.removeCheckout(worktreeInfo!.path).catch(() => {}),
         );
       }
 
@@ -434,8 +453,8 @@ export const interactive = async (
       // On error, always clean up worktree (on success, handled above with preserve check)
       Effect.tapError(() =>
         worktreeInfo
-          ? WorktreeManager.remove(worktreeInfo.path).pipe(
-              Effect.catchAll(() => Effect.void),
+          ? Effect.promise(() =>
+              vcs.removeCheckout(worktreeInfo!.path).catch(() => {}),
             )
           : Effect.void,
       ),

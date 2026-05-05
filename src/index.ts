@@ -82,3 +82,12 @@ export type {
   MergeToHeadBranchStrategy,
   NamedBranchStrategy,
 } from "./SandboxProvider.js";
+export type {
+  VersionControlProvider,
+  VersionControlTag,
+  CheckoutInfo,
+  CommitRef,
+  RepoMount,
+  UserIdentity,
+} from "./VersionControl.js";
+export { git } from "./vcs/git.js";

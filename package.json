@@ -29,6 +29,10 @@
     "./sandboxes/no-sandbox": {
       "import": "./dist/sandboxes/no-sandbox.js",
       "types": "./dist/sandboxes/no-sandbox.d.ts"
+    },
+    "./vcs/git": {
+      "import": "./dist/vcs/git.js",
+      "types": "./dist/vcs/git.d.ts"
     }
   },
   "bin": {

@@ -10,7 +10,6 @@ import { resolvePrompt } from "./PromptResolver.js";
 import {
   SandboxFactory,
   makeSandboxLayerFromHandle,
-  resolveGitMounts,
   SANDBOX_REPO_DIR,
 } from "./SandboxFactory.js";
 import {
@@ -42,7 +41,6 @@ import { resolveEnv } from "./EnvResolver.js";
 import { mergeProviderEnv } from "./mergeProviderEnv.js";
 import { startSandbox } from "./startSandbox.js";
 import { syncOut } from "./syncOut.js";
-import * as WorktreeManager from "./WorktreeManager.js";
 import { copyToWorktree } from "./CopyToWorktree.js";
 import { resolveCwd } from "./resolveCwd.js";
 import {
@@ -55,6 +53,8 @@ import {
 import { noSandbox } from "./sandboxes/no-sandbox.js";
 import { raceAbortSignal } from "./raceAbortSignal.js";
 import type { Timeouts } from "./run.js";
+import type { VersionControlProvider } from "./VersionControl.js";
+import { git } from "./vcs/git.js";
 
 /** Branch strategies valid for createWorktree — head is excluded. */
 export type WorktreeBranchStrategy =
@@ -81,6 +81,13 @@ export interface CreateWorktreeOptions {
   readonly hooks?: SandboxHooks;
   /** Override default timeouts for built-in lifecycle steps. Unset keys keep their defaults. */
   readonly timeouts?: Timeouts;
+  /**
+   * Version-control backend used for worktree/workspace creation, identity
+   * propagation, and host-side merge-back. Defaults to {@link git}.
+   *
+   * @default git()
+   */
+  readonly vcs?: VersionControlProvider;
 }
 
 export interface WorktreeInteractiveOptions {
@@ -211,6 +218,8 @@ export interface Worktree {
 export const createWorktree = async (
   options: CreateWorktreeOptions,
 ): Promise<Worktree> => {
+  const vcs = options.vcs ?? git();
+
   const branch =
     options.branchStrategy.type === "branch"
       ? options.branchStrategy.branch
@@ -223,15 +232,19 @@ export const createWorktree = async (
 
   const { hostRepoDir, worktreeInfo } = await Effect.gen(function* () {
     const hostRepoDir = yield* resolveCwd(options.cwd);
-    yield* WorktreeManager.pruneStale(hostRepoDir).pipe(
-      Effect.catchAll(() => Effect.void),
+    yield* Effect.promise(() =>
+      vcs.pruneStaleCheckouts(hostRepoDir).catch(() => {}),
     );
-    const info = yield* WorktreeManager.create(hostRepoDir, {
-      branch,
-      baseBranch,
-    });
+    const info = yield* Effect.promise(() =>
+      vcs.createCheckout({ repoDir: hostRepoDir, branch, baseBranch }),
+    );
     if (options.copyToWorktree && options.copyToWorktree.length > 0) {
-      yield* copyToWorktree(options.copyToWorktree, hostRepoDir, info.path, options.timeouts?.copyToWorktreeMs);
+      yield* copyToWorktree(
+        options.copyToWorktree,
+        hostRepoDir,
+        info.path,
+        options.timeouts?.copyToWorktreeMs,
+      );
     }
     // Run host.onWorktreeReady hooks after copyToWorktree, before sandbox creation
     if (options.hooks?.host?.onWorktreeReady?.length) {
@@ -246,21 +259,17 @@ export const createWorktree = async (
     if (closed) return { preservedWorktreePath: undefined };
     closed = true;
 
-    return Effect.gen(function* () {
-      const isDirty = yield* WorktreeManager.hasUncommittedChanges(
-        worktreeInfo.path,
-      ).pipe(Effect.catchAll(() => Effect.succeed(false)));
+    const isDirty = await vcs
+      .hasUncommittedChanges(worktreeInfo.path)
+      .catch(() => false);
 
-      if (isDirty) {
-        return { preservedWorktreePath: worktreeInfo.path } as CloseResult;
-      }
+    if (isDirty) {
+      return { preservedWorktreePath: worktreeInfo.path } as CloseResult;
+    }
 
-      yield* WorktreeManager.remove(worktreeInfo.path).pipe(
-        Effect.catchAll(() => Effect.void),
-      );
+    await vcs.removeCheckout(worktreeInfo.path).catch(() => {});
 
-      return { preservedWorktreePath: undefined } as CloseResult;
-    }).pipe(Effect.runPromise);
+    return { preservedWorktreePath: undefined } as CloseResult;
   };
 
   const worktreeInteractive = async (
@@ -352,7 +361,12 @@ export const createWorktree = async (
         handle = startResult.handle;
       } else {
         const gitPath = join(hostRepoDir, ".git");
-        const gitMounts = yield* resolveGitMounts(gitPath);
+        const gitMounts = yield* Effect.promise(() =>
+          vcs.resolveRepoMounts({
+            checkoutPath: worktreeInfo.path,
+            gitPath,
+          }),
+        );
         const startResult = yield* d.taskLog("Starting sandbox", () =>
           startSandbox({
             provider: resolvedSandbox,
@@ -380,7 +394,8 @@ export const createWorktree = async (
 
         const applyToHost =
           resolvedSandbox.tag === "isolated"
-            ? () => syncOut(worktreeInfo.path, handle as IsolatedSandboxHandle)
+            ? () =>
+                syncOut(worktreeInfo.path, handle as IsolatedSandboxHandle, vcs)
             : () => Effect.void;
 
         const lifecycleEffect = withSandboxLifecycle(
@@ -391,6 +406,7 @@ export const createWorktree = async (
             branch: worktreeInfo.branch,
             hostWorktreePath: worktreeInfo.path,
             applyToHost,
+            vcs,
           },
           (ctx) =>
             Effect.gen(function* () {
@@ -541,7 +557,12 @@ export const createWorktree = async (
         sandboxRepoDir = startResult.worktreePath;
       } else {
         const gitPath = join(hostRepoDir, ".git");
-        const gitMounts = yield* resolveGitMounts(gitPath);
+        const gitMounts = yield* Effect.promise(() =>
+          vcs.resolveRepoMounts({
+            checkoutPath: worktreeInfo.path,
+            gitPath,
+          }),
+        );
         const startResult = yield* startSandbox({
           provider: sandboxProvider,
           hostRepoDir,
@@ -557,7 +578,8 @@ export const createWorktree = async (
       const sandboxLayer = makeSandboxLayerFromHandle(handle);
       const applyToHost =
         sandboxProvider.tag === "isolated"
-          ? () => syncOut(worktreeInfo.path, handle as IsolatedSandboxHandle)
+          ? () =>
+              syncOut(worktreeInfo.path, handle as IsolatedSandboxHandle, vcs)
           : () => Effect.void;
 
       // 5. Resolve logging
@@ -632,6 +654,7 @@ export const createWorktree = async (
           resumeSession: opts.resumeSession,
           signal: opts.signal,
           skipPromptExpansion: isInlinePrompt,
+          vcs,
         });
       }).pipe(
         Effect.provide(runLayer),

@@ -17,6 +17,8 @@ import {
   type ExecResult,
   type SandboxService,
 } from "./SandboxFactory.js";
+import type { VersionControlProvider } from "./VersionControl.js";
+import { git } from "./vcs/git.js";
 
 const GIT_SETUP_TIMEOUT_MS = 10_000;
 const HOOK_TIMEOUT_MS = 60_000;
@@ -130,6 +132,8 @@ export interface SandboxLifecycleOptions {
   /** AbortSignal passed through to lifecycle hooks so they can cooperatively cancel.
    *  When omitted, hooks receive a never-aborted signal. */
   readonly signal?: AbortSignal;
+  /** VCS provider — defaults to git(). */
+  readonly vcs?: VersionControlProvider;
 }
 
 export interface SandboxContext {
@@ -155,6 +159,7 @@ export const withSandboxLifecycle = <A>(
     const display = yield* Display;
     const { hostRepoDir, sandboxRepoDir, hooks, branch, hostWorktreePath } =
       options;
+    const vcs = options.vcs ?? git();
 
     // Resolve signal: use caller's signal or a never-aborted one so hooks
     // can unconditionally reference it without null-checking.
@@ -162,27 +167,13 @@ export const withSandboxLifecycle = <A>(
 
     // Without an explicit branch, record host's current branch for cherry-pick
     const hostCurrentBranch: string | null = !branch
-      ? yield* Effect.promise(async () => {
-          const { stdout } = await execAsync(
-            "git rev-parse --abbrev-ref HEAD",
-            { cwd: hostRepoDir },
-          );
-          return stdout.trim();
-        })
+      ? yield* Effect.promise(() => vcs.currentBranch(hostRepoDir))
       : null;
 
     // Read host git identity before entering the sandbox
-    const [hostGitName, hostGitEmail] = yield* Effect.promise(async () => {
-      const [nameResult, emailResult] = await Promise.all([
-        execAsync("git config user.name", { cwd: hostRepoDir })
-          .then((r) => r.stdout.trim())
-          .catch(() => ""),
-        execAsync("git config user.email", { cwd: hostRepoDir })
-          .then((r) => r.stdout.trim())
-          .catch(() => ""),
-      ]);
-      return [nameResult, emailResult] as const;
-    });
+    const { name: hostGitName, email: hostGitEmail } = yield* Effect.promise(
+      () => vcs.readUserIdentity(hostRepoDir),
+    );
 
     // For host-side operations, use hostWorktreePath (the real path on the host)
     // instead of sandboxRepoDir (which may be a sandbox path like /home/agent/workspace).
@@ -202,17 +193,12 @@ export const withSandboxLifecycle = <A>(
 
         // Propagate host git identity into the sandbox so commits are attributed
         // to the actual developer without requiring manual setup.
-        if (hostGitName) {
-          yield* execOkWithGitTimeout(
-            sandbox,
-            `git config --global user.name "${hostGitName.replace(/"/g, '\\"')}"`,
-          );
-        }
-        if (hostGitEmail) {
-          yield* execOkWithGitTimeout(
-            sandbox,
-            `git config --global user.email "${hostGitEmail.replace(/"/g, '\\"')}"`,
-          );
+        const identityCmds = vcs.writeUserIdentityCommands({
+          name: hostGitName,
+          email: hostGitEmail,
+        });
+        for (const cmd of identityCmds) {
+          yield* execOkWithGitTimeout(sandbox, cmd);
         }
 
         // Repo is bind-mounted — discover branch directly
@@ -331,12 +317,9 @@ export const withSandboxLifecycle = <A>(
     // For bind-mount providers, these are the same. For isolated providers,
     // the host-side SHA is the correct baseline for git rev-list after applyToHost
     // syncs commits back (syncOut creates new SHAs via format-patch/am).
-    const baseHead = yield* Effect.promise(async () => {
-      const { stdout } = await execAsync("git rev-parse HEAD", {
-        cwd: hostSideWorktreePath,
-      });
-      return stdout.trim();
-    });
+    const baseHead = yield* Effect.promise(() =>
+      vcs.headRef(hostSideWorktreePath),
+    );
 
     // Run the caller's work
     const result = yield* work({ sandbox, sandboxRepoDir, baseHead });
@@ -372,19 +355,19 @@ export const withSandboxLifecycle = <A>(
       // moved) and the diverged case (host branch has new commits since the worktree started).
 
       // Check if there are any new commits on the temp branch
-      const hasNewCommits = yield* Effect.promise(async () => {
-        try {
-          const { stdout } = await execAsync(
-            `git rev-list "${baseHead}..HEAD" --count`,
-            { cwd: hostSideWorktreePath },
-          );
-          return parseInt(stdout.trim(), 10) > 0;
-        } catch {
-          return false;
-        }
-      });
+      const currentHead = yield* Effect.promise(() =>
+        vcs.headRef(hostSideWorktreePath),
+      );
+      const hasNewCommits = yield* Effect.promise(() =>
+        vcs
+          .commitsBetween(hostSideWorktreePath, baseHead, currentHead)
+          .then((cs) => cs.length > 0)
+          .catch(() => false),
+      );
 
-      // Detach the worktree from the temp branch so the branch can be deleted
+      // Detach the worktree from the temp branch so the branch can be deleted.
+      // This runs inside the sandbox; the agent's environment is always git
+      // even when host vcs is jj.
       yield* execOk(sandbox, "git checkout --detach", { cwd: sandboxRepoDir });
 
       if (hasNewCommits) {
@@ -393,15 +376,19 @@ export const withSandboxLifecycle = <A>(
           Effect.tryPromise({
             try: async () => {
               try {
-                await execAsync(`git merge "${resolvedBranch}"`, {
-                  cwd: hostRepoDir,
+                await vcs.mergeBranchInto({
+                  repoDir: hostRepoDir,
+                  sourceBranch: resolvedBranch,
+                  targetBranch: hostCurrentBranch,
                 });
               } catch {
                 throw new Error(
                   `Merge of '${resolvedBranch}' onto '${hostCurrentBranch}' failed. ` +
                     `The temporary branch '${resolvedBranch}' has been preserved. ` +
-                    `To retry: git merge ${resolvedBranch}, ` +
-                    `then clean up: git branch -D ${resolvedBranch}`,
+                    vcs.mergeFailureHint({
+                      sourceBranch: resolvedBranch,
+                      targetBranch: hostCurrentBranch ?? "",
+                    }),
                 );
               }
             },
@@ -426,9 +413,7 @@ export const withSandboxLifecycle = <A>(
 
       // Delete the temp branch (now merged into host branch)
       yield* Effect.promise(() =>
-        execAsync(`git branch -D "${resolvedBranch}"`, {
-          cwd: hostRepoDir,
-        }).catch(() => {}),
+        vcs.deleteBranch(hostRepoDir, resolvedBranch).catch(() => {}),
       );
 
       // Collect the commits now on the host branch

@@ -37,7 +37,6 @@ import {
   Sandbox as SandboxTag,
   SandboxFactory,
   SANDBOX_REPO_DIR,
-  resolveGitMounts,
 } from "./SandboxFactory.js";
 import type {
   SandboxProvider,
@@ -46,9 +45,10 @@ import type {
 } from "./SandboxProvider.js";
 import { startSandbox } from "./startSandbox.js";
 import { syncOut } from "./syncOut.js";
-import * as WorktreeManager from "./WorktreeManager.js";
 import { copyToWorktree } from "./CopyToWorktree.js";
 import { resolveCwd } from "./resolveCwd.js";
+import type { VersionControlProvider } from "./VersionControl.js";
+import { git, shellSingleQuote } from "./vcs/git.js";
 
 export interface CreateSandboxOptions {
   /** Explicit branch for the worktree (required). */
@@ -75,6 +75,13 @@ export interface CreateSandboxOptions {
   readonly copyToWorktree?: string[];
   /** Override default timeouts for built-in lifecycle steps. Unset keys keep their defaults. */
   readonly timeouts?: Timeouts;
+  /**
+   * Version-control backend used for worktree/workspace creation, identity
+   * propagation, and host-side merge-back. Defaults to {@link git}.
+   *
+   * @default git()
+   */
+  readonly vcs?: VersionControlProvider;
   /** @internal Test-only overrides to bypass the sandbox provider. */
   readonly _test?: {
     readonly buildSandboxLayer?: (
@@ -200,6 +207,7 @@ interface SandboxHandleContext {
 const buildSandboxHandle = (
   ctx: SandboxHandleContext,
   close: () => Promise<CloseResult>,
+  vcs: import("./VersionControl.js").VersionControlProvider,
 ): Sandbox => {
   const {
     branch,
@@ -235,9 +243,7 @@ const buildSandboxHandle = (
       const isInlinePrompt = resolved.source === "inline";
 
       const userArgs = runOptions.promptArgs ?? {};
-      const currentHostBranch = await Effect.runPromise(
-        WorktreeManager.getCurrentBranch(hostRepoDir),
-      );
+      const currentHostBranch = await vcs.currentBranch(hostRepoDir);
 
       const displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
       const silentDisplayLayer = SilentDisplay.layer(displayRef);
@@ -333,6 +339,7 @@ const buildSandboxHandle = (
               name: runOptions.name,
               signal: runOptions.signal,
               skipPromptExpansion: isInlinePrompt,
+              vcs,
             });
           }).pipe(Effect.provide(runLayer)),
         );
@@ -384,8 +391,9 @@ const buildSandboxHandle = (
             const isInlinePrompt = resolved.source === "inline";
 
             const userArgs = interactiveOptions.promptArgs ?? {};
-            const currentHostBranch =
-              yield* WorktreeManager.getCurrentBranch(hostRepoDir);
+            const currentHostBranch: string = yield* Effect.promise(() =>
+              vcs.currentBranch(hostRepoDir),
+            );
 
             let resolvedPrompt: string;
             if (isInlinePrompt) {
@@ -415,6 +423,7 @@ const buildSandboxHandle = (
                 branch,
                 hostWorktreePath: worktreePath,
                 applyToHost,
+                vcs,
               },
               (ctx) =>
                 Effect.gen(function* () {
@@ -527,7 +536,12 @@ export const createSandboxFromWorktree = async (
     options.sandbox.tag !== "isolated"
   ) {
     await Effect.runPromise(
-      copyToWorktree(options.copyToWorktree, hostRepoDir, worktreePath, options.timeouts?.copyToWorktreeMs),
+      copyToWorktree(
+        options.copyToWorktree,
+        hostRepoDir,
+        worktreePath,
+        options.timeouts?.copyToWorktreeMs,
+      ),
     );
   }
 
@@ -564,8 +578,17 @@ export const createSandboxFromWorktree = async (
         copyPaths: options.copyToWorktree,
       });
     } else {
-      startEffect = resolveGitMounts(join(hostRepoDir, ".git")).pipe(
-        Effect.provide(NodeFileSystem.layer),
+      // createSandboxFromWorktree is called by createWorktree which doesn't
+      // currently thread vcs into its options; default to git() here.
+      const localVcs = git();
+      startEffect = Effect.tryPromise({
+        try: () =>
+          localVcs.resolveRepoMounts({
+            checkoutPath: worktreePath,
+            gitPath: join(hostRepoDir, ".git"),
+          }),
+        catch: () => undefined,
+      }).pipe(
         Effect.catchAll(() => Effect.succeed([])),
         Effect.flatMap((gitMounts) =>
           startSandbox({
@@ -596,7 +619,7 @@ export const createSandboxFromWorktree = async (
       Effect.gen(function* () {
         const sandbox = yield* SandboxTag;
         yield* sandbox.exec(
-          `git config --global --add safe.directory "${sandboxRepoDir}"`,
+          `git config --global --add safe.directory ${shellSingleQuote(sandboxRepoDir)}`,
         );
         const sandboxEffects = (sandboxOnReady ?? []).map((hook) =>
           sandbox.exec(hook.command, {
@@ -643,6 +666,7 @@ export const createSandboxFromWorktree = async (
       if (providerHandle) await providerHandle.close();
       return { preservedWorktreePath: undefined };
     },
+    git(),
   );
 };
 
@@ -654,6 +678,7 @@ export const createSandboxFromWorktree = async (
 export const createSandbox = async (
   options: CreateSandboxOptions,
 ): Promise<Sandbox> => {
+  const vcs = options.vcs ?? git();
   const { branch } = options;
   const isTestMode = !!options._test?.buildSandboxLayer;
 
@@ -661,13 +686,16 @@ export const createSandbox = async (
   const { hostRepoDir, worktreeInfo } = await Effect.runPromise(
     Effect.gen(function* () {
       const hostRepoDir = yield* resolveCwd(options.cwd);
-      yield* WorktreeManager.pruneStale(hostRepoDir).pipe(
-        Effect.catchAll(() => Effect.void),
+      yield* Effect.promise(() =>
+        vcs.pruneStaleCheckouts(hostRepoDir).catch(() => {}),
       );
-      const worktreeInfo = yield* WorktreeManager.create(hostRepoDir, {
-        branch,
-        baseBranch: options.baseBranch,
-      });
+      const worktreeInfo = yield* Effect.promise(() =>
+        vcs.createCheckout({
+          repoDir: hostRepoDir,
+          branch,
+          baseBranch: options.baseBranch,
+        }),
+      );
       return { hostRepoDir, worktreeInfo };
     }).pipe(Effect.provide(NodeContext.layer)),
   );
@@ -681,7 +709,12 @@ export const createSandbox = async (
     options.sandbox.tag !== "isolated"
   ) {
     await Effect.runPromise(
-      copyToWorktree(options.copyToWorktree, hostRepoDir, worktreePath, options.timeouts?.copyToWorktreeMs),
+      copyToWorktree(
+        options.copyToWorktree,
+        hostRepoDir,
+        worktreePath,
+        options.timeouts?.copyToWorktreeMs,
+      ),
     );
   }
 
@@ -726,8 +759,14 @@ export const createSandbox = async (
         copyPaths: options.copyToWorktree,
       });
     } else {
-      startEffect = resolveGitMounts(join(hostRepoDir, ".git")).pipe(
-        Effect.provide(NodeFileSystem.layer),
+      startEffect = Effect.tryPromise({
+        try: () =>
+          vcs.resolveRepoMounts({
+            checkoutPath: worktreePath,
+            gitPath: join(hostRepoDir, ".git"),
+          }),
+        catch: () => undefined,
+      }).pipe(
         Effect.catchAll(() => Effect.succeed([])),
         Effect.flatMap((gitMounts) =>
           startSandbox({
@@ -759,7 +798,7 @@ export const createSandbox = async (
         Effect.gen(function* () {
           const sandbox = yield* SandboxTag;
           yield* sandbox.exec(
-            `git config --global --add safe.directory "${sandboxRepoDir}"`,
+            `git config --global --add safe.directory ${shellSingleQuote(sandboxRepoDir)}`,
           );
           const sandboxEffects = (sandboxOnReady ?? []).map((hook) =>
             sandbox.exec(hook.command, {
@@ -785,7 +824,8 @@ export const createSandbox = async (
   // 5. Build applyToHost callback (once, reused across runs)
   const applyToHost =
     isIsolated && providerHandle
-      ? () => syncOut(worktreePath, providerHandle as IsolatedSandboxHandle)
+      ? () =>
+          syncOut(worktreePath, providerHandle as IsolatedSandboxHandle, vcs)
       : () => Effect.void;
 
   // 6. Set up signal handlers
@@ -816,22 +856,16 @@ export const createSandbox = async (
     }
 
     // Check for uncommitted changes
-    const isDirty = await Effect.runPromise(
-      WorktreeManager.hasUncommittedChanges(worktreePath).pipe(
-        Effect.catchAll(() => Effect.succeed(false)),
-      ),
-    );
+    const isDirty = await vcs
+      .hasUncommittedChanges(worktreePath)
+      .catch(() => false);
 
     if (isDirty) {
       return { preservedWorktreePath: worktreePath };
     }
 
     // Remove worktree
-    await Effect.runPromise(
-      WorktreeManager.remove(worktreePath).pipe(
-        Effect.catchAll(() => Effect.void),
-      ),
-    );
+    await vcs.removeCheckout(worktreePath).catch(() => {});
 
     return { preservedWorktreePath: undefined };
   };
@@ -852,5 +886,6 @@ export const createSandbox = async (
       process.removeListener("SIGTERM", onSignal);
       return doClose();
     },
+    vcs,
   );
 };

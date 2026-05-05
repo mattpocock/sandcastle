@@ -36,6 +36,8 @@ import { mergeProviderEnv } from "./mergeProviderEnv.js";
 import { hostSessionStore } from "./SessionStore.js";
 import { defaultSessionPathsLayer } from "./SessionPaths.js";
 import { generateTempBranchName, getCurrentBranch } from "./WorktreeManager.js";
+import type { VersionControlProvider } from "./VersionControl.js";
+import { git } from "./vcs/git.js";
 import {
   type PromptArgs,
   substitutePromptArgs,
@@ -258,6 +260,13 @@ export interface RunOptions {
   readonly signal?: AbortSignal;
   /** Override default timeouts for built-in lifecycle steps. Unset keys keep their defaults. */
   readonly timeouts?: Timeouts;
+  /**
+   * Version-control backend used for worktree/workspace creation, identity
+   * propagation, and host-side merge-back. Defaults to {@link git}.
+   *
+   * @default git()
+   */
+  readonly vcs?: VersionControlProvider;
 }
 
 export type { IterationResult, IterationUsage } from "./Orchestrator.js";
@@ -282,6 +291,8 @@ export interface RunResult {
 export const run = async (options: RunOptions): Promise<RunResult> => {
   // If signal is already aborted, reject immediately without any setup
   options.signal?.throwIfAborted();
+
+  const vcs = options.vcs ?? git();
 
   const {
     prompt,
@@ -423,6 +434,7 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
         hooks,
         signal: options.signal,
         timeouts: options.timeouts,
+        vcs,
       }),
       NodeFileSystem.layer,
       displayLayer,
@@ -494,6 +506,7 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
       resumeSession: options.resumeSession,
       signal: options.signal,
       skipPromptExpansion: isInlinePrompt,
+      vcs,
     });
 
     const completion = buildCompletionMessage(
