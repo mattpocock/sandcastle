@@ -1,3 +1,7 @@
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import { git } from "./git.js";
 
@@ -38,5 +42,96 @@ describe("git() factory", () => {
         typeof (provider as unknown as Record<string, unknown>)[method],
       ).toBe("function");
     }
+  });
+});
+
+describe("git() worktree lifecycle (real git)", () => {
+  it("creates, queries, and removes a checkout", async () => {
+    const repoDir = mkdtempSync(join(tmpdir(), "vcs-git-test-"));
+    try {
+      execFileSync("git", ["init", "-q"], { cwd: repoDir });
+      execFileSync("git", ["config", "user.email", "t@t"], { cwd: repoDir });
+      execFileSync("git", ["config", "user.name", "T"], { cwd: repoDir });
+      writeFileSync(join(repoDir, "README"), "x\n");
+      execFileSync("git", ["add", "."], { cwd: repoDir });
+      execFileSync("git", ["commit", "-qm", "init"], { cwd: repoDir });
+
+      const provider = git();
+      const checkout = await provider.createCheckout({ repoDir });
+      expect(checkout.path).toMatch(/sandcastle\/worktrees/);
+      expect(typeof checkout.branch).toBe("string");
+
+      const dirty = await provider.hasUncommittedChanges(checkout.path);
+      expect(dirty).toBe(false);
+
+      writeFileSync(join(checkout.path, "scratch"), "y\n");
+      const dirtyAfter = await provider.hasUncommittedChanges(checkout.path);
+      expect(dirtyAfter).toBe(true);
+
+      // Clean up the dirty file before remove (mirrors WorktreeManager precondition)
+      rmSync(join(checkout.path, "scratch"));
+      await provider.removeCheckout(checkout.path);
+    } finally {
+      rmSync(repoDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("git().writeUserIdentityCommands", () => {
+  it("emits one command per non-empty field", () => {
+    expect(
+      git().writeUserIdentityCommands({ name: "Ada", email: "a@b" }),
+    ).toEqual([
+      `git config --global user.name "Ada"`,
+      `git config --global user.email "a@b"`,
+    ]);
+  });
+  it("escapes embedded quotes", () => {
+    expect(git().writeUserIdentityCommands({ name: 'A"B', email: "" })).toEqual(
+      [`git config --global user.name "A\\"B"`],
+    );
+  });
+  it("returns empty when both fields are empty", () => {
+    expect(git().writeUserIdentityCommands({ name: "", email: "" })).toEqual(
+      [],
+    );
+  });
+});
+
+describe("git() transport command builders", () => {
+  it("builds the format-patch command", () => {
+    expect(git().exportPatchesCommand({ base: "abc", outDir: "/tmp/p" })).toBe(
+      `git format-patch "abc..HEAD" -o "/tmp/p"`,
+    );
+  });
+  it("builds the apply command", () => {
+    expect(git().applyPatchCommand({ patchPath: "/tmp/x.patch" })).toBe(
+      `git apply "/tmp/x.patch"`,
+    );
+  });
+  it("builds the import patches command", () => {
+    expect(git().importPatchesCommand({ patchDir: "/tmp/patches" })).toBe(
+      `git am --3way "/tmp/patches"/*.patch`,
+    );
+  });
+  it("builds diff working tree command", () => {
+    expect(git().diffWorkingTreeCommand()).toBe(`git diff HEAD`);
+  });
+  it("builds list untracked command", () => {
+    expect(git().listUntrackedCommand()).toBe(
+      `git ls-files --others --exclude-standard`,
+    );
+  });
+});
+
+describe("git() recovery instructions", () => {
+  it("builds a recovery instruction string for git", () => {
+    const out = git().recoveryInstructions({
+      patchDir: "/tmp/x",
+      targetBranch: "main",
+    });
+    expect(out).toContain("git checkout main");
+    expect(out).toContain("git am --3way /tmp/x/*.patch");
+    expect(out).toContain("git apply /tmp/x/changes.patch");
   });
 });
