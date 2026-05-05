@@ -283,6 +283,42 @@ describe("git().deleteBranch (real git)", () => {
   });
 });
 
+describe("git().detachCheckout (real git)", () => {
+  it("puts the checkout into detached HEAD state", async () => {
+    const repoDir = mkdtempSync(join(tmpdir(), "vcs-detach-test-"));
+    try {
+      execFileSync("git", ["init", "-q"], { cwd: repoDir });
+      execFileSync("git", ["config", "user.email", "t@t"], { cwd: repoDir });
+      execFileSync("git", ["config", "user.name", "T"], { cwd: repoDir });
+      writeFileSync(join(repoDir, "README"), "x\n");
+      execFileSync("git", ["add", "."], { cwd: repoDir });
+      execFileSync("git", ["commit", "-qm", "init"], { cwd: repoDir });
+
+      // Verify on a branch (not detached)
+      const before = execFileSync("git", ["symbolic-ref", "-q", "HEAD"], {
+        cwd: repoDir,
+      })
+        .toString()
+        .trim();
+      expect(before).toMatch(/^refs\/heads\//);
+
+      // Detach
+      await git().detachCheckout(repoDir);
+
+      // Verify detached: symbolic-ref exits non-zero on detached HEAD
+      let isDetached = false;
+      try {
+        execFileSync("git", ["symbolic-ref", "-q", "HEAD"], { cwd: repoDir });
+      } catch {
+        isDetached = true;
+      }
+      expect(isDetached).toBe(true);
+    } finally {
+      rmSync(repoDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("git().mergeFailureHint", () => {
   it("returns git-specific retry instructions", () => {
     const hint = git().mergeFailureHint({
