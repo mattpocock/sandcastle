@@ -319,6 +319,70 @@ describe("git().detachCheckout (real git)", () => {
   });
 });
 
+describe("git().commitsBetween (real git)", () => {
+  it("returns the commits between two refs in chronological order", async () => {
+    const repoDir = mkdtempSync(join(tmpdir(), "vcs-commitsbetween-test-"));
+    try {
+      execFileSync("git", ["init", "-q"], { cwd: repoDir });
+      execFileSync("git", ["config", "user.email", "t@t"], { cwd: repoDir });
+      execFileSync("git", ["config", "user.name", "T"], { cwd: repoDir });
+      writeFileSync(join(repoDir, "f1"), "1\n");
+      execFileSync("git", ["add", "."], { cwd: repoDir });
+      execFileSync("git", ["commit", "-qm", "first"], { cwd: repoDir });
+      const baseSha = execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: repoDir,
+      })
+        .toString()
+        .trim();
+
+      writeFileSync(join(repoDir, "f2"), "2\n");
+      execFileSync("git", ["add", "."], { cwd: repoDir });
+      execFileSync("git", ["commit", "-qm", "second"], { cwd: repoDir });
+
+      writeFileSync(join(repoDir, "f3"), "3\n");
+      execFileSync("git", ["add", "."], { cwd: repoDir });
+      execFileSync("git", ["commit", "-qm", "third"], { cwd: repoDir });
+      const headSha = execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: repoDir,
+      })
+        .toString()
+        .trim();
+
+      const commits = await git().commitsBetween(repoDir, baseSha, headSha);
+
+      expect(commits).toHaveLength(2);
+      // Each commit has an `id` (SHA) field; both should be valid hex SHAs
+      for (const c of commits) {
+        expect(c.id).toMatch(/^[0-9a-f]{40}$/);
+      }
+    } finally {
+      rmSync(repoDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns empty array when base equals head", async () => {
+    const repoDir = mkdtempSync(join(tmpdir(), "vcs-commitsbetween-empty-"));
+    try {
+      execFileSync("git", ["init", "-q"], { cwd: repoDir });
+      execFileSync("git", ["config", "user.email", "t@t"], { cwd: repoDir });
+      execFileSync("git", ["config", "user.name", "T"], { cwd: repoDir });
+      writeFileSync(join(repoDir, "f"), "x\n");
+      execFileSync("git", ["add", "."], { cwd: repoDir });
+      execFileSync("git", ["commit", "-qm", "only"], { cwd: repoDir });
+      const sha = execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: repoDir,
+      })
+        .toString()
+        .trim();
+
+      const commits = await git().commitsBetween(repoDir, sha, sha);
+      expect(commits).toEqual([]);
+    } finally {
+      rmSync(repoDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("git().mergeFailureHint", () => {
   it("returns git-specific retry instructions", () => {
     const hint = git().mergeFailureHint({
