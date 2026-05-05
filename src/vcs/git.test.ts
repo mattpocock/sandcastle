@@ -245,6 +245,44 @@ describe("git().mergeBranchInto (real git)", () => {
   });
 });
 
+describe("git().deleteBranch (real git)", () => {
+  it("deletes a branch from the repo", async () => {
+    const repoDir = mkdtempSync(join(tmpdir(), "vcs-delbranch-test-"));
+    try {
+      execFileSync("git", ["init", "-q"], { cwd: repoDir });
+      execFileSync("git", ["config", "user.email", "t@t"], { cwd: repoDir });
+      execFileSync("git", ["config", "user.name", "T"], { cwd: repoDir });
+      writeFileSync(join(repoDir, "README"), "x\n");
+      execFileSync("git", ["add", "."], { cwd: repoDir });
+      execFileSync("git", ["commit", "-qm", "init"], { cwd: repoDir });
+
+      // Create a branch
+      execFileSync("git", ["branch", "to-delete"], { cwd: repoDir });
+
+      // Verify it exists
+      const before = execFileSync("git", ["branch", "--list", "to-delete"], {
+        cwd: repoDir,
+      })
+        .toString()
+        .trim();
+      expect(before).toContain("to-delete");
+
+      // Delete via provider
+      await git().deleteBranch(repoDir, "to-delete");
+
+      // Verify it's gone
+      const after = execFileSync("git", ["branch", "--list", "to-delete"], {
+        cwd: repoDir,
+      })
+        .toString()
+        .trim();
+      expect(after).toBe("");
+    } finally {
+      rmSync(repoDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("git().mergeFailureHint", () => {
   it("returns git-specific retry instructions", () => {
     const hint = git().mergeFailureHint({
