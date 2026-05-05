@@ -48,7 +48,7 @@ import { syncOut } from "./syncOut.js";
 import { copyToWorktree } from "./CopyToWorktree.js";
 import { resolveCwd } from "./resolveCwd.js";
 import type { VersionControlProvider } from "./VersionControl.js";
-import { git } from "./vcs/git.js";
+import { git, shellSingleQuote } from "./vcs/git.js";
 
 export interface CreateSandboxOptions {
   /** Explicit branch for the worktree (required). */
@@ -619,7 +619,7 @@ export const createSandboxFromWorktree = async (
       Effect.gen(function* () {
         const sandbox = yield* SandboxTag;
         yield* sandbox.exec(
-          `git config --global --add safe.directory "${sandboxRepoDir}"`,
+          `git config --global --add safe.directory ${shellSingleQuote(sandboxRepoDir)}`,
         );
         const sandboxEffects = (sandboxOnReady ?? []).map((hook) =>
           sandbox.exec(hook.command, {
@@ -798,7 +798,7 @@ export const createSandbox = async (
         Effect.gen(function* () {
           const sandbox = yield* SandboxTag;
           yield* sandbox.exec(
-            `git config --global --add safe.directory "${sandboxRepoDir}"`,
+            `git config --global --add safe.directory ${shellSingleQuote(sandboxRepoDir)}`,
           );
           const sandboxEffects = (sandboxOnReady ?? []).map((hook) =>
             sandbox.exec(hook.command, {
