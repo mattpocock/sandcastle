@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -71,6 +71,25 @@ describe("git() worktree lifecycle (real git)", () => {
       // Clean up the dirty file before remove (mirrors WorktreeManager precondition)
       rmSync(join(checkout.path, "scratch"));
       await provider.removeCheckout(checkout.path);
+    } finally {
+      rmSync(repoDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("git().headRef", () => {
+  it("returns the 40-char SHA of HEAD", async () => {
+    const repoDir = mkdtempSync(join(tmpdir(), "vcs-git-headref-"));
+    try {
+      execFileSync("git", ["init", "-q"], { cwd: repoDir });
+      execFileSync("git", ["config", "user.email", "t@t"], { cwd: repoDir });
+      execFileSync("git", ["config", "user.name", "T"], { cwd: repoDir });
+      writeFileSync(join(repoDir, "README"), "x\n");
+      execFileSync("git", ["add", "."], { cwd: repoDir });
+      execFileSync("git", ["commit", "-qm", "init"], { cwd: repoDir });
+
+      const sha = await git().headRef(repoDir);
+      expect(sha).toMatch(/^[0-9a-f]{40}$/);
     } finally {
       rmSync(repoDir, { recursive: true, force: true });
     }

@@ -1,18 +1,12 @@
-import { execFile, execFile as execFileCallback } from "node:child_process";
+import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { Effect } from "effect";
 import { NodeFileSystem } from "@effect/platform-node";
-import type {
-  VersionControlProvider,
-  CheckoutInfo,
-  CommitRef,
-  RepoMount,
-  UserIdentity,
-} from "../VersionControl.js";
+import type { VersionControlProvider } from "../VersionControl.js";
 import * as WorktreeManager from "../WorktreeManager.js";
 import { resolveGitMounts } from "../SandboxFactory.js";
 
-const execFileAsync = promisify(execFileCallback);
+const execFileAsync = promisify(execFile);
 
 export const git = (): VersionControlProvider => ({
   tag: "git",
@@ -40,7 +34,9 @@ export const git = (): VersionControlProvider => ({
   },
 
   hasUncommittedChanges: async (checkoutPath) => {
-    return Effect.runPromise(WorktreeManager.hasUncommittedChanges(checkoutPath));
+    return Effect.runPromise(
+      WorktreeManager.hasUncommittedChanges(checkoutPath),
+    );
   },
 
   // ----- Repo introspection -----
@@ -83,9 +79,7 @@ export const git = (): VersionControlProvider => ({
   writeUserIdentityCommands: ({ name, email }) => {
     const cmds: string[] = [];
     if (name)
-      cmds.push(
-        `git config --global user.name "${name.replace(/"/g, '\\"')}"`,
-      );
+      cmds.push(`git config --global user.name "${name.replace(/"/g, '\\"')}"`);
     if (email)
       cmds.push(
         `git config --global user.email "${email.replace(/"/g, '\\"')}"`,
@@ -95,11 +89,9 @@ export const git = (): VersionControlProvider => ({
 
   // ----- Transport -----
   bundleAllRefs: async (repoDir, outBundlePath) => {
-    await execFileAsync(
-      "git",
-      ["bundle", "create", outBundlePath, "--all"],
-      { cwd: repoDir },
-    );
+    await execFileAsync("git", ["bundle", "create", outBundlePath, "--all"], {
+      cwd: repoDir,
+    });
   },
 
   // cloneFromBundleCommands returns multiple commands rather than chaining with
@@ -114,8 +106,7 @@ export const git = (): VersionControlProvider => ({
   exportPatchesCommand: ({ base, outDir }) =>
     `git format-patch "${base}..HEAD" -o "${outDir}"`,
 
-  importPatchesCommand: ({ patchDir }) =>
-    `git am --3way "${patchDir}"/*.patch`,
+  importPatchesCommand: ({ patchDir }) => `git am --3way "${patchDir}"/*.patch`,
 
   diffWorkingTreeCommand: () => `git diff HEAD`,
 
