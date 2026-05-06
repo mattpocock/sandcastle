@@ -610,12 +610,28 @@ Select a template during `sandcastle init` when prompted, or re-run init in a fr
 
 Scaffolds the `.sandcastle/` config directory and builds the container image. This is the first command you run in a new repo. You choose a sandbox provider (Docker or Podman) during init — selecting Podman writes a `Containerfile` instead of `Dockerfile` and uses `sandcastle podman build-image` for the build step.
 
-| Option         | Required | Default                      | Description                                                          |
-| -------------- | -------- | ---------------------------- | -------------------------------------------------------------------- |
-| `--image-name` | No       | `sandcastle:<repo-dir-name>` | Docker image name                                                    |
-| `--agent`      | No       | Interactive prompt           | Agent to use (`claude-code`, `pi`, `codex`, `opencode`)              |
-| `--model`      | No       | Agent's default model        | Model to use (e.g. `claude-sonnet-4-6`). Defaults to agent's default |
-| `--template`   | No       | Interactive prompt           | Template to scaffold (e.g. `blank`, `simple-loop`)                   |
+| Option               | Required | Default                      | Description                                                           |
+| -------------------- | -------- | ---------------------------- | --------------------------------------------------------------------- |
+| `--image-name`       | No       | `sandcastle:<repo-dir-name>` | Docker image name                                                     |
+| `--agent`            | No       | Interactive prompt           | Agent to use (`claude-code`, `pi`, `codex`, `opencode`)               |
+| `--model`            | No       | Agent's default model        | Model to use (e.g. `claude-sonnet-4-6`). Defaults to agent's default  |
+| `--template`         | No       | Interactive prompt           | Template to scaffold (e.g. `blank`, `simple-loop`)                    |
+| `--sandbox-provider` | No       | Interactive prompt           | Sandbox provider (`docker`, `podman`)                                 |
+| `--backlog-manager`  | No       | Interactive prompt           | Backlog manager (`github-issues`, `beads`)                            |
+| `--create-label`     | No       | Interactive prompt           | Whether to create the "Sandcastle" GitHub label (`true`/`false`)      |
+| `--build-image`      | No       | Interactive prompt           | Whether to build the sandbox image after scaffolding (`true`/`false`) |
+
+When all required flags are provided, `sandcastle init` runs end-to-end without any interactive prompts — this is required for non-TTY environments like CI. Example:
+
+```bash
+sandcastle init \
+  --template blank \
+  --agent claude-code \
+  --sandbox-provider docker \
+  --backlog-manager github-issues \
+  --create-label true \
+  --build-image true
+```
 
 Creates the following files:
 
