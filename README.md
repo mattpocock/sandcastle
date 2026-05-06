@@ -45,6 +45,8 @@ npx sandcastle init
 cp .sandcastle/.env.example .sandcastle/.env
 ```
 
+When selecting Codex during `sandcastle init`, Sandcastle asks whether to use API-key auth or a Codex subscription. API-key auth remains the default. Subscription auth expects you to run `codex login` on the host first; generated Docker/Podman configs mount only `~/.codex/auth.json` read-only and copy it into a sandbox-local `CODEX_HOME`.
+
 4. Run the `.sandcastle/main.ts` (or `main.mts`) file with `npx tsx`
 
 ```bash

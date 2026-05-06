@@ -5,8 +5,12 @@ import { fileURLToPath } from "node:url";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 
 const GITIGNORE = `.env
+.gitconfig
 logs/
 worktrees/
+`;
+
+const CODEX_SUBSCRIPTION_GITIGNORE = `codex-home/
 `;
 
 export interface TemplateMetadata {
@@ -328,6 +332,34 @@ export const getSandboxProvider = (
 ): SandboxProviderEntry | undefined =>
   SANDBOX_PROVIDER_REGISTRY.find((p) => p.name === name);
 
+export type CodexAuthMode = "api-key" | "subscription";
+
+export const listCodexAuthModes = (): Array<{
+  readonly name: CodexAuthMode;
+  readonly label: string;
+  readonly description: string;
+}> => [
+  {
+    name: "api-key",
+    label: "API key",
+    description: "Use OPENAI_KEY from .sandcastle/.env",
+  },
+  {
+    name: "subscription",
+    label: "Codex subscription",
+    description:
+      "Mount host Codex auth.json into a writable sandbox CODEX_HOME",
+  },
+];
+
+const sandboxProviderFactoryImport = (
+  sandboxProvider: SandboxProviderEntry,
+): string => sandboxProvider.name;
+
+const sandboxProviderImportPath = (
+  sandboxProvider: SandboxProviderEntry,
+): string => `@ai-hero/sandcastle/sandboxes/${sandboxProvider.name}`;
+
 // ---------------------------------------------------------------------------
 // Next steps
 // ---------------------------------------------------------------------------
@@ -335,12 +367,28 @@ export const getSandboxProvider = (
 export function getNextStepsLines(
   template: string,
   mainFilename: string,
+  options?: {
+    readonly agent?: AgentEntry;
+    readonly codexAuthMode?: CodexAuthMode;
+  },
 ): string[] {
+  const envStep =
+    options?.agent?.name === "codex" &&
+    options?.codexAuthMode === "subscription"
+      ? "Set any required backlog manager env vars in .sandcastle/.env (see .sandcastle/.env.example). Codex subscription auth uses your host `codex login` session"
+      : "Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)";
+  const claudeSubscriptionNote =
+    options?.agent?.name === undefined || options.agent.name === "claude-code"
+      ? [
+          "   If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191",
+        ]
+      : [];
+
   if (template === "blank") {
     return [
       "Next steps:",
-      `1. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
-      "   If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191",
+      `1. ${envStep}`,
+      ...claudeSubscriptionNote,
       "2. Read and customize .sandcastle/prompt.md to describe what you want the agent to do",
       `3. Customize .sandcastle/${mainFilename} — it uses the JS API (\`run()\`) to control how the agent runs`,
       `4. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
@@ -351,8 +399,8 @@ export function getNextStepsLines(
     let step = 1;
     const lines: string[] = [
       "Next steps:",
-      `${step++}. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
-      "   If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191",
+      `${step++}. ${envStep}`,
+      ...claudeSubscriptionNote,
       `${step++}. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
       `${step++}. Templates use \`copyToWorktree: ["node_modules"]\` to copy your host node_modules into the sandbox for fast startup — the \`npm install\` in the onSandboxReady hook is a safety net for platform-specific binaries. Adjust both if you use a different package manager`,
       `${step++}. Read and customize the prompt files in .sandcastle/ — they shape what the agent does`,
@@ -440,6 +488,8 @@ const rewriteMainTs = (
   agent: AgentEntry,
   model: string,
   mainFilename: string,
+  sandboxProvider: SandboxProviderEntry,
+  codexAuthMode: CodexAuthMode,
 ): Effect.Effect<void, Error, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -464,6 +514,12 @@ const rewriteMainTs = (
     // and all factory calls with the correct model.
     // Templates always use claudeCode as the placeholder factory.
     content = content.replace(/\bclaudeCode\b/g, agent.factoryImport);
+    const sandboxFactoryImport = sandboxProviderFactoryImport(sandboxProvider);
+    content = content.replace(
+      /import \{ docker \} from "@ai-hero\/sandcastle\/sandboxes\/docker";/,
+      `import { ${sandboxFactoryImport} } from "${sandboxProviderImportPath(sandboxProvider)}";`,
+    );
+    content = content.replace(/\bdocker\(/g, `${sandboxFactoryImport}(`);
     // Replace model strings in factory calls: factoryImport("any-model")
     const factoryCallRe = new RegExp(
       `${agent.factoryImport}\\(["']([^"']+)["']\\)`,
@@ -473,6 +529,28 @@ const rewriteMainTs = (
       factoryCallRe,
       `${agent.factoryImport}("${model}")`,
     );
+
+    const usesCodexSubscription =
+      agent.name === "codex" && codexAuthMode === "subscription";
+    content = content
+      .replace(
+        /\/\* {{SANDBOX_ENV_ENTRIES}} \*\//g,
+        usesCodexSubscription
+          ? `CODEX_HOME: "/home/agent/workspace/.sandcastle/codex-home",`
+          : "",
+      )
+      .replace(
+        /\/\* {{SANDBOX_MOUNT_ENTRIES}} \*\//g,
+        usesCodexSubscription
+          ? `{\n    hostPath: "~/.codex/auth.json",\n    sandboxPath: "/mnt/codex-auth/auth.json",\n    readonly: true,\n  },`
+          : "",
+      )
+      .replace(
+        /\/\* {{CODEX_AUTH_READY_HOOK}} \*\//g,
+        usesCodexSubscription
+          ? `{ command: 'mkdir -p "$CODEX_HOME" && cp /mnt/codex-auth/auth.json "$CODEX_HOME/auth.json"' },`
+          : "",
+      );
 
     yield* fs
       .writeFileString(mainTsPath, content)
@@ -585,6 +663,7 @@ export interface ScaffoldOptions {
   createLabel?: boolean;
   backlogManager?: BacklogManagerEntry;
   sandboxProvider?: SandboxProviderEntry;
+  codexAuthMode?: CodexAuthMode;
 }
 
 export interface ScaffoldResult {
@@ -628,9 +707,12 @@ export const scaffold = (
       createLabel = true,
       backlogManager = BACKLOG_MANAGER_REGISTRY[0]!, // default: github-issues
       sandboxProvider = SANDBOX_PROVIDER_REGISTRY[0]!, // default: docker
+      codexAuthMode = "api-key",
     } = options;
     const fs = yield* FileSystem.FileSystem;
     const configDir = join(repoDir, ".sandcastle");
+    const usesCodexSubscription =
+      agent.name === "codex" && codexAuthMode === "subscription";
 
     const exists = yield* fs
       .exists(configDir)
@@ -652,7 +734,13 @@ export const scaffold = (
     const templateDir = yield* getTemplateDir(templateName);
 
     // Build .env.example from agent + backlog manager env blocks
-    const envExampleParts = [agent.envExample];
+    const envExampleParts = [
+      usesCodexSubscription
+        ? `# Codex subscription auth
+# Run \`codex login\` on your host machine first. Sandcastle will mount ~/.codex/auth.json read-only
+# and copy it into a sandbox-local CODEX_HOME at startup.`
+        : agent.envExample,
+    ];
     if (backlogManager.envExample) {
       envExampleParts.push(backlogManager.envExample);
     }
@@ -667,7 +755,11 @@ export const scaffold = (
           )
           .pipe(Effect.mapError((e) => new Error(e.message))),
         fs
-          .writeFileString(join(configDir, ".gitignore"), GITIGNORE)
+          .writeFileString(
+            join(configDir, ".gitignore"),
+            GITIGNORE +
+              (usesCodexSubscription ? CODEX_SUBSCRIPTION_GITIGNORE : ""),
+          )
           .pipe(Effect.mapError((e) => new Error(e.message))),
         fs
           .writeFileString(join(configDir, ".env.example"), envExampleContent)
@@ -678,7 +770,14 @@ export const scaffold = (
     );
 
     // Rewrite main file with the selected agent factory and model
-    yield* rewriteMainTs(configDir, agent, model, mainFilename);
+    yield* rewriteMainTs(
+      configDir,
+      agent,
+      model,
+      mainFilename,
+      sandboxProvider,
+      codexAuthMode,
+    );
 
     // Replace backlog manager template arguments in all text files (must run before label stripping)
     yield* substituteTemplateArgs(configDir, backlogManager);

@@ -22,12 +22,14 @@ import {
   getBacklogManager,
   listSandboxProviders,
   getSandboxProvider,
+  listCodexAuthModes,
   getNextStepsLines,
 } from "./InitService.js";
 import { defaultImageName } from "./sandboxes/docker.js";
 import type {
   AgentEntry,
   BacklogManagerEntry,
+  CodexAuthMode,
   SandboxProviderEntry,
 } from "./InitService.js";
 import { ConfigDirError, InitError } from "./errors.js";
@@ -89,6 +91,13 @@ const initModelOption = Options.text("model").pipe(
   Options.optional,
 );
 
+const codexAuthOption = Options.text("codex-auth").pipe(
+  Options.withDescription(
+    "Codex auth mode: api-key or subscription. Defaults to api-key",
+  ),
+  Options.optional,
+);
+
 const initCommand = Command.make(
   "init",
   {
@@ -96,12 +105,14 @@ const initCommand = Command.make(
     template: templateOption,
     agent: agentOption,
     model: initModelOption,
+    codexAuth: codexAuthOption,
   },
   ({
     imageName: imageNameFlag,
     template,
     agent: agentFlag,
     model: modelFlag,
+    codexAuth,
   }) =>
     Effect.gen(function* () {
       const d = yield* Display;
@@ -161,6 +172,50 @@ const initCommand = Command.make(
         modelFlag._tag === "Some"
           ? modelFlag.value
           : selectedAgent.defaultModel;
+
+      let selectedCodexAuthMode: CodexAuthMode = "api-key";
+      if (selectedAgent.name === "codex") {
+        const codexAuthModes = listCodexAuthModes();
+        if (codexAuth._tag === "Some") {
+          const valid = codexAuthModes.find((m) => m.name === codexAuth.value);
+          if (!valid) {
+            const names = codexAuthModes.map((m) => m.name).join(", ");
+            yield* Effect.fail(
+              new InitError({
+                message: `Unknown Codex auth mode "${codexAuth.value}". Available: ${names}`,
+              }),
+            );
+          } else {
+            selectedCodexAuthMode = valid.name;
+          }
+        } else if (agentFlag._tag === "None") {
+          const selected = yield* Effect.promise(() =>
+            clack.select({
+              message: "Select Codex auth mode:",
+              initialValue: "api-key",
+              options: codexAuthModes.map((m) => ({
+                value: m.name,
+                label: m.label,
+                hint: m.description,
+              })),
+            }),
+          );
+          if (clack.isCancel(selected)) {
+            yield* Effect.fail(
+              new InitError({
+                message: "Codex auth mode selection cancelled.",
+              }),
+            );
+          }
+          selectedCodexAuthMode = selected as CodexAuthMode;
+        }
+      } else if (codexAuth._tag === "Some") {
+        yield* Effect.fail(
+          new InitError({
+            message: "--codex-auth can only be used with --agent codex",
+          }),
+        );
+      }
 
       // Resolve sandbox provider: interactive select (no default — user must choose)
       const sandboxProviders = listSandboxProviders();
@@ -265,6 +320,7 @@ const initCommand = Command.make(
           createLabel: shouldCreateLabel === true,
           backlogManager: selectedBacklogManager,
           sandboxProvider: selectedSandboxProvider,
+          codexAuthMode: selectedCodexAuthMode,
         }).pipe(
           Effect.mapError(
             (e) =>
@@ -309,6 +365,10 @@ const initCommand = Command.make(
       const nextSteps = getNextStepsLines(
         selectedTemplate,
         scaffoldResult.mainFilename,
+        {
+          agent: selectedAgent,
+          codexAuthMode: selectedCodexAuthMode,
+        },
       );
       for (const [i, line] of nextSteps.entries()) {
         yield* d.text(i === 0 ? line : styleText("dim", line));
