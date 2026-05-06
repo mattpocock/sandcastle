@@ -365,6 +365,7 @@ export const createWorktree = async (
             provider: resolvedSandbox,
             hostRepoDir: worktreeInfo.path,
             env: effectiveEnv,
+            namespace,
           }),
         );
         handle = startResult.handle;
@@ -379,6 +380,7 @@ export const createWorktree = async (
             worktreeOrRepoPath: worktreeInfo.path,
             gitMounts,
             repoDir: SANDBOX_REPO_DIR,
+            namespace,
           }),
         );
         handle = startResult.handle;
@@ -559,6 +561,7 @@ export const createWorktree = async (
           provider: sandboxProvider,
           hostRepoDir: worktreeInfo.path,
           env: effectiveEnv,
+          namespace,
         });
         handle = startResult.handle;
         sandboxRepoDir = startResult.worktreePath;
@@ -572,6 +575,7 @@ export const createWorktree = async (
           worktreeOrRepoPath: worktreeInfo.path,
           gitMounts,
           repoDir: SANDBOX_REPO_DIR,
+          namespace,
         });
         handle = startResult.handle;
         sandboxRepoDir = startResult.worktreePath;

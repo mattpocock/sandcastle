@@ -385,6 +385,7 @@ export const WorktreeDockerSandboxFactory = {
                     hostRepoDir: worktreeInfo.path,
                     env,
                     copyPaths,
+                    namespace,
                   }).pipe(
                     Effect.map(({ handle, sandboxLayer, worktreePath }) => ({
                       worktreeInfo,
@@ -475,6 +476,7 @@ export const WorktreeDockerSandboxFactory = {
                     worktreeOrRepoPath: hostRepoDir,
                     gitMounts,
                     repoDir: SANDBOX_REPO_DIR,
+                    namespace,
                   }),
                   // Use
                   ({ sandboxLayer, worktreePath, handle }) =>
@@ -572,6 +574,7 @@ export const WorktreeDockerSandboxFactory = {
                         worktreeOrRepoPath: worktreeInfo.path,
                         gitMounts,
                         repoDir: SANDBOX_REPO_DIR,
+                        namespace,
                       }).pipe(
                         Effect.map(
                           ({ handle, sandboxLayer, worktreePath }) => ({

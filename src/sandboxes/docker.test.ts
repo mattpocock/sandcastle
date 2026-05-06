@@ -198,6 +198,75 @@ describe("docker()", () => {
     await handle.close();
   });
 
+  it("uses createOptions.namespace as the container name prefix", async () => {
+    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      callback(null, "", "");
+      return undefined as any;
+    });
+
+    const provider = docker();
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+      namespace: "feature-bot",
+    });
+
+    const bmHandle = handle as BindMountSandboxHandle;
+    await bmHandle.copyFileIn("/host/file.txt", "/sandbox/file.txt");
+
+    const cpCall = mockExecFile.mock.calls.find(
+      ([cmd, args]) =>
+        cmd === "docker" &&
+        Array.isArray(args) &&
+        args[0] === "cp" &&
+        args[1] === "/host/file.txt",
+    );
+    expect(cpCall).toBeDefined();
+    const cpArgs = cpCall![1] as string[];
+    expect(cpArgs[2]).toMatch(/^feature-bot-.*:\/sandbox\/file\.txt$/);
+
+    await handle.close();
+  });
+
+  it("falls back to 'sandcastle' container prefix when namespace is omitted", async () => {
+    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      callback(null, "", "");
+      return undefined as any;
+    });
+
+    const provider = docker();
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    const bmHandle = handle as BindMountSandboxHandle;
+    await bmHandle.copyFileIn("/host/file.txt", "/sandbox/file.txt");
+
+    const cpCall = mockExecFile.mock.calls.find(
+      ([cmd, args]) =>
+        cmd === "docker" &&
+        Array.isArray(args) &&
+        args[0] === "cp" &&
+        args[1] === "/host/file.txt",
+    );
+    expect(cpCall).toBeDefined();
+    const cpArgs = cpCall![1] as string[];
+    expect(cpArgs[2]).toMatch(/^sandcastle-.*:\/sandbox\/file\.txt$/);
+
+    await handle.close();
+  });
+
   it("copyFileIn rejects when docker cp fails", async () => {
     mockExecFile.mockImplementation((_command, args, ...rest: any[]) => {
       const callback = rest[rest.length - 1];

@@ -105,7 +105,7 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
     create: async (
       createOptions: BindMountCreateOptions,
     ): Promise<BindMountSandboxHandle> => {
-      const containerName = `sandcastle-${randomUUID()}`;
+      const containerName = `${createOptions.namespace ?? "sandcastle"}-${randomUUID()}`;
 
       const worktreePath =
         createOptions.mounts.find(

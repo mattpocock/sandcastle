@@ -34,6 +34,8 @@ export interface StartSandboxBindMountOptions {
   gitMounts: MountEntry[];
   repoDir: string;
   copyPaths?: undefined;
+  /** Resolved namespace forwarded to the provider for container naming. */
+  namespace?: string;
 }
 
 export interface StartSandboxIsolatedOptions {
@@ -44,6 +46,8 @@ export interface StartSandboxIsolatedOptions {
   gitMounts?: undefined;
   repoDir?: undefined;
   copyPaths?: string[];
+  /** Resolved namespace forwarded to the provider for session/sandbox naming. */
+  namespace?: string;
 }
 
 export type StartSandboxOptions =
@@ -115,6 +119,7 @@ const startBindMountSandbox = (
         hostRepoPath: options.hostRepoDir,
         mounts,
         env: options.env,
+        namespace: options.namespace,
       });
     },
     catch: (e) =>
@@ -150,7 +155,11 @@ const startIsolatedSandbox = (
 > =>
   Effect.gen(function* () {
     const handle = yield* Effect.tryPromise({
-      try: () => options.provider.create({ env: options.env }),
+      try: () =>
+        options.provider.create({
+          env: options.env,
+          namespace: options.namespace,
+        }),
       catch: (e) =>
         new WorktreeError({
           message: `Isolated provider '${options.provider.name}' setup failed: ${e instanceof Error ? e.message : String(e)}`,

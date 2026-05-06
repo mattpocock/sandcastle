@@ -582,6 +582,7 @@ export const createSandboxFromWorktree = async (
         hostRepoDir: worktreePath,
         env,
         copyPaths: options.copyToWorktree,
+        namespace,
       });
     } else {
       startEffect = resolveGitMounts(join(hostRepoDir, ".git")).pipe(
@@ -595,6 +596,7 @@ export const createSandboxFromWorktree = async (
             worktreeOrRepoPath: worktreePath,
             gitMounts,
             repoDir: SANDBOX_REPO_DIR,
+            namespace,
           }),
         ),
       );
@@ -757,6 +759,7 @@ export const createSandbox = async (
         hostRepoDir: worktreePath,
         env,
         copyPaths: options.copyToWorktree,
+        namespace,
       });
     } else {
       startEffect = resolveGitMounts(join(hostRepoDir, ".git")).pipe(
@@ -770,6 +773,7 @@ export const createSandbox = async (
             worktreeOrRepoPath: worktreePath,
             gitMounts,
             repoDir: SANDBOX_REPO_DIR,
+            namespace,
           }),
         ),
       );
