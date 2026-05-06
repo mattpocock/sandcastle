@@ -179,6 +179,8 @@ export class SandboxConfig extends Context.Tag("SandboxConfig")<
     readonly copyToWorktree?: string[];
     /** When specified, the run name is included in the auto-generated branch and worktree names. */
     readonly name?: string;
+    /** Resolved namespace prefix used for branch + filesystem paths. Defaults to `"sandcastle"`. */
+    readonly namespace?: string;
     /** Sandbox provider — delegates sandbox lifecycle to the provider. */
     readonly sandboxProvider: SandboxProvider;
     /** Branch strategy — controls how the agent's changes relate to branches. */
@@ -312,6 +314,7 @@ export const WorktreeDockerSandboxFactory = {
         hostRepoDir,
         copyToWorktree: copyPaths,
         name,
+        namespace,
         sandboxProvider,
         branchStrategy,
         hooks,
@@ -331,7 +334,7 @@ export const WorktreeDockerSandboxFactory = {
 
       /** Prune stale worktrees (best-effort), then create a fresh one. */
       const pruneAndCreate = () =>
-        WorktreeManager.pruneStale(hostRepoDir).pipe(
+        WorktreeManager.pruneStale(hostRepoDir, namespace).pipe(
           Effect.catchAll((e) =>
             Effect.sync(() => {
               console.error(
@@ -342,8 +345,12 @@ export const WorktreeDockerSandboxFactory = {
           ),
           Effect.andThen(
             branch
-              ? WorktreeManager.create(hostRepoDir, { branch, baseBranch })
-              : WorktreeManager.create(hostRepoDir, { name }),
+              ? WorktreeManager.create(hostRepoDir, {
+                  branch,
+                  baseBranch,
+                  namespace,
+                })
+              : WorktreeManager.create(hostRepoDir, { name, namespace }),
           ),
           Effect.provideService(FileSystem.FileSystem, fileSystem),
         );
@@ -378,6 +385,7 @@ export const WorktreeDockerSandboxFactory = {
                     hostRepoDir: worktreeInfo.path,
                     env,
                     copyPaths,
+                    namespace,
                   }).pipe(
                     Effect.map(({ handle, sandboxLayer, worktreePath }) => ({
                       worktreeInfo,
@@ -394,7 +402,11 @@ export const WorktreeDockerSandboxFactory = {
                   hostWorktreePath: worktreeInfo.path,
                   sandboxRepoPath: worktreePath,
                   applyToHost: () =>
-                    syncOut(worktreeInfo.path, handle as IsolatedSandboxHandle),
+                    syncOut(
+                      worktreeInfo.path,
+                      handle as IsolatedSandboxHandle,
+                      namespace,
+                    ),
                 }).pipe(Effect.provide(sandboxLayer)) as Effect.Effect<
                   A,
                   E | SandboxError,
@@ -464,6 +476,7 @@ export const WorktreeDockerSandboxFactory = {
                     worktreeOrRepoPath: hostRepoDir,
                     gitMounts,
                     repoDir: SANDBOX_REPO_DIR,
+                    namespace,
                   }),
                   // Use
                   ({ sandboxLayer, worktreePath, handle }) =>
@@ -504,7 +517,12 @@ export const WorktreeDockerSandboxFactory = {
                 (copyPaths && copyPaths.length > 0
                   ? display.spinner(
                       "Copying to worktree",
-                      copyToWorktree(copyPaths, hostRepoDir, worktreeInfo.path, timeouts?.copyToWorktreeMs),
+                      copyToWorktree(
+                        copyPaths,
+                        hostRepoDir,
+                        worktreeInfo.path,
+                        timeouts?.copyToWorktreeMs,
+                      ),
                     )
                   : Effect.succeed(undefined)
                 ).pipe(Effect.map(() => worktreeInfo)),
@@ -556,6 +574,7 @@ export const WorktreeDockerSandboxFactory = {
                         worktreeOrRepoPath: worktreeInfo.path,
                         gitMounts,
                         repoDir: SANDBOX_REPO_DIR,
+                        namespace,
                       }).pipe(
                         Effect.map(
                           ({ handle, sandboxLayer, worktreePath }) => ({

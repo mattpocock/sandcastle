@@ -509,9 +509,7 @@ describe("podman()", () => {
     // Verify no chown exec call was made
     const chownCall = mockExecFile.mock.calls.find(
       ([cmd, args]) =>
-        cmd === "podman" &&
-        Array.isArray(args) &&
-        args.includes("chown"),
+        cmd === "podman" && Array.isArray(args) && args.includes("chown"),
     );
     expect(chownCall).toBeUndefined();
 
@@ -586,6 +584,41 @@ describe("podman()", () => {
     expect(cpArgs[0]).toBe("cp");
     expect(cpArgs[1]).toMatch(/^sandcastle-.*:\/sandbox\/output\.txt$/);
     expect(cpArgs[2]).toBe("/host/output.txt");
+
+    await handle.close();
+  });
+
+  it("uses createOptions.namespace as the container name prefix", async () => {
+    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      callback(null, "", "");
+      return undefined as any;
+    });
+
+    const provider = podman();
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+      namespace: "feature-bot",
+    });
+
+    const bmHandle = handle as BindMountSandboxHandle;
+    await bmHandle.copyFileIn("/host/file.txt", "/sandbox/file.txt");
+
+    const cpCall = mockExecFile.mock.calls.find(
+      ([cmd, args]) =>
+        cmd === "podman" &&
+        Array.isArray(args) &&
+        args[0] === "cp" &&
+        args[1] === "/host/file.txt",
+    );
+    expect(cpCall).toBeDefined();
+    const cpArgs = cpCall![1] as string[];
+    expect(cpArgs[2]).toMatch(/^feature-bot-.*:\/sandbox\/file\.txt$/);
 
     await handle.close();
   });

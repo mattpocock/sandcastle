@@ -10,6 +10,7 @@ import { join, relative } from "node:path";
 import {
   createIsolatedSandboxProvider,
   type ExecResult,
+  type IsolatedCreateOptions,
   type IsolatedSandboxHandle,
   type IsolatedSandboxProvider,
 } from "../SandboxProvider.js";
@@ -70,7 +71,10 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
   createIsolatedSandboxProvider({
     name: "daytona",
     env: options?.env,
-    create: async (): Promise<IsolatedSandboxHandle> => {
+    create: async (
+      createOptions: IsolatedCreateOptions,
+    ): Promise<IsolatedSandboxHandle> => {
+      const namespace = createOptions.namespace ?? "sandcastle";
       const { Daytona } =
         (await import("@daytona/sdk")) as typeof import("@daytona/sdk");
 
@@ -101,7 +105,7 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
           const effectiveCommand = opts?.sudo ? `sudo ${command}` : command;
           if (opts?.onLine) {
             const onLine = opts.onLine;
-            const sessionId = `sandcastle-${crypto.randomUUID()}`;
+            const sessionId = `${namespace}-${crypto.randomUUID()}`;
             await sandbox.process.createSession(sessionId);
 
             try {

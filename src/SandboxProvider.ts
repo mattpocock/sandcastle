@@ -77,6 +77,12 @@ export interface BindMountCreateOptions {
   }>;
   /** Environment variables to inject into the sandbox. */
   readonly env: Record<string, string>;
+  /**
+   * Prefix for container names produced by this provider
+   * (e.g. `<namespace>-<uuid>`). Sourced from `RunOptions.namespace`.
+   * Defaults to `"sandcastle"` when omitted.
+   */
+  readonly namespace?: string;
 }
 
 /** Configuration for createBindMountSandboxProvider. */
@@ -144,6 +150,12 @@ export interface IsolatedSandboxHandle {
 export interface IsolatedCreateOptions {
   /** Environment variables to inject into the sandbox. */
   readonly env: Record<string, string>;
+  /**
+   * Prefix for session / sandbox names produced by this provider
+   * (e.g. `<namespace>-<uuid>`). Sourced from `RunOptions.namespace`.
+   * Defaults to `"sandcastle"` when omitted.
+   */
+  readonly namespace?: string;
 }
 
 /** Configuration for createIsolatedSandboxProvider. */

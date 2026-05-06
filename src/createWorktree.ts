@@ -66,13 +66,23 @@ export interface CreateWorktreeOptions {
   readonly branchStrategy: WorktreeBranchStrategy;
   /**
    * Host repo directory. Replaces `process.cwd()` as the anchor for
-   * `.sandcastle/worktrees/`, `.sandcastle/.env`, and git operations.
+   * `.<namespace>/worktrees/`, `.sandcastle/.env`, and git operations.
    *
    * - Relative paths are resolved against `process.cwd()`.
    * - Absolute paths are used as-is.
    * - Defaults to `process.cwd()` when omitted.
    */
   readonly cwd?: string;
+  /**
+   * Prefix used for the worktree branch (`<namespace>/<timestamp>`),
+   * worktree directory (`<namespace>-<timestamp>`), worktree parent
+   * directory (`.<namespace>/worktrees/`), log directory
+   * (`.<namespace>/logs/`), and patches directory (`.<namespace>/patches/`).
+   *
+   * Defaults to `"sandcastle"`. Sanitized like `name`. Empty strings rejected.
+   * The `.sandcastle/.env` location is unaffected.
+   */
+  readonly namespace?: string;
   /** Paths relative to the host repo root to copy into the worktree at creation time. */
   readonly copyToWorktree?: string[];
   /** Lifecycle hooks grouped by execution location (host or sandbox).
@@ -211,6 +221,8 @@ export interface Worktree {
 export const createWorktree = async (
   options: CreateWorktreeOptions,
 ): Promise<Worktree> => {
+  const namespace = WorktreeManager.resolveNamespace(options.namespace);
+
   const branch =
     options.branchStrategy.type === "branch"
       ? options.branchStrategy.branch
@@ -223,15 +235,21 @@ export const createWorktree = async (
 
   const { hostRepoDir, worktreeInfo } = await Effect.gen(function* () {
     const hostRepoDir = yield* resolveCwd(options.cwd);
-    yield* WorktreeManager.pruneStale(hostRepoDir).pipe(
+    yield* WorktreeManager.pruneStale(hostRepoDir, namespace).pipe(
       Effect.catchAll(() => Effect.void),
     );
     const info = yield* WorktreeManager.create(hostRepoDir, {
       branch,
       baseBranch,
+      namespace,
     });
     if (options.copyToWorktree && options.copyToWorktree.length > 0) {
-      yield* copyToWorktree(options.copyToWorktree, hostRepoDir, info.path, options.timeouts?.copyToWorktreeMs);
+      yield* copyToWorktree(
+        options.copyToWorktree,
+        hostRepoDir,
+        info.path,
+        options.timeouts?.copyToWorktreeMs,
+      );
     }
     // Run host.onWorktreeReady hooks after copyToWorktree, before sandbox creation
     if (options.hooks?.host?.onWorktreeReady?.length) {
@@ -347,6 +365,7 @@ export const createWorktree = async (
             provider: resolvedSandbox,
             hostRepoDir: worktreeInfo.path,
             env: effectiveEnv,
+            namespace,
           }),
         );
         handle = startResult.handle;
@@ -361,6 +380,7 @@ export const createWorktree = async (
             worktreeOrRepoPath: worktreeInfo.path,
             gitMounts,
             repoDir: SANDBOX_REPO_DIR,
+            namespace,
           }),
         );
         handle = startResult.handle;
@@ -380,7 +400,12 @@ export const createWorktree = async (
 
         const applyToHost =
           resolvedSandbox.tag === "isolated"
-            ? () => syncOut(worktreeInfo.path, handle as IsolatedSandboxHandle)
+            ? () =>
+                syncOut(
+                  worktreeInfo.path,
+                  handle as IsolatedSandboxHandle,
+                  namespace,
+                )
             : () => Effect.void;
 
         const lifecycleEffect = withSandboxLifecycle(
@@ -536,6 +561,7 @@ export const createWorktree = async (
           provider: sandboxProvider,
           hostRepoDir: worktreeInfo.path,
           env: effectiveEnv,
+          namespace,
         });
         handle = startResult.handle;
         sandboxRepoDir = startResult.worktreePath;
@@ -549,6 +575,7 @@ export const createWorktree = async (
           worktreeOrRepoPath: worktreeInfo.path,
           gitMounts,
           repoDir: SANDBOX_REPO_DIR,
+          namespace,
         });
         handle = startResult.handle;
         sandboxRepoDir = startResult.worktreePath;
@@ -557,7 +584,12 @@ export const createWorktree = async (
       const sandboxLayer = makeSandboxLayerFromHandle(handle);
       const applyToHost =
         sandboxProvider.tag === "isolated"
-          ? () => syncOut(worktreeInfo.path, handle as IsolatedSandboxHandle)
+          ? () =>
+              syncOut(
+                worktreeInfo.path,
+                handle as IsolatedSandboxHandle,
+                namespace,
+              )
           : () => Effect.void;
 
       // 5. Resolve logging
@@ -565,7 +597,7 @@ export const createWorktree = async (
         type: "file",
         path: join(
           hostRepoDir,
-          ".sandcastle",
+          `.${namespace}`,
           "logs",
           buildLogFilename(worktreeInfo.branch, undefined, opts.name),
         ),
@@ -672,6 +704,7 @@ export const createWorktree = async (
       branch: worktreeInfo.branch,
       worktreePath: worktreeInfo.path,
       hostRepoDir,
+      namespace,
       sandbox: opts.sandbox,
       hooks: opts.hooks,
       copyToWorktree: opts.copyToWorktree,

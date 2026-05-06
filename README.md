@@ -153,6 +153,15 @@ const result = await run({
   // Relative paths resolve against process.cwd(). Defaults to process.cwd().
   cwd: "../other-repo",
 
+  // Prefix used for the worktree branch (`<namespace>/<timestamp>`),
+  // worktree directory (`<namespace>-<timestamp>`), worktree parent dir
+  // (`.<namespace>/worktrees/`), log dir (`.<namespace>/logs/`), and patches
+  // dir (`.<namespace>/patches/`). Useful for keeping branches and dirs from
+  // distinct workflows separate (e.g. "feature-bot" vs "triage-bot") inside
+  // the same repo. Defaults to `"sandcastle"`. The `.sandcastle/.env` lookup
+  // is unaffected.
+  namespace: "feature-bot",
+
   // Branch strategy — controls how the agent's changes relate to branches.
   // Defaults to { type: "head" } for bind-mount and { type: "merge-to-head" } for isolated providers.
   branchStrategy: { type: "branch", branch: "agent/fix-42" },
@@ -295,14 +304,15 @@ if (closeResult.preservedWorktreePath) {
 
 #### `CreateSandboxOptions`
 
-| Option           | Type            | Default         | Description                                                          |
-| ---------------- | --------------- | --------------- | -------------------------------------------------------------------- |
-| `branch`         | string          | —               | **Required.** Explicit branch for the sandbox                        |
-| `sandbox`        | SandboxProvider | —               | **Required.** Sandbox provider (e.g. `docker()`, `podman()`)         |
-| `cwd`            | string          | `process.cwd()` | Host repo directory — relative paths resolve against `process.cwd()` |
-| `hooks`          | SandboxHooks    | —               | Lifecycle hooks (`host.*`, `sandbox.*`) — run once at creation time  |
-| `copyToWorktree` | string[]        | —               | Host-relative file paths to copy into the sandbox at creation time   |
-| `timeouts`       | Timeouts        | —               | Override default timeouts (e.g. `{ copyToWorktreeMs: 120_000 }`)     |
+| Option           | Type            | Default         | Description                                                                                       |
+| ---------------- | --------------- | --------------- | ------------------------------------------------------------------------------------------------- |
+| `branch`         | string          | —               | **Required.** Explicit branch for the sandbox                                                     |
+| `sandbox`        | SandboxProvider | —               | **Required.** Sandbox provider (e.g. `docker()`, `podman()`)                                      |
+| `cwd`            | string          | `process.cwd()` | Host repo directory — relative paths resolve against `process.cwd()`                              |
+| `namespace`      | string          | `"sandcastle"`  | Prefix for `.<namespace>/{worktrees,logs,patches}/`. The `.sandcastle/.env` lookup is unaffected. |
+| `hooks`          | SandboxHooks    | —               | Lifecycle hooks (`host.*`, `sandbox.*`) — run once at creation time                               |
+| `copyToWorktree` | string[]        | —               | Host-relative file paths to copy into the sandbox at creation time                                |
+| `timeouts`       | Timeouts        | —               | Override default timeouts (e.g. `{ copyToWorktreeMs: 120_000 }`)                                  |
 
 #### `Sandbox`
 
@@ -401,11 +411,12 @@ await sandbox.close();
 
 #### `CreateWorktreeOptions`
 
-| Option           | Type                   | Default | Description                                                               |
-| ---------------- | ---------------------- | ------- | ------------------------------------------------------------------------- |
-| `branchStrategy` | WorktreeBranchStrategy | —       | **Required.** `{ type: "branch", branch }` or `{ type: "merge-to-head" }` |
-| `copyToWorktree` | string[]               | —       | Host-relative file paths to copy into the worktree at creation time       |
-| `timeouts`       | Timeouts               | —       | Override default timeouts (e.g. `{ copyToWorktreeMs: 120_000 }`)          |
+| Option           | Type                   | Default        | Description                                                                                       |
+| ---------------- | ---------------------- | -------------- | ------------------------------------------------------------------------------------------------- |
+| `branchStrategy` | WorktreeBranchStrategy | —              | **Required.** `{ type: "branch", branch }` or `{ type: "merge-to-head" }`                         |
+| `namespace`      | string                 | `"sandcastle"` | Prefix for `.<namespace>/{worktrees,logs,patches}/`. The `.sandcastle/.env` lookup is unaffected. |
+| `copyToWorktree` | string[]               | —              | Host-relative file paths to copy into the worktree at creation time                               |
+| `timeouts`       | Timeouts               | —              | Override default timeouts (e.g. `{ copyToWorktreeMs: 120_000 }`)                                  |
 
 #### `Worktree`
 
@@ -665,25 +676,26 @@ Removes the Podman image.
 
 ### `RunOptions`
 
-| Option               | Type               | Default                       | Description                                                                                                                                                     |
-| -------------------- | ------------------ | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agent`              | AgentProvider      | —                             | **Required.** Agent provider (e.g. `claudeCode("claude-opus-4-6")`, `pi("claude-sonnet-4-6")`, `codex("gpt-5.4-mini")`, `opencode("opencode/big-pickle")`)      |
-| `sandbox`            | SandboxProvider    | —                             | **Required.** Sandbox provider (e.g. `docker()`, `podman()`, `docker({ imageName: "sandcastle:local" })`)                                                       |
-| `cwd`                | string             | `process.cwd()`               | Host repo directory — anchor for `.sandcastle/` artifacts and git operations. Relative paths resolve against `process.cwd()`.                                   |
-| `prompt`             | string             | —                             | Inline prompt (mutually exclusive with `promptFile`)                                                                                                            |
-| `promptFile`         | string             | —                             | Path to prompt file (mutually exclusive with `prompt`). Resolves against `process.cwd()`, **not** `cwd`.                                                        |
-| `maxIterations`      | number             | `1`                           | Maximum iterations to run                                                                                                                                       |
-| `hooks`              | SandboxHooks       | —                             | Lifecycle hooks (`host.*`, `sandbox.*`)                                                                                                                         |
-| `name`               | string             | —                             | Display name for the run, shown as a prefix in log output                                                                                                       |
-| `promptArgs`         | PromptArgs         | —                             | Key-value map for `{{KEY}}` placeholder substitution                                                                                                            |
-| `branchStrategy`     | BranchStrategy     | per-provider default          | Branch strategy: `{ type: 'head' }`, `{ type: 'merge-to-head' }`, or `{ type: 'branch', branch: '…' }`                                                          |
-| `copyToWorktree`     | string[]           | —                             | Host-relative file paths to copy into the sandbox before start (not supported with `branchStrategy: { type: 'head' }`)                                          |
-| `logging`            | object             | file (auto-generated)         | `{ type: 'file', path }` or `{ type: 'stdout' }`                                                                                                                |
-| `completionSignal`   | string \| string[] | `<promise>COMPLETE</promise>` | String or array of strings the agent emits to stop the iteration loop early                                                                                     |
-| `idleTimeoutSeconds` | number             | `600`                         | Idle timeout in seconds — resets on each agent output event                                                                                                     |
-| `resumeSession`      | string             | —                             | Resume a prior Claude Code session by ID. Incompatible with `maxIterations > 1`. Session file must exist on host.                                               |
-| `signal`             | AbortSignal        | —                             | Cancel the run when aborted. Kills the in-flight agent subprocess and cancels lifecycle hooks; the worktree is preserved on disk. Rejects with `signal.reason`. |
-| `timeouts`           | Timeouts           | —                             | Override default timeouts for built-in lifecycle steps. Currently supports `{ copyToWorktreeMs?: number }` (default: 60 000).                                   |
+| Option               | Type               | Default                       | Description                                                                                                                                                                                       |
+| -------------------- | ------------------ | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent`              | AgentProvider      | —                             | **Required.** Agent provider (e.g. `claudeCode("claude-opus-4-6")`, `pi("claude-sonnet-4-6")`, `codex("gpt-5.4-mini")`, `opencode("opencode/big-pickle")`)                                        |
+| `sandbox`            | SandboxProvider    | —                             | **Required.** Sandbox provider (e.g. `docker()`, `podman()`, `docker({ imageName: "sandcastle:local" })`)                                                                                         |
+| `cwd`                | string             | `process.cwd()`               | Host repo directory — anchor for `.sandcastle/` artifacts and git operations. Relative paths resolve against `process.cwd()`.                                                                     |
+| `namespace`          | string             | `"sandcastle"`                | Prefix for the temporary branch (`<namespace>/<timestamp>`), worktree dir (`<namespace>-<timestamp>`), and `.<namespace>/{worktrees,logs,patches}/`. The `.sandcastle/.env` lookup is unaffected. |
+| `prompt`             | string             | —                             | Inline prompt (mutually exclusive with `promptFile`)                                                                                                                                              |
+| `promptFile`         | string             | —                             | Path to prompt file (mutually exclusive with `prompt`). Resolves against `process.cwd()`, **not** `cwd`.                                                                                          |
+| `maxIterations`      | number             | `1`                           | Maximum iterations to run                                                                                                                                                                         |
+| `hooks`              | SandboxHooks       | —                             | Lifecycle hooks (`host.*`, `sandbox.*`)                                                                                                                                                           |
+| `name`               | string             | —                             | Display name for the run, shown as a prefix in log output                                                                                                                                         |
+| `promptArgs`         | PromptArgs         | —                             | Key-value map for `{{KEY}}` placeholder substitution                                                                                                                                              |
+| `branchStrategy`     | BranchStrategy     | per-provider default          | Branch strategy: `{ type: 'head' }`, `{ type: 'merge-to-head' }`, or `{ type: 'branch', branch: '…' }`                                                                                            |
+| `copyToWorktree`     | string[]           | —                             | Host-relative file paths to copy into the sandbox before start (not supported with `branchStrategy: { type: 'head' }`)                                                                            |
+| `logging`            | object             | file (auto-generated)         | `{ type: 'file', path }` or `{ type: 'stdout' }`                                                                                                                                                  |
+| `completionSignal`   | string \| string[] | `<promise>COMPLETE</promise>` | String or array of strings the agent emits to stop the iteration loop early                                                                                                                       |
+| `idleTimeoutSeconds` | number             | `600`                         | Idle timeout in seconds — resets on each agent output event                                                                                                                                       |
+| `resumeSession`      | string             | —                             | Resume a prior Claude Code session by ID. Incompatible with `maxIterations > 1`. Session file must exist on host.                                                                                 |
+| `signal`             | AbortSignal        | —                             | Cancel the run when aborted. Kills the in-flight agent subprocess and cancels lifecycle hooks; the worktree is preserved on disk. Rejects with `signal.reason`.                                   |
+| `timeouts`           | Timeouts           | —                             | Override default timeouts for built-in lifecycle steps. Currently supports `{ copyToWorktreeMs?: number }` (default: 60 000).                                                                     |
 
 ### `RunResult`
 

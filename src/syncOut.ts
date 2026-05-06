@@ -28,6 +28,7 @@ import { Effect } from "effect";
 import type { IsolatedSandboxHandle } from "./SandboxProvider.js";
 import { buildRecoveryMessage, type FailedStep } from "./RecoveryMessage.js";
 import { SyncError } from "./errors.js";
+import { resolveNamespace } from "./WorktreeManager.js";
 
 /**
  * Execute a command on the host side, returning stdout.
@@ -127,6 +128,7 @@ const isEmptyPatch = (patchPath: string): Effect.Effect<boolean, SyncError> =>
  */
 const createPatchDir = (
   hostRepoDir: string,
+  namespace: string,
 ): Effect.Effect<string, SyncError> =>
   Effect.tryPromise({
     try: async () => {
@@ -134,7 +136,7 @@ const createPatchDir = (
       const pad = (n: number) => String(n).padStart(2, "0");
       const base = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
 
-      const patchesRoot = join(hostRepoDir, ".sandcastle", "patches");
+      const patchesRoot = join(hostRepoDir, `.${namespace}`, "patches");
       await mkdir(patchesRoot, { recursive: true });
 
       let dirName = base;
@@ -158,14 +160,16 @@ const createPatchDir = (
  * Sync changes from an isolated sandbox back to the host repo.
  *
  * Two-phase extraction with artifact persistence:
- * 1. Save all artifacts to `.sandcastle/patches/<timestamp>/`
+ * 1. Save all artifacts to `.<namespace>/patches/<timestamp>/`
  * 2. Apply from saved directory; on failure, preserve artifacts and print recovery
  */
 export const syncOut = (
   hostRepoDir: string,
   handle: IsolatedSandboxHandle,
+  namespace?: string,
 ): Effect.Effect<void, SyncError> =>
   Effect.gen(function* () {
+    const ns = resolveNamespace(namespace);
     const worktreePath = handle.worktreePath;
 
     const hostHead = (yield* execHost(
@@ -207,8 +211,8 @@ export const syncOut = (
     }
 
     // --- Phase 1: Save all artifacts ---
-    const patchDir = yield* createPatchDir(hostRepoDir);
-    const relativePatchDir = join(".sandcastle", "patches", basename(patchDir));
+    const patchDir = yield* createPatchDir(hostRepoDir, ns);
+    const relativePatchDir = join(`.${ns}`, "patches", basename(patchDir));
 
     const nonEmptyPatches: string[] = [];
 
@@ -352,11 +356,11 @@ export const syncOut = (
       yield* Effect.tryPromise({
         try: async () => {
           await rm(patchDir, { recursive: true, force: true });
-          const patchesRoot = join(hostRepoDir, ".sandcastle", "patches");
+          const patchesRoot = join(hostRepoDir, `.${ns}`, "patches");
           try {
             const remaining = await readdir(patchesRoot);
             if (remaining.length === 0) {
-              await rm(join(hostRepoDir, ".sandcastle"), {
+              await rm(join(hostRepoDir, `.${ns}`), {
                 recursive: true,
                 force: true,
               });
