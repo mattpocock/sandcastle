@@ -34,7 +34,6 @@ import {
 import type { SandboxHooks } from "./SandboxLifecycle.js";
 import { mergeProviderEnv } from "./mergeProviderEnv.js";
 import { hostSessionStore } from "./SessionStore.js";
-import { defaultSessionPathsLayer } from "./SessionPaths.js";
 import { generateTempBranchName, getCurrentBranch } from "./WorktreeManager.js";
 import {
   type PromptArgs,
@@ -487,7 +486,6 @@ export async function run(options: RunOptions): Promise<RunResult & { output?: u
   const runLayer = Layer.mergeAll(
     factoryLayer,
     displayLayer,
-    defaultSessionPathsLayer,
     agentStreamEmitterLayer,
   );
 

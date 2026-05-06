@@ -12,7 +12,6 @@ import {
 import { resolveEnv } from "./EnvResolver.js";
 import { mergeProviderEnv } from "./mergeProviderEnv.js";
 import { orchestrate, type IterationResult } from "./Orchestrator.js";
-import { defaultSessionPathsLayer } from "./SessionPaths.js";
 import {
   callbackAgentStreamEmitterLayer,
   noopAgentStreamEmitterLayer,
@@ -312,7 +311,6 @@ const buildSandboxHandle = (
       const runLayer = Layer.mergeAll(
         reuseFactoryLayer,
         runDisplayLayer,
-        defaultSessionPathsLayer,
         agentStreamEmitterLayer,
       );
 
@@ -528,7 +526,12 @@ export const createSandboxFromWorktree = async (
     options.sandbox.tag !== "isolated"
   ) {
     await Effect.runPromise(
-      copyToWorktree(options.copyToWorktree, hostRepoDir, worktreePath, options.timeouts?.copyToWorktreeMs),
+      copyToWorktree(
+        options.copyToWorktree,
+        hostRepoDir,
+        worktreePath,
+        options.timeouts?.copyToWorktreeMs,
+      ),
     );
   }
 
@@ -572,7 +575,11 @@ export const createSandboxFromWorktree = async (
         Effect.flatMap((gitMounts) =>
           Effect.tryPromise({
             try: () =>
-              patchGitMountsForWindows(gitMounts, worktreePath, SANDBOX_REPO_DIR),
+              patchGitMountsForWindows(
+                gitMounts,
+                worktreePath,
+                SANDBOX_REPO_DIR,
+              ),
             catch: (e) =>
               new Error(
                 `Failed to patch git mounts: ${e instanceof Error ? e.message : String(e)}`,
@@ -693,7 +700,12 @@ export const createSandbox = async (
     options.sandbox.tag !== "isolated"
   ) {
     await Effect.runPromise(
-      copyToWorktree(options.copyToWorktree, hostRepoDir, worktreePath, options.timeouts?.copyToWorktreeMs),
+      copyToWorktree(
+        options.copyToWorktree,
+        hostRepoDir,
+        worktreePath,
+        options.timeouts?.copyToWorktreeMs,
+      ),
     );
   }
 
@@ -745,7 +757,11 @@ export const createSandbox = async (
         Effect.flatMap((gitMounts) =>
           Effect.tryPromise({
             try: () =>
-              patchGitMountsForWindows(gitMounts, worktreePath, SANDBOX_REPO_DIR),
+              patchGitMountsForWindows(
+                gitMounts,
+                worktreePath,
+                SANDBOX_REPO_DIR,
+              ),
             catch: (e) =>
               new Error(
                 `Failed to patch git mounts: ${e instanceof Error ? e.message : String(e)}`,

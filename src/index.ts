@@ -37,11 +37,6 @@ export {
   transferSession,
 } from "./SessionStore.js";
 export type { SessionStore } from "./SessionStore.js";
-export {
-  SessionPaths,
-  sessionPathsLayer,
-  defaultSessionPathsLayer,
-} from "./SessionPaths.js";
 export type { SandboxHooks } from "./SandboxLifecycle.js";
 export type { MountConfig } from "./MountConfig.js";
 export { Output, StructuredOutputError } from "./Output.js";
@@ -51,13 +46,14 @@ export type {
   OutputStringDefinition,
 } from "./Output.js";
 export { CwdError } from "./resolveCwd.js";
-export { claudeCode, codex, opencode, pi } from "./AgentProvider.js";
+export { claudeCode, codex, gemini, opencode, pi } from "./AgentProvider.js";
 export type {
   AgentProvider,
   AgentCommandOptions,
   PrintCommand,
   ClaudeCodeOptions,
   CodexOptions,
+  GeminiOptions,
   OpenCodeOptions,
   PiOptions,
 } from "./AgentProvider.js";

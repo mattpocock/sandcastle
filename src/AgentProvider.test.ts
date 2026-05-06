@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { claudeCode, codex, opencode, pi } from "./AgentProvider.js";
+import { claudeCode, codex, gemini, opencode, pi } from "./AgentProvider.js";
 import type { AgentCommandOptions } from "./AgentProvider.js";
 
 /** Shorthand: build options with dangerouslySkipPermissions: true (mirrors existing sandbox callers). */
@@ -938,5 +938,81 @@ describe("captureSessions flag", () => {
 
   it("opencode has captureSessions false", () => {
     expect(opencode("opencode-model").captureSessions).toBe(false);
+  });
+});
+// gemini factory
+// ---------------------------------------------------------------------------
+
+describe("gemini factory", () => {
+  const provider = gemini("gemini-2.0-flash");
+
+  it("returns a provider with name 'gemini'", () => {
+    expect(provider.name).toBe("gemini");
+  });
+
+  it("buildPrintCommand includes the model and gemini flags", () => {
+    const { command, stdin } = provider.buildPrintCommand({
+      prompt: "test prompt",
+      dangerouslySkipPermissions: true,
+    });
+    expect(command).toContain("gemini -p - -o stream-json");
+    expect(command).toContain("--model 'gemini-2.0-flash'");
+    expect(stdin).toBe("test prompt");
+  });
+
+  it("parseStreamLine extracts text from assistant message", () => {
+    const line = JSON.stringify({
+      type: "message",
+      role: "assistant",
+      content: "Hello",
+      delta: true,
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "text", text: "Hello" },
+    ]);
+  });
+
+  it("parseStreamLine extracts tool call", () => {
+    const line = JSON.stringify({
+      type: "tool_use",
+      tool_name: "read_file",
+      parameters: { file_path: "README.md" },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "tool_call", name: "read_file", args: "README.md" },
+    ]);
+  });
+
+  it("parseStreamLine emits session_id from init event", () => {
+    const line = JSON.stringify({ type: "init", session_id: "uuid-123" });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "session_id", sessionId: "uuid-123" },
+    ]);
+  });
+
+  it("parseSessionUsage extracts usage from result event", () => {
+    const content = JSON.stringify({
+      type: "result",
+      stats: { input_tokens: 100, output_tokens: 50, cached: 20 },
+    });
+    expect(provider.parseSessionUsage!(content)).toEqual({
+      inputTokens: 100,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 20,
+      outputTokens: 50,
+    });
+  });
+
+  it("captureSessions flag defaults to true", () => {
+    expect(provider.captureSessions).toBe(true);
+  });
+
+  it("includes --resume in buildPrintCommand when resumeSession is set", () => {
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+      resumeSession: "session-abc",
+    });
+    expect(command).toContain("--resume 'session-abc'");
   });
 });

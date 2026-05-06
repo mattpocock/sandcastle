@@ -12,10 +12,8 @@ vi.mock("node:path", async (importOriginal) => {
   };
 });
 
-import { Effect } from "effect";
 import type { BindMountSandboxHandle } from "./SandboxProvider.js";
 import { sandboxSessionStore } from "./SessionStore.js";
-import { SessionPaths, defaultSessionPathsLayer } from "./SessionPaths.js";
 
 describe("sandboxSessionStore on Windows-style hosts", () => {
   it("uses POSIX separators for in-container paths regardless of host platform", async () => {
@@ -66,13 +64,5 @@ describe("sandboxSessionStore on Windows-style hosts", () => {
     expect(execCalls[0]).toContain(
       "/home/agent/.claude/projects/-home-agent-workspace",
     );
-  });
-
-  it("defaultSessionPathsLayer produces a POSIX sandboxProjectsDir", async () => {
-    const paths = await Effect.runPromise(
-      Effect.provide(SessionPaths, defaultSessionPathsLayer),
-    );
-    expect(paths.sandboxProjectsDir).not.toMatch(/\\/);
-    expect(paths.sandboxProjectsDir).toBe("/home/agent/.claude/projects");
   });
 });

@@ -30,7 +30,6 @@ import type { DockerError, SandboxError } from "./errors.js";
 import { AgentError, AgentIdleTimeoutError } from "./errors.js";
 import { SandboxFactory } from "./SandboxFactory.js";
 import { encodeProjectPath } from "./SessionStore.js";
-import { defaultSessionPathsLayer, sessionPathsLayer } from "./SessionPaths.js";
 import {
   callbackAgentStreamEmitterLayer,
   noopAgentStreamEmitterLayer,
@@ -44,7 +43,6 @@ const testProvider = claudeCode("test-model");
 
 const testDisplayLayer = Layer.mergeAll(
   SilentDisplay.layer(Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([])),
-  defaultSessionPathsLayer,
   noopAgentStreamEmitterLayer,
 );
 
@@ -1124,7 +1122,6 @@ describe("Orchestrator tool call display integration", () => {
           Layer.mergeAll(
             mockLayer.factoryLayer,
             displayLayer,
-            defaultSessionPathsLayer,
             noopAgentStreamEmitterLayer,
           ),
         ),
@@ -1221,12 +1218,7 @@ describe("Orchestrator agent stream emitter", () => {
         prompt: "do work",
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(
-            mockLayer.factoryLayer,
-            displayLayer,
-            defaultSessionPathsLayer,
-            emitterLayer,
-          ),
+          Layer.mergeAll(mockLayer.factoryLayer, displayLayer, emitterLayer),
         ),
       ),
     );
@@ -1309,12 +1301,7 @@ describe("Orchestrator agent stream emitter", () => {
         prompt: "do work",
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(
-            mockLayer.factoryLayer,
-            displayLayer,
-            defaultSessionPathsLayer,
-            emitterLayer,
-          ),
+          Layer.mergeAll(mockLayer.factoryLayer, displayLayer, emitterLayer),
         ),
       ),
     );
@@ -1594,36 +1581,34 @@ describe("Orchestrator error handling", () => {
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
     const opencodeProvider = opencodeFactory("test-model");
-    const stdoutContent = "Setting up environment...\nLoading model...\nError: API key is invalid\nPlease check your credentials";
+    const stdoutContent =
+      "Setting up environment...\nLoading model...\nError: API key is invalid\nPlease check your credentials";
 
-    const { factoryLayer } = makeTestSandboxFactory(
-      hostDir,
-      (dir) => {
-        const fsLayer = makeLocalSandboxLayer(dir);
-        return Layer.succeed(Sandbox, {
-          exec: (command, options) => {
-            if (command.startsWith("opencode ")) {
-              return Effect.succeed({
-                stdout: stdoutContent,
-                stderr: "",
-                exitCode: 1,
-              });
-            }
-            return Effect.flatMap(Sandbox, (real) =>
-              real.exec(command, options),
-            ).pipe(Effect.provide(fsLayer));
-          },
-          copyIn: (hostPath, sandboxPath) =>
-            Effect.flatMap(Sandbox, (real) =>
-              real.copyIn(hostPath, sandboxPath),
-            ).pipe(Effect.provide(fsLayer)),
-          copyFileOut: (sandboxPath, hostPath) =>
-            Effect.flatMap(Sandbox, (real) =>
-              real.copyFileOut(sandboxPath, hostPath),
-            ).pipe(Effect.provide(fsLayer)),
-        });
-      },
-    );
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) => {
+      const fsLayer = makeLocalSandboxLayer(dir);
+      return Layer.succeed(Sandbox, {
+        exec: (command, options) => {
+          if (command.startsWith("opencode ")) {
+            return Effect.succeed({
+              stdout: stdoutContent,
+              stderr: "",
+              exitCode: 1,
+            });
+          }
+          return Effect.flatMap(Sandbox, (real) =>
+            real.exec(command, options),
+          ).pipe(Effect.provide(fsLayer));
+        },
+        copyIn: (hostPath, sandboxPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyIn(hostPath, sandboxPath),
+          ).pipe(Effect.provide(fsLayer)),
+        copyFileOut: (sandboxPath, hostPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyFileOut(sandboxPath, hostPath),
+          ).pipe(Effect.provide(fsLayer)),
+      });
+    });
 
     const exit = await Effect.runPromiseExit(
       orchestrate({
@@ -1657,35 +1642,32 @@ describe("Orchestrator error handling", () => {
       result: "Rate limit exceeded, please retry later",
     });
 
-    const { factoryLayer } = makeTestSandboxFactory(
-      hostDir,
-      (dir) => {
-        const fsLayer = makeLocalSandboxLayer(dir);
-        return Layer.succeed(Sandbox, {
-          exec: (command, options) => {
-            if (command.startsWith("claude ") && options?.onLine) {
-              options.onLine(errorLine);
-              return Effect.succeed({
-                stdout: errorLine,
-                stderr: "",
-                exitCode: 1,
-              });
-            }
-            return Effect.flatMap(Sandbox, (real) =>
-              real.exec(command, options),
-            ).pipe(Effect.provide(fsLayer));
-          },
-          copyIn: (hostPath, sandboxPath) =>
-            Effect.flatMap(Sandbox, (real) =>
-              real.copyIn(hostPath, sandboxPath),
-            ).pipe(Effect.provide(fsLayer)),
-          copyFileOut: (sandboxPath, hostPath) =>
-            Effect.flatMap(Sandbox, (real) =>
-              real.copyFileOut(sandboxPath, hostPath),
-            ).pipe(Effect.provide(fsLayer)),
-        });
-      },
-    );
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) => {
+      const fsLayer = makeLocalSandboxLayer(dir);
+      return Layer.succeed(Sandbox, {
+        exec: (command, options) => {
+          if (command.startsWith("claude ") && options?.onLine) {
+            options.onLine(errorLine);
+            return Effect.succeed({
+              stdout: errorLine,
+              stderr: "",
+              exitCode: 1,
+            });
+          }
+          return Effect.flatMap(Sandbox, (real) =>
+            real.exec(command, options),
+          ).pipe(Effect.provide(fsLayer));
+        },
+        copyIn: (hostPath, sandboxPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyIn(hostPath, sandboxPath),
+          ).pipe(Effect.provide(fsLayer)),
+        copyFileOut: (sandboxPath, hostPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyFileOut(sandboxPath, hostPath),
+          ).pipe(Effect.provide(fsLayer)),
+      });
+    });
 
     const exit = await Effect.runPromiseExit(
       orchestrate({
@@ -1702,7 +1684,9 @@ describe("Orchestrator error handling", () => {
       expect(err).toBeInstanceOf(AgentError);
       if (err instanceof AgentError) {
         expect(err.message).toContain("claude-code exited with code 1:");
-        expect(err.message).toContain("Rate limit exceeded, please retry later");
+        expect(err.message).toContain(
+          "Rate limit exceeded, please retry later",
+        );
       }
     }
   });
@@ -1715,34 +1699,31 @@ describe("Orchestrator error handling", () => {
 
     const opencodeProvider = opencodeFactory("test-model");
 
-    const { factoryLayer } = makeTestSandboxFactory(
-      hostDir,
-      (dir) => {
-        const fsLayer = makeLocalSandboxLayer(dir);
-        return Layer.succeed(Sandbox, {
-          exec: (command, options) => {
-            if (command.startsWith("opencode ")) {
-              return Effect.succeed({
-                stdout: "some stdout output",
-                stderr: "fatal error from stderr",
-                exitCode: 1,
-              });
-            }
-            return Effect.flatMap(Sandbox, (real) =>
-              real.exec(command, options),
-            ).pipe(Effect.provide(fsLayer));
-          },
-          copyIn: (hostPath, sandboxPath) =>
-            Effect.flatMap(Sandbox, (real) =>
-              real.copyIn(hostPath, sandboxPath),
-            ).pipe(Effect.provide(fsLayer)),
-          copyFileOut: (sandboxPath, hostPath) =>
-            Effect.flatMap(Sandbox, (real) =>
-              real.copyFileOut(sandboxPath, hostPath),
-            ).pipe(Effect.provide(fsLayer)),
-        });
-      },
-    );
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) => {
+      const fsLayer = makeLocalSandboxLayer(dir);
+      return Layer.succeed(Sandbox, {
+        exec: (command, options) => {
+          if (command.startsWith("opencode ")) {
+            return Effect.succeed({
+              stdout: "some stdout output",
+              stderr: "fatal error from stderr",
+              exitCode: 1,
+            });
+          }
+          return Effect.flatMap(Sandbox, (real) =>
+            real.exec(command, options),
+          ).pipe(Effect.provide(fsLayer));
+        },
+        copyIn: (hostPath, sandboxPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyIn(hostPath, sandboxPath),
+          ).pipe(Effect.provide(fsLayer)),
+        copyFileOut: (sandboxPath, hostPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyFileOut(sandboxPath, hostPath),
+          ).pipe(Effect.provide(fsLayer)),
+      });
+    });
 
     const exit = await Effect.runPromiseExit(
       orchestrate({
@@ -2188,11 +2169,7 @@ describe("Orchestrator Display integration", () => {
 
         iterations: 5,
         prompt: "do some work",
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(factoryLayer, displayLayer, defaultSessionPathsLayer),
-        ),
-      ),
+      }).pipe(Effect.provide(Layer.mergeAll(factoryLayer, displayLayer))),
     );
 
     const entries = await Effect.runPromise(Ref.get(ref));
@@ -2258,11 +2235,7 @@ describe("Orchestrator Display integration", () => {
 
         iterations: 2,
         prompt: "do some work",
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(factoryLayer, displayLayer, defaultSessionPathsLayer),
-        ),
-      ),
+      }).pipe(Effect.provide(Layer.mergeAll(factoryLayer, displayLayer))),
     );
 
     const entries = await Effect.runPromise(Ref.get(ref));
@@ -2339,11 +2312,7 @@ describe("Orchestrator Display integration", () => {
         iterations: 1,
         prompt: "do some work",
         name: "issue-42",
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(factoryLayer, displayLayer, defaultSessionPathsLayer),
-        ),
-      ),
+      }).pipe(Effect.provide(Layer.mergeAll(factoryLayer, displayLayer))),
     );
 
     const entries = await Effect.runPromise(Ref.get(ref));
@@ -2386,11 +2355,7 @@ describe("Orchestrator Display integration", () => {
 
         iterations: 1,
         prompt: "do some work",
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(factoryLayer, displayLayer, defaultSessionPathsLayer),
-        ),
-      ),
+      }).pipe(Effect.provide(Layer.mergeAll(factoryLayer, displayLayer))),
     );
 
     const entries = await Effect.runPromise(Ref.get(ref));
@@ -2639,9 +2604,7 @@ describe("Orchestrator Display integration", () => {
         idleTimeoutSeconds: 10, // high enough not to kill
         _idleWarningIntervalMs: 100, // fire warnings every 100ms for testing
       }).pipe(
-        Effect.provide(
-          Layer.mergeAll(factoryLayer, displayLayer, defaultSessionPathsLayer),
-        ),
+        Effect.provide(Layer.mergeAll(factoryLayer, displayLayer)),
         Effect.exit,
       ),
     );
@@ -2735,9 +2698,7 @@ describe("Orchestrator Display integration", () => {
         idleTimeoutSeconds: 10,
         _idleWarningIntervalMs: 100,
       }).pipe(
-        Effect.provide(
-          Layer.mergeAll(factoryLayer, displayLayer, defaultSessionPathsLayer),
-        ),
+        Effect.provide(Layer.mergeAll(factoryLayer, displayLayer)),
         Effect.exit,
       ),
     );
@@ -2986,11 +2947,7 @@ describe("Orchestrator with pi provider", () => {
 
         iterations: 1,
         prompt: "do some work",
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(factoryLayer, displayLayer, defaultSessionPathsLayer),
-        ),
-      ),
+      }).pipe(Effect.provide(Layer.mergeAll(factoryLayer, displayLayer))),
     );
 
     const entries = await Effect.runPromise(Ref.get(ref));
@@ -3077,11 +3034,7 @@ describe("Orchestrator with pi provider", () => {
 
         iterations: 1,
         prompt: "do some work",
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(factoryLayer, displayLayer, defaultSessionPathsLayer),
-        ),
-      ),
+      }).pipe(Effect.provide(Layer.mergeAll(factoryLayer, displayLayer))),
     );
 
     const entries = await Effect.runPromise(Ref.get(ref));
@@ -3382,15 +3335,9 @@ describe("Session capture integration", () => {
         hostRepoDir: hostDir,
         iterations: 1,
         prompt: "do some work",
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            factoryLayer,
-            testDisplayLayer,
-            sessionPathsLayer({ hostProjectsDir, sandboxProjectsDir }),
-          ),
-        ),
-      ),
+        _hostProjectsDir: hostProjectsDir,
+        _sandboxProjectsDir: sandboxProjectsDir,
+      }).pipe(Effect.provide(Layer.mergeAll(factoryLayer, testDisplayLayer))),
     );
 
     // Verify iteration result
@@ -3535,15 +3482,9 @@ describe("Session capture integration", () => {
         iterations: 1,
         prompt: "continue working",
         resumeSession: mockSessionId,
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            factoryLayer,
-            testDisplayLayer,
-            sessionPathsLayer({ hostProjectsDir, sandboxProjectsDir }),
-          ),
-        ),
-      ),
+        _hostProjectsDir: hostProjectsDir,
+        _sandboxProjectsDir: sandboxProjectsDir,
+      }).pipe(Effect.provide(Layer.mergeAll(factoryLayer, testDisplayLayer))),
     );
 
     // Verify iteration result
@@ -3611,15 +3552,9 @@ describe("Session capture integration", () => {
         hostRepoDir: hostDir,
         iterations: 1,
         prompt: "do some work",
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            factoryLayer,
-            testDisplayLayer,
-            sessionPathsLayer({ hostProjectsDir, sandboxProjectsDir }),
-          ),
-        ),
-      ),
+        _hostProjectsDir: hostProjectsDir,
+        _sandboxProjectsDir: sandboxProjectsDir,
+      }).pipe(Effect.provide(Layer.mergeAll(factoryLayer, testDisplayLayer))),
     );
 
     expect(result.iterations[0]!.usage).toEqual({

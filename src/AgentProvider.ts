@@ -1,8 +1,22 @@
-export type ParsedStreamEvent =
-  | { type: "text"; text: string }
-  | { type: "result"; result: string }
-  | { type: "tool_call"; name: string; args: string }
-  | { type: "session_id"; sessionId: string };
+import { join, posix, basename } from "node:path";
+import { readdir, readFile, writeFile, mkdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import type { BindMountSandboxHandle } from "./SandboxProvider.js";
+import {
+  hostSessionStore,
+  sandboxSessionStore,
+  transferSession,
+  type SessionStore,
+} from "./SessionStore.js";
+
+export interface ParsedStreamEvent {
+  readonly type: "text" | "result" | "tool_call" | "session_id";
+  readonly text?: string;
+  readonly result?: string;
+  readonly name?: string;
+  readonly args?: string;
+  readonly sessionId?: string;
+}
 
 const shellEscape = (s: string): string => "'" + s.replace(/'/g, "'\\''") + "'";
 
@@ -12,6 +26,12 @@ const TOOL_ARG_FIELDS: Record<string, string> = {
   WebSearch: "query",
   WebFetch: "url",
   Agent: "description",
+  // Gemini-cli and Sandcastle-specific tool names
+  update_topic: "strategic_intent",
+  read_file: "file_path",
+  grep_search: "pattern",
+  run_shell_command: "command",
+  ask_user: "questions",
 };
 
 /**
@@ -114,6 +134,12 @@ export interface AgentProvider {
   readonly env: Record<string, string>;
   /** When true, session capture is enabled for this provider. Default: true for Claude Code, false for others. */
   readonly captureSessions: boolean;
+  /** Optional session storage configuration. Only implemented by Gemini. */
+  readonly sessionStorage?: {
+    hostStore: (cwd: string) => SessionStore;
+    sandboxStore: (cwd: string, handle: BindMountSandboxHandle) => SessionStore;
+    transfer: (from: SessionStore, to: SessionStore, id: string) => Promise<void>;
+  };
   buildPrintCommand(options: AgentCommandOptions): PrintCommand;
   buildInteractiveArgs?(options: AgentCommandOptions): string[];
   parseStreamLine(line: string): ParsedStreamEvent[];
@@ -409,6 +435,210 @@ export const claudeCode = (
               outputTokens: u.output_tokens,
             };
           }
+        }
+      } catch {
+        // Not valid JSON — skip
+      }
+    }
+    return undefined;
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Gemini agent provider
+// ---------------------------------------------------------------------------
+
+const parseGeminiStreamLine = (line: string): ParsedStreamEvent[] => {
+  if (!line.startsWith("{")) return [];
+  try {
+    const obj = JSON.parse(line);
+    if (
+      obj.type === "message" &&
+      obj.role === "assistant" &&
+      typeof obj.content === "string"
+    ) {
+      return [{ type: "text", text: obj.content }];
+    }
+    if (
+      obj.type === "tool_use" &&
+      typeof obj.tool_name === "string" &&
+      obj.parameters !== undefined
+    ) {
+      const toolName = obj.tool_name;
+      const argField = TOOL_ARG_FIELDS[toolName];
+      if (argField === undefined) return [];
+      const argValue = obj.parameters[argField];
+      if (typeof argValue !== "string") return [];
+      return [{ type: "tool_call", name: toolName, args: argValue }];
+    }
+    if (obj.type === "result" && typeof obj.status === "string") {
+      // If result has content or we just want to signal end
+      return [{ type: "result", result: obj.status }];
+    }
+    if (obj.type === "init" && typeof obj.session_id === "string") {
+      return [{ type: "session_id", sessionId: obj.session_id }];
+    }
+  } catch {
+    // Not valid JSON — skip
+  }
+  return [];
+};
+
+/** Options for the gemini agent provider. */
+export interface GeminiOptions {
+  /** Environment variables injected by this agent provider. */
+  readonly env?: Record<string, string>;
+  /** When false, session capture is enabled. Default: true. */
+  readonly captureSessions?: boolean;
+  /** Optional overrides for session storage paths. */
+  readonly sessionStorage?: {
+    /** Override for the host-side gemini root directory (default: ~/.gemini) */
+    readonly hostGeminiDir?: string;
+    /** Override for the sandbox-side gemini root directory (default: /home/agent/.gemini) */
+    readonly sandboxGeminiDir?: string;
+  };
+}
+
+export const gemini = (
+  model: string,
+  options?: GeminiOptions,
+): AgentProvider => ({
+  name: "gemini",
+  env: options?.env ?? {},
+  captureSessions: options?.captureSessions ?? true,
+  sessionStorage: {
+    hostStore: (cwd) => {
+      const project = basename(cwd);
+      const baseDir = join(
+        options?.sessionStorage?.hostGeminiDir ?? process.env.HOME ?? "~",
+        ".gemini",
+        "tmp",
+        project,
+        "chats",
+      );
+      return {
+        cwd,
+        sessionFilePath: (id) => join(baseDir, id + ".jsonl"),
+        readSession: async (id) => {
+          const prefix = id.slice(0, 8);
+          const files = await readdir(baseDir).catch(() => []);
+          const match = files.find(
+            (f) => f.includes(prefix) && f.endsWith(".jsonl"),
+          );
+          if (!match) throw new Error(`Session ${id} not found in ${baseDir}`);
+          return await readFile(join(baseDir, match), "utf-8");
+        },
+        writeSession: async (id, content) => {
+          await mkdir(baseDir, { recursive: true });
+          const now = new Date()
+            .toISOString()
+            .replace(/:/g, "-")
+            .replace(/\..+/, "");
+          const filename = `session-${now}-${id.slice(0, 8)}.jsonl`;
+          await writeFile(join(baseDir, filename), content);
+        },
+      };
+    },
+    sandboxStore: (cwd, handle) => {
+      const project = basename(cwd);
+      const baseDir = posix.join(
+        options?.sessionStorage?.sandboxGeminiDir ?? "/home/agent",
+        ".gemini",
+        "tmp",
+        project,
+        "chats",
+      );
+      return {
+        cwd,
+        sessionFilePath: (id) => posix.join(baseDir, id + ".jsonl"),
+        readSession: async (id) => {
+          const prefix = id.slice(0, 8);
+          const match = (
+            await handle
+              .exec(`ls ${baseDir} | grep ${prefix}`)
+              .catch(() => ({ stdout: "" }))
+          ).stdout.trim();
+          if (!match) throw new Error(`Session ${id} not found in ${baseDir}`);
+          const sandboxPath = posix.join(baseDir, match.split("\n")[0]!);
+          const tmpPath = join(
+            tmpdir(),
+            `sandcastle-gemini-${id}-${Date.now()}.jsonl`,
+          );
+          await handle.copyFileOut(sandboxPath, tmpPath);
+          try {
+            return await readFile(tmpPath, "utf-8");
+          } finally {
+            await rm(tmpPath, { force: true }).catch(() => {});
+          }
+        },
+        writeSession: async (id, content) => {
+          const now = new Date()
+            .toISOString()
+            .replace(/:/g, "-")
+            .replace(/\..+/, "");
+          const filename = `session-${now}-${id.slice(0, 8)}.jsonl`;
+          const sandboxPath = posix.join(baseDir, filename);
+          const tmpPath = join(
+            tmpdir(),
+            `sandcastle-gemini-${id}-${Date.now()}.jsonl`,
+          );
+          await writeFile(tmpPath, content);
+          try {
+            await handle.exec(`mkdir -p ${baseDir}`);
+            await handle.copyFileIn(tmpPath, sandboxPath);
+          } finally {
+            await rm(tmpPath, { force: true }).catch(() => {});
+          }
+        },
+      };
+    },
+    transfer: async (from, to, id) => {
+      const content = await from.readSession(id);
+      const rewritten = content.replaceAll(from.cwd, to.cwd);
+      await to.writeSession(id, rewritten);
+    },
+  },
+
+  buildPrintCommand({
+    prompt,
+    resumeSession,
+  }: AgentCommandOptions): PrintCommand {
+    const resumeFlag = resumeSession
+      ? ` --resume ${shellEscape(resumeSession)}`
+      : "";
+    return {
+      command: `gemini -p - -o stream-json --approval-mode yolo --raw-output --accept-raw-output-risk --model ${shellEscape(model)}${resumeFlag}`,
+      stdin: prompt,
+    };
+  },
+
+  buildInteractiveArgs({ prompt }: AgentCommandOptions): string[] {
+    const args = ["gemini", "--model", model];
+    if (prompt) args.push(prompt);
+    return args;
+  },
+
+  parseStreamLine(line: string): ParsedStreamEvent[] {
+    return parseGeminiStreamLine(line);
+  },
+
+  parseSessionUsage(content: string): IterationUsage | undefined {
+    const lines = content.split("\n");
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i]!;
+      if (!line.startsWith("{")) continue;
+      try {
+        const obj = JSON.parse(line);
+        if (obj.type === "result" && obj.stats) {
+          const s = obj.stats;
+          // Note: gemini-cli stats fields might differ from Claude Code
+          // but we map them as best as we can.
+          return {
+            inputTokens: s.input_tokens ?? 0,
+            cacheCreationInputTokens: 0, // not directly available in result event
+            cacheReadInputTokens: s.cached ?? 0,
+            outputTokens: s.output_tokens ?? 0,
+          };
         }
       } catch {
         // Not valid JSON — skip

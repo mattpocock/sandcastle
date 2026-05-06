@@ -91,6 +91,39 @@ WORKDIR /home/agent
 ENTRYPOINT ["sleep", "infinity"]
 `;
 
+const GEMINI_DOCKERFILE = `FROM node:22-bookworm
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \\
+  git \\
+  curl \\
+  jq \\
+  && rm -rf /var/lib/apt/lists/*
+
+{{BACKLOG_MANAGER_TOOLS}}
+
+# Build-args for UID/GID alignment: sandcastle docker build-image
+# defaults these to the host user's UID/GID so image-built files
+# and bind-mounted files share an owner without runtime chown.
+ARG AGENT_UID=1000
+ARG AGENT_GID=1000
+
+# Rename the base image's "node" user to "agent" and align UID/GID.
+RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+
+# Install Gemini CLI (run as root before USER agent)
+RUN npm install -g @google/gemini-cli
+
+USER \${AGENT_UID}:\${AGENT_GID}
+
+WORKDIR /home/agent
+
+# In worktree sandbox mode, Sandcastle bind-mounts the git worktree at ${SANDBOX_REPO_DIR}
+# and overrides the working directory to ${SANDBOX_REPO_DIR} at container start.
+# Structure your Dockerfile so that ${SANDBOX_REPO_DIR} can serve as the project root.
+ENTRYPOINT ["sleep", "infinity"]
+`;
+
 const PI_DOCKERFILE = `FROM node:22-bookworm
 
 # Install system dependencies
@@ -184,9 +217,9 @@ USER \${AGENT_UID}:\${AGENT_GID}
 
 WORKDIR /home/agent
 
-# In worktree sandbox mode, Sandcastle bind-mounts the git worktree at \${SANDBOX_REPO_DIR}
-# and overrides the working directory to \${SANDBOX_REPO_DIR} at container start.
-# Structure your Dockerfile so that \${SANDBOX_REPO_DIR} can serve as the project root.
+# In worktree sandbox mode, Sandcastle bind-mounts the git worktree at ${SANDBOX_REPO_DIR}
+# and overrides the working directory to ${SANDBOX_REPO_DIR} at container start.
+# Structure your Dockerfile so that ${SANDBOX_REPO_DIR} can serve as the project root.
 ENTRYPOINT ["sleep", "infinity"]
 `;
 
@@ -200,6 +233,15 @@ const AGENT_REGISTRY: AgentEntry[] = [
     envExample: `# Anthropic API key
 # If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191
 ANTHROPIC_API_KEY=`,
+  },
+  {
+    name: "gemini",
+    label: "Gemini CLI",
+    defaultModel: "gemini-2.0-flash",
+    factoryImport: "gemini",
+    dockerfileTemplate: GEMINI_DOCKERFILE,
+    envExample: `# Google AI Studio API key
+GOOGLE_API_KEY=`,
   },
   {
     name: "pi",
@@ -360,7 +402,7 @@ export function getNextStepsLines(
       "2. Read and customize .sandcastle/prompt.md to describe what you want the agent to do",
       `3. Customize .sandcastle/${mainFilename} — it uses the JS API (\`run()\`) to control how the agent runs`,
       `4. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
-      "5. Run `npm run sandcastle` to start the agent",
+      "5. Run \`npm run sandcastle\` to start the agent",
     ];
   } else {
     const hasReviewer = template.includes("review");
@@ -448,7 +490,7 @@ const copyTemplateFiles = (
 /**
  * Replace the agent factory import and call in a scaffolded main.ts.
  *
- * Templates use `claudeCode` as the default factory. When a different agent or
+ * Templates use \`claudeCode\` as the default factory. When a different agent or
  * model is selected, this function rewrites the import and factory calls.
  */
 const rewriteMainTs = (
@@ -496,8 +538,8 @@ const rewriteMainTs = (
   });
 
 /**
- * When the user opted out of the Sandcastle label, strip ` --label Sandcastle`
- * from all `.md` files in the scaffolded config directory so that `gh issue list`
+ * When the user opted out of the Sandcastle label, strip \` --label Sandcastle\`
+ * from all \`.md\` files in the scaffolded config directory so that \`gh issue list\`
  * commands work without a label filter.
  */
 const rewritePromptFiles = (
@@ -528,7 +570,7 @@ const rewritePromptFiles = (
     );
   });
 
-/** Text file extensions eligible for `{{KEY}}` template argument substitution. */
+/** Text file extensions eligible for \`{{KEY}}\` template argument substitution. */
 const TEXT_FILE_EXTENSIONS = new Set([
   ".md",
   ".txt",
@@ -550,8 +592,8 @@ const isTextFile = (filename: string): boolean => {
 };
 
 /**
- * Replace `{{KEY}}` template arguments from the backlog manager's
- * `templateArgs` map in all text files in the scaffolded config directory.
+ * Replace \`{{KEY}}\` template arguments from the backlog manager's
+ * \`templateArgs\` map in all text files in the scaffolded config directory.
  */
 const substituteTemplateArgs = (
   configDir: string,
@@ -608,8 +650,8 @@ export interface ScaffoldResult {
 }
 
 /**
- * Detect whether the project's package.json has `"type": "module"`.
- * If so, we can use plain `.ts`; otherwise we use `.mts` to ensure ESM.
+ * Detect whether the project's package.json has \`"type": "module"\`.
+ * If so, we can use plain \`.ts\`; otherwise we use \`.mts\` to ensure ESM.
  */
 const detectMainFilename = (
   repoDir: string,
