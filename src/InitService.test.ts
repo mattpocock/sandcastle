@@ -645,6 +645,32 @@ describe("InitService scaffold", () => {
       const joined = lines.join("\n");
       expect(joined).not.toContain("CODING_STANDARDS.md");
     });
+
+    it("pull-request merge strategy includes gh auth login step", () => {
+      const lines = getNextStepsLines(
+        "simple-loop",
+        "main.mts",
+        "pull-request",
+      );
+      const joined = lines.join("\n");
+      expect(joined).toContain("gh auth login");
+    });
+
+    it("merge-to-head merge strategy does not include gh auth login step", () => {
+      const lines = getNextStepsLines(
+        "simple-loop",
+        "main.mts",
+        "merge-to-head",
+      );
+      const joined = lines.join("\n");
+      expect(joined).not.toContain("gh auth login");
+    });
+
+    it("omitted merge strategy does not include gh auth login step", () => {
+      const lines = getNextStepsLines("simple-loop", "main.mts");
+      const joined = lines.join("\n");
+      expect(joined).not.toContain("gh auth login");
+    });
   });
 
   it("scaffolds pi agent with pi Dockerfile", async () => {
@@ -1168,10 +1194,8 @@ describe("InitService scaffold", () => {
         "GitHub CLI",
       );
       expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).toContain("gh");
-      // PR-mode auto-close keyword for GitHub. The inner {{ISSUE_ID}} is
-      // filled in by the scaffolded main.mts.pull-request at runtime.
       expect(manager!.templateArgs.CLOSES_LINE).toBe(
-        "Closes #{{ISSUE_ID}}\n\n",
+        "Closes #{{ISSUE_ID}}\\n\\n",
       );
     });
 
@@ -1194,7 +1218,6 @@ describe("InitService scaffold", () => {
       expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).toContain(
         "dpkg-architecture -qDEB_HOST_MULTIARCH",
       );
-      // No GitHub auto-close keyword for non-GitHub trackers.
       expect(manager!.templateArgs.CLOSES_LINE).toBe("");
     });
 
@@ -1238,10 +1261,6 @@ describe("InitService scaffold", () => {
   });
 
   describe("Merge strategy plumbing", () => {
-    // Phase 1 only validates that mergeStrategy threads through scaffold
-    // without changing existing template output. Variant-file behavior is
-    // covered by Phase 2 once the templates ship variant files.
-
     it("scaffold accepts mergeStrategy without affecting blank template output", async () => {
       const dirA = await makeDir();
       const dirB = await makeDir();
@@ -1268,33 +1287,6 @@ describe("InitService scaffold", () => {
         templateName: "simple-loop",
         mergeStrategy: getMergeStrategy("merge-to-head"),
       });
-      // Compare main.mts output: implicit default must equal explicit
-      // merge-to-head selection.
-      const mainA = await readFile(
-        join(dirA, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
-      const mainB = await readFile(
-        join(dirB, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
-      expect(mainA).toBe(mainB);
-    });
-
-    it("scaffold with pull-request strategy succeeds for templates with no variant files", async () => {
-      // Phase 1: no template ships variant files yet, so pull-request mode
-      // should produce identical output to merge-to-head. This test pins that
-      // invariant so Phase 2's variant additions are visible as a diff.
-      const dirA = await makeDir();
-      const dirB = await makeDir();
-      await runScaffold(dirA, {
-        templateName: "simple-loop",
-        mergeStrategy: getMergeStrategy("merge-to-head"),
-      });
-      await runScaffold(dirB, {
-        templateName: "simple-loop",
-        mergeStrategy: getMergeStrategy("pull-request"),
-      });
       const mainA = await readFile(
         join(dirA, ".sandcastle", "main.mts"),
         "utf-8",
@@ -1307,8 +1299,6 @@ describe("InitService scaffold", () => {
     });
 
     it("scaffold under pull-request never leaves variant suffix files in the output", async () => {
-      // Defensive invariant: regardless of strategy, no .merge-to-head or
-      // .pull-request suffix should appear in the scaffolded directory.
       const dir = await makeDir();
       await runScaffold(dir, {
         templateName: "simple-loop",
@@ -1320,6 +1310,503 @@ describe("InitService scaffold", () => {
         expect(entry).not.toMatch(/\.(merge-to-head|pull-request)$/);
       }
     });
+
+    it("scaffold under merge-to-head never leaves variant suffix files in the output", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        mergeStrategy: getMergeStrategy("merge-to-head"),
+      });
+      const fs = await import("node:fs/promises");
+      const entries = await fs.readdir(join(dir, ".sandcastle"));
+      for (const entry of entries) {
+        expect(entry).not.toMatch(/\.(merge-to-head|pull-request)$/);
+      }
+    });
+  });
+
+  describe("Merge strategy variant selection", () => {
+    for (const template of [
+      "simple-loop",
+      "sequential-reviewer",
+      "parallel-planner",
+      "parallel-planner-with-review",
+    ] as const) {
+      describe(template, () => {
+        it("merge-to-head selects the merge-to-head main.mts variant", async () => {
+          const dir = await makeDir();
+          await runScaffold(dir, {
+            templateName: template,
+            mergeStrategy: getMergeStrategy("merge-to-head"),
+          });
+          const main = await readFile(
+            join(dir, ".sandcastle", "main.mts"),
+            "utf-8",
+          );
+
+          expect(main).not.toContain("gh pr create");
+          expect(main).not.toContain("gh pr list");
+          expect(main).not.toContain("git push origin");
+          expect(main).not.toContain("gh repo view");
+          expect(main).not.toContain("<pr-title>");
+        });
+
+        it("pull-request selects the pull-request main.mts variant", async () => {
+          const dir = await makeDir();
+          await runScaffold(dir, {
+            templateName: template,
+            mergeStrategy: getMergeStrategy("pull-request"),
+          });
+          const main = await readFile(
+            join(dir, ".sandcastle", "main.mts"),
+            "utf-8",
+          );
+
+          expect(main).toContain("gh repo view");
+          expect(main).toContain("gh pr list --head");
+          expect(main).toContain("git push origin");
+          expect(main).toContain("gh pr create --base");
+          expect(main).toContain("<pr-title>");
+          expect(main).toContain("<pr-body>");
+
+          expect(main).toContain("shellEscape");
+
+          expect(main).toContain("slugify");
+          expect(main).toContain("sandcastle/issue-");
+
+          expect(main).not.toContain("--force");
+          expect(main).not.toMatch(/git push.*\+/);
+        });
+
+        it("pull-request scaffolds pr-prompt.md, merge-to-head does not", async () => {
+          const dirPr = await makeDir();
+          const dirMth = await makeDir();
+          await runScaffold(dirPr, {
+            templateName: template,
+            mergeStrategy: getMergeStrategy("pull-request"),
+          });
+          await runScaffold(dirMth, {
+            templateName: template,
+            mergeStrategy: getMergeStrategy("merge-to-head"),
+          });
+
+          const fs = await import("node:fs/promises");
+          const prFiles = await fs.readdir(join(dirPr, ".sandcastle"));
+          const mthFiles = await fs.readdir(join(dirMth, ".sandcastle"));
+
+          expect(prFiles).toContain("pr-prompt.md");
+          expect(mthFiles).not.toContain("pr-prompt.md");
+        });
+      });
+    }
+
+    it("parallel-planner under pull-request scaffolds pr-prompt.md but NOT merge-prompt.md", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "parallel-planner",
+        mergeStrategy: getMergeStrategy("pull-request"),
+      });
+      const fs = await import("node:fs/promises");
+      const files = await fs.readdir(join(dir, ".sandcastle"));
+      expect(files).toContain("pr-prompt.md");
+      expect(files).not.toContain("merge-prompt.md");
+    });
+
+    it("parallel-planner-with-review under pull-request scaffolds pr-prompt.md but NOT merge-prompt.md", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "parallel-planner-with-review",
+        mergeStrategy: getMergeStrategy("pull-request"),
+      });
+      const fs = await import("node:fs/promises");
+      const files = await fs.readdir(join(dir, ".sandcastle"));
+      expect(files).toContain("pr-prompt.md");
+      expect(files).not.toContain("merge-prompt.md");
+    });
+
+    it("parallel-planner-with-review under merge-to-head scaffolds merge-prompt.md but NOT pr-prompt.md", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "parallel-planner-with-review",
+        mergeStrategy: getMergeStrategy("merge-to-head"),
+      });
+      const fs = await import("node:fs/promises");
+      const files = await fs.readdir(join(dir, ".sandcastle"));
+      expect(files).toContain("merge-prompt.md");
+      expect(files).not.toContain("pr-prompt.md");
+    });
+
+    it("parallel-planner under merge-to-head scaffolds merge-prompt.md but NOT pr-prompt.md", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "parallel-planner",
+        mergeStrategy: getMergeStrategy("merge-to-head"),
+      });
+      const fs = await import("node:fs/promises");
+      const files = await fs.readdir(join(dir, ".sandcastle"));
+      expect(files).toContain("merge-prompt.md");
+      expect(files).not.toContain("pr-prompt.md");
+    });
+
+    it("simple-loop under pull-request locks the prompt to the host-resolved task", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        mergeStrategy: getMergeStrategy("pull-request"),
+      });
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "prompt.md"),
+        "utf-8",
+      );
+
+      expect(prompt).toContain("{{TASK_ID}}");
+    });
+
+    it("simple-loop under merge-to-head does not embed {{TASK_ID}} (agent picks)", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        mergeStrategy: getMergeStrategy("merge-to-head"),
+      });
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).not.toContain("{{TASK_ID}}");
+
+      expect(prompt).toContain("Priority order");
+    });
+
+    it("sequential-reviewer under pull-request locks implement-prompt.md to the host-resolved task", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "sequential-reviewer",
+        mergeStrategy: getMergeStrategy("pull-request"),
+      });
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "implement-prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).toContain("{{TASK_ID}}");
+    });
+
+    it("sequential-reviewer under merge-to-head does not embed {{TASK_ID}} (agent picks)", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "sequential-reviewer",
+        mergeStrategy: getMergeStrategy("merge-to-head"),
+      });
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "implement-prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).not.toContain("{{TASK_ID}}");
+
+      expect(prompt).toContain("Priority order");
+    });
+
+    it("pr-prompt.md substitutes CLOSES_LINE for github-issues to include `Closes #`", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        backlogManager: getBacklogManager("github-issues"),
+        mergeStrategy: getMergeStrategy("pull-request"),
+      });
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "pr-prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).not.toContain("{{CLOSES_LINE}}");
+      expect(prompt).toContain("Closes #{{ISSUE_ID}}");
+    });
+
+    it("pr-prompt.md substitutes CLOSES_LINE to empty for beads backlog", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        backlogManager: getBacklogManager("beads"),
+        mergeStrategy: getMergeStrategy("pull-request"),
+      });
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "pr-prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).not.toContain("{{CLOSES_LINE}}");
+      expect(prompt).not.toContain("Closes #");
+
+      expect(prompt).toContain("## Summary");
+    });
+
+    for (const template of [
+      "sequential-reviewer",
+      "parallel-planner",
+      "parallel-planner-with-review",
+    ] as const) {
+      it(`${template}: pr-prompt.md substitutes CLOSES_LINE for github-issues`, async () => {
+        const dir = await makeDir();
+        await runScaffold(dir, {
+          templateName: template,
+          backlogManager: getBacklogManager("github-issues"),
+          mergeStrategy: getMergeStrategy("pull-request"),
+        });
+        const prompt = await readFile(
+          join(dir, ".sandcastle", "pr-prompt.md"),
+          "utf-8",
+        );
+        expect(prompt).not.toContain("{{CLOSES_LINE}}");
+        expect(prompt).toContain("Closes #{{ISSUE_ID}}");
+      });
+
+      it(`${template}: pr-prompt.md substitutes CLOSES_LINE to empty for beads`, async () => {
+        const dir = await makeDir();
+        await runScaffold(dir, {
+          templateName: template,
+          backlogManager: getBacklogManager("beads"),
+          mergeStrategy: getMergeStrategy("pull-request"),
+        });
+        const prompt = await readFile(
+          join(dir, ".sandcastle", "pr-prompt.md"),
+          "utf-8",
+        );
+        expect(prompt).not.toContain("{{CLOSES_LINE}}");
+        expect(prompt).not.toContain("Closes #");
+        expect(prompt).toContain("## Summary");
+      });
+    }
+
+    for (const template of [
+      "simple-loop",
+      "sequential-reviewer",
+      "parallel-planner",
+      "parallel-planner-with-review",
+    ] as const) {
+      it(`${template}: pr-prompt.md contains <pr-title>, <pr-body>, and COMPLETE signal`, async () => {
+        const dir = await makeDir();
+        await runScaffold(dir, {
+          templateName: template,
+          mergeStrategy: getMergeStrategy("pull-request"),
+        });
+        const prompt = await readFile(
+          join(dir, ".sandcastle", "pr-prompt.md"),
+          "utf-8",
+        );
+        expect(prompt).toContain("<pr-title>");
+        expect(prompt).toContain("</pr-title>");
+        expect(prompt).toContain("<pr-body>");
+        expect(prompt).toContain("</pr-body>");
+        expect(prompt).toContain("<promise>COMPLETE</promise>");
+      });
+    }
+
+    for (const template of ["simple-loop", "sequential-reviewer"] as const) {
+      it(`${template}: PR-mode main.mts contains lock-until-merged PR search`, async () => {
+        const dir = await makeDir();
+        await runScaffold(dir, {
+          templateName: template,
+          mergeStrategy: getMergeStrategy("pull-request"),
+        });
+        const main = await readFile(
+          join(dir, ".sandcastle", "main.mts"),
+          "utf-8",
+        );
+        expect(main).toContain("head:sandcastle/issue-");
+      });
+    }
+
+    it("main.mts under github-issues + pull-request has valid closesLine string (no literal newlines)", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        backlogManager: getBacklogManager("github-issues"),
+        mergeStrategy: getMergeStrategy("pull-request"),
+      });
+      const main = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+
+      const closesLineMatch = main.match(/const closesLine = "(.*)"/);
+      expect(closesLineMatch).not.toBeNull();
+
+      expect(closesLineMatch![1]).not.toContain("\n");
+
+      expect(closesLineMatch![1]).toContain("Closes #{{ISSUE_ID}}");
+    });
+
+    it("Dockerfile is byte-identical between merge strategies (simple-loop, github-issues)", async () => {
+      const dirMth = await makeDir();
+      const dirPr = await makeDir();
+      await runScaffold(dirMth, {
+        templateName: "simple-loop",
+        backlogManager: getBacklogManager("github-issues"),
+        mergeStrategy: getMergeStrategy("merge-to-head"),
+      });
+      await runScaffold(dirPr, {
+        templateName: "simple-loop",
+        backlogManager: getBacklogManager("github-issues"),
+        mergeStrategy: getMergeStrategy("pull-request"),
+      });
+      const dockerMth = await readFile(
+        join(dirMth, ".sandcastle", "Dockerfile"),
+        "utf-8",
+      );
+      const dockerPr = await readFile(
+        join(dirPr, ".sandcastle", "Dockerfile"),
+        "utf-8",
+      );
+      expect(dockerPr).toBe(dockerMth);
+    });
+
+    it("Dockerfile is byte-identical between merge strategies (parallel-planner, beads)", async () => {
+      const dirMth = await makeDir();
+      const dirPr = await makeDir();
+      await runScaffold(dirMth, {
+        templateName: "parallel-planner",
+        backlogManager: getBacklogManager("beads"),
+        mergeStrategy: getMergeStrategy("merge-to-head"),
+      });
+      await runScaffold(dirPr, {
+        templateName: "parallel-planner",
+        backlogManager: getBacklogManager("beads"),
+        mergeStrategy: getMergeStrategy("pull-request"),
+      });
+      const dockerMth = await readFile(
+        join(dirMth, ".sandcastle", "Dockerfile"),
+        "utf-8",
+      );
+      const dockerPr = await readFile(
+        join(dirPr, ".sandcastle", "Dockerfile"),
+        "utf-8",
+      );
+      expect(dockerPr).toBe(dockerMth);
+    });
+
+    it(".env.example is byte-identical between merge strategies", async () => {
+      const dirMth = await makeDir();
+      const dirPr = await makeDir();
+      await runScaffold(dirMth, {
+        templateName: "simple-loop",
+        mergeStrategy: getMergeStrategy("merge-to-head"),
+      });
+      await runScaffold(dirPr, {
+        templateName: "simple-loop",
+        mergeStrategy: getMergeStrategy("pull-request"),
+      });
+      const envMth = await readFile(
+        join(dirMth, ".sandcastle", ".env.example"),
+        "utf-8",
+      );
+      const envPr = await readFile(
+        join(dirPr, ".sandcastle", ".env.example"),
+        "utf-8",
+      );
+      expect(envPr).toBe(envMth);
+    });
+
+    // These placeholders are resolved at runtime, not scaffold time.
+    const RUNTIME_PLACEHOLDERS = new Set([
+      "TASK_ID",
+      "ISSUE_TITLE",
+      "BRANCH",
+      "BASE_BRANCH",
+      "ISSUE_ID",
+      "SOURCE_BRANCH",
+      "TARGET_BRANCH",
+      "BRANCHES",
+      "ISSUES",
+    ]);
+
+    for (const template of [
+      "simple-loop",
+      "sequential-reviewer",
+      "parallel-planner",
+      "parallel-planner-with-review",
+    ] as const) {
+      for (const strategy of ["merge-to-head", "pull-request"] as const) {
+        for (const backlog of ["github-issues", "beads"] as const) {
+          it(`${template} × ${strategy} × ${backlog}: no unsubstituted scaffold-time placeholders leak into output`, async () => {
+            const dir = await makeDir();
+            await runScaffold(dir, {
+              templateName: template,
+              backlogManager: getBacklogManager(backlog),
+              mergeStrategy: getMergeStrategy(strategy),
+            });
+            const fs = await import("node:fs/promises");
+            const configDir = join(dir, ".sandcastle");
+            const entries = await fs.readdir(configDir);
+            for (const entry of entries) {
+              if (
+                !/\.(md|mts|ts|env|example|gitignore)$|^Dockerfile$|^Containerfile$/.test(
+                  entry,
+                )
+              ) {
+                continue;
+              }
+              const content = await readFile(join(configDir, entry), "utf-8");
+              const matches = content.match(/\{\{[A-Z_]+\}\}/g) ?? [];
+              const leaked = matches.filter((m) => {
+                const key = m.slice(2, -2);
+                return !RUNTIME_PLACEHOLDERS.has(key);
+              });
+              expect(
+                leaked,
+                `Unsubstituted scaffold-time placeholders found in ${template}/${entry} (strategy=${strategy}, backlog=${backlog}): ${leaked.join(", ")}`,
+              ).toEqual([]);
+            }
+          });
+        }
+      }
+    }
+  });
+
+  describe("Variant file pairing invariant", () => {
+    const templatesWithVariants = [
+      "simple-loop",
+      "sequential-reviewer",
+      "parallel-planner",
+      "parallel-planner-with-review",
+    ] as const;
+
+    for (const template of templatesWithVariants) {
+      it(`${template} variant files come in matched pairs`, async () => {
+        const fs = await import("node:fs/promises");
+        const path = await import("node:path");
+        const url = await import("node:url");
+        const here = path.dirname(url.fileURLToPath(import.meta.url));
+        const templateDir = path.join(here, "templates", template);
+        const files = await fs.readdir(templateDir);
+
+        const mthBases = new Set(
+          files
+            .filter((f) => f.endsWith(".merge-to-head"))
+            .map((f) => f.slice(0, -".merge-to-head".length)),
+        );
+        const prBases = new Set(
+          files
+            .filter((f) => f.endsWith(".pull-request"))
+            .map((f) => f.slice(0, -".pull-request".length)),
+        );
+
+        // pr-prompt.md is PR-only; merge-prompt.md is merge-to-head-only.
+        const prOnly = new Set(["pr-prompt.md"]);
+        const mthOnly = new Set(["merge-prompt.md"]);
+
+        for (const base of mthBases) {
+          if (mthOnly.has(base)) continue;
+          expect(
+            prBases.has(base),
+            `${template}/${base}.merge-to-head exists but ${base}.pull-request is missing`,
+          ).toBe(true);
+        }
+        for (const base of prBases) {
+          if (prOnly.has(base)) continue;
+          expect(
+            mthBases.has(base),
+            `${template}/${base}.pull-request exists but ${base}.merge-to-head is missing`,
+          ).toBe(true);
+        }
+      });
+    }
   });
 
   describe("Backlog manager scaffold", () => {

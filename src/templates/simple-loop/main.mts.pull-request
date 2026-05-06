@@ -1,0 +1,322 @@
+// Simple loop (PR mode): pick the next open issue, work on a stable branch,
+// push, and open or update a pull request via the GitHub CLI.
+//
+// Run this with: npx tsx .sandcastle/main.mts
+// Or add to package.json scripts: "sandcastle": "npx tsx .sandcastle/main.mts"
+
+import * as sandcastle from "@ai-hero/sandcastle";
+import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { execSync } from "node:child_process";
+
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
+
+const MAX_ITERATIONS = 3;
+
+const hooks = {
+  sandbox: { onSandboxReady: [{ command: "npm install" }] },
+};
+
+const copyToWorktree = ["node_modules"];
+
+// ---------------------------------------------------------------------------
+// Host helpers (duplicated per ADR 0009 — no shared template code)
+// ---------------------------------------------------------------------------
+
+// Single-quote shell escape, mirroring the helper in @ai-hero/sandcastle's
+// AgentProvider so quoting behavior is consistent across the project.
+const shellEscape = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`;
+
+// Deterministic title-derived slug. Idempotency holds while the issue title
+// is unchanged; editing the title between runs is a documented cause of a
+// duplicate PR (see ADR 0010).
+const slugify = (title: string): string => {
+  const slug = title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 30)
+    .replace(/-+$/g, "");
+  return slug || "untitled";
+};
+
+// Pre-flight: validate the host has everything PR mode needs. Fails fast with
+// actionable error messages so users can fix their environment before any
+// agent is spawned.
+const preflight = (): { defaultBranch: string } => {
+  try {
+    execSync("git remote get-url origin", { stdio: "ignore" });
+  } catch {
+    throw new Error(
+      "PR mode requires an 'origin' remote. Add one with `git remote add origin <url>`.",
+    );
+  }
+
+  try {
+    execSync("git symbolic-ref -q HEAD", { stdio: "ignore" });
+  } catch {
+    throw new Error(
+      "PR mode requires a checked-out branch (HEAD is detached). Run `git checkout <branch>` first.",
+    );
+  }
+
+  let ghVersionRaw = "";
+  try {
+    ghVersionRaw = execSync("gh --version", { encoding: "utf8" });
+  } catch {
+    throw new Error(
+      "PR mode requires the GitHub CLI (`gh`). Install from https://cli.github.com/.",
+    );
+  }
+  const m = ghVersionRaw.match(/gh version (\d+)\.(\d+)/);
+  if (
+    !m ||
+    Number(m[1]) < 2 ||
+    (Number(m[1]) === 2 && Number(m[2]) < 4)
+  ) {
+    throw new Error(
+      `PR mode requires gh ≥ 2.4 (found: ${ghVersionRaw.trim()}). Upgrade with your package manager.`,
+    );
+  }
+
+  try {
+    execSync("gh auth status", { stdio: "ignore" });
+  } catch {
+    throw new Error(
+      "PR mode requires `gh auth login` on the host. Run it and retry.",
+    );
+  }
+
+  const defaultBranch = execSync(
+    "gh repo view --json defaultBranchRef -q .defaultBranchRef.name",
+    { encoding: "utf8" },
+  ).trim();
+  if (!defaultBranch) {
+    throw new Error(
+      "Could not resolve repository default branch. Check `gh repo view` output.",
+    );
+  }
+  return { defaultBranch };
+};
+
+type PrState = "OPEN" | "CLOSED" | "MERGED" | null;
+
+const checkExistingPr = (
+  branch: string,
+): { state: PrState; url?: string; number?: number } => {
+  try {
+    const raw = execSync(
+      `gh pr list --head ${shellEscape(branch)} --state all --json number,state,url --limit 1`,
+      { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" },
+    );
+    const arr = JSON.parse(raw) as {
+      number: number;
+      state: PrState;
+      url: string;
+    }[];
+    return arr[0] ?? { state: null };
+  } catch (err) {
+    console.warn(`  ⚠ Could not check existing PR for ${branch}: ${(err as Error).message ?? "unknown error"}`);
+    return { state: null };
+  }
+};
+
+// List currently-open PRs whose head branch starts with `sandcastle/issue-`.
+// Used by the "lock until merged" check at the top of each iteration.
+const listOpenSandcastlePrs = (): {
+  number: number;
+  title: string;
+  headRefName: string;
+}[] => {
+  try {
+    const raw = execSync(
+      `gh pr list --state open --search "head:sandcastle/issue-" --json number,title,headRefName`,
+      { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" },
+    );
+    return JSON.parse(raw) as {
+      number: number;
+      title: string;
+      headRefName: string;
+    }[];
+  } catch {
+    return [];
+  }
+};
+
+// Open or update the pull request for an issue branch. Returns the PR URL on
+// success, or null if the iteration should be skipped (closed/merged PR,
+// push rejected, or PR-author agent did not produce structured output).
+const openOrUpdatePullRequest = async (args: {
+  issueId: string;
+  issueTitle: string;
+  branch: string;
+  defaultBranch: string;
+}): Promise<string | null> => {
+  const { issueId, issueTitle, branch, defaultBranch } = args;
+
+  const existing = checkExistingPr(branch);
+  if (existing.state === "MERGED") {
+    console.warn(
+      `  ⚠ ${issueId}: PR ${existing.url} already merged — skipping.`,
+    );
+    return null;
+  }
+  if (existing.state === "CLOSED") {
+    console.warn(`  ⚠ ${issueId}: PR ${existing.url} closed — skipping.`);
+    return null;
+  }
+
+  try {
+    execSync(`git push origin ${shellEscape(branch)}`, {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (err) {
+    const stderr = (err as { stderr?: Buffer }).stderr?.toString() ?? "";
+    console.error(
+      `  ✗ ${issueId}: push failed — skipping (no force-push).\n${stderr}`,
+    );
+    return null;
+  }
+
+  if (existing.state === "OPEN" && existing.url) {
+    console.log(`  ↻ ${issueId}: updated existing PR ${existing.url}`);
+    return existing.url;
+  }
+
+  // Brand-new PR: invoke the PR-author agent for title + body. The agent does
+  // not run gh — it returns title/body inside structured tags so the host can
+  // construct the gh pr create command with proper shell escaping.
+  const closesLine = "{{CLOSES_LINE}}".replace("{{ISSUE_ID}}", issueId);
+  const result = await sandcastle.run({
+    hooks,
+    sandbox: docker(),
+    branchStrategy: { type: "branch", branch },
+    name: "pr-author",
+    maxIterations: 1,
+    agent: sandcastle.claudeCode("claude-sonnet-4-6"),
+    promptFile: "./.sandcastle/pr-prompt.md",
+    promptArgs: {
+      TASK_ID: issueId,
+      ISSUE_TITLE: issueTitle,
+      BRANCH: branch,
+      BASE_BRANCH: defaultBranch,
+      ISSUE_ID: issueId,
+      CLOSES_LINE: closesLine,
+    },
+  });
+
+  const titleMatch = result.stdout.match(/<pr-title>([\s\S]*?)<\/pr-title>/);
+  const bodyMatch = result.stdout.match(/<pr-body>([\s\S]*?)<\/pr-body>/);
+  if (!titleMatch || !bodyMatch) {
+    console.error(
+      `  ✗ ${issueId}: PR-author agent did not emit <pr-title> + <pr-body>. Skipping.`,
+    );
+    return null;
+  }
+  const title = titleMatch[1]!.trim();
+  const body = bodyMatch[1]!.trim();
+
+  try {
+    const cmd =
+      `gh pr create --base ${shellEscape(defaultBranch)} ` +
+      `--head ${shellEscape(branch)} ` +
+      `--title ${shellEscape(title)} ` +
+      `--body ${shellEscape(body)}`;
+    const url = execSync(cmd, { encoding: "utf8" }).trim();
+    console.log(`  ✓ ${issueId}: opened ${url}`);
+    return url;
+  } catch (err) {
+    const stderr = (err as { stderr?: Buffer }).stderr?.toString() ?? "";
+    console.error(`  ✗ ${issueId}: gh pr create failed.\n${stderr}`);
+    return null;
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Main loop
+// ---------------------------------------------------------------------------
+
+const { defaultBranch } = preflight();
+
+for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
+  console.log(`\n=== Iteration ${iteration}/${MAX_ITERATIONS} ===\n`);
+
+  // Lock-until-merged: if any Sandcastle PR is open, continue working on its
+  // issue rather than picking a new one. Once the PR is merged or closed, the
+  // loop frees up to start the next backlog item.
+  const openPrs = listOpenSandcastlePrs();
+
+  let issueId: string;
+  let issueTitle: string;
+  let branch: string;
+
+  if (openPrs.length > 0) {
+    const lockedPr = openPrs.sort((a, b) => a.number - b.number)[0]!;
+    const idMatch = lockedPr.headRefName.match(/^sandcastle\/issue-(\d+)/);
+    if (!idMatch) {
+      console.warn(
+        `  ⚠ Skipping non-conformant Sandcastle branch: ${lockedPr.headRefName}`,
+      );
+      continue;
+    }
+    issueId = idMatch[1]!;
+    issueTitle = lockedPr.title;
+    branch = lockedPr.headRefName;
+    console.log(
+      `Locked to open PR #${lockedPr.number} (issue ${issueId}: ${issueTitle})`,
+    );
+  } else {
+    // No open Sandcastle PR — pick the next backlog item. PR mode assumes the
+    // github-issues backlog manager shape (`{number, title, ...}`); other
+    // backlog managers (e.g. beads) expose different fields and need this
+    // section adjusted before they will work.
+    const issuesRaw = execSync(`{{LIST_TASKS_COMMAND}}`, { encoding: "utf8" });
+    const issues = JSON.parse(issuesRaw) as { number?: number; title?: string }[];
+    if (!Array.isArray(issues) || issues.length === 0) {
+      console.log("No open issues to work on. Exiting.");
+      break;
+    }
+    const next = issues[0]!;
+    if (
+      typeof next.number !== "number" ||
+      typeof next.title !== "string"
+    ) {
+      throw new Error(
+        "PR mode could not read the next issue: expected `{number, title}` shape from {{LIST_TASKS_COMMAND}}. " +
+          "PR mode currently assumes the github-issues backlog manager. " +
+          "If you are using a different backlog manager, adjust the issue-resolution block in this file.",
+      );
+    }
+    issueId = String(next.number);
+    issueTitle = next.title;
+    branch = `sandcastle/issue-${issueId}-${slugify(issueTitle)}`;
+    console.log(`Picked next issue ${issueId}: ${issueTitle}`);
+  }
+
+  const result = await sandcastle.run({
+    hooks,
+    copyToWorktree,
+    sandbox: docker(),
+    branchStrategy: { type: "branch", branch },
+    name: "implementer",
+    maxIterations: 100,
+    agent: sandcastle.claudeCode("claude-sonnet-4-6"),
+    promptFile: "./.sandcastle/prompt.md",
+    promptArgs: { TASK_ID: issueId, BRANCH: branch },
+  });
+
+  if (result.commits.length === 0) {
+    console.log(`No commits produced for issue ${issueId}. Nothing to push.`);
+    continue;
+  }
+
+  await openOrUpdatePullRequest({
+    issueId,
+    issueTitle,
+    branch,
+    defaultBranch,
+  });
+}
+
+console.log("\nAll done.");

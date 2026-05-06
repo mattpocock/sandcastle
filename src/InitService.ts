@@ -597,6 +597,8 @@ const TEXT_FILE_EXTENSIONS = new Set([
   ".txt",
   ".env",
   ".example",
+  ".mts",
+  ".ts",
   // Dockerfile / Containerfile have no extension — handled by name check below
 ]);
 

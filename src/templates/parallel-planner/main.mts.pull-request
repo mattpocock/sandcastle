@@ -1,0 +1,325 @@
+// Parallel planner (PR mode): three-phase orchestration loop.
+//
+//   Phase 1 (Plan):    An opus agent analyzes open issues, builds a dependency
+//                      graph, and outputs a <plan> JSON listing unblocked
+//                      issues with branch names. The branch names emitted by
+//                      the planner are *replaced* in the host with deterministic
+//                      `sandcastle/issue-<id>-<slug>` names so re-runs always
+//                      target the same branch (and update the same PR).
+//   Phase 2 (Execute): N sonnet agents run in parallel via Promise.allSettled,
+//                      each working a single issue on its own branch.
+//   Phase 3 (PRs):     For each branch with new commits, the host pushes to
+//                      origin and either updates an existing open PR (push-only)
+//                      or invokes a short PR-author agent and opens a new PR
+//                      via `gh pr create` on the host.
+//
+// Run this with: npx tsx .sandcastle/main.mts
+// Or add to package.json scripts: "sandcastle": "npx tsx .sandcastle/main.mts"
+
+import * as sandcastle from "@ai-hero/sandcastle";
+import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { execSync } from "node:child_process";
+
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
+
+const MAX_ITERATIONS = 10;
+
+const hooks = {
+  sandbox: { onSandboxReady: [{ command: "npm install" }] },
+};
+
+const copyToWorktree = ["node_modules"];
+
+// ---------------------------------------------------------------------------
+// Host helpers (duplicated per ADR 0009 — no shared template code)
+// ---------------------------------------------------------------------------
+
+const shellEscape = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`;
+
+const slugify = (title: string): string => {
+  const slug = title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 30)
+    .replace(/-+$/g, "");
+  return slug || "untitled";
+};
+
+const preflight = (): { defaultBranch: string } => {
+  try {
+    execSync("git remote get-url origin", { stdio: "ignore" });
+  } catch {
+    throw new Error(
+      "PR mode requires an 'origin' remote. Add one with `git remote add origin <url>`.",
+    );
+  }
+  try {
+    execSync("git symbolic-ref -q HEAD", { stdio: "ignore" });
+  } catch {
+    throw new Error(
+      "PR mode requires a checked-out branch (HEAD is detached). Run `git checkout <branch>` first.",
+    );
+  }
+  let ghVersionRaw = "";
+  try {
+    ghVersionRaw = execSync("gh --version", { encoding: "utf8" });
+  } catch {
+    throw new Error(
+      "PR mode requires the GitHub CLI (`gh`). Install from https://cli.github.com/.",
+    );
+  }
+  const m = ghVersionRaw.match(/gh version (\d+)\.(\d+)/);
+  if (
+    !m ||
+    Number(m[1]) < 2 ||
+    (Number(m[1]) === 2 && Number(m[2]) < 4)
+  ) {
+    throw new Error(
+      `PR mode requires gh ≥ 2.4 (found: ${ghVersionRaw.trim()}). Upgrade with your package manager.`,
+    );
+  }
+  try {
+    execSync("gh auth status", { stdio: "ignore" });
+  } catch {
+    throw new Error(
+      "PR mode requires `gh auth login` on the host. Run it and retry.",
+    );
+  }
+  const defaultBranch = execSync(
+    "gh repo view --json defaultBranchRef -q .defaultBranchRef.name",
+    { encoding: "utf8" },
+  ).trim();
+  if (!defaultBranch) {
+    throw new Error(
+      "Could not resolve repository default branch. Check `gh repo view` output.",
+    );
+  }
+  return { defaultBranch };
+};
+
+type PrState = "OPEN" | "CLOSED" | "MERGED" | null;
+
+const checkExistingPr = (
+  branch: string,
+): { state: PrState; url?: string; number?: number } => {
+  try {
+    const raw = execSync(
+      `gh pr list --head ${shellEscape(branch)} --state all --json number,state,url --limit 1`,
+      { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" },
+    );
+    const arr = JSON.parse(raw) as {
+      number: number;
+      state: PrState;
+      url: string;
+    }[];
+    return arr[0] ?? { state: null };
+  } catch (err) {
+    console.warn(`  ⚠ Could not check existing PR for ${branch}: ${(err as Error).message ?? "unknown error"}`);
+    return { state: null };
+  }
+};
+
+const openOrUpdatePullRequest = async (args: {
+  issueId: string;
+  issueTitle: string;
+  branch: string;
+  defaultBranch: string;
+}): Promise<string | null> => {
+  const { issueId, issueTitle, branch, defaultBranch } = args;
+
+  const existing = checkExistingPr(branch);
+  if (existing.state === "MERGED") {
+    console.warn(
+      `  ⚠ ${issueId}: PR ${existing.url} already merged — skipping.`,
+    );
+    return null;
+  }
+  if (existing.state === "CLOSED") {
+    console.warn(`  ⚠ ${issueId}: PR ${existing.url} closed — skipping.`);
+    return null;
+  }
+
+  try {
+    execSync(`git push origin ${shellEscape(branch)}`, {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (err) {
+    const stderr = (err as { stderr?: Buffer }).stderr?.toString() ?? "";
+    console.error(
+      `  ✗ ${issueId}: push failed — skipping (no force-push).\n${stderr}`,
+    );
+    return null;
+  }
+
+  if (existing.state === "OPEN" && existing.url) {
+    console.log(`  ↻ ${issueId}: updated existing PR ${existing.url}`);
+    return existing.url;
+  }
+
+  const closesLine = "{{CLOSES_LINE}}".replace("{{ISSUE_ID}}", issueId);
+  const result = await sandcastle.run({
+    hooks,
+    sandbox: docker(),
+    branchStrategy: { type: "branch", branch },
+    name: "pr-author",
+    maxIterations: 1,
+    agent: sandcastle.claudeCode("claude-sonnet-4-6"),
+    promptFile: "./.sandcastle/pr-prompt.md",
+    promptArgs: {
+      TASK_ID: issueId,
+      ISSUE_TITLE: issueTitle,
+      BRANCH: branch,
+      BASE_BRANCH: defaultBranch,
+      ISSUE_ID: issueId,
+      CLOSES_LINE: closesLine,
+    },
+  });
+
+  const titleMatch = result.stdout.match(/<pr-title>([\s\S]*?)<\/pr-title>/);
+  const bodyMatch = result.stdout.match(/<pr-body>([\s\S]*?)<\/pr-body>/);
+  if (!titleMatch || !bodyMatch) {
+    console.error(
+      `  ✗ ${issueId}: PR-author agent did not emit <pr-title> + <pr-body>. Skipping.`,
+    );
+    return null;
+  }
+  const title = titleMatch[1]!.trim();
+  const body = bodyMatch[1]!.trim();
+
+  try {
+    const cmd =
+      `gh pr create --base ${shellEscape(defaultBranch)} ` +
+      `--head ${shellEscape(branch)} ` +
+      `--title ${shellEscape(title)} ` +
+      `--body ${shellEscape(body)}`;
+    const url = execSync(cmd, { encoding: "utf8" }).trim();
+    console.log(`  ✓ ${issueId}: opened ${url}`);
+    return url;
+  } catch (err) {
+    const stderr = (err as { stderr?: Buffer }).stderr?.toString() ?? "";
+    console.error(`  ✗ ${issueId}: gh pr create failed.\n${stderr}`);
+    return null;
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Main loop
+// ---------------------------------------------------------------------------
+
+const { defaultBranch } = preflight();
+
+for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
+  console.log(`\n=== Iteration ${iteration}/${MAX_ITERATIONS} ===\n`);
+
+  // Phase 1: Plan
+  const plan = await sandcastle.run({
+    hooks,
+    sandbox: docker(),
+    name: "planner",
+    maxIterations: 1,
+    agent: sandcastle.claudeCode("claude-opus-4-6"),
+    promptFile: "./.sandcastle/plan-prompt.md",
+  });
+
+  const planMatch = plan.stdout.match(/<plan>([\s\S]*?)<\/plan>/);
+  if (!planMatch) {
+    throw new Error(
+      "Planning agent did not produce a <plan> tag.\n\n" + plan.stdout,
+    );
+  }
+
+  // Force deterministic branch names. Idempotency depends on this — see
+  // ADR 0010. The planner's emitted branch field is intentionally ignored.
+  const rawIssues = (
+    JSON.parse(planMatch[1]!) as {
+      issues: { id: string; title: string; branch: string }[];
+    }
+  ).issues;
+
+  const issues = rawIssues.map((issue) => ({
+    id: issue.id,
+    title: issue.title,
+    branch: `sandcastle/issue-${issue.id}-${slugify(issue.title)}`,
+  }));
+
+  if (issues.length === 0) {
+    console.log("No unblocked issues to work on. Exiting.");
+    break;
+  }
+
+  console.log(
+    `Planning complete. ${issues.length} issue(s) to work in parallel:`,
+  );
+  for (const issue of issues) {
+    console.log(`  ${issue.id}: ${issue.title} → ${issue.branch}`);
+  }
+
+  // Phase 2: Execute
+  const settled = await Promise.allSettled(
+    issues.map((issue) =>
+      sandcastle.run({
+        hooks,
+        copyToWorktree,
+        sandbox: docker(),
+        branchStrategy: { type: "branch", branch: issue.branch },
+        name: "implementer",
+        maxIterations: 100,
+        agent: sandcastle.claudeCode("claude-sonnet-4-6"),
+        promptFile: "./.sandcastle/implement-prompt.md",
+        promptArgs: {
+          TASK_ID: issue.id,
+          ISSUE_TITLE: issue.title,
+          BRANCH: issue.branch,
+        },
+      }),
+    ),
+  );
+
+  for (const [i, outcome] of settled.entries()) {
+    if (outcome.status === "rejected") {
+      console.error(
+        `  ✗ ${issues[i]!.id} (${issues[i]!.branch}) failed: ${outcome.reason}`,
+      );
+    }
+  }
+
+  const completedIssues = settled
+    .map((outcome, i) => ({ outcome, issue: issues[i]! }))
+    .filter(
+      (
+        entry,
+      ): entry is {
+        outcome: PromiseFulfilledResult<
+          Awaited<ReturnType<typeof sandcastle.run>>
+        >;
+        issue: (typeof issues)[number];
+      } =>
+        entry.outcome.status === "fulfilled" &&
+        entry.outcome.value.commits.length > 0,
+    )
+    .map((entry) => entry.issue);
+
+  console.log(
+    `\nExecution complete. ${completedIssues.length} branch(es) with commits.`,
+  );
+
+  if (completedIssues.length === 0) {
+    console.log("No commits produced. Nothing to push.");
+    continue;
+  }
+
+  // Phase 3: Open or update PRs
+  for (const issue of completedIssues) {
+    await openOrUpdatePullRequest({
+      issueId: issue.id,
+      issueTitle: issue.title,
+      branch: issue.branch,
+      defaultBranch,
+    });
+  }
+}
+
+console.log("\nAll done.");
