@@ -146,6 +146,14 @@ const result = await run({
     env: { DOCKER_SPECIFIC: "value" },
     // Optional: attach container to Docker network(s) — string or string[]
     network: "my-network",
+    // Optional: user mode for Docker. Defaults to "auto": host uid:gid on Linux,
+    // container uid:gid on macOS/Windows. Use "host", "container", or "image"
+    // to force a specific mode.
+    user: "auto",
+    // Optional: UID used when user mode is "container". Defaults to 1000.
+    containerUid: 1000,
+    // Optional: GID used when user mode is "container". Defaults to 1000.
+    containerGid: 1000,
   }),
 
   // Host repo directory — replaces process.cwd() as the anchor for

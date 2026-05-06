@@ -20,6 +20,24 @@ import type { BindMountSandboxHandle } from "../SandboxProvider.js";
 
 const mockExecFile = vi.mocked(execFile);
 
+const mockDockerSuccess = () => {
+  mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+    const callback = rest[rest.length - 1];
+    callback(null, "", "");
+    return undefined as any;
+  });
+};
+
+const getDockerRunArgs = (): string[] => {
+  const runArgs = mockExecFile.mock.calls.find(
+    ([, args]) => Array.isArray(args) && args[0] === "run",
+  )?.[1];
+  if (!Array.isArray(runArgs)) {
+    throw new Error("docker run was not called");
+  }
+  return runArgs;
+};
+
 afterEach(() => {
   mockExecFile.mockReset();
 });
@@ -126,12 +144,117 @@ describe("docker()", () => {
     expect(provider.tag).toBe("bind-mount");
   });
 
-  it("copyFileIn calls docker cp with correct arguments", async () => {
-    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
-      callback(null, "", "");
-      return undefined as any;
+  it("uses platform-aware user mode by default", async () => {
+    mockDockerSuccess();
+
+    const provider = docker();
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
     });
+
+    const runArgs = getDockerRunArgs();
+    const userIdx = runArgs.indexOf("--user");
+    const expectedUser =
+      process.platform === "linux"
+        ? `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`
+        : "1000:1000";
+    expect(runArgs[userIdx + 1]).toBe(expectedUser);
+
+    await handle.close();
+  });
+
+  it("can force container uid/gid 1000:1000", async () => {
+    mockDockerSuccess();
+
+    const provider = docker({ user: "container" });
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    const runArgs = getDockerRunArgs();
+    const userIdx = runArgs.indexOf("--user");
+    expect(runArgs[userIdx + 1]).toBe("1000:1000");
+
+    await handle.close();
+  });
+
+  it("uses custom containerUid/containerGid in container user mode", async () => {
+    mockDockerSuccess();
+
+    const provider = docker({
+      user: "container",
+      containerUid: 500,
+      containerGid: 501,
+    });
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    const runArgs = getDockerRunArgs();
+    const userIdx = runArgs.indexOf("--user");
+    expect(runArgs[userIdx + 1]).toBe("500:501");
+
+    await handle.close();
+  });
+
+  it("can run as the host uid/gid for legacy bind mount setups", async () => {
+    mockDockerSuccess();
+
+    const provider = docker({ user: "host" });
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    const runArgs = getDockerRunArgs();
+    const userIdx = runArgs.indexOf("--user");
+    expect(runArgs[userIdx + 1]).toBe(
+      `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`,
+    );
+
+    await handle.close();
+  });
+
+  it("can omit --user and use the Dockerfile USER", async () => {
+    mockDockerSuccess();
+
+    const provider = docker({ user: "image" });
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    const runArgs = getDockerRunArgs();
+    expect(runArgs).not.toContain("--user");
+
+    await handle.close();
+  });
+
+  it("copyFileIn calls docker cp with correct arguments", async () => {
+    mockDockerSuccess();
 
     const provider = docker();
     const handle = await provider.create({
@@ -163,11 +286,7 @@ describe("docker()", () => {
   });
 
   it("copyFileOut calls docker cp with correct arguments", async () => {
-    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
-      callback(null, "", "");
-      return undefined as any;
-    });
+    mockDockerSuccess();
 
     const provider = docker();
     const handle = await provider.create({
