@@ -201,6 +201,38 @@ describe("InitService scaffold", () => {
     expect(envExample).not.toContain("GH_TOKEN=");
   });
 
+  it("generates .env.example with GITEA_* vars when backlog manager is gitea-issues", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      backlogManager: getBacklogManager("gitea-issues"),
+    });
+
+    const envExample = await readFile(
+      join(dir, ".sandcastle", ".env.example"),
+      "utf-8",
+    );
+    expect(envExample).toContain("GITEA_URL=");
+    expect(envExample).toContain("GITEA_TOKEN=");
+    expect(envExample).toContain("GITEA_REPO=");
+    expect(envExample).not.toContain("GH_TOKEN=");
+  });
+
+  it("generates .env.example with FORGEJO_* vars when backlog manager is forgejo-issues", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      backlogManager: getBacklogManager("forgejo-issues"),
+    });
+
+    const envExample = await readFile(
+      join(dir, ".sandcastle", ".env.example"),
+      "utf-8",
+    );
+    expect(envExample).toContain("FORGEJO_URL=");
+    expect(envExample).toContain("FORGEJO_TOKEN=");
+    expect(envExample).toContain("FORGEJO_REPO=");
+    expect(envExample).not.toContain("GH_TOKEN=");
+  });
+
   it("does not scaffold config.json for blank template", async () => {
     const dir = await makeDir();
     await runScaffold(dir);
@@ -1152,10 +1184,12 @@ describe("InitService scaffold", () => {
   // --- Backlog manager ---
 
   describe("Backlog manager registry", () => {
-    it("listBacklogManagers returns github-issues and beads", () => {
+    it("listBacklogManagers returns github-issues, beads, gitea-issues, and forgejo-issues", () => {
       const managers = listBacklogManagers();
       expect(managers.some((m) => m.name === "github-issues")).toBe(true);
       expect(managers.some((m) => m.name === "beads")).toBe(true);
+      expect(managers.some((m) => m.name === "gitea-issues")).toBe(true);
+      expect(managers.some((m) => m.name === "forgejo-issues")).toBe(true);
     });
 
     it("getBacklogManager returns github-issues entry with expected templateArgs", () => {
@@ -1200,6 +1234,54 @@ describe("InitService scaffold", () => {
       );
     });
 
+    it("getBacklogManager returns gitea-issues entry with expected templateArgs", () => {
+      const manager = getBacklogManager("gitea-issues");
+      expect(manager).toBeDefined();
+      expect(manager!.label).toBe("Gitea Issues");
+      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain("curl");
+      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain(
+        "$GITEA_URL/api/v1/repos/$GITEA_REPO/issues",
+      );
+      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain(
+        "labels=Sandcastle",
+      );
+      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain("comments");
+      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain(
+        "$GITEA_TOKEN",
+      );
+      expect(manager!.templateArgs.VIEW_TASK_COMMAND).toContain(
+        "$GITEA_URL/api/v1/repos/$GITEA_REPO/issues/<ID>",
+      );
+      expect(manager!.templateArgs.CLOSE_TASK_COMMAND).toContain(
+        "Completed by Sandcastle",
+      );
+      expect(manager!.templateArgs.CLOSE_TASK_COMMAND).toContain('"closed"');
+      expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).not.toContain("gh");
+      expect(manager!.envExample).toContain("GITEA_URL=");
+      expect(manager!.envExample).toContain("GITEA_TOKEN=");
+      expect(manager!.envExample).toContain("GITEA_REPO=");
+    });
+
+    it("getBacklogManager returns forgejo-issues entry with expected templateArgs", () => {
+      const manager = getBacklogManager("forgejo-issues");
+      expect(manager).toBeDefined();
+      expect(manager!.label).toBe("Forgejo Issues");
+      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain("curl");
+      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain(
+        "$FORGEJO_URL/api/v1/repos/$FORGEJO_REPO/issues",
+      );
+      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain(
+        "$FORGEJO_TOKEN",
+      );
+      expect(manager!.templateArgs.LIST_TASKS_COMMAND).not.toContain(
+        "$GITEA_URL",
+      );
+      expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).not.toContain("gh");
+      expect(manager!.envExample).toContain("FORGEJO_URL=");
+      expect(manager!.envExample).toContain("FORGEJO_TOKEN=");
+      expect(manager!.envExample).toContain("FORGEJO_REPO=");
+    });
+
     it("getBacklogManager returns undefined for unknown manager", () => {
       expect(getBacklogManager("nonexistent")).toBeUndefined();
     });
@@ -1242,6 +1324,67 @@ describe("InitService scaffold", () => {
       expect(prompt).not.toContain("gh issue close");
       expect(prompt).not.toContain("{{LIST_TASKS_COMMAND}}");
       expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
+    });
+
+    it("simple-loop with gitea-issues produces prompt with curl-based commands", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        backlogManager: getBacklogManager("gitea-issues"),
+      });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).toContain("curl");
+      expect(prompt).toContain("$GITEA_URL/api/v1/repos/$GITEA_REPO/issues");
+      expect(prompt).toContain("$GITEA_TOKEN");
+      expect(prompt).toContain("Completed by Sandcastle");
+      expect(prompt).not.toContain("gh issue list");
+      expect(prompt).not.toContain("gh issue close");
+      expect(prompt).not.toContain("{{LIST_TASKS_COMMAND}}");
+      expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
+    });
+
+    it("simple-loop with forgejo-issues produces prompt with curl-based commands", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        backlogManager: getBacklogManager("forgejo-issues"),
+      });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).toContain("curl");
+      expect(prompt).toContain(
+        "$FORGEJO_URL/api/v1/repos/$FORGEJO_REPO/issues",
+      );
+      expect(prompt).toContain("$FORGEJO_TOKEN");
+      expect(prompt).not.toContain("$GITEA_URL");
+      expect(prompt).not.toContain("gh issue list");
+      expect(prompt).not.toContain("{{LIST_TASKS_COMMAND}}");
+    });
+
+    it("gitea-issues Dockerfile does not install the GitHub CLI", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        backlogManager: getBacklogManager("gitea-issues"),
+      });
+
+      const dockerfile = await readFile(
+        join(dir, ".sandcastle", "Dockerfile"),
+        "utf-8",
+      );
+      expect(dockerfile).not.toContain("apt-get install -y gh");
+      expect(dockerfile).not.toContain("cli.github.com");
+      // curl + jq remain — they are part of the base image install above
+      expect(dockerfile).toContain("curl");
+      expect(dockerfile).toContain("jq");
+      expect(dockerfile).not.toContain("{{BACKLOG_MANAGER_TOOLS}}");
     });
 
     it("simple-loop with beads skips --label Sandcastle (no label to strip)", async () => {

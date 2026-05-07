@@ -257,6 +257,37 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \\
   && apt-get update && apt-get install -y gh \\
   && rm -rf /var/lib/apt/lists/*`;
 
+// Gitea and Forgejo expose the same REST API at /api/v1. Forgejo is a soft-fork
+// of Gitea (2022) and remains API-compatible for issue/PR operations, so a
+// single set of curl-based commands targets both — only the configured
+// GITEA_URL / FORGEJO_URL differs.
+const GITEA_API_TOOLS = `# Gitea/Forgejo backlog uses the REST API via curl + jq (already installed above).
+# No additional CLI is needed.`;
+
+// One-line shell commands embedded in markdown templates. They produce JSON
+// shaped identically to the GitHub Issues output so downstream prompts don't
+// need to branch on the backlog manager.
+const giteaListTasksCommand = (
+  urlVar: string,
+  tokenVar: string,
+  repoVar: string,
+): string =>
+  `for n in $(curl -fsSL -H "Authorization: token $${tokenVar}" "$${urlVar}/api/v1/repos/$${repoVar}/issues?state=open&type=issues&labels=Sandcastle&limit=50" | jq '.[].number'); do c=$(curl -fsSL -H "Authorization: token $${tokenVar}" "$${urlVar}/api/v1/repos/$${repoVar}/issues/$n/comments" | jq '[.[] | {body}]'); curl -fsSL -H "Authorization: token $${tokenVar}" "$${urlVar}/api/v1/repos/$${repoVar}/issues/$n" | jq --argjson comments "$c" '{number, title, body, labels: [.labels[] | {name}], comments: $comments}'; done | jq -s '.'`;
+
+const giteaViewTaskCommand = (
+  urlVar: string,
+  tokenVar: string,
+  repoVar: string,
+): string =>
+  `curl -fsSL -H "Authorization: token $${tokenVar}" "$${urlVar}/api/v1/repos/$${repoVar}/issues/<ID>" | jq '{number, title, state, body, labels: [.labels[].name]}'`;
+
+const giteaCloseTaskCommand = (
+  urlVar: string,
+  tokenVar: string,
+  repoVar: string,
+): string =>
+  `curl -fsSL -H "Authorization: token $${tokenVar}" -H "Content-Type: application/json" -X POST "$${urlVar}/api/v1/repos/$${repoVar}/issues/<ID>/comments" -d '{"body":"Completed by Sandcastle"}' >/dev/null && curl -fsSL -H "Authorization: token $${tokenVar}" -H "Content-Type: application/json" -X PATCH "$${urlVar}/api/v1/repos/$${repoVar}/issues/<ID>" -d '{"state":"closed"}' >/dev/null`;
+
 const BEADS_TOOLS = `# Install system dependencies for Beads
 RUN apt-get update && apt-get install -y \\
   dpkg-dev \\
@@ -283,6 +314,62 @@ const BACKLOG_MANAGER_REGISTRY: BacklogManagerEntry[] = [
     },
     envExample: `# GitHub personal access token
 GH_TOKEN=`,
+  },
+  {
+    name: "gitea-issues",
+    label: "Gitea Issues",
+    templateArgs: {
+      LIST_TASKS_COMMAND: giteaListTasksCommand(
+        "GITEA_URL",
+        "GITEA_TOKEN",
+        "GITEA_REPO",
+      ),
+      VIEW_TASK_COMMAND: giteaViewTaskCommand(
+        "GITEA_URL",
+        "GITEA_TOKEN",
+        "GITEA_REPO",
+      ),
+      CLOSE_TASK_COMMAND: giteaCloseTaskCommand(
+        "GITEA_URL",
+        "GITEA_TOKEN",
+        "GITEA_REPO",
+      ),
+      BACKLOG_MANAGER_TOOLS: GITEA_API_TOOLS,
+    },
+    envExample: `# Gitea instance URL (e.g. https://gitea.example.com) and personal access token
+GITEA_URL=
+GITEA_TOKEN=
+# Repository in owner/repo form (e.g. acme/widgets)
+GITEA_REPO=`,
+  },
+  // Forgejo is a soft-fork of Gitea with a compatible REST API at /api/v1, so
+  // the only difference from the Gitea entry is the env var names users see.
+  {
+    name: "forgejo-issues",
+    label: "Forgejo Issues",
+    templateArgs: {
+      LIST_TASKS_COMMAND: giteaListTasksCommand(
+        "FORGEJO_URL",
+        "FORGEJO_TOKEN",
+        "FORGEJO_REPO",
+      ),
+      VIEW_TASK_COMMAND: giteaViewTaskCommand(
+        "FORGEJO_URL",
+        "FORGEJO_TOKEN",
+        "FORGEJO_REPO",
+      ),
+      CLOSE_TASK_COMMAND: giteaCloseTaskCommand(
+        "FORGEJO_URL",
+        "FORGEJO_TOKEN",
+        "FORGEJO_REPO",
+      ),
+      BACKLOG_MANAGER_TOOLS: GITEA_API_TOOLS,
+    },
+    envExample: `# Forgejo instance URL (e.g. https://codeberg.org) and personal access token
+FORGEJO_URL=
+FORGEJO_TOKEN=
+# Repository in owner/repo form (e.g. acme/widgets)
+FORGEJO_REPO=`,
   },
   {
     name: "beads",
