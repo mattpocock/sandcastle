@@ -1147,6 +1147,7 @@ All per-repo sandbox configuration lives in `.sandcastle/`. Run `sandcastle init
 The `.sandcastle/Dockerfile` controls the sandbox environment. The default template installs:
 
 - **Node.js 22** (base image)
+- **Python 3.12**, **pip**, **venv** (Python runtime)
 - **git**, **curl**, **jq** (system dependencies)
 - **GitHub CLI** (`gh`)
 - **Claude Code CLI**
@@ -1159,7 +1160,7 @@ When customizing the Dockerfile, ensure you keep:
 - `gh` (required for issue fetching)
 - Claude Code CLI installed and on PATH
 
-Add your project-specific dependencies (e.g., language runtimes, build tools) to the Dockerfile as needed.
+Add your project-specific dependencies (e.g., language runtimes, build tools) to the Dockerfile as needed. For Python projects, add `pip install --break-system-packages -r requirements.txt` to your `sandbox.onSandboxReady` hook.
 
 ### Hooks
 
@@ -1174,6 +1175,7 @@ hooks: {
   sandbox: {
     onSandboxReady: [
       { command: "npm install", timeoutMs: 300_000 },
+      { command: "pip install -r requirements.txt" },
       { command: "apt-get install -y ffmpeg", sudo: true },
     ],
   },

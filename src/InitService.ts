@@ -38,6 +38,11 @@ const TEMPLATES: TemplateMetadata[] = [
     description:
       "Plans parallelizable issues, executes with per-branch review, merges",
   },
+  {
+    name: "superpowers-workflow",
+    description:
+      "Multi-phase workflow with planning, execution, and merge using superpowers skills",
+  },
 ];
 
 export const listTemplates = (): TemplateMetadata[] => TEMPLATES;
@@ -63,6 +68,9 @@ RUN apt-get update && apt-get install -y \\
   git \\
   curl \\
   jq \\
+  python3 \\
+  python3-pip \\
+  python3-venv \\
   && rm -rf /var/lib/apt/lists/*
 
 {{BACKLOG_MANAGER_TOOLS}}
@@ -74,7 +82,7 @@ ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
 # Rename the base image's "node" user to "agent" and align UID/GID.
-RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+RUN groupmod -g $AGENT_GID node || true && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
 USER \${AGENT_UID}:\${AGENT_GID}
 
 # Install Claude Code CLI
@@ -98,6 +106,9 @@ RUN apt-get update && apt-get install -y \\
   git \\
   curl \\
   jq \\
+  python3 \\
+  python3-pip \\
+  python3-venv \\
   && rm -rf /var/lib/apt/lists/*
 
 {{BACKLOG_MANAGER_TOOLS}}
@@ -109,7 +120,7 @@ ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
 # Rename the base image's "node" user to "agent" and align UID/GID.
-RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+RUN groupmod -g $AGENT_GID node || true && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
 
 # Install pi coding agent (run as root before USER agent)
 RUN npm install -g @mariozechner/pi-coding-agent
@@ -131,6 +142,9 @@ RUN apt-get update && apt-get install -y \\
   git \\
   curl \\
   jq \\
+  python3 \\
+  python3-pip \\
+  python3-venv \\
   && rm -rf /var/lib/apt/lists/*
 
 {{BACKLOG_MANAGER_TOOLS}}
@@ -142,7 +156,7 @@ ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
 # Rename the base image's "node" user to "agent" and align UID/GID.
-RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+RUN groupmod -g $AGENT_GID node || true && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
 
 # Install Codex CLI (run as root before USER agent)
 RUN npm install -g @openai/codex
@@ -164,6 +178,9 @@ RUN apt-get update && apt-get install -y \\
   git \\
   curl \\
   jq \\
+  python3 \\
+  python3-pip \\
+  python3-venv \\
   && rm -rf /var/lib/apt/lists/*
 
 {{BACKLOG_MANAGER_TOOLS}}
@@ -175,7 +192,7 @@ ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
 # Rename the base image's "node" user to "agent" and align UID/GID.
-RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+RUN groupmod -g $AGENT_GID node || true && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
 
 # Install OpenCode CLI (run as root before USER agent)
 RUN npm install -g opencode-ai@latest
@@ -197,9 +214,10 @@ const AGENT_REGISTRY: AgentEntry[] = [
     defaultModel: "claude-opus-4-6",
     factoryImport: "claudeCode",
     dockerfileTemplate: CLAUDE_CODE_DOCKERFILE,
-    envExample: `# Anthropic API key
-# If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191
-ANTHROPIC_API_KEY=`,
+    envExample: `# Anthropic auth token (use "freecc" for free-claude-code proxy)
+ANTHROPIC_AUTH_TOKEN=freecc
+# Point to your free-claude-code proxy (default: localhost:8082)
+ANTHROPIC_BASE_URL=http://host.docker.internal:8082`,
   },
   {
     name: "pi",
@@ -417,6 +435,36 @@ const COMPILED_FILE_EXTENSIONS = [
   ".d.mts.map",
 ];
 
+const copyRecursive = (
+  src: string,
+  dest: string,
+): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    // Try to read as directory; if it succeeds, it's a directory
+    const entries = yield* fs.readDirectory(src).pipe(
+      Effect.mapError(() => undefined as void),
+      Effect.catchAll(() => Effect.succeed(undefined as string[] | undefined)),
+    );
+    if (entries) {
+      // It's a directory — create it and copy contents recursively
+      yield* fs
+        .makeDirectory(dest, { recursive: true })
+        .pipe(Effect.mapError((e) => new Error(e.message)));
+      yield* Effect.all(
+        entries.map((entry) =>
+          copyRecursive(join(src, entry), join(dest, entry)),
+        ),
+        { concurrency: "unbounded" },
+      );
+    } else {
+      // It's a file — copy it directly
+      yield* fs
+        .copyFile(src, dest)
+        .pipe(Effect.mapError((e) => new Error(e.message)));
+    }
+  });
+
 const copyTemplateFiles = (
   templateDir: string,
   destDir: string,
@@ -437,9 +485,7 @@ const copyTemplateFiles = (
         )
         .map((f) => {
           const destName = f === "main.mts" ? mainFilename : f;
-          return fs
-            .copyFile(join(templateDir, f), join(destDir, destName))
-            .pipe(Effect.mapError((e) => new Error(e.message)));
+          return copyRecursive(join(templateDir, f), join(destDir, destName));
         }),
       { concurrency: "unbounded" },
     );

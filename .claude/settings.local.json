@@ -26,7 +26,27 @@
       "WebFetch(domain:www.daytona.io)",
       "WebFetch(domain:www.npmjs.com)",
       "Bash(git diff:*)",
-      "WebFetch(domain:vercel.com)"
+      "WebFetch(domain:vercel.com)",
+      "mcp__plugin_context-mode_context-mode__ctx_batch_execute",
+      "mcp__plugin_context-mode_context-mode__ctx_execute_file",
+      "mcp__plugin_context7_context7__resolve-library-id",
+      "mcp__plugin_context-mode_context-mode__ctx_fetch_and_index",
+      "mcp__plugin_context-mode_context-mode__ctx_search",
+      "mcp__plugin_context7_context7__query-docs",
+      "Bash(xxd)",
+      "Bash(npx tsc *)",
+      "mcp__plugin_context-mode_context-mode__ctx_execute",
+      "Bash(git stash *)",
+      "Bash(npx tsx *)",
+      "Bash(npm run *)",
+      "Bash(npm link *)",
+      "Bash(sandcastle init *)",
+      "Bash(docker run *)",
+      "Bash(node -e \"import { existsSync, readFileSync } from 'node:fs'; import { join, dirname } from 'node:path'; const envPath = join\\('.sandcastle', '.env'\\); console.log\\('env exists:', existsSync\\(envPath\\)\\); if \\(existsSync\\(envPath\\)\\) { const content = readFileSync\\(envPath, 'utf-8'\\); console.log\\('env content:', content\\); }\")",
+      "Bash(docker exec test-sandcastle *)",
+      "Bash(docker rm *)",
+      "Bash(docker exec *)",
+      "Bash(npm install *)"
     ]
   }
 }

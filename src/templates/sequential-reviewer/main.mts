@@ -31,15 +31,15 @@ import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 const MAX_ITERATIONS = 10;
 
 // Hooks run inside the sandbox before the agent starts each iteration.
-// npm install ensures the sandbox always has fresh dependencies.
+// npm install / pip install ensures the sandbox always has fresh dependencies.
 const hooks = {
-  sandbox: { onSandboxReady: [{ command: "npm install" }] },
+  sandbox: { onSandboxReady: [{ command: "npm install" }, { command: "[ -f requirements.txt ] && command -v pip && pip install --break-system-packages -r requirements.txt" }] },
 };
 
-// Copy node_modules from the host into the worktree before each sandbox
-// starts. Avoids a full npm install from scratch; the hook above handles
+// Copy node_modules, venv, .venv from the host into the worktree before each sandbox
+// starts. Avoids a full install from scratch; the hooks above handle
 // platform-specific binaries and any packages added since the last copy.
-const copyToWorktree = ["node_modules"];
+const copyToWorktree = ["node_modules", "venv", ".venv", "src"];
 
 // ---------------------------------------------------------------------------
 // Main loop

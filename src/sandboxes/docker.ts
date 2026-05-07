@@ -102,10 +102,8 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
       const imageName =
         configuredImageName ?? defaultImageName(createOptions.hostRepoPath);
 
-      const containerUid =
-        options?.containerUid ?? process.getuid?.() ?? 1000;
-      const containerGid =
-        options?.containerGid ?? process.getgid?.() ?? 1000;
+      const containerUid = options?.containerUid ?? process.getuid?.() ?? 1000;
+      const containerGid = options?.containerGid ?? process.getgid?.() ?? 1000;
 
       // Pre-flight: verify image exists and UID matches
       await checkImageUid(imageName, containerUid);

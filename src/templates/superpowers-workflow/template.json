@@ -1,0 +1,4 @@
+{
+  "name": "superpowers-workflow",
+  "description": "Full Superpowers skills workflow: plan → worktree → write plans → subagent-driven execution → TDD → code review → finish branch"
+}
