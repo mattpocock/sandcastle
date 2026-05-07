@@ -224,6 +224,7 @@ export interface BacklogManagerEntry {
   readonly name: string;
   readonly label: string;
   readonly templateArgs: {
+    readonly LIST_TASKS_SNIPPET: string;
     readonly LIST_TASKS_COMMAND: string;
     readonly VIEW_TASK_COMMAND: string;
     readonly CLOSE_TASK_COMMAND: string;
@@ -255,11 +256,19 @@ RUN curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/i
 
 RUN corepack enable`;
 
+const LINEAR_TOOLS = `# Configure Official Linear MCP server for Claude Code
+# Settings will be relocated to /home/agent/.claude/ by the subsequent usermod command
+RUN mkdir -p /home/node/.claude \\
+  && echo '{"mcpServers":{"linear":{"url":"https://mcp.linear.app/mcp"}}}' > /home/node/.claude/settings.json \\
+  && chown -R node:node /home/node/.claude`;
+
 const BACKLOG_MANAGER_REGISTRY: BacklogManagerEntry[] = [
   {
     name: "github-issues",
     label: "GitHub Issues",
     templateArgs: {
+      LIST_TASKS_SNIPPET:
+        "!`gh issue list --state open --label Sandcastle --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`",
       LIST_TASKS_COMMAND: `gh issue list --state open --label Sandcastle --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`,
       VIEW_TASK_COMMAND: "gh issue view <ID>",
       CLOSE_TASK_COMMAND: `gh issue close <ID> --comment "Completed by Sandcastle"`,
@@ -272,12 +281,26 @@ GH_TOKEN=`,
     name: "beads",
     label: "Beads",
     templateArgs: {
+      LIST_TASKS_SNIPPET: "!`bd ready --json`",
       LIST_TASKS_COMMAND: "bd ready --json",
       VIEW_TASK_COMMAND: "bd show <ID>",
       CLOSE_TASK_COMMAND: `bd close <ID> "Completed by Sandcastle"`,
       BACKLOG_MANAGER_TOOLS: BEADS_TOOLS,
     },
     envExample: "",
+  },
+  {
+    name: "linear",
+    label: "Linear",
+    templateArgs: {
+      LIST_TASKS_SNIPPET: `Use the \`mcp__linear-server__list_issues\` tool to list open issues (filter by \`state: "Todo"\`).`,
+      LIST_TASKS_COMMAND: "mcp__linear-server__list_issues",
+      VIEW_TASK_COMMAND: "mcp__linear-server__get_issue",
+      CLOSE_TASK_COMMAND: `mcp__linear-server__save_issue (set state: "Done")`,
+      BACKLOG_MANAGER_TOOLS: LINEAR_TOOLS,
+    },
+    envExample: `# Linear MCP authentication is handled via OAuth when the agent container first connects.
+# Visit https://linear.app/docs/mcp for setup instructions.`,
   },
 ];
 

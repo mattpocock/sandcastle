@@ -2,7 +2,7 @@
 
 ## Open issues
 
-!`{{LIST_TASKS_COMMAND}}`
+{{LIST_TASKS_SNIPPET}}
 
 ## Recent RALPH commits (last 10)
 
