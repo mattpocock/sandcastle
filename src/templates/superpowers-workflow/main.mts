@@ -126,7 +126,6 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // Agent may return raw JSON, JS-escaped string literal, or wrap JSON in
   // natural-language commentary — handle all cases.
   let planStr = plan.stdout.slice(startTagPos + 6, endTagPos).trim();
-  console.log(`[planner] Extracted <plan> content: ${planStr}`);
   let parsed: { issues: { id: string; title: string; branch: string }[] };
 
   // If the entire match is a JSON string (quoted), parse it to unwrap.
@@ -183,7 +182,6 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   }
 
   parsed = extractJson(planStr) as typeof parsed;
-  console.log(`[planner] Parsed JSON: ${JSON.stringify(parsed)}`);
   const { issues } = parsed;
 
   if (issues.length === 0) {
