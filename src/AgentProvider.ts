@@ -339,6 +339,48 @@ export const opencode = (
 });
 
 // ---------------------------------------------------------------------------
+// GitHub Copilot CLI agent provider
+// ---------------------------------------------------------------------------
+
+/** Options for the GitHub Copilot CLI agent provider. */
+export interface CopilotOptions {
+  /** Reasoning effort level. Maps to the CLI's --effort flag. */
+  readonly effort?: "low" | "medium" | "high";
+  /** Environment variables injected by this agent provider. */
+  readonly env?: Record<string, string>;
+}
+
+export const copilot = (
+  model: string,
+  options?: CopilotOptions,
+): AgentProvider => ({
+  name: "copilot",
+  env: options?.env ?? {},
+  captureSessions: false,
+
+  buildPrintCommand({
+    prompt,
+    dangerouslySkipPermissions,
+  }: AgentCommandOptions): PrintCommand {
+    const allowAll = dangerouslySkipPermissions ? " --allow-all-tools" : "";
+    const effortFlag = options?.effort ? ` --effort ${options.effort}` : "";
+    return {
+      command: `copilot -p ${shellEscape(prompt)} --output-format json --model ${shellEscape(model)}${allowAll}${effortFlag}`,
+    };
+  },
+
+  buildInteractiveArgs({ prompt }: AgentCommandOptions): string[] {
+    const args = ["copilot", "--model", model];
+    if (prompt) args.push("-p", prompt);
+    return args;
+  },
+
+  parseStreamLine(_line: string): ParsedStreamEvent[] {
+    return [];
+  },
+});
+
+// ---------------------------------------------------------------------------
 // Claude Code agent provider
 // ---------------------------------------------------------------------------
 

@@ -23,6 +23,10 @@ ARG AGENT_GID=1000
 
 # Rename the base image's "node" user to "agent" and align UID/GID.
 RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+
+# Install GitHub Copilot CLI (run as root before USER agent)
+RUN npm install -g @github/copilot
+
 USER ${AGENT_UID}:${AGENT_GID}
 
 # Install Claude Code CLI

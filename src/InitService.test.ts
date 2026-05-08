@@ -107,6 +107,20 @@ describe("Agent registry", () => {
     expect(agent!.dockerfileTemplate).toContain("FROM");
     expect(agent!.dockerfileTemplate).toContain("opencode-ai");
   });
+
+  it("listAgents includes copilot", () => {
+    const agents = listAgents();
+    expect(agents.some((a) => a.name === "copilot")).toBe(true);
+  });
+
+  it("getAgent returns copilot entry with expected fields", () => {
+    const agent = getAgent("copilot");
+    expect(agent).toBeDefined();
+    expect(agent!.name).toBe("copilot");
+    expect(agent!.factoryImport).toBe("copilot");
+    expect(agent!.dockerfileTemplate).toContain("FROM");
+    expect(agent!.dockerfileTemplate).toContain("@github/copilot");
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { claudeCode, codex, opencode, pi } from "./AgentProvider.js";
+import { claudeCode, codex, copilot, opencode, pi } from "./AgentProvider.js";
 import type { AgentCommandOptions } from "./AgentProvider.js";
 
 /** Shorthand: build options with dangerouslySkipPermissions: true (mirrors existing sandbox callers). */
@@ -842,6 +842,121 @@ describe("resumeSession on non-Claude providers", () => {
     });
     expect(command).not.toContain("--resume");
     expect(command).not.toContain("abc-123");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// copilot factory
+// ---------------------------------------------------------------------------
+
+describe("copilot factory", () => {
+  it("returns a provider with name 'copilot'", () => {
+    const provider = copilot("claude-sonnet-4.5");
+    expect(provider.name).toBe("copilot");
+  });
+
+  it("does not capture sessions by default", () => {
+    const provider = copilot("claude-sonnet-4.5");
+    expect(provider.captureSessions).toBe(false);
+  });
+
+  it("buildPrintCommand includes the model and -p prompt", () => {
+    const provider = copilot("claude-sonnet-4.5");
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).toContain("copilot -p");
+    expect(command).toContain("'do something'");
+    expect(command).toContain("--model 'claude-sonnet-4.5'");
+    expect(command).toContain("--output-format json");
+  });
+  it("buildPrintCommand includes --allow-all-tools when dangerouslySkipPermissions is true", () => {
+    const provider = copilot("claude-sonnet-4.5");
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+    });
+    expect(command).toContain("--allow-all-tools");
+  });
+
+  it("buildPrintCommand omits --allow-all-tools when dangerouslySkipPermissions is false", () => {
+    const provider = copilot("claude-sonnet-4.5");
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: false,
+    });
+    expect(command).not.toContain("--allow-all-tools");
+  });
+
+  it("buildPrintCommand shell-escapes the prompt", () => {
+    const provider = copilot("claude-sonnet-4.5");
+    const { command } = provider.buildPrintCommand(opts("it's a test"));
+    expect(command).toContain("'it'\\''s a test'");
+  });
+
+  it("buildPrintCommand includes --effort when specified", () => {
+    const provider = copilot("claude-sonnet-4.5", { effort: "high" });
+    const { command } = provider.buildPrintCommand(opts("test"));
+    expect(command).toContain("--effort high");
+  });
+
+  it("buildPrintCommand omits --effort when not specified", () => {
+    const provider = copilot("claude-sonnet-4.5");
+    const { command } = provider.buildPrintCommand(opts("test"));
+    expect(command).not.toContain("--effort");
+  });
+
+  it("buildPrintCommand ignores resumeSession (resume not yet supported)", () => {
+    const provider = copilot("claude-sonnet-4.5");
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+      resumeSession: "abc-123",
+    });
+    expect(command).not.toContain("--resume");
+    expect(command).not.toContain("abc-123");
+  });
+
+  it("buildInteractiveArgs includes copilot binary, --model, and prompt", () => {
+    const provider = copilot("claude-sonnet-4.5");
+    const args = provider.buildInteractiveArgs!(opts("hello"));
+    expect(args[0]).toBe("copilot");
+    expect(args).toContain("--model");
+    expect(args).toContain("claude-sonnet-4.5");
+    expect(args).toContain("hello");
+  });
+
+  it("parseStreamLine returns empty array for all input (raw passthrough)", () => {
+    const provider = copilot("claude-sonnet-4.5");
+    expect(provider.parseStreamLine("some output text")).toEqual([]);
+    expect(provider.parseStreamLine("")).toEqual([]);
+    expect(
+      provider.parseStreamLine(JSON.stringify({ type: "text", text: "hi" })),
+    ).toEqual([]);
+  });
+
+  it("accepts an env option and exposes it on the provider", () => {
+    const provider = copilot("claude-sonnet-4.5", {
+      env: { GITHUB_TOKEN: "ghp_test" },
+    });
+    expect(provider.env).toEqual({ GITHUB_TOKEN: "ghp_test" });
+  });
+
+  it("defaults env to empty object when not provided", () => {
+    const provider = copilot("claude-sonnet-4.5");
+    expect(provider.env).toEqual({});
+  });
+
+  it("bakes model into each provider instance independently", () => {
+    const provider1 = copilot("model-a");
+    const provider2 = copilot("model-b");
+    expect(provider1.buildPrintCommand(opts("test")).command).toContain(
+      "model-a",
+    );
+    expect(provider2.buildPrintCommand(opts("test")).command).toContain(
+      "model-b",
+    );
+    expect(provider1.buildPrintCommand(opts("test")).command).not.toContain(
+      "model-b",
+    );
   });
 });
 
