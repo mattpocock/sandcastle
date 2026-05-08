@@ -759,9 +759,7 @@ describe("opencode factory", () => {
   });
 
   it("buildPrintCommand shell-escapes the variant value", () => {
-    const provider = opencode("opencode/big-pickle", {
-      variant: "it's tricky",
-    });
+    const provider = opencode("opencode/big-pickle", { variant: "it's tricky" });
     const { command } = provider.buildPrintCommand(opts("test"));
     expect(command).toContain("--variant 'it'\\''s tricky'");
   });
