@@ -22,7 +22,10 @@ ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
 # Rename the base image's "node" user to "agent" and align UID/GID.
-RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+# -o (non-unique) allows GID/UID values already used by another group/user in the
+# base image (e.g. GID 20 = "dialout" on Debian bookworm, which collides with the
+# macOS "staff" GID). The collision is harmless — dialout is unused in agent containers.
+RUN groupmod -o -g $AGENT_GID node && usermod -o -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
 USER ${AGENT_UID}:${AGENT_GID}
 
 # Install Claude Code CLI
