@@ -217,7 +217,8 @@ const AGENT_REGISTRY: AgentEntry[] = [
     envExample: `# Anthropic auth token (use "freecc" for free-claude-code proxy)
 ANTHROPIC_AUTH_TOKEN=freecc
 # Point to your free-claude-code proxy (default: localhost:8082)
-ANTHROPIC_BASE_URL=http://host.docker.internal:8082`,
+ANTHROPIC_BASE_URL=http://host.docker.internal:8082
+CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`,
   },
   {
     name: "pi",
