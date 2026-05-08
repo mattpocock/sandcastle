@@ -216,9 +216,17 @@ const AGENT_REGISTRY: AgentEntry[] = [
     dockerfileTemplate: CLAUDE_CODE_DOCKERFILE,
     envExample: `# Anthropic auth token (use "freecc" for free-claude-code proxy)
 ANTHROPIC_AUTH_TOKEN=freecc
-# Point to your free-claude-code proxy (default: localhost:8082)
-ANTHROPIC_BASE_URL=http://host.docker.internal:8082
-CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`,
+# Point to your free-claude-code proxy (default: 127.0.0.1:3456)
+ANTHROPIC_BASE_URL=http://127.0.0.1:3456
+CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
+# Bypass proxy for local CCR server
+NO_PROXY=127.0.0.1
+# Disable Claude Code telemetry
+DISABLE_TELEMETRY=true
+# Suppress cost warnings
+DISABLE_COST_WARNINGS=true
+# Provider API timeout (default: 600000ms / 10min)
+API_TIMEOUT_MS=600000`,
   },
   {
     name: "pi",
