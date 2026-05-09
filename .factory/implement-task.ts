@@ -18,6 +18,9 @@
  * the daemon. Commits landed on FACTORY_BRANCH will be pushed and opened
  * as a PR automatically.
  */
+import * as dotenv from "dotenv";
+dotenv.config({ path: ".sandcastle/.env" });
+
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 
@@ -48,7 +51,9 @@ await using sandbox = await worktree.createSandbox({
 
 const result = await sandbox.run({
   name: "Implementer #" + issueNumber,
-  agent: sandcastle.claudeCode("claude-opus-4-6"),
+  agent: sandcastle.claudeCode(
+    process.env.ANTHROPIC_MODEL || "claude-opus-4-6",
+  ),
   promptFile: "./.sandcastle/implement-prompt.md",
   promptArgs: {
     ISSUE_NUMBER: String(issueNumber),
@@ -60,7 +65,9 @@ const result = await sandbox.run({
 if (result.commits.length > 0) {
   await sandbox.run({
     name: "Reviewer #" + issueNumber,
-    agent: sandcastle.claudeCode("claude-opus-4-6"),
+    agent: sandcastle.claudeCode(
+      process.env.ANTHROPIC_MODEL || "claude-opus-4-6",
+    ),
     promptFile: "./.sandcastle/review-prompt.md",
     promptArgs: {
       ISSUE_NUMBER: String(issueNumber),

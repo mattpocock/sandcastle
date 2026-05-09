@@ -15,6 +15,8 @@
 //   npx tsx .sandcastle/main.mts
 // Or add to package.json:
 //   "scripts": { "sandcastle": "npx tsx .sandcastle/main.mts" }
+import * as dotenv from "dotenv";
+dotenv.config({ path: ".sandcastle/.env" });
 
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
@@ -62,7 +64,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     // not write code.
     maxIterations: 1,
     // Opus for planning: dependency analysis benefits from deeper reasoning.
-    agent: sandcastle.claudeCode("claude-opus-4-6"),
+    agent: sandcastle.claudeCode(process.env.ANTHROPIC_MODEL || "claude-opus-4-6"),
     promptFile: "./.sandcastle/plan-prompt.md",
   });
 
@@ -113,7 +115,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
         // Give each agent plenty of room to implement and iterate on tests.
         maxIterations: 100,
         // Sonnet for execution: fast and capable enough for typical issue work.
-        agent: sandcastle.claudeCode("claude-sonnet-4-6"),
+        agent: sandcastle.claudeCode(process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6"),
         promptFile: "./.sandcastle/implement-prompt.md",
         // Prompt arguments substitute {{TASK_ID}}, {{ISSUE_TITLE}},
         // and {{BRANCH}} placeholders in implement-prompt.md before the
@@ -184,7 +186,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     name: "merger",
     maxIterations: 1,
     // Sonnet is sufficient for merge conflict resolution.
-    agent: sandcastle.claudeCode("claude-sonnet-4-6"),
+    agent: sandcastle.claudeCode(process.env.ANTHROPIC_MODEL || "claude-opus-4-6"),
     promptFile: "./.sandcastle/merge-prompt.md",
     promptArgs: {
       // A markdown list of branch names, one per line.

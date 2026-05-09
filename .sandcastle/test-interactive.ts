@@ -1,3 +1,6 @@
+import * as dotenv from "dotenv";
+dotenv.config({ path: ".sandcastle/.env" });
+
 import * as sandcastle from "@ai-hero/sandcastle";
 import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
 
@@ -7,7 +10,9 @@ const { commits, branch } = await sandcastle.interactive({
     type: "merge-to-head",
   },
   name: "Test",
-  agent: sandcastle.claudeCode("claude-sonnet-4-6"),
+  agent: sandcastle.claudeCode(
+    process.env.ANTHROPIC_MODEL || "claude-opus-4-6",
+  ),
   prompt: "Add /foobar to the .gitignore, then commit.",
   copyToWorkspace: ["node_modules"],
 });
