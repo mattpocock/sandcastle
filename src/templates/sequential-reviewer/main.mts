@@ -18,6 +18,8 @@
 //   npx tsx .sandcastle/main.mts
 // Or add to package.json:
 //   "scripts": { "sandcastle": "npx tsx .sandcastle/main.mts" }
+import * as dotenv from "dotenv";
+dotenv.config({ path: ".sandcastle/.env" });
 
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
@@ -73,7 +75,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     const implement = await sandbox.run({
       name: "implementer",
       maxIterations: 100,
-      agent: sandcastle.claudeCode("claude-sonnet-4-6"),
+      agent: sandcastle.claudeCode(process.env.ANTHROPIC_MODEL || "claude-opus-4-6"),
       promptFile: "./.sandcastle/implement-prompt.md",
     });
 
@@ -95,7 +97,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     await sandbox.run({
       name: "reviewer",
       maxIterations: 1,
-      agent: sandcastle.claudeCode("claude-sonnet-4-6"),
+      agent: sandcastle.claudeCode(process.env.ANTHROPIC_MODEL || "claude-opus-4-6"),
       promptFile: "./.sandcastle/review-prompt.md",
       promptArgs: {
         BRANCH: branch,

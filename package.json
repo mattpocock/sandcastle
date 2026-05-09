@@ -80,6 +80,7 @@
     "@effect/platform-node": "^0.105.0",
     "@effect/printer": "^0.48.0",
     "@effect/printer-ansi": "^0.48.0",
+    "dotenv": "^17.4.2",
     "effect": "^3.20.0"
   },
   "peerDependencies": {
