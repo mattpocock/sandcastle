@@ -13,7 +13,7 @@ await run({
   sandbox: docker(),
 
   // The agent provider. Pass a model string to claudeCode() — sonnet balances
-  // capability and speed for most tasks. Switch to claude-opus-4-6 for harder
+  // capability and speed for most tasks. Switch to claude-opus-4-7 for harder
   // problems, or claude-haiku-4-5-20251001 for speed.
   agent: claudeCode("claude-sonnet-4-6"),
 

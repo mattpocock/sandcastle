@@ -3,7 +3,7 @@
  *
  * Usage:
  *   import { vercel } from "sandcastle/sandboxes/vercel";
- *   await run({ agent: claudeCode("claude-opus-4-6"), sandbox: vercel() });
+ *   await run({ agent: claudeCode("claude-opus-4-7"), sandbox: vercel() });
  */
 
 import { execSync } from "node:child_process";

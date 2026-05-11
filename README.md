@@ -57,7 +57,7 @@ import { run, claudeCode } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 
 await run({
-  agent: claudeCode("claude-opus-4-6"),
+  agent: claudeCode("claude-opus-4-7"),
   sandbox: docker(), // or podman(), vercel(), or your own provider
   promptFile: ".sandcastle/prompt.md",
 });
@@ -84,14 +84,14 @@ import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
 
 // Docker, Podman, and Vercel are interchangeable in run() and createSandbox():
 await run({
-  agent: claudeCode("claude-opus-4-6"),
+  agent: claudeCode("claude-opus-4-7"),
   sandbox: docker(),
   prompt: "...",
 });
 
 // No-sandbox runs the agent directly on the host — interactive() only:
 await interactive({
-  agent: claudeCode("claude-opus-4-6"),
+  agent: claudeCode("claude-opus-4-7"),
   sandbox: noSandbox(),
   prompt: "...", // optional — omit to launch the TUI with no initial prompt
   cwd: "/path/to/other-repo", // optional — defaults to process.cwd()
@@ -109,7 +109,7 @@ import { run, claudeCode } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 
 const result = await run({
-  agent: claudeCode("claude-opus-4-6"),
+  agent: claudeCode("claude-opus-4-7"),
   sandbox: docker(),
   promptFile: ".sandcastle/prompt.md",
 });
@@ -129,7 +129,7 @@ import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 const result = await run({
   // Agent provider — required. Pass a model string to claudeCode().
   // Optional second arg for provider-specific options like effort level.
-  agent: claudeCode("claude-opus-4-6", { effort: "high" }),
+  agent: claudeCode("claude-opus-4-7", { effort: "high" }),
 
   // Sandbox provider — required. Any SandboxProvider works (docker, podman, vercel, or custom).
   // Provider-specific config (like imageName, mounts) lives inside the provider factory call.
@@ -146,6 +146,9 @@ const result = await run({
       { hostPath: "~/.npm", sandboxPath: "/home/agent/.npm", readonly: true },
       { hostPath: "data", sandboxPath: "data" }, // mounts <cwd>/data → <sandbox-repo>/data
     ],
+    // Optional: SELinux volume label — "z" (default, shared), "Z" (private), or false (none).
+    // No-op on non-SELinux systems (Docker Desktop on macOS/Windows, Linux without SELinux).
+    selinuxLabel: "z",
     // Optional: provider-level env vars merged at launch time
     env: { DOCKER_SPECIFIC: "value" },
     // Optional: attach container to Docker network(s) — string or string[]
@@ -249,7 +252,7 @@ await using sandbox = await createSandbox({
 });
 
 const result = await sandbox.run({
-  agent: claudeCode("claude-opus-4-6"),
+  agent: claudeCode("claude-opus-4-7"),
   prompt: "Fix issue #42 in this repo.",
 });
 
@@ -270,7 +273,7 @@ await using sandbox = await createSandbox({
 
 // Step 1: implement
 const implResult = await sandbox.run({
-  agent: claudeCode("claude-opus-4-6"),
+  agent: claudeCode("claude-opus-4-7"),
   promptFile: ".sandcastle/implement.md",
   maxIterations: 5,
 });
@@ -328,7 +331,7 @@ if (closeResult.preservedWorktreePath) {
 
 | Option               | Type               | Default                       | Description                                                         |
 | -------------------- | ------------------ | ----------------------------- | ------------------------------------------------------------------- |
-| `agent`              | AgentProvider      | —                             | **Required.** Agent provider (e.g. `claudeCode("claude-opus-4-6")`) |
+| `agent`              | AgentProvider      | —                             | **Required.** Agent provider (e.g. `claudeCode("claude-opus-4-7")`) |
 | `prompt`             | string             | —                             | Inline prompt (mutually exclusive with `promptFile`)                |
 | `promptFile`         | string             | —                             | Path to prompt file (mutually exclusive with `prompt`)              |
 | `promptArgs`         | PromptArgs         | —                             | Key-value map for `{{KEY}}` placeholder substitution                |
@@ -377,13 +380,13 @@ console.log(wt.branch); // "agent/fix-42"
 
 // Run an interactive session in the worktree (defaults to noSandbox)
 await wt.interactive({
-  agent: claudeCode("claude-opus-4-6"),
+  agent: claudeCode("claude-opus-4-7"),
   prompt: "Explore the codebase and understand the bug.",
 });
 
 // Run an AFK agent in the worktree (sandbox is required)
 const result = await wt.run({
-  agent: claudeCode("claude-opus-4-6"),
+  agent: claudeCode("claude-opus-4-7"),
   sandbox: docker({ imageName: "sandcastle:myrepo" }),
   prompt: "Fix issue #42.",
   maxIterations: 3,
@@ -609,7 +612,7 @@ import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { z } from "zod";
 
 const result = await run({
-  agent: claudeCode("claude-opus-4-6"),
+  agent: claudeCode("claude-opus-4-7"),
   sandbox: docker(),
   prompt: `Analyze the code, and output the result as JSON inside <result> tags.
     The result must match this schema:
@@ -704,7 +707,7 @@ Removes the Podman image.
 
 | Option               | Type               | Default                       | Description                                                                                                                                                     |
 | -------------------- | ------------------ | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agent`              | AgentProvider      | —                             | **Required.** Agent provider (e.g. `claudeCode("claude-opus-4-6")`, `pi("claude-sonnet-4-6")`, `codex("gpt-5.4-mini")`, `opencode("opencode/big-pickle")`)      |
+| `agent`              | AgentProvider      | —                             | **Required.** Agent provider (e.g. `claudeCode("claude-opus-4-7")`, `pi("claude-sonnet-4-6")`, `codex("gpt-5.4-mini")`, `opencode("opencode/big-pickle")`)      |
 | `sandbox`            | SandboxProvider    | —                             | **Required.** Sandbox provider (e.g. `docker()`, `podman()`, `docker({ imageName: "sandcastle:local" })`)                                                       |
 | `cwd`                | string             | `process.cwd()`               | Host repo directory — anchor for `.sandcastle/` artifacts and git operations. Relative paths resolve against `process.cwd()`.                                   |
 | `prompt`             | string             | —                             | Inline prompt (mutually exclusive with `promptFile`)                                                                                                            |
@@ -764,7 +767,7 @@ Pass `resumeSession` to `run()` to continue a prior Claude Code conversation ins
 
 ```typescript
 const result = await run({
-  agent: claudeCode("claude-opus-4-6"),
+  agent: claudeCode("claude-opus-4-7"),
   sandbox: docker(),
   prompt: "Continue where you left off",
   resumeSession: "abc-123-def",
@@ -785,7 +788,7 @@ Constraints:
 The `claudeCode()` factory accepts an optional second argument for provider-specific options:
 
 ```typescript
-agent: claudeCode("claude-opus-4-6", { effort: "high" });
+agent: claudeCode("claude-opus-4-7", { effort: "high" });
 ```
 
 | Option            | Type                                         | Default | Description                                               |
@@ -813,7 +816,7 @@ Both **agent providers** and **sandbox providers** accept an optional `env: Reco
 
 ```typescript
 await run({
-  agent: claudeCode("claude-opus-4-6", {
+  agent: claudeCode("claude-opus-4-7", {
     env: { ANTHROPIC_API_KEY: "sk-ant-..." },
   }),
   sandbox: docker({
@@ -1094,19 +1097,19 @@ import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 
 // head — direct write, bind-mount only (default for bind-mount providers)
 await run({
-  agent: claudeCode("claude-opus-4-6"),
+  agent: claudeCode("claude-opus-4-7"),
   sandbox: docker(),
   prompt: "…",
 });
 // merge-to-head — temp branch, merge back (default for isolated providers)
 await run({
-  agent: claudeCode("claude-opus-4-6"),
+  agent: claudeCode("claude-opus-4-7"),
   sandbox: tempDir(),
   prompt: "…",
 });
 // branch — explicit named branch
 await run({
-  agent: claudeCode("claude-opus-4-6"),
+  agent: claudeCode("claude-opus-4-7"),
   sandbox: docker(),
   branchStrategy: { type: "branch", branch: "agent/fix-42" },
   prompt: "…",
@@ -1121,7 +1124,7 @@ Pass your custom provider via the `sandbox` option — it works the same as the 
 import { run, claudeCode } from "@ai-hero/sandcastle";
 
 const result = await run({
-  agent: claudeCode("claude-opus-4-6"),
+  agent: claudeCode("claude-opus-4-7"),
   sandbox: localProcess(), // your custom provider
   prompt: "Fix issue #42 in this repo.",
 });
@@ -1131,7 +1134,7 @@ const result = await run({
 
 For real-world examples, see:
 
-- [`src/sandboxes/docker.ts`](src/sandboxes/docker.ts) — bind-mount provider using Docker containers
+- [`src/sandboxes/docker.ts`](src/sandboxes/docker.ts) — bind-mount provider using Docker containers (with SELinux label support)
 - [`src/sandboxes/vercel.ts`](src/sandboxes/vercel.ts) — isolated provider using Vercel Firecracker microVMs via `@vercel/sandbox`
 - [`src/sandboxes/podman.ts`](src/sandboxes/podman.ts) — bind-mount provider using Podman containers (with SELinux label support)
 - [`src/sandboxes/test-isolated.ts`](src/sandboxes/test-isolated.ts) — isolated provider using temp directories (used in tests)

@@ -84,7 +84,7 @@ export interface CreateWorktreeOptions {
 }
 
 export interface WorktreeInteractiveOptions {
-  /** Agent provider to use (e.g. claudeCode("claude-opus-4-6")) */
+  /** Agent provider to use (e.g. claudeCode("claude-opus-4-7")) */
   readonly agent: AgentProvider;
   /** Sandbox provider (e.g. docker(), noSandbox()). Defaults to noSandbox(). */
   readonly sandbox?: AnySandboxProvider;
@@ -114,7 +114,7 @@ export interface WorktreeInteractiveOptions {
 }
 
 export interface WorktreeRunOptions {
-  /** Agent provider to use (e.g. claudeCode("claude-opus-4-6")) */
+  /** Agent provider to use (e.g. claudeCode("claude-opus-4-7")) */
   readonly agent: AgentProvider;
   /** Sandbox provider (e.g. docker()). Required — AFK agents should always be sandboxed. */
   readonly sandbox: SandboxProvider;

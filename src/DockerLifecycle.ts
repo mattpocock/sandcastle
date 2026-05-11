@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { execFile } from "node:child_process";
 import { resolve } from "node:path";
 import { DockerError } from "./errors.js";
+import { formatVolumeMount, type SelinuxLabel } from "./mountUtils.js";
 
 const dockerExec = (args: string[]): Effect.Effect<string, DockerError> =>
   Effect.async((resume) => {
@@ -78,6 +79,14 @@ export interface StartContainerOptions {
   readonly user?: string;
   /** Docker network(s) to attach the container to. Passed as `--network` flags. */
   readonly network?: string | readonly string[];
+  /**
+   * SELinux volume label suffix applied to bind mounts (default `"z"`).
+   *
+   * - `"z"` — shared label. No-op on non-SELinux systems.
+   * - `"Z"` — private label; only this container can access the mount.
+   * - `false` — disable labeling entirely.
+   */
+  readonly selinuxLabel?: SelinuxLabel;
 }
 
 /**
@@ -113,9 +122,10 @@ export const startContainer = (
       `${k}=${v}`,
     ]);
 
+    const selinuxLabel = options?.selinuxLabel ?? "z";
     const volumeFlags = (options?.volumeMounts ?? []).flatMap((mount) => [
-      "--mount",
-      `type=bind,source=${mount.hostPath},target=${mount.sandboxPath}${mount.readonly ? ",readonly" : ""}`,
+      "-v",
+      formatVolumeMount(mount, selinuxLabel),
     ]);
 
     const workdirFlags = options?.workdir ? ["-w", options.workdir] : [];

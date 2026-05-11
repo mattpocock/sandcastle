@@ -211,7 +211,7 @@ const AGENT_REGISTRY: AgentEntry[] = [
   {
     name: "claude-code",
     label: "Claude Code",
-    defaultModel: "claude-opus-4-6",
+    defaultModel: "claude-opus-4-7",
     factoryImport: "claudeCode",
     dockerfileTemplate: CLAUDE_CODE_DOCKERFILE,
     envExample: `# Anthropic auth token (use "freecc" for free-claude-code proxy)

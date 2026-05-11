@@ -1,5 +1,29 @@
 # @ai-hero/sandcastle
 
+## 0.5.10
+
+### Patch Changes
+
+- 95d63a4: Apply `:z` SELinux label by default on Docker bind mounts, matching the existing Podman behavior. Adds `selinuxLabel` option to `DockerOptions` (`"z"` | `"Z"` | `false`, default `"z"`). Extracts shared `formatVolumeMount` from Podman provider into `src/mountUtils.ts` so both providers use the same volume-mount formatter.
+- 9bf43df: Auto-create parent directories for file-target bind mounts under `/home/agent`. When a user mount targets a single file whose sandbox-side parent directory may not exist in the image (e.g. `/home/agent/.codex/auth.json`), both Docker and Podman providers now run `mkdir -p` + `chown` on the parent at container start. File mounts whose parent is outside `/home/agent` fail at config time with a clear error and remediation guidance.
+- adbb3cc: Add `variant` option to the `opencode` agent provider for controlling reasoning effort via opencode's `--variant` CLI flag.
+
+## 0.5.9
+
+### Patch Changes
+
+- 1b742cb: Replace hardcoded "GitHub issues" language in simple-loop and sequential-reviewer templates with backlog-agnostic wording so scaffolded projects read correctly regardless of the chosen backlog manager.
+- a85d6c0: Add Docker UID alignment via build-arg and pre-flight diagnostic. Dockerfile templates now accept `AGENT_UID`/`AGENT_GID` build-args (default 1000) and `sandcastle docker build-image` defaults them to the host UID/GID. The Docker provider gains `containerUid`/`containerGid` options and a pre-flight `docker image inspect` check that catches UID mismatches before container start. See ADR-0014.
+- 856e6b7: fix: unescape `\n`, `\r`, `\t`, and `\\` in double-quoted `.env` values to match standard dotenv semantics
+- 77590d0: fix: sequential-reviewer template uses createSandbox so implementer and reviewer share a branch
+
+  The sequential-reviewer template previously used `merge-to-head` for the implementer, which merged the temp branch into HEAD and deleted it. The reviewer then tried to create a worktree for the host branch (e.g. `main`), which was already checked out — causing a git worktree conflict.
+
+  Restructured to use `createSandbox()` with an explicit named branch, so both the implementer and reviewer run in the same sandbox on the same branch. This matches the pattern used by the parallel-planner-with-review template.
+
+- c9f8348: Fix Docker mount failures on Windows hosts by switching from `-v host:sandbox` to `--mount type=bind,source=...,target=...` format (avoiding colon ambiguity with drive letters), and adding missing `patchGitMountsForWindows` calls in `createSandbox` and `createSandboxFromWorktree` code paths.
+- 0fd2e74: Add structured output support: `Output.object({ tag, schema })` and `Output.string({ tag })` extract typed, validated payloads from agent stdout. Adds `output` option to `RunOptions` with overloaded return type, `StructuredOutputError` for extraction failures, and entry-time validation for `maxIterations === 1` and tag-in-prompt checks.
+
 ## 0.5.8
 
 ### Patch Changes

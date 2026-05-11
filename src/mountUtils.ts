@@ -5,12 +5,21 @@
  * validation, image naming, and Windows path normalization.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
-import { isAbsolute, resolve, join } from "node:path";
+import { isAbsolute, resolve, join, dirname } from "node:path";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import type { MountConfig } from "./MountConfig.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
+
+/**
+ * SELinux volume label suffix applied to bind mounts.
+ *
+ * - `"z"` — shared label. No-op on non-SELinux systems.
+ * - `"Z"` — private label; only this container can access the mount.
+ * - `false` — disable labeling entirely.
+ */
+export type SelinuxLabel = "z" | "Z" | false;
 
 /**
  * Deterministic mount point inside the sandbox for the parent repo's .git
@@ -290,4 +299,76 @@ export const patchGitMountsForWindows = async (
   }
 
   return correctedMounts;
+};
+
+/**
+ * Format a bind mount into a `-v` style string for container runtimes.
+ *
+ * Produces: `hostPath:sandboxPath[:ro][,z|Z]`
+ *
+ * Used by both Podman and Docker providers.
+ */
+export const formatVolumeMount = (
+  mount: { hostPath: string; sandboxPath: string; readonly?: boolean },
+  selinuxLabel: SelinuxLabel | undefined,
+): string => {
+  const base = `${mount.hostPath}:${mount.sandboxPath}`;
+  const options = [mount.readonly ? "ro" : undefined, selinuxLabel || undefined]
+    .filter((option): option is string => option !== undefined)
+    .join(",");
+
+  return options ? `${base}:${options}` : base;
+};
+
+/**
+ * Detect file-target mounts whose sandbox-side parent directory may not
+ * exist in the container image, and return the parent dirs that need to
+ * be created at container start.
+ *
+ * Validates at config time: if a file mount's sandbox parent is outside
+ * `sandboxHomedir`, throws with a clear error and remediation guidance.
+ *
+ * For file mounts whose parent is under `sandboxHomedir` (but not equal
+ * to it — `/home/agent` always exists), returns the unique set of parent
+ * directories that must be `mkdir -p` + `chown`'d before the agent runs.
+ *
+ * @param mounts - Resolved mounts (hostPath already validated to exist).
+ * @param sandboxHomedir - The agent's home directory in the sandbox (e.g. `/home/agent`).
+ * @param statFn - Injectable stat function for testing (defaults to `statSync`).
+ */
+export const processFileMountParents = (
+  mounts: ReadonlyArray<{ hostPath: string; sandboxPath: string }>,
+  sandboxHomedir: string,
+  statFn: (path: string) => { isFile(): boolean } = statSync,
+): string[] => {
+  const parentDirs = new Set<string>();
+
+  for (const mount of mounts) {
+    let isFile: boolean;
+    try {
+      isFile = statFn(mount.hostPath).isFile();
+    } catch {
+      continue;
+    }
+
+    if (!isFile) continue;
+
+    const parentDir = dirname(mount.sandboxPath);
+
+    // Parent IS sandboxHomedir — it always exists in the image
+    if (parentDir === sandboxHomedir) continue;
+
+    // Parent is outside sandboxHomedir — fail at config time
+    if (!parentDir.startsWith(sandboxHomedir + "/")) {
+      throw new Error(
+        `Cannot mount file to '${mount.sandboxPath}': ` +
+          `parent directory '${parentDir}' is outside the sandbox home directory ('${sandboxHomedir}'). ` +
+          `Mount the parent directory instead, or rebuild the image with '${parentDir}' pre-created.`,
+      );
+    }
+
+    parentDirs.add(parentDir);
+  }
+
+  return [...parentDirs];
 };

@@ -15,7 +15,9 @@ vi.mock("node:child_process", async () => {
 });
 
 import { execFile, execFileSync } from "node:child_process";
-import { homedir } from "node:os";
+import { writeFileSync, mkdtempSync, unlinkSync, rmdirSync } from "node:fs";
+import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
 import { podman, defaultImageName } from "./podman.js";
 import type { BindMountSandboxHandle } from "../SandboxProvider.js";
 
@@ -509,9 +511,7 @@ describe("podman()", () => {
     // Verify no chown exec call was made
     const chownCall = mockExecFile.mock.calls.find(
       ([cmd, args]) =>
-        cmd === "podman" &&
-        Array.isArray(args) &&
-        args.includes("chown"),
+        cmd === "podman" && Array.isArray(args) && args.includes("chown"),
     );
     expect(chownCall).toBeUndefined();
 
@@ -617,6 +617,105 @@ describe("podman()", () => {
     ).rejects.toThrow("podman cp (in) failed");
 
     await handle.close();
+  });
+
+  it("runs mkdir+chown for file mount parent dirs after container start", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "podman-test-"));
+    const tmpFile = join(tmpDir, "auth.json");
+    writeFileSync(tmpFile, "{}");
+
+    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      callback(null, "", "");
+      return undefined as any;
+    });
+
+    const provider = podman({
+      mounts: [
+        { hostPath: tmpFile, sandboxPath: "/home/agent/.codex/auth.json" },
+      ],
+    });
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    // Find the podman exec call for mkdir+chown
+    const mkdirCall = mockExecFile.mock.calls.find(
+      ([cmd, args]) =>
+        cmd === "podman" &&
+        Array.isArray(args) &&
+        args[0] === "exec" &&
+        args.some(
+          (a: string) =>
+            typeof a === "string" && a.includes("mkdir") && a.includes("chown"),
+        ),
+    );
+    expect(mkdirCall).toBeDefined();
+    const mkdirArgs = mkdirCall![1] as string[];
+    // Should run as root
+    expect(mkdirArgs).toContain("--user");
+    expect(mkdirArgs[mkdirArgs.indexOf("--user") + 1]).toBe("0:0");
+    // Script body is fixed; the dir and uid:gid are passed as argv after `sh`
+    const shCmdIdx = mkdirArgs.indexOf("-c");
+    const shCmd = mkdirArgs[shCmdIdx + 1]!;
+    expect(shCmd).toContain("mkdir -p");
+    expect(shCmd).toContain("chown");
+    expect(mkdirArgs).toContain("/home/agent/.codex");
+    expect(mkdirArgs).toContain("1000:1000");
+
+    unlinkSync(tmpFile);
+    rmdirSync(tmpDir);
+    await handle.close();
+  });
+
+  it("does not run mkdir+chown when there are no file mounts", async () => {
+    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      callback(null, "", "");
+      return undefined as any;
+    });
+
+    const provider = podman();
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    // Should NOT have any podman exec for mkdir
+    const mkdirCall = mockExecFile.mock.calls.find(
+      ([cmd, args]) =>
+        cmd === "podman" &&
+        Array.isArray(args) &&
+        args[0] === "exec" &&
+        args.some((a: string) => typeof a === "string" && a.includes("mkdir")),
+    );
+    expect(mkdirCall).toBeUndefined();
+
+    await handle.close();
+  });
+
+  it("throws at construction time for file mount with parent outside /home/agent", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "podman-test-"));
+    const tmpFile = join(tmpDir, "config.json");
+    writeFileSync(tmpFile, "{}");
+
+    expect(() =>
+      podman({
+        mounts: [{ hostPath: tmpFile, sandboxPath: "/opt/foo/config.json" }],
+      }),
+    ).toThrow(/outside the sandbox home directory/);
+
+    unlinkSync(tmpFile);
+    rmdirSync(tmpDir);
   });
 
   it("includes timeout on signal handler cleanup", async () => {

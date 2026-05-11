@@ -15,6 +15,9 @@ vi.mock("node:child_process", async () => {
 });
 
 import { execFile } from "node:child_process";
+import { writeFileSync, mkdtempSync, unlinkSync, rmdirSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { docker } from "./docker.js";
 import type { BindMountSandboxHandle } from "../SandboxProvider.js";
 
@@ -45,6 +48,15 @@ describe("docker()", () => {
   it("does not have a branchStrategy property", () => {
     const provider = docker();
     expect("branchStrategy" in provider).toBe(false);
+  });
+
+  it("accepts selinuxLabel option", () => {
+    const withZ = docker({ selinuxLabel: "z" });
+    const withBigZ = docker({ selinuxLabel: "Z" });
+    const withFalse = docker({ selinuxLabel: false });
+    expect(withZ.tag).toBe("bind-mount");
+    expect(withBigZ.tag).toBe("bind-mount");
+    expect(withFalse.tag).toBe("bind-mount");
   });
 
   it("accepts a mounts option with valid paths", () => {
@@ -366,6 +378,186 @@ describe("docker()", () => {
     expect(cpArgs[2]).toBe("/host/output.txt");
 
     await handle.close();
+  });
+
+  it("default mounts include :z SELinux label", async () => {
+    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      callback(null, "", "");
+      return undefined as any;
+    });
+
+    const provider = docker();
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    const runCall = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    );
+    const runArgs = runCall![1] as string[];
+    const vIdx = runArgs.indexOf("-v");
+    expect(vIdx).toBeGreaterThan(-1);
+    expect(runArgs[vIdx + 1]).toMatch(/:z$/);
+
+    await handle.close();
+  });
+
+  it("selinuxLabel 'Z' produces :Z suffix on mounts", async () => {
+    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      callback(null, "", "");
+      return undefined as any;
+    });
+
+    const provider = docker({ selinuxLabel: "Z" });
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    const runCall = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    );
+    const runArgs = runCall![1] as string[];
+    const vIdx = runArgs.indexOf("-v");
+    expect(runArgs[vIdx + 1]).toMatch(/:Z$/);
+
+    await handle.close();
+  });
+
+  it("selinuxLabel false produces no SELinux suffix on mounts", async () => {
+    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      callback(null, "", "");
+      return undefined as any;
+    });
+
+    const provider = docker({ selinuxLabel: false });
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    const runCall = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    );
+    const runArgs = runCall![1] as string[];
+    const vIdx = runArgs.indexOf("-v");
+    expect(runArgs[vIdx + 1]).toBe("/tmp/worktree:/home/agent/workspace");
+
+    await handle.close();
+  });
+
+  it("runs mkdir+chown for file mount parent dirs after container start", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "docker-test-"));
+    const tmpFile = join(tmpDir, "auth.json");
+    writeFileSync(tmpFile, "{}");
+
+    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      callback(null, "", "");
+      return undefined as any;
+    });
+
+    const provider = docker({
+      mounts: [
+        { hostPath: tmpFile, sandboxPath: "/home/agent/.codex/auth.json" },
+      ],
+    });
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    // Find the docker exec call for mkdir+chown
+    const mkdirCall = mockExecFile.mock.calls.find(
+      ([cmd, args]) =>
+        cmd === "docker" &&
+        Array.isArray(args) &&
+        args[0] === "exec" &&
+        args.some(
+          (a: string) =>
+            typeof a === "string" && a.includes("mkdir") && a.includes("chown"),
+        ),
+    );
+    expect(mkdirCall).toBeDefined();
+    const mkdirArgs = mkdirCall![1] as string[];
+    // Should run as root
+    expect(mkdirArgs).toContain("--user");
+    expect(mkdirArgs[mkdirArgs.indexOf("--user") + 1]).toBe("0:0");
+    // Script body is fixed; the dir and uid:gid are passed as argv after `sh`
+    const shCmdIdx = mkdirArgs.indexOf("-c");
+    const shCmd = mkdirArgs[shCmdIdx + 1]!;
+    expect(shCmd).toContain("mkdir -p");
+    expect(shCmd).toContain("chown");
+    expect(mkdirArgs).toContain("/home/agent/.codex");
+
+    unlinkSync(tmpFile);
+    rmdirSync(tmpDir);
+    await handle.close();
+  });
+
+  it("does not run mkdir+chown when there are no file mounts", async () => {
+    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      callback(null, "", "");
+      return undefined as any;
+    });
+
+    const provider = docker();
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    // Should NOT have any docker exec for mkdir
+    const mkdirCall = mockExecFile.mock.calls.find(
+      ([cmd, args]) =>
+        cmd === "docker" &&
+        Array.isArray(args) &&
+        args[0] === "exec" &&
+        args.some((a: string) => typeof a === "string" && a.includes("mkdir")),
+    );
+    expect(mkdirCall).toBeUndefined();
+
+    await handle.close();
+  });
+
+  it("throws at construction time for file mount with parent outside /home/agent", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "docker-test-"));
+    const tmpFile = join(tmpDir, "config.json");
+    writeFileSync(tmpFile, "{}");
+
+    expect(() =>
+      docker({
+        mounts: [{ hostPath: tmpFile, sandboxPath: "/opt/foo/config.json" }],
+      }),
+    ).toThrow(/outside the sandbox home directory/);
+
+    unlinkSync(tmpFile);
+    rmdirSync(tmpDir);
   });
 
   it("copyFileIn rejects when docker cp fails", async () => {

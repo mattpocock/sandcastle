@@ -1,10 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 
-vi.mock("node:child_process", () => ({
-  execFile: vi.fn(),
-  execFileSync: vi.fn(),
-}));
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...actual,
+    execFile: vi.fn(),
+    execFileSync: vi.fn(),
+  };
+});
 
 import { execFile } from "node:child_process";
 import { startContainer, buildImage } from "./DockerLifecycle.js";
@@ -115,7 +119,7 @@ describe("startContainer", () => {
     expect(runArgs).not.toContain("--network");
   });
 
-  it("uses --mount type=bind format instead of -v for volume mounts", async () => {
+  it("uses -v format with formatVolumeMount for volume mounts", async () => {
     mockExecFile.mockImplementation((_cmd, _args, _opts, cb: any) => {
       cb(null, "", "");
       return undefined as any;
@@ -133,37 +137,9 @@ describe("startContainer", () => {
       ([, args]) => Array.isArray(args) && args[0] === "run",
     );
     const runArgs = runCall![1] as string[];
-    expect(runArgs).not.toContain("-v");
-    expect(runArgs).toContain("--mount");
-    const mountIdx = runArgs.indexOf("--mount");
-    expect(runArgs[mountIdx + 1]).toBe(
-      "type=bind,source=/host/path,target=/sandbox/path",
-    );
-  });
-
-  it("handles Windows-style host paths with colons correctly", async () => {
-    mockExecFile.mockImplementation((_cmd, _args, _opts, cb: any) => {
-      cb(null, "", "");
-      return undefined as any;
-    });
-
-    await Effect.runPromise(
-      startContainer("ctr", "img", {}, {
-        volumeMounts: [
-          { hostPath: "C:/Users/x/repo", sandboxPath: "/home/agent/workspace" },
-        ],
-      }),
-    );
-
-    const runCall = mockExecFile.mock.calls.find(
-      ([, args]) => Array.isArray(args) && args[0] === "run",
-    );
-    const runArgs = runCall![1] as string[];
-    expect(runArgs).not.toContain("-v");
-    const mountIdx = runArgs.indexOf("--mount");
-    expect(runArgs[mountIdx + 1]).toBe(
-      "type=bind,source=C:/Users/x/repo,target=/home/agent/workspace",
-    );
+    expect(runArgs).toContain("-v");
+    const vIdx = runArgs.indexOf("-v");
+    expect(runArgs[vIdx + 1]).toBe("/host/path:/sandbox/path:z");
   });
 
   it("includes readonly flag for read-only mounts", async () => {
@@ -184,9 +160,98 @@ describe("startContainer", () => {
       ([, args]) => Array.isArray(args) && args[0] === "run",
     );
     const runArgs = runCall![1] as string[];
-    const mountIdx = runArgs.indexOf("--mount");
-    expect(runArgs[mountIdx + 1]).toBe(
-      "type=bind,source=/host/path,target=/sandbox/path,readonly",
+    const vIdx = runArgs.indexOf("-v");
+    expect(runArgs[vIdx + 1]).toBe("/host/path:/sandbox/path:ro,z");
+  });
+
+  it("default mount string ends with :z (SELinux shared label)", async () => {
+    mockExecFile.mockImplementation((_cmd, _args, _opts, cb: any) => {
+      cb(null, "", "");
+      return undefined as any;
+    });
+
+    await Effect.runPromise(
+      startContainer("ctr", "img", {}, {
+        volumeMounts: [
+          { hostPath: "/host/path", sandboxPath: "/sandbox/path" },
+        ],
+      }),
     );
+
+    const runCall = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    );
+    const runArgs = runCall![1] as string[];
+    const vIdx = runArgs.indexOf("-v");
+    expect(runArgs[vIdx + 1]).toBe("/host/path:/sandbox/path:z");
+  });
+
+  it("selinuxLabel 'Z' produces :Z suffix", async () => {
+    mockExecFile.mockImplementation((_cmd, _args, _opts, cb: any) => {
+      cb(null, "", "");
+      return undefined as any;
+    });
+
+    await Effect.runPromise(
+      startContainer("ctr", "img", {}, {
+        volumeMounts: [
+          { hostPath: "/host/path", sandboxPath: "/sandbox/path" },
+        ],
+        selinuxLabel: "Z",
+      }),
+    );
+
+    const runCall = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    );
+    const runArgs = runCall![1] as string[];
+    const vIdx = runArgs.indexOf("-v");
+    expect(runArgs[vIdx + 1]).toBe("/host/path:/sandbox/path:Z");
+  });
+
+  it("selinuxLabel false produces no SELinux suffix", async () => {
+    mockExecFile.mockImplementation((_cmd, _args, _opts, cb: any) => {
+      cb(null, "", "");
+      return undefined as any;
+    });
+
+    await Effect.runPromise(
+      startContainer("ctr", "img", {}, {
+        volumeMounts: [
+          { hostPath: "/host/path", sandboxPath: "/sandbox/path" },
+        ],
+        selinuxLabel: false,
+      }),
+    );
+
+    const runCall = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    );
+    const runArgs = runCall![1] as string[];
+    const vIdx = runArgs.indexOf("-v");
+    expect(runArgs[vIdx + 1]).toBe("/host/path:/sandbox/path");
+  });
+
+  it("readonly with selinuxLabel false produces :ro only", async () => {
+    mockExecFile.mockImplementation((_cmd, _args, _opts, cb: any) => {
+      cb(null, "", "");
+      return undefined as any;
+    });
+
+    await Effect.runPromise(
+      startContainer("ctr", "img", {}, {
+        volumeMounts: [
+          { hostPath: "/host/path", sandboxPath: "/sandbox/path", readonly: true },
+        ],
+        selinuxLabel: false,
+      }),
+    );
+
+    const runCall = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    );
+    const runArgs = runCall![1] as string[];
+    const vIdx = runArgs.indexOf("-v");
+    expect(runArgs[vIdx + 1]).toBe("/host/path:/sandbox/path:ro");
   });
 });

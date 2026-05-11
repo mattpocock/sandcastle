@@ -3,7 +3,7 @@
  *
  * Usage:
  *   import { noSandbox } from "sandcastle/sandboxes/no-sandbox";
- *   await interactive({ agent: claudeCode("claude-opus-4-6"), sandbox: noSandbox() });
+ *   await interactive({ agent: claudeCode("claude-opus-4-7"), sandbox: noSandbox() });
  *
  * Only valid for `interactive()` — not accepted by `run()` or `createSandbox()`.
  * Does not pass `--dangerously-skip-permissions` to the agent — the user manages
