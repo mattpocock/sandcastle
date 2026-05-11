@@ -21,7 +21,11 @@ const TOOL_ARG_FIELDS: Record<string, string> = {
 const extractErrorMessage = (obj: any): string | undefined => {
   const err = obj.error;
   if (typeof err === "string") return err;
-  if (typeof err === "object" && err !== null && typeof err.message === "string") {
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    typeof err.message === "string"
+  ) {
     return err.message;
   }
   if (typeof obj.message === "string") return obj.message;
@@ -348,6 +352,8 @@ export interface ClaudeCodeOptions {
   readonly env?: Record<string, string>;
   /** When false, session capture is disabled. Default: true. */
   readonly captureSessions?: boolean;
+  /** Controls thinking token display. Default: "omitted". */
+  readonly thinkingDisplay?: "enabled" | "disabled" | "omitted";
 }
 
 export const claudeCode = (
@@ -371,7 +377,7 @@ export const claudeCode = (
       ? ` --resume ${shellEscape(resumeSession)}`
       : "";
     return {
-      command: `claude --print --verbose${skipPerms} --output-format stream-json --model ${shellEscape(model)}${effortFlag}${resumeFlag} -p -`,
+      command: `claude --print --verbose${skipPerms} --thinking-display ${options?.thinkingDisplay ?? "omitted"} --output-format stream-json --model ${shellEscape(model)}${effortFlag}${resumeFlag} -p -`,
       stdin: prompt,
     };
   },
@@ -384,6 +390,7 @@ export const claudeCode = (
     if (dangerouslySkipPermissions) args.push("--dangerously-skip-permissions");
     args.push("--model", model);
     if (options?.effort) args.push("--effort", options.effort);
+    args.push("--thinking-display", options?.thinkingDisplay ?? "omitted");
     if (prompt) args.push(prompt);
     return args;
   },

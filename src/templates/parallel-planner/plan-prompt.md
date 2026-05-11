@@ -32,4 +32,6 @@ Output your plan as a JSON object wrapped in `<plan>` tags:
 {"issues": [{"id": "42", "title": "Fix auth bug", "branch": "sandcastle/issue-42-fix-auth-bug"}]}
 </plan>
 
+IMPORTANT: Output raw JSON only. Do NOT escape quotes (no `\"`). Do NOT use JavaScript string literals or indentation escapes. The output must be valid JSON that can be parsed directly with `JSON.parse()`.
+
 Include only unblocked issues. If every issue is blocked, include the single highest-priority candidate (the one with the fewest or weakest dependencies).

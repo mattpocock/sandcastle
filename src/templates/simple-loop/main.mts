@@ -32,11 +32,11 @@ await run({
   // the host directory directly (no worktree to copy into).
   branchStrategy: { type: "merge-to-head" },
 
-  // Copy node_modules from the host into the worktree before the sandbox
-  // starts. This avoids a full npm install from scratch on every iteration.
-  // The onSandboxReady hook still runs npm install as a safety net to handle
+  // Copy node_modules, venv, .venv from the host into the worktree before the sandbox
+  // starts. This avoids a full install from scratch on every iteration.
+  // The onSandboxReady hook still runs install commands as a safety net to handle
   // platform-specific binaries and any packages added since the last copy.
-  copyToWorktree: ["node_modules"],
+  copyToWorktree: ["node_modules", "venv", ".venv", "src"],
 
   // Lifecycle hooks — commands grouped by where they run (host or sandbox).
   hooks: {
@@ -44,7 +44,7 @@ await run({
       // onSandboxReady runs once after the sandbox is initialised and the repo is
       // synced in, before the agent starts. Use it to install dependencies or run
       // any other setup steps your project needs.
-      onSandboxReady: [{ command: "npm install" }],
+      onSandboxReady: [{ command: "npm install" }, { command: "[ -f requirements.txt ] && command -v pip && pip install --break-system-packages -r requirements.txt" }],
     },
   },
 });

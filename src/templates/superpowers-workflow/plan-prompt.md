@@ -10,6 +10,12 @@ Here are the open issues in the repo:
 
 The list above has already been filtered to issues ready for work.
 
+# EXISTING WORKTREES
+
+Check for existing worktrees in the sandcastle worktree folder. Run `git worktree list` to see all worktrees, then look for any that match the pattern `issue-{id}` or `sandcastle/issue-{id}` in the branch name.
+
+If an existing worktree is found for an issue, use its branch name in the plan output instead of generating a new one.
+
 # TASK
 
 Analyze the open issues and build a dependency graph. For each issue, determine whether it **blocks** or **is blocked by** any other open issue.
@@ -22,7 +28,7 @@ An issue B is **blocked by** issue A if:
 
 An issue is **unblocked** if it has zero blocking dependencies on other open issues.
 
-For each unblocked issue, assign a branch name using the format `sandcastle/issue-{id}-{slug}`.
+For each unblocked issue, check if an existing worktree exists (from the EXISTING WORKTREES section above). If found, use that worktree's branch name. Otherwise, assign a new branch name using the format `sandcastle/issue-{id}-{slug}`.
 
 # OUTPUT
 

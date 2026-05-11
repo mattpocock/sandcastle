@@ -28,15 +28,15 @@ import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 const MAX_ITERATIONS = 10;
 
 // Hooks run inside the sandbox before the agent starts each iteration.
-// npm install ensures the sandbox always has fresh dependencies.
+// npm install / pip install ensures the sandbox always has fresh dependencies.
 const hooks = {
-  sandbox: { onSandboxReady: [{ command: "npm install" }] },
+  sandbox: { onSandboxReady: [{ command: "npm install" }, { command: "[ -f requirements.txt ] && command -v pip && pip install --break-system-packages -r requirements.txt" }] },
 };
 
-// Copy node_modules from the host into the worktree before each sandbox
-// starts. Avoids a full npm install from scratch; the hook above handles
+// Copy node_modules, venv, .venv from the host into the worktree before each sandbox
+// starts. Avoids a full install from scratch; the hooks above handle
 // platform-specific binaries and any packages added since the last copy.
-const copyToWorktree = ["node_modules"];
+const copyToWorktree = ["node_modules", "venv", ".venv", "src"];
 
 // ---------------------------------------------------------------------------
 // Main loop
@@ -75,9 +75,68 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   }
 
   // The plan JSON contains an array of issues, each with id, title, branch.
-  const { issues } = JSON.parse(planMatch[1]!) as {
-    issues: { id: string; title: string; branch: string }[];
-  };
+  // Agent may return raw JSON or JS-escaped string literal — handle both.
+  let planStr = planMatch[1]!.trim();
+  let parsed: { issues: { id: string; title: string; branch: string }[] };
+  try {
+    parsed = JSON.parse(planStr) as typeof parsed;
+  } catch {
+    // If the entire match is a JSON string (quoted), parse it to unwrap.
+	  if (planStr.startsWith('"') && planStr.endsWith('"')) {
+	    try {
+	      planStr = JSON.parse(planStr) as string;
+	    } catch {
+	      // Not a wrapped string — continue with original.
+	    }
+	  }
+
+	  // Extract valid JSON from possibly noisy LLM output.
+	  function extractJson(text: string): unknown {
+	    try { return JSON.parse(text); } catch {}
+
+	    const unescaped = text
+	      .replace(/\\\\/g, "\x00")
+	      .replace(/\\"/g, '"')
+	      .replace(/\\n/g, "\n")
+	      .replace(/\\t/g, "\t")
+	      .replace(/\x00/g, "\\");
+	    try { return JSON.parse(unescaped); } catch {}
+
+	    for (const open of ["{", "["]) {
+	      const close = open === "{" ? "}" : "]";
+	      let depth = 0;
+	      let start = -1;
+	      for (let i = 0; i < text.length; i++) {
+	        if (text[i] === open) {
+	          if (depth === 0) start = i;
+	          depth++;
+	        } else if (text[i] === close) {
+	          depth--;
+	          if (depth === 0 && start >= 0) {
+	            const candidate = text.slice(start, i + 1);
+	            try {
+	              const parsedCandidate = JSON.parse(candidate);
+	              if (open === "[" && Array.isArray(parsedCandidate)) {
+	                return parsedCandidate;
+	              }
+	              return parsedCandidate;
+	            } catch {}
+	          }
+	        }
+	      }
+	    }
+	    throw new Error("No valid JSON found in plan output");
+	  }
+
+	  parsed = extractJson(planStr) as typeof parsed;
+	  const unescaped = planStr
+      .replace(/\\\"/g, '"')
+      .replace(/\n/g, '
+')
+      .replace(/\t/g, '	');
+    parsed = JSON.parse(unescaped) as typeof parsed;
+  }
+  const { issues } = parsed;
 
   if (issues.length === 0) {
     // No unblocked work — either everything is done or everything is blocked.

@@ -125,6 +125,9 @@ describe("InitService scaffold", () => {
     // Template has {{BACKLOG_MANAGER_TOOLS}} replaced — should contain GitHub CLI (default backlog manager)
     expect(dockerfile).toContain("FROM node:22-bookworm");
     expect(dockerfile).toContain("GitHub CLI");
+    expect(dockerfile).toContain("python3");
+    expect(dockerfile).toContain("python3-pip");
+    expect(dockerfile).toContain("python3-venv");
     expect(dockerfile).not.toContain("{{BACKLOG_MANAGER_TOOLS}}");
   });
 
@@ -135,7 +138,11 @@ describe("InitService scaffold", () => {
       agent: claudeCodeAgent,
       expectedKey: "ANTHROPIC_API_KEY=",
       unexpectedKey: "OPENAI_KEY=",
-      expectIssue191Link: true,
+      expectIssue191Link: false,
+      extraExpectedKeys: [
+        'ANTHROPIC_AUTH_TOKEN="freecc"',
+        'ANTHROPIC_BASE_URL="http://localhost:8082"',
+      ],
     },
     {
       agent: piAgent,
@@ -157,7 +164,13 @@ describe("InitService scaffold", () => {
     },
   ])(
     "generates .env.example with $agent.name env var",
-    async ({ agent, expectedKey, unexpectedKey, expectIssue191Link }) => {
+    async ({
+      agent,
+      expectedKey,
+      unexpectedKey,
+      expectIssue191Link,
+      extraExpectedKeys,
+    }) => {
       const dir = await makeDir();
       await runScaffold(dir, { agent, model: agent.defaultModel });
 
@@ -171,6 +184,9 @@ describe("InitService scaffold", () => {
         expect(envExample).toContain("issues/191");
       } else {
         expect(envExample).not.toContain("issues/191");
+      }
+      for (const key of extraExpectedKeys ?? []) {
+        expect(envExample).toContain(key);
       }
     },
   );
