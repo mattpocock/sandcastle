@@ -4,7 +4,7 @@ Here are the open issues in the repo:
 
 <issues-json>
 
-!`{{LIST_TASKS_COMMAND}}`
+{{LIST_TASKS_SNIPPET}}
 
 </issues-json>
 
