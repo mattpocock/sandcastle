@@ -190,6 +190,41 @@ WORKDIR /home/agent
 ENTRYPOINT ["sleep", "infinity"]
 `;
 
+const CLAUDE_CODE_VERTEX_DOCKERFILE = `FROM node:22-bookworm
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \\
+  git \\
+  curl \\
+  jq \\
+  && rm -rf /var/lib/apt/lists/*
+
+{{BACKLOG_MANAGER_TOOLS}}
+
+# Build-args for UID/GID alignment: sandcastle docker build-image
+# defaults these to the host user's UID/GID so image-built files
+# and bind-mounted files share an owner without runtime chown.
+ARG AGENT_UID=1000
+ARG AGENT_GID=1000
+
+# Rename the base image's "node" user to "agent" and align UID/GID.
+RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+USER \${AGENT_UID}:\${AGENT_GID}
+
+# Install Claude Code CLI
+RUN curl -fsSL https://claude.ai/install.sh | bash
+
+# Add Claude to PATH
+ENV PATH="/home/agent/.local/bin:$PATH"
+
+WORKDIR /home/agent
+
+# In worktree sandbox mode, Sandcastle bind-mounts the git worktree at \${SANDBOX_REPO_DIR}
+# and overrides the working directory to \${SANDBOX_REPO_DIR} at container start.
+# Structure your Dockerfile so that \${SANDBOX_REPO_DIR} can serve as the project root.
+ENTRYPOINT ["sleep", "infinity"]
+`;
+
 const AGENT_REGISTRY: AgentEntry[] = [
   {
     name: "claude-code",
@@ -227,6 +262,17 @@ OPENAI_KEY=`,
     dockerfileTemplate: OPENCODE_DOCKERFILE,
     envExample: `# OpenCode API key
 OPENCODE_API_KEY=`,
+  },
+  {
+    name: "claude-code-vertex",
+    label: "Claude Code (Vertex AI)",
+    defaultModel: "claude-opus-4-7",
+    factoryImport: "claudeCodeVertex",
+    dockerfileTemplate: CLAUDE_CODE_VERTEX_DOCKERFILE,
+    envExample: `# Google Cloud project ID for Vertex AI
+ANTHROPIC_VERTEX_PROJECT_ID=
+# Google credentials — path to service account JSON (or use Application Default Credentials)
+GOOGLE_APPLICATION_CREDENTIALS=`,
   },
 ];
 
