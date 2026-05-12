@@ -43,6 +43,12 @@ import {
   validateNoBuiltInArgOverride,
   BUILT_IN_PROMPT_ARG_KEYS,
 } from "./PromptArgumentSubstitution.js";
+import type {
+  OutputDefinition,
+  OutputObjectDefinition,
+  OutputStringDefinition,
+} from "./Output.js";
+import { extractStructuredOutput } from "./extractStructuredOutput.js";
 
 /** Default maximum number of iterations for a run. */
 export const DEFAULT_MAX_ITERATIONS = 1;
@@ -199,7 +205,7 @@ export interface Timeouts {
 }
 
 export interface RunOptions {
-  /** Agent provider to use (e.g. claudeCode("claude-opus-4-6")) */
+  /** Agent provider to use (e.g. claudeCode("claude-opus-4-7")) */
   readonly agent: AgentProvider;
   /** Sandbox provider (e.g. docker({ imageName: "sandcastle:myrepo" })). */
   readonly sandbox: SandboxProvider;
@@ -258,6 +264,21 @@ export interface RunOptions {
   readonly signal?: AbortSignal;
   /** Override default timeouts for built-in lifecycle steps. Unset keys keep their defaults. */
   readonly timeouts?: Timeouts;
+  /**
+   * Structured output definition. When provided, the agent's stdout is
+   * scanned for the configured XML tag after the iteration completes, and the
+   * result is parsed/validated and returned on `RunResult.output`.
+   *
+   * Use `Output.object({ tag, schema })` for JSON+schema or
+   * `Output.string({ tag })` for raw string extraction.
+   *
+   * Constraints:
+   * - `maxIterations` must be `1` (the default).
+   * - The resolved prompt must contain the configured opening tag literal.
+   *
+   * See ADR 0010 for design rationale.
+   */
+  readonly output?: OutputDefinition;
 }
 
 export type { IterationResult, IterationUsage } from "./Orchestrator.js";
@@ -279,7 +300,17 @@ export interface RunResult {
   readonly preservedWorktreePath?: string;
 }
 
-export const run = async (options: RunOptions): Promise<RunResult> => {
+/** Overload: with `Output.object`, returns `RunResult` with typed `output: T`. */
+export function run<T>(
+  options: RunOptions & { output: OutputObjectDefinition<T> },
+): Promise<RunResult & { output: T }>;
+/** Overload: with `Output.string`, returns `RunResult` with `output: string`. */
+export function run(
+  options: RunOptions & { output: OutputStringDefinition },
+): Promise<RunResult & { output: string }>;
+/** Overload: without `output`, returns the standard `RunResult`. */
+export function run(options: RunOptions): Promise<RunResult>;
+export async function run(options: RunOptions): Promise<RunResult & { output?: unknown }> {
   // If signal is already aborted, reject immediately without any setup
   options.signal?.throwIfAborted();
 
@@ -326,6 +357,14 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
     );
   }
 
+  // Validate: output requires maxIterations === 1
+  if (options.output && maxIterations !== 1) {
+    throw new Error(
+      "output requires maxIterations to be 1. " +
+        "Structured output is only supported for single-iteration runs.",
+    );
+  }
+
   // Extract explicit branch when in branch mode
   const branch: string | undefined =
     branchStrategy.type === "branch" ? branchStrategy.branch : undefined;
@@ -353,6 +392,17 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
   );
   const rawPrompt = resolved.text;
   const isInlinePrompt = resolved.source === "inline";
+
+  // Validate: output tag must appear in the resolved prompt
+  if (options.output) {
+    const openTag = `<${options.output.tag}>`;
+    if (!rawPrompt.includes(openTag)) {
+      throw new Error(
+        `output tag <${options.output.tag}> not found in the resolved prompt. ` +
+          "The caller must instruct the agent to emit the configured tag.",
+      );
+    }
+  }
 
   const agentName = provider.name;
 
@@ -538,9 +588,25 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
     throw error;
   }
 
-  return {
+  const baseResult = {
     ...result,
     logFilePath:
       resolvedLogging.type === "file" ? resolvedLogging.path : undefined,
   };
-};
+
+  // Extract structured output after the iteration completes (separate pass from completion signal)
+  if (options.output) {
+    const output = await extractStructuredOutput(
+      baseResult.stdout,
+      options.output,
+      {
+        commits: baseResult.commits,
+        branch: baseResult.branch,
+        preservedWorktreePath: baseResult.preservedWorktreePath,
+      },
+    );
+    return { ...baseResult, output };
+  }
+
+  return baseResult;
+}

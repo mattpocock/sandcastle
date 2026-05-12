@@ -48,7 +48,7 @@ await using sandbox = await worktree.createSandbox({
 
 const result = await sandbox.run({
   name: "Implementer #" + issueNumber,
-  agent: sandcastle.claudeCode("claude-opus-4-6"),
+  agent: sandcastle.claudeCode("claude-opus-4-7"),
   promptFile: "./.sandcastle/implement-prompt.md",
   promptArgs: {
     ISSUE_NUMBER: String(issueNumber),
@@ -60,7 +60,7 @@ const result = await sandbox.run({
 if (result.commits.length > 0) {
   await sandbox.run({
     name: "Reviewer #" + issueNumber,
-    agent: sandcastle.claudeCode("claude-opus-4-6"),
+    agent: sandcastle.claudeCode("claude-opus-4-7"),
     promptFile: "./.sandcastle/review-prompt.md",
     promptArgs: {
       ISSUE_NUMBER: String(issueNumber),

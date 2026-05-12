@@ -3589,7 +3589,7 @@ describe("Session capture integration", () => {
             JSON.stringify({
               type: "assistant",
               message: {
-                model: "claude-opus-4-6",
+                model: "claude-opus-4-7",
                 usage: {
                   input_tokens: 3,
                   cache_creation_input_tokens: 9294,

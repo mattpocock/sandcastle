@@ -8,6 +8,8 @@ Here are the open issues in the repo:
 
 </issues-json>
 
+The list above has already been filtered to issues ready for work.
+
 # TASK
 
 Analyze the open issues and build a dependency graph. For each issue, determine whether it **blocks** or **is blocked by** any other open issue.

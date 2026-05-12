@@ -91,8 +91,16 @@ A work item from the **backlog manager** that the **agent** selects and works on
 _Avoid_: "job", "work item", "ticket"
 
 **Completion signal**:
-The `<promise>COMPLETE</promise>` marker in the **agent**'s output indicating all actionable tasks are finished.
-_Avoid_: "done flag", "exit signal"
+The `<promise>COMPLETE</promise>` marker in the **agent**'s output indicating all actionable tasks are finished. A pure termination signal -- carries no payload. Distinct from **structured output**.
+_Avoid_: "done flag", "exit signal", conflating with **structured output**
+
+**Structured output**:
+A schema-validated JSON payload emitted by the **agent** inside a caller-specified XML tag and returned to the caller of `run()`. Configured via `output: Output.object({ tag, schema })`. Orthogonal to the **completion signal** -- a run can use either, both, or neither. The caller owns the prompt-side instruction telling the agent to emit the tag; Sandcastle does not inject it, and `run()` errors early if the resolved prompt does not contain the configured tag.
+_Avoid_: "output payload", "result", "JSON output"
+
+**Output schema**:
+The Standard Schema validator (e.g. Zod, Valibot) the caller passes alongside the XML tag name to parse and validate **structured output**.
+_Avoid_: "validator", "result schema"
 
 ### Prompts
 
@@ -171,7 +179,7 @@ A provider-namespaced CLI command that removes the image (e.g. `sandcastle docke
 _Avoid_: "cleanup-sandbox" (old name)
 
 **Agent session**:
-The **agent**'s persisted conversation record. For Claude Code, a `<session-id>.jsonl` written per **iteration**. Resumable via `claude --resume`.
+The **agent**'s persisted conversation record. Storage shape and location are owned by the **agent provider** -- Claude Code writes a `<session-id>.jsonl` under `~/.claude/projects/<encoded-cwd>/`; other agents use their own conventions (e.g. `~/.codex/sessions/`, `~/.pi/agent/sessions/`, OpenCode's SQLite store). Resumable when the **agent provider** declares session-storage support; the resume mechanism is the agent's native flag (e.g. `claude --resume`, `codex exec resume`, `pi --session`).
 _Avoid_: "chat history", "transcript"
 
 ### Display

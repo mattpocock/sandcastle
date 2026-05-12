@@ -6,7 +6,7 @@ import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 // Or add to package.json scripts: "sandcastle": "npx tsx .sandcastle/main.mts"
 
 await run({
-  agent: claudeCode("claude-opus-4-6"),
+  agent: claudeCode("claude-opus-4-7"),
   sandbox: docker(),
   promptFile: "./.sandcastle/prompt.md",
 });

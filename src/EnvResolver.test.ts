@@ -197,4 +197,76 @@ describe("resolveEnv", () => {
       else process.env["FALLBACK_KEY"] = orig;
     }
   });
+
+  it("unescapes \\n in double-quoted values", async () => {
+    const dir = await makeDir();
+    await mkdir(join(dir, ".sandcastle"));
+    await writeFile(
+      join(dir, ".sandcastle", ".env"),
+      'KEY="line1\\nline2"\n',
+    );
+
+    const env = await runResolveEnv(dir);
+    expect(env["KEY"]).toBe("line1\nline2");
+  });
+
+  it("does not unescape \\n in single-quoted values", async () => {
+    const dir = await makeDir();
+    await mkdir(join(dir, ".sandcastle"));
+    await writeFile(
+      join(dir, ".sandcastle", ".env"),
+      "KEY='line1\\nline2'\n",
+    );
+
+    const env = await runResolveEnv(dir);
+    expect(env["KEY"]).toBe("line1\\nline2");
+  });
+
+  it("preserves internal whitespace in double-quoted values", async () => {
+    const dir = await makeDir();
+    await mkdir(join(dir, ".sandcastle"));
+    await writeFile(
+      join(dir, ".sandcastle", ".env"),
+      'KEY="  spaced  "\n',
+    );
+
+    const env = await runResolveEnv(dir);
+    expect(env["KEY"]).toBe("  spaced  ");
+  });
+
+  it("unescapes \\r, \\t, and \\\\ in double-quoted values", async () => {
+    const dir = await makeDir();
+    await mkdir(join(dir, ".sandcastle"));
+    await writeFile(
+      join(dir, ".sandcastle", ".env"),
+      'TAB="a\\tb"\nCR="a\\rb"\nBS="a\\\\b"\n',
+    );
+
+    const env = await runResolveEnv(dir);
+    expect(env["TAB"]).toBe("a\tb");
+    expect(env["CR"]).toBe("a\rb");
+    expect(env["BS"]).toBe("a\\b");
+  });
+
+  it("handles escaped backslash before n in double-quoted values", async () => {
+    const dir = await makeDir();
+    await mkdir(join(dir, ".sandcastle"));
+    await writeFile(
+      join(dir, ".sandcastle", ".env"),
+      'KEY="a\\\\nb"\n',
+    );
+
+    const env = await runResolveEnv(dir);
+    // \\n in the file → literal backslash + literal n (not a newline)
+    expect(env["KEY"]).toBe("a\\nb");
+  });
+
+  it("parses unquoted values unchanged", async () => {
+    const dir = await makeDir();
+    await mkdir(join(dir, ".sandcastle"));
+    await writeFile(join(dir, ".sandcastle", ".env"), "KEY=plain\n");
+
+    const env = await runResolveEnv(dir);
+    expect(env["KEY"]).toBe("plain");
+  });
 });

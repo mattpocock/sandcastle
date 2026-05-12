@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import { Context, Layer } from "effect";
 
 /**
@@ -30,6 +30,8 @@ export const defaultSessionPathsLayer: Layer.Layer<SessionPaths> = Layer.sync(
   SessionPaths,
   () => ({
     hostProjectsDir: join(process.env.HOME ?? "~", ".claude", "projects"),
-    sandboxProjectsDir: join("/home/agent", ".claude", "projects"),
+    // Sandbox-side path: Linux container, must use POSIX separators regardless
+    // of host platform.
+    sandboxProjectsDir: posix.join("/home/agent", ".claude", "projects"),
   }),
 );

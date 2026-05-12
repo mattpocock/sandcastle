@@ -44,6 +44,12 @@ export {
 } from "./SessionPaths.js";
 export type { SandboxHooks } from "./SandboxLifecycle.js";
 export type { MountConfig } from "./MountConfig.js";
+export { Output, StructuredOutputError } from "./Output.js";
+export type {
+  OutputDefinition,
+  OutputObjectDefinition,
+  OutputStringDefinition,
+} from "./Output.js";
 export { CwdError } from "./resolveCwd.js";
 export { claudeCode, codex, cursor, opencode, pi } from "./AgentProvider.js";
 export type {

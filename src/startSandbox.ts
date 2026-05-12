@@ -1,6 +1,6 @@
 import { Effect, Layer } from "effect";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import {
   ContainerStartTimeoutError,
   CopyToWorktreeTimeoutError,
@@ -185,7 +185,9 @@ const startIsolatedSandbox = (
           if (!existsSync(hostPath)) {
             continue;
           }
-          const sandboxPath = join(handle.worktreePath, relativePath);
+          // Sandbox-side path: Linux container, must use POSIX separators
+          // regardless of host platform.
+          const sandboxPath = posix.join(handle.worktreePath, relativePath);
           yield* Effect.tryPromise({
             try: () => handle.copyIn(hostPath, sandboxPath),
             catch: (e) =>

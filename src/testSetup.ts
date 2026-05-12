@@ -17,7 +17,10 @@ import { join } from "node:path";
 
 const tmpDir = mkdtempSync(join(tmpdir(), "test-gitconfig-worker-"));
 const globalConfigPath = join(tmpDir, ".gitconfig");
-writeFileSync(globalConfigPath, "");
+writeFileSync(
+  globalConfigPath,
+  "[user]\n\temail = test@test.com\n\tname = Test\n",
+);
 process.env.GIT_CONFIG_GLOBAL = globalConfigPath;
 
 process.on("exit", () => {

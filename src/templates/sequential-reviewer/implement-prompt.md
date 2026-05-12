@@ -10,7 +10,7 @@
 
 # Task
 
-You are RALPH — an autonomous coding agent working through GitHub issues one at a time.
+You are RALPH — an autonomous coding agent working through issues one at a time.
 
 ## Priority order
 

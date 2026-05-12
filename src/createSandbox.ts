@@ -49,6 +49,7 @@ import { syncOut } from "./syncOut.js";
 import * as WorktreeManager from "./WorktreeManager.js";
 import { copyToWorktree } from "./CopyToWorktree.js";
 import { resolveCwd } from "./resolveCwd.js";
+import { patchGitMountsForWindows } from "./mountUtils.js";
 
 export interface CreateSandboxOptions {
   /** Explicit branch for the worktree (required). */
@@ -84,7 +85,7 @@ export interface CreateSandboxOptions {
 }
 
 export interface SandboxRunOptions {
-  /** Agent provider to use (e.g. claudeCode("claude-opus-4-6")). */
+  /** Agent provider to use (e.g. claudeCode("claude-opus-4-7")). */
   readonly agent: AgentProvider;
   /** Inline prompt string (mutually exclusive with promptFile). */
   readonly prompt?: string;
@@ -128,7 +129,7 @@ export interface SandboxRunResult {
 }
 
 export interface SandboxInteractiveOptions {
-  /** Agent provider to use (e.g. claudeCode("claude-opus-4-6")). */
+  /** Agent provider to use (e.g. claudeCode("claude-opus-4-7")). */
   readonly agent: AgentProvider;
   /** Inline prompt string (mutually exclusive with promptFile). */
   readonly prompt?: string;
@@ -567,6 +568,17 @@ export const createSandboxFromWorktree = async (
       startEffect = resolveGitMounts(join(hostRepoDir, ".git")).pipe(
         Effect.provide(NodeFileSystem.layer),
         Effect.catchAll(() => Effect.succeed([])),
+        // Patch git mounts for Windows worktree compatibility (ADR-0006)
+        Effect.flatMap((gitMounts) =>
+          Effect.tryPromise({
+            try: () =>
+              patchGitMountsForWindows(gitMounts, worktreePath, SANDBOX_REPO_DIR),
+            catch: (e) =>
+              new Error(
+                `Failed to patch git mounts: ${e instanceof Error ? e.message : String(e)}`,
+              ),
+          }),
+        ),
         Effect.flatMap((gitMounts) =>
           startSandbox({
             provider,
@@ -729,6 +741,17 @@ export const createSandbox = async (
       startEffect = resolveGitMounts(join(hostRepoDir, ".git")).pipe(
         Effect.provide(NodeFileSystem.layer),
         Effect.catchAll(() => Effect.succeed([])),
+        // Patch git mounts for Windows worktree compatibility (ADR-0006)
+        Effect.flatMap((gitMounts) =>
+          Effect.tryPromise({
+            try: () =>
+              patchGitMountsForWindows(gitMounts, worktreePath, SANDBOX_REPO_DIR),
+            catch: (e) =>
+              new Error(
+                `Failed to patch git mounts: ${e instanceof Error ? e.message : String(e)}`,
+              ),
+          }),
+        ),
         Effect.flatMap((gitMounts) =>
           startSandbox({
             provider,
