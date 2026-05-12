@@ -23,6 +23,7 @@ const makeDir = () => mkdtemp(join(tmpdir(), "init-service-"));
 
 const claudeCodeAgent = getAgent("claude-code")!;
 const piAgent = getAgent("pi")!;
+const cursorAgent = getAgent("cursor")!;
 const codexAgent = getAgent("codex")!;
 const opencodeAgent = getAgent("opencode")!;
 
@@ -76,6 +77,21 @@ describe("Agent registry", () => {
     expect(agent!.dockerfileTemplate).toContain(
       "@mariozechner/pi-coding-agent",
     );
+  });
+
+  it("listAgents includes cursor", () => {
+    const agents = listAgents();
+    expect(agents.some((a) => a.name === "cursor")).toBe(true);
+  });
+
+  it("getAgent returns cursor entry with expected fields", () => {
+    const agent = getAgent("cursor");
+    expect(agent).toBeDefined();
+    expect(agent!.name).toBe("cursor");
+    expect(agent!.defaultModel).toBe("auto");
+    expect(agent!.factoryImport).toBe("cursor");
+    expect(agent!.dockerfileTemplate).toContain("FROM");
+    expect(agent!.dockerfileTemplate).toContain("cursor.com/install");
   });
 
   it("listAgents includes codex", () => {
@@ -141,6 +157,12 @@ describe("InitService scaffold", () => {
       agent: piAgent,
       expectedKey: "ANTHROPIC_API_KEY=",
       unexpectedKey: "OPENAI_KEY=",
+      expectIssue191Link: false,
+    },
+    {
+      agent: cursorAgent,
+      expectedKey: "CURSOR_API_KEY=",
+      unexpectedKey: "ANTHROPIC_API_KEY=",
       expectIssue191Link: false,
     },
     {
@@ -667,6 +689,33 @@ describe("InitService scaffold", () => {
       "utf-8",
     );
     expect(mainTs).toContain('pi("claude-sonnet-4-6")');
+    expect(mainTs).not.toContain("claudeCode");
+  });
+
+  it("scaffolds cursor agent with cursor Dockerfile", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, { agent: cursorAgent, model: "auto" });
+
+    const dockerfile = await readFile(
+      join(dir, ".sandcastle", "Dockerfile"),
+      "utf-8",
+    );
+    expect(dockerfile).toContain("FROM node:22-bookworm");
+    expect(dockerfile).toContain("cursor.com/install");
+    expect(dockerfile).toContain("chmod -R a+rwX /home/agent");
+    expect(dockerfile).toContain('ENV PATH="/home/agent/.local/bin:$PATH"');
+    expect(dockerfile).not.toContain("{{BACKLOG_MANAGER_TOOLS}}");
+  });
+
+  it("scaffolds main.mts with cursor factory import when cursor agent selected", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, { agent: cursorAgent, model: "auto" });
+
+    const mainTs = await readFile(
+      join(dir, ".sandcastle", "main.mts"),
+      "utf-8",
+    );
+    expect(mainTs).toContain('cursor("auto")');
     expect(mainTs).not.toContain("claudeCode");
   });
 

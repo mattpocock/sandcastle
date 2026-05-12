@@ -9,7 +9,7 @@ import {
   type BindMountSandboxHandle,
   type InteractiveExecOptions,
 } from "./SandboxProvider.js";
-import { claudeCode, pi, codex, opencode } from "./AgentProvider.js";
+import { claudeCode, pi, codex, cursor, opencode } from "./AgentProvider.js";
 
 // --- buildInteractiveArgs prompt tests ---
 
@@ -55,6 +55,19 @@ describe("buildInteractiveArgs with prompts", () => {
 
   it("codex omits prompt when empty string", () => {
     const provider = codex("gpt-5.4-mini");
+    const args = provider.buildInteractiveArgs!(interactiveOpts(""));
+    expect(args).not.toContain("");
+  });
+
+  it("cursor includes prompt as positional argument", () => {
+    const provider = cursor("auto");
+    const args = provider.buildInteractiveArgs!(interactiveOpts("fix the bug"));
+    expect(args[0]).toBe("agent");
+    expect(args[args.length - 1]).toBe("fix the bug");
+  });
+
+  it("cursor omits prompt when empty string", () => {
+    const provider = cursor("auto");
     const args = provider.buildInteractiveArgs!(interactiveOpts(""));
     expect(args).not.toContain("");
   });
