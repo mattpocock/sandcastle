@@ -632,7 +632,7 @@ console.log(result.output.score); // typed as number
 
 ### Templates
 
-`sandcastle init` prompts you to choose a sandbox provider (Docker or Podman), a backlog manager (GitHub Issues or Beads), and a template, which scaffolds a ready-to-use prompt and `main.mts` suited to a specific workflow. If your project's `package.json` has `"type": "module"`, the file will be named `main.ts` instead. Five templates are available:
+`sandcastle init` prompts you to choose a sandbox provider (Docker or Podman), a backlog manager (GitHub Issues, GitLab Issues, or Beads), and a template, which scaffolds a ready-to-use prompt and `main.mts` suited to a specific workflow. If your project's `package.json` has `"type": "module"`, the file will be named `main.ts` instead. Five templates are available:
 
 | Template                       | Description                                                               |
 | ------------------------------ | ------------------------------------------------------------------------- |
@@ -1151,7 +1151,8 @@ The `.sandcastle/Dockerfile` controls the sandbox environment. The default templ
 
 - **Node.js 22** (base image)
 - **git**, **curl**, **jq** (system dependencies)
-- **GitHub CLI** (`gh`)
+- **GitHub CLI** (`gh`) — when the backlog manager is `github-issues` (the default)
+- **GitLab CLI** (`glab`) — when the backlog manager is `gitlab-issues`
 - **Claude Code CLI**
 - A non-root `agent` user (required — Claude runs as this user)
 
@@ -1159,7 +1160,7 @@ When customizing the Dockerfile, ensure you keep:
 
 - A non-root user (the default `agent` user) for Claude to run as
 - `git` (required for commits and branch operations)
-- `gh` (required for issue fetching)
+- The backlog-manager CLI you picked (`gh` for GitHub, `glab` for GitLab, `bd` for Beads — required for issue fetching)
 - Claude Code CLI installed and on PATH
 
 Add your project-specific dependencies (e.g., language runtimes, build tools) to the Dockerfile as needed.

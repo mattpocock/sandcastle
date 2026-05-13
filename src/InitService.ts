@@ -242,7 +242,10 @@ export interface BacklogManagerEntry {
   readonly templateArgs: {
     readonly LIST_TASKS_COMMAND: string;
     readonly VIEW_TASK_COMMAND: string;
-    readonly CLOSE_TASK_COMMAND: string;
+    // Some backlog managers (e.g. GitLab) need multiple commands to close a task —
+    // a separate "add comment" step and a "close" step. Rendered as a `&&`-joined
+    // shell pipeline in templates.
+    readonly CLOSE_TASK_COMMAND: readonly string[];
     readonly BACKLOG_MANAGER_TOOLS: string;
   };
   /** Lines to append to `.env.example` for this backlog manager, or empty string if none needed. */
@@ -255,6 +258,14 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \\
   && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \\
   | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \\
   && apt-get update && apt-get install -y gh \\
+  && rm -rf /var/lib/apt/lists/*`;
+
+const GITLAB_CLI_TOOLS = `# Install GitLab CLI (glab)
+RUN ARCH=$(dpkg --print-architecture) \\
+  && GLAB_VERSION=$(curl -fsSL https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/releases/permalink/latest | jq -r '.tag_name | sub("^v"; "")') \\
+  && curl -fsSL "https://gitlab.com/gitlab-org/cli/-/releases/v\${GLAB_VERSION}/downloads/glab_\${GLAB_VERSION}_linux_\${ARCH}.deb" -o /tmp/glab.deb \\
+  && apt-get update && apt-get install -y /tmp/glab.deb \\
+  && rm /tmp/glab.deb \\
   && rm -rf /var/lib/apt/lists/*`;
 
 const BEADS_TOOLS = `# Install system dependencies for Beads
@@ -278,11 +289,34 @@ const BACKLOG_MANAGER_REGISTRY: BacklogManagerEntry[] = [
     templateArgs: {
       LIST_TASKS_COMMAND: `gh issue list --state open --label Sandcastle --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`,
       VIEW_TASK_COMMAND: "gh issue view <ID>",
-      CLOSE_TASK_COMMAND: `gh issue close <ID> --comment "Completed by Sandcastle"`,
+      CLOSE_TASK_COMMAND: [
+        `gh issue close <ID> --comment "Completed by Sandcastle"`,
+      ],
       BACKLOG_MANAGER_TOOLS: GITHUB_CLI_TOOLS,
     },
     envExample: `# GitHub personal access token
 GH_TOKEN=`,
+  },
+  {
+    name: "gitlab-issues",
+    label: "GitLab Issues",
+    templateArgs: {
+      // Reshape `glab issue list -O json` into the same {number, title, body, labels, comments}
+      // schema as github-issues so templates remain provider-agnostic. `comments` is empty here;
+      // the agent fetches them via VIEW_TASK_COMMAND when it picks an issue.
+      LIST_TASKS_COMMAND: `glab issue list --label Sandcastle -O json -P 100 | jq -c '[.[] | {number: .iid, title, body: .description, labels: [.labels[]?], comments: []}]'`,
+      VIEW_TASK_COMMAND: "glab issue view <ID> --comments",
+      // glab's `issue close` does not accept --comment, so close is two steps.
+      CLOSE_TASK_COMMAND: [
+        `glab issue note <ID> --message "Completed by Sandcastle"`,
+        `glab issue close <ID>`,
+      ],
+      BACKLOG_MANAGER_TOOLS: GITLAB_CLI_TOOLS,
+    },
+    envExample: `# GitLab personal access token (https://gitlab.com/-/user_settings/personal_access_tokens — needs the 'api' scope)
+GITLAB_TOKEN=
+# Optional: only needed for self-hosted GitLab instances
+# GITLAB_HOST=gitlab.example.com`,
   },
   {
     name: "beads",
@@ -290,7 +324,7 @@ GH_TOKEN=`,
     templateArgs: {
       LIST_TASKS_COMMAND: "bd ready --json",
       VIEW_TASK_COMMAND: "bd show <ID>",
-      CLOSE_TASK_COMMAND: `bd close <ID> "Completed by Sandcastle"`,
+      CLOSE_TASK_COMMAND: [`bd close <ID> "Completed by Sandcastle"`],
       BACKLOG_MANAGER_TOOLS: BEADS_TOOLS,
     },
     envExample: "",
@@ -550,6 +584,14 @@ const isTextFile = (filename: string): boolean => {
 };
 
 /**
+ * Render a backlog manager `templateArg` value as a single string for substitution.
+ * Single-command values pass through; arrays are rendered as `cmd1 && cmd2 && ...`
+ * so templates can keep close steps inline (e.g. inside backticks).
+ */
+const renderTemplateArg = (value: string | readonly string[]): string =>
+  Array.isArray(value) ? value.join(" && ") : (value as string);
+
+/**
  * Replace `{{KEY}}` template arguments from the backlog manager's
  * `templateArgs` map in all text files in the scaffolded config directory.
  */
@@ -576,7 +618,7 @@ const substituteTemplateArgs = (
           )) {
             content = content.replace(
               new RegExp(`\\{\\{${key}\\}\\}`, "g"),
-              value,
+              renderTemplateArg(value as string | readonly string[]),
             );
           }
           if (content !== original) {
