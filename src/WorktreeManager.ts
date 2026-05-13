@@ -7,6 +7,19 @@ import { WorktreeError, WorktreeTimeoutError, withTimeout } from "./errors.js";
 const WORKTREE_TIMEOUT_MS = 30_000;
 
 /**
+ * Normalize backslashes to forward slashes so paths from `git worktree list`
+ * (always forward-slash, every platform) and paths from `path.join` (backslash
+ * on Windows) can be compared with `===`, `.startsWith()`, and Set lookups.
+ *
+ * Exported for direct unit testing; the live call sites are in `create`
+ * (collision detection / managed-worktree check) and `pruneStale` (active-set
+ * Set lookup). Without this normalization, on Windows: managed-worktree reuse
+ * is unreachable, mid-rebase reuse-by-path never matches, and `pruneStale`
+ * wipes active worktrees out from under running sandboxes.
+ */
+export const toPosix = (p: string): string => p.replace(/\\/g, "/");
+
+/**
  * Git global flags that prevent `git worktree add -b` from writing upstream
  * tracking config to `.git/config`. Without these, a user's global
  * `branch.autoSetupMerge` or `push.autoSetupRemote` can cause a config write
@@ -168,12 +181,9 @@ export const create = (
     if (opts?.branch) {
       // Proactively detect collision before git produces a confusing error.
       // Match by branch first; fall back to target path (covers mid-rebase
-      // detached-HEAD state where the branch field is null).
-      //
-      // `git worktree list` emits forward-slash paths on every platform; on
-      // Windows `path.join` produces backslashes. Normalize both sides for
-      // comparison so collision detection and managed-worktree reuse work.
-      const toPosix = (p: string) => p.replace(/\\/g, "/");
+      // detached-HEAD state where the branch field is null). `toPosix` keeps
+      // the two slash conventions (git porcelain vs. `path.join`) comparable
+      // on Windows.
       const worktreePathPosix = toPosix(worktreePath);
       const worktreesDirPosix = toPosix(worktreesDir);
       const existing = yield* listWorktrees(repoDir);
@@ -347,7 +357,6 @@ export const pruneStale = (
     // Get the list of active worktree paths from git. Normalize to forward
     // slashes so the Set lookup below works on Windows, where `path.join`
     // emits backslashes but `git worktree list` always emits forward slashes.
-    const toPosix = (p: string) => p.replace(/\\/g, "/");
     const worktreeList = yield* execGit(
       ["worktree", "list", "--porcelain"],
       repoDir,
