@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, rm as fsRm } from "node:fs";
 import { join } from "node:path";
 import { Effect } from "effect";
 import {
@@ -41,25 +41,44 @@ export const copyToWorktree = (
       yield* Effect.async<void, CopyToWorktreeError>((resume) => {
         execFile("cp", [...cowFlags, src, dest], (error) => {
           if (error) {
-            // Fall back to a regular copy if copy-on-write is not supported
-            execFile("cp", ["-R", src, dest], (fallbackError, _, stderr) => {
-              if (fallbackError) {
+            // The first attempt may have partially populated dest. `cp -R src dest`
+            // semantics depend on whether dest exists: missing dest → copy creates
+            // it as a clone of src; existing dest dir → src is copied INSIDE as
+            // dest/<basename>, doubling the path. Clear dest before retry so the
+            // fallback always sees the "fresh" case.
+            fsRm(dest, { recursive: true, force: true }, (rmError) => {
+              if (rmError) {
                 resume(
                   Effect.fail(
                     new CopyToWorktreeError({
-                      message: `Failed to copy ${relativePath} to worktree: ${stderr || fallbackError.message}`,
+                      message: `Failed to clear ${relativePath} before fallback copy: ${rmError.message}`,
                       path: relativePath,
-                      stderr: stderr || fallbackError.message,
-                      exitCode:
-                        typeof fallbackError.code === "number"
-                          ? fallbackError.code
-                          : null,
+                      stderr: rmError.message,
+                      exitCode: null,
                     }),
                   ),
                 );
-              } else {
-                resume(Effect.succeed(undefined));
+                return;
               }
+              execFile("cp", ["-R", src, dest], (fallbackError, _, stderr) => {
+                if (fallbackError) {
+                  resume(
+                    Effect.fail(
+                      new CopyToWorktreeError({
+                        message: `Failed to copy ${relativePath} to worktree: ${stderr || fallbackError.message}`,
+                        path: relativePath,
+                        stderr: stderr || fallbackError.message,
+                        exitCode:
+                          typeof fallbackError.code === "number"
+                            ? fallbackError.code
+                            : null,
+                      }),
+                    ),
+                  );
+                } else {
+                  resume(Effect.succeed(undefined));
+                }
+              });
             });
           } else {
             resume(Effect.succeed(undefined));

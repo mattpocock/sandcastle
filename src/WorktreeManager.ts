@@ -1,7 +1,7 @@
 import { Effect, Option } from "effect";
 import { FileSystem } from "@effect/platform";
 import { execFile } from "node:child_process";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { WorktreeError, WorktreeTimeoutError, withTimeout } from "./errors.js";
 
 const WORKTREE_TIMEOUT_MS = 30_000;
@@ -169,13 +169,21 @@ export const create = (
       // Proactively detect collision before git produces a confusing error.
       // Match by branch first; fall back to target path (covers mid-rebase
       // detached-HEAD state where the branch field is null).
+      //
+      // `git worktree list` emits forward-slash paths on every platform; on
+      // Windows `path.join` produces backslashes. Normalize both sides for
+      // comparison so collision detection and managed-worktree reuse work.
+      const toPosix = (p: string) => p.replace(/\\/g, "/");
+      const worktreePathPosix = toPosix(worktreePath);
+      const worktreesDirPosix = toPosix(worktreesDir);
       const existing = yield* listWorktrees(repoDir);
       const collision =
         existing.find((wt) => wt.branch === branch) ??
-        existing.find((wt) => wt.path === worktreePath);
+        existing.find((wt) => toPosix(wt.path) === worktreePathPosix);
       if (collision) {
-        // Only reuse worktrees managed by sandcastle (under .sandcastle/worktrees/)
-        const isManagedWorktree = collision.path.startsWith(worktreesDir);
+        // Only reuse worktrees managed by sandcastle (under .sandcastle/worktrees/).
+        const isManagedWorktree =
+          toPosix(collision.path).startsWith(worktreesDirPosix);
         if (isManagedWorktree) {
           const dirty = yield* hasUncommittedChanges(collision.path);
           if (dirty) {
@@ -187,7 +195,11 @@ export const create = (
               `Reusing existing worktree at ${collision.path} (branch '${branch}')`,
             );
           }
-          return { path: collision.path, branch };
+          // Normalize to native separators so the returned path matches the
+          // shape `path.join` produces in the non-collision branch — callers
+          // and tests can compare values without worrying about slash style.
+          const nativePath = collision.path.split("/").join(sep);
+          return { path: nativePath, branch };
         }
         // Branch is checked out in the main working tree or external worktree
         yield* Effect.fail(
@@ -332,7 +344,10 @@ export const pruneStale = (
       .realPath(worktreesDir)
       .pipe(Effect.catchAll(() => Effect.succeed(worktreesDir)));
 
-    // Get the list of active worktree paths from git
+    // Get the list of active worktree paths from git. Normalize to forward
+    // slashes so the Set lookup below works on Windows, where `path.join`
+    // emits backslashes but `git worktree list` always emits forward slashes.
+    const toPosix = (p: string) => p.replace(/\\/g, "/");
     const worktreeList = yield* execGit(
       ["worktree", "list", "--porcelain"],
       repoDir,
@@ -341,7 +356,7 @@ export const pruneStale = (
       worktreeList
         .split("\n")
         .filter((line) => line.startsWith("worktree "))
-        .map((line) => line.slice("worktree ".length).trim()),
+        .map((line) => toPosix(line.slice("worktree ".length).trim())),
     );
 
     // Remove any directory under .sandcastle/worktrees/ that is not an active worktree
@@ -351,7 +366,7 @@ export const pruneStale = (
         Effect.map((s) => s.type === "Directory"),
         Effect.catchAll(() => Effect.succeed(false)),
       );
-      if (isDir && !activeWorktreePaths.has(entryPath)) {
+      if (isDir && !activeWorktreePaths.has(toPosix(entryPath))) {
         yield* fs.remove(entryPath, { recursive: true, force: true }).pipe(
           Effect.mapError(
             (e) =>
