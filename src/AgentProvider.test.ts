@@ -759,7 +759,9 @@ describe("opencode factory", () => {
   });
 
   it("buildPrintCommand shell-escapes the variant value", () => {
-    const provider = opencode("opencode/big-pickle", { variant: "it's tricky" });
+    const provider = opencode("opencode/big-pickle", {
+      variant: "it's tricky",
+    });
     const { command } = provider.buildPrintCommand(opts("test"));
     expect(command).toContain("--variant 'it'\\''s tricky'");
   });
@@ -913,6 +915,22 @@ describe("cursor factory", () => {
         type: "result",
         result: "Final answer <promise>COMPLETE</promise>",
       },
+    ]);
+  });
+
+  it("parseStreamLine extracts session id from init system messages", () => {
+    const provider = cursor("auto");
+    const line = JSON.stringify({
+      type: "system",
+      subtype: "init",
+      apiKeySource: "env",
+      cwd: "/absolute/path",
+      session_id: "cursor-session-1",
+      model: "Cursor Model",
+      permissionMode: "default",
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "session_id", sessionId: "cursor-session-1" },
     ]);
   });
 

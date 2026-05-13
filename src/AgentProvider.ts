@@ -420,6 +420,13 @@ const parseCursorStreamLine = (line: string): ParsedStreamEvent[] => {
     if (obj.type === "tool_call" && obj.subtype === "started") {
       return parseCursorToolCall(obj.tool_call);
     }
+    if (
+      obj.type === "system" &&
+      obj.subtype === "init" &&
+      typeof obj.session_id === "string"
+    ) {
+      return [{ type: "session_id", sessionId: obj.session_id }];
+    }
     if (obj.type === "error") {
       const msg = extractErrorMessage(obj);
       return msg ? [{ type: "result", result: msg }] : [];
