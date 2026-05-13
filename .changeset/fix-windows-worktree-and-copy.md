@@ -4,7 +4,7 @@
 
 Three Windows-related fixes for the worktree + copy lifecycle:
 
-- `CopyToWorktree`: when the first `cp` attempt fails and partially populates the destination, the fallback `cp -R` would nest the source INSIDE the partial dest (e.g. `node_modules/node_modules/...`), turning a recoverable error into a corrupted path tree. The fallback now clears the destination before retrying so it always operates on a fresh target.
+- `CopyToWorktree`: replaced the shelled-out `cp -R` + fallback dance with a Node-based recursive walk. The previous approach broke on Windows: `npm install` under Git Bash creates `node_modules/.bin/*` shims as NTFS reparse points that GNU `cp` (MSYS build) cannot recreate, so the first attempt partially populated the destination, `fs.rm` could not fully clean it, and the fallback `cp -R src dest` then POSIX-nested the source inside the partial dest (producing `node_modules/node_modules/...`). The new walk uses `lstat` / `copyFile` / `readlink` / `symlink` directly, silently skipping entries whose `lstat` throws `EACCES` / `EINVAL` (unreadable MSYS reparse points). It still uses `COPYFILE_FICLONE` so Linux reflink and APFS clonefile remain in play.
 
 - `createSandbox` / `createWorktree`: a failure in `copyToWorktree` or the `onWorktreeReady` host hook used to leak the just-created git worktree, causing the next run to fail with "branch already checked out". The worktree is now removed on failure before the error propagates.
 
