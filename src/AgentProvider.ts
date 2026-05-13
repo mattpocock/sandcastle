@@ -441,6 +441,8 @@ const parseCursorStreamLine = (line: string): ParsedStreamEvent[] => {
 export interface CursorOptions {
   /** Environment variables injected by this agent provider. */
   readonly env?: Record<string, string>;
+  /** When false, session capture is disabled. Default: true. */
+  readonly captureSessions?: boolean;
 }
 
 export const cursor = (
@@ -449,11 +451,19 @@ export const cursor = (
 ): AgentProvider => ({
   name: "cursor",
   env: options?.env ?? {},
-  captureSessions: false,
+  captureSessions: options?.captureSessions ?? true,
 
-  buildPrintCommand({ prompt }: AgentCommandOptions): PrintCommand {
+  buildPrintCommand({
+    prompt,
+    resumeSession,
+    dangerouslySkipPermissions,
+  }: AgentCommandOptions): PrintCommand {
+    const skipPerms = dangerouslySkipPermissions ? " --force" : "";
+    const resumeFlag = resumeSession
+      ? ` --resume ${shellEscape(resumeSession)}`
+      : "";
     return {
-      command: `agent -p --force --output-format stream-json --model ${shellEscape(model)} ${shellEscape(prompt)}`,
+      command: `agent -p --output-format stream-json --model ${shellEscape(model)}${skipPerms}${resumeFlag} ${shellEscape(prompt)}`,
     };
   },
 

@@ -1105,6 +1105,43 @@ describe("cursor factory", () => {
     const provider = cursor("auto");
     expect(provider.env).toEqual({});
   });
+
+  it("cursor provides force flag when dangerouslySkipPermissions is true", () => {
+    const provider = cursor("auto");
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+    });
+    expect(command).toContain("--force");
+  });
+
+  it("cursor does not provide force flag when dangerouslySkipPermissions is false", () => {
+    const provider = cursor("auto");
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: false,
+    });
+    expect(command).not.toContain("--force");
+  });
+
+  it("cursor provides resume flag when resumeSession is set", () => {
+    const provider = cursor("auto");
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+      resumeSession: "abc-123",
+    });
+    expect(command).toContain("--resume 'abc-123'");
+  });
+
+  it("cursor does not provide resume flag when resumeSession is not set", () => {
+    const provider = cursor("auto");
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+    });
+    expect(command).not.toContain("--resume");
+  });
 });
 
 describe("resumeSession on non-Claude providers", () => {
@@ -1132,17 +1169,6 @@ describe("resumeSession on non-Claude providers", () => {
 
   it("opencode ignores resumeSession in buildPrintCommand", () => {
     const provider = opencode("opencode/big-pickle");
-    const { command } = provider.buildPrintCommand({
-      prompt: "test",
-      dangerouslySkipPermissions: true,
-      resumeSession: "abc-123",
-    });
-    expect(command).not.toContain("--resume");
-    expect(command).not.toContain("abc-123");
-  });
-
-  it("cursor ignores resumeSession in buildPrintCommand", () => {
-    const provider = cursor("auto");
     const { command } = provider.buildPrintCommand({
       prompt: "test",
       dangerouslySkipPermissions: true,
@@ -1285,7 +1311,7 @@ describe("captureSessions flag", () => {
     expect(opencode("opencode-model").captureSessions).toBe(false);
   });
 
-  it("cursor has captureSessions false", () => {
-    expect(cursor("auto").captureSessions).toBe(false);
+  it("cursor defaults captureSessions to true", () => {
+    expect(cursor("auto").captureSessions).toBe(true);
   });
 });
