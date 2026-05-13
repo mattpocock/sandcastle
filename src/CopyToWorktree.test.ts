@@ -58,15 +58,13 @@ describe("copyToWorktree", () => {
     }
   });
 
-  it("succeeds when first cp fails but fallback cp -R succeeds", async () => {
+  it("copies a regular file", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cw-test-"));
     const worktreeDir = await mkdtemp(join(tmpdir(), "cw-wt-"));
 
-    // Create a source file
     await writeFile(join(hostDir, "file.txt"), "content");
 
     try {
-      // Normal copy should succeed (fallback may or may not be needed)
       await Effect.runPromise(
         copyToWorktree(["file.txt"], hostDir, worktreeDir),
       );
