@@ -153,6 +153,12 @@ const result = await run({
     env: { DOCKER_SPECIFIC: "value" },
     // Optional: attach container to Docker network(s) — string or string[]
     network: "my-network",
+    // Optional: host devices to attach to the sandbox (e.g. /dev/kvm for KVM, /dev/dri for GPU)
+    // Each entry can specify hostPath, optional sandboxPath (for remapping), and optional permissions.
+    devices: [
+      { hostPath: "/dev/kvm" },
+      { hostPath: "/dev/dri", permissions: "rw" },
+    ],
   }),
 
   // Host repo directory — replaces process.cwd() as the anchor for

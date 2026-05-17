@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { execFile } from "node:child_process";
 import { resolve } from "node:path";
+import type { DeviceConfig } from "./DeviceConfig.js";
 import { DockerError } from "./errors.js";
 import { formatVolumeMount, type SelinuxLabel } from "./mountUtils.js";
 
@@ -74,6 +75,7 @@ export interface VolumeMount {
 
 export interface StartContainerOptions {
   readonly volumeMounts?: readonly VolumeMount[];
+  readonly devices?: readonly DeviceConfig[];
   readonly workdir?: string;
   /** Run the container as this uid:gid instead of the Dockerfile's USER. */
   readonly user?: string;
@@ -128,6 +130,13 @@ export const startContainer = (
       formatVolumeMount(mount, selinuxLabel),
     ]);
 
+    const deviceFlags = (options?.devices ?? []).flatMap((device) => {
+      const parts = [device.hostPath];
+      if (device.sandboxPath) parts.push(device.sandboxPath);
+      if (device.permissions) parts.push(device.permissions);
+      return ["--device", parts.join(":")];
+    });
+
     const workdirFlags = options?.workdir ? ["-w", options.workdir] : [];
     const userFlags = options?.user ? ["--user", options.user] : [];
     const networks = options?.network
@@ -144,6 +153,7 @@ export const startContainer = (
       containerName,
       ...envFlags,
       ...volumeFlags,
+      ...deviceFlags,
       ...workdirFlags,
       ...userFlags,
       ...networkFlags,

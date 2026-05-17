@@ -22,6 +22,7 @@ import {
   type ExecResult,
   type InteractiveExecOptions,
 } from "../SandboxProvider.js";
+import type { DeviceConfig } from "../DeviceConfig.js";
 import type { MountConfig } from "../MountConfig.js";
 import type { SelinuxLabel } from "../mountUtils.js";
 import {
@@ -72,6 +73,17 @@ export interface PodmanOptions {
    * If `hostPath` does not exist, sandbox creation fails with a clear error.
    */
   readonly mounts?: readonly MountConfig[];
+  /**
+   * Host devices to attach to the sandbox container (e.g. `/dev/kvm`, `/dev/dri`).
+   *
+   * Each entry specifies a `hostPath` and optionally a `sandboxPath` (to remap
+   * inside the container) and `permissions` (`"r"`, `"w"`, `"m"`, or combinations).
+   * Passed as `--device` flags to `podman run`.
+   *
+   * Unlike mounts, device paths are NOT validated at construction time — the
+   * host path may point to a device that only exists at container start.
+   */
+  readonly devices?: readonly DeviceConfig[];
   /** Environment variables injected by this provider. Merged at launch time with env resolver and agent provider env. */
   readonly env?: Record<string, string>;
   /**
@@ -148,6 +160,12 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
         `${key}=${value}`,
       ]);
       const volumeArgs = volumeMounts.flatMap((v) => ["-v", v]);
+      const deviceArgs = (options?.devices ?? []).flatMap((device) => {
+        const parts = [device.hostPath];
+        if (device.sandboxPath) parts.push(device.sandboxPath);
+        if (device.permissions) parts.push(device.permissions);
+        return ["--device", parts.join(":")];
+      });
       const usernsArgs = userns
         ? [`--userns=keep-id:uid=${containerUid},gid=${containerGid}`]
         : [];
@@ -171,6 +189,7 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
             ...userArgs,
             ...usernsArgs,
             ...networkArgs,
+            ...deviceArgs,
             "-w",
             worktreePath,
             ...envArgs,

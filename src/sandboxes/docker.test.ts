@@ -128,6 +128,55 @@ describe("docker()", () => {
     expect(provider.env).toEqual({});
   });
 
+  it("accepts a devices option", () => {
+    const provider = docker({ devices: [{ hostPath: "/dev/kvm" }] });
+    expect(provider.tag).toBe("bind-mount");
+  });
+
+  it("passes --device flags to docker run when devices are specified", async () => {
+    const capturedRunArgs: string[] = [];
+    mockExecFile.mockImplementation((_command, args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      if (Array.isArray(args) && args[0] === "image" && args[1] === "inspect") {
+        callback(
+          null,
+          `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}\n`,
+          "",
+        );
+      } else if (Array.isArray(args) && args[0] === "run") {
+        capturedRunArgs.push(...args);
+        callback(null, "", "");
+      } else {
+        callback(null, "", "");
+      }
+      return undefined as any;
+    });
+
+    const provider = docker({
+      devices: [
+        { hostPath: "/dev/kvm" },
+        { hostPath: "/dev/dri", permissions: "rw" },
+      ],
+    });
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    const deviceIdx = capturedRunArgs.indexOf("--device");
+    expect(deviceIdx).toBeGreaterThan(-1);
+    expect(capturedRunArgs[deviceIdx + 1]).toBe("/dev/kvm");
+    const secondIdx = capturedRunArgs.indexOf("--device", deviceIdx + 1);
+    expect(secondIdx).toBeGreaterThan(-1);
+    expect(capturedRunArgs[secondIdx + 1]).toBe("/dev/dri:rw");
+
+    await handle.close();
+  });
+
   it("accepts a network option as a string", () => {
     const provider = docker({ network: "my-network" });
     expect(provider.tag).toBe("bind-mount");

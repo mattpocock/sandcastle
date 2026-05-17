@@ -43,6 +43,7 @@ export {
   defaultSessionPathsLayer,
 } from "./SessionPaths.js";
 export type { SandboxHooks } from "./SandboxLifecycle.js";
+export type { DeviceConfig } from "./DeviceConfig.js";
 export type { MountConfig } from "./MountConfig.js";
 export { Output, StructuredOutputError } from "./Output.js";
 export type {
