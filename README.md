@@ -67,12 +67,28 @@ await run({
 
 Sandcastle uses a `SandboxProvider` to create isolated environments. The `sandbox` option on `run()` and `createSandbox()` accepts any provider. A no-sandbox option is also available for `interactive()` and `wt.interactive()`. Built-in providers:
 
-| Provider   | Import path                                | Type       | Accepted by                                   |
-| ---------- | ------------------------------------------ | ---------- | --------------------------------------------- |
-| Docker     | `@ai-hero/sandcastle/sandboxes/docker`     | Bind-mount | `run()`, `createSandbox()`, `interactive()`   |
-| Podman     | `@ai-hero/sandcastle/sandboxes/podman`     | Bind-mount | `run()`, `createSandbox()`, `interactive()`   |
-| Vercel     | `@ai-hero/sandcastle/sandboxes/vercel`     | Isolated   | `run()`, `createSandbox()`, `interactive()`   |
-| No-sandbox | `@ai-hero/sandcastle/sandboxes/no-sandbox` | None       | `interactive()`, `wt.interactive()` (default) |
+| Provider       | Import path                                    | Type       | Accepted by                                   |
+| -------------- | ---------------------------------------------- | ---------- | --------------------------------------------- |
+| Docker         | `@ai-hero/sandcastle/sandboxes/docker`         | Bind-mount | `run()`, `createSandbox()`, `interactive()`   |
+| Docker Compose | `@ai-hero/sandcastle/sandboxes/docker-compose` | Bind-mount | `run()`, `createSandbox()`, `interactive()`   |
+| Podman         | `@ai-hero/sandcastle/sandboxes/podman`         | Bind-mount | `run()`, `createSandbox()`, `interactive()`   |
+| Vercel         | `@ai-hero/sandcastle/sandboxes/vercel`         | Isolated   | `run()`, `createSandbox()`, `interactive()`   |
+| No-sandbox     | `@ai-hero/sandcastle/sandboxes/no-sandbox`     | None       | `interactive()`, `wt.interactive()` (default) |
+
+Use `dockerCompose()` when the per-run container needs config that doesn't fit on `DockerOptions` — GPUs, custom resource limits, or dependent services. The compose file owns image, networks, GPU reservations, and dependencies; sandcastle injects only the worktree mount and workdir.
+
+```typescript
+import { dockerCompose } from "@ai-hero/sandcastle/sandboxes/docker-compose";
+
+await run({
+  agent: claudeCode("claude-opus-4-6"),
+  sandbox: dockerCompose({
+    composeFile: ".sandcastle/docker-compose.yml",
+    // serviceName defaults to "agent"
+  }),
+  prompt: "...",
+});
+```
 
 Worktree methods (`wt.run()`, `wt.interactive()`, `wt.createSandbox()`) accept the same providers as their top-level counterparts. `wt.interactive()` defaults to `noSandbox()` when no sandbox is specified.
 
