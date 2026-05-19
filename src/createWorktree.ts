@@ -230,12 +230,24 @@ export const createWorktree = async (
       branch,
       baseBranch,
     });
+    // If copy or onWorktreeReady fails, remove the just-created worktree so a
+    // retry isn't blocked by a stale "branch already checked out" collision.
+    const rollbackOnError = Effect.tapErrorCause(() =>
+      WorktreeManager.remove(info.path).pipe(Effect.catchAll(() => Effect.void)),
+    );
     if (options.copyToWorktree && options.copyToWorktree.length > 0) {
-      yield* copyToWorktree(options.copyToWorktree, hostRepoDir, info.path, options.timeouts?.copyToWorktreeMs);
+      yield* copyToWorktree(
+        options.copyToWorktree,
+        hostRepoDir,
+        info.path,
+        options.timeouts?.copyToWorktreeMs,
+      ).pipe(rollbackOnError);
     }
     // Run host.onWorktreeReady hooks after copyToWorktree, before sandbox creation
     if (options.hooks?.host?.onWorktreeReady?.length) {
-      yield* runHostHooks(options.hooks.host.onWorktreeReady, info.path);
+      yield* runHostHooks(options.hooks.host.onWorktreeReady, info.path).pipe(
+        rollbackOnError,
+      );
     }
     return { hostRepoDir, worktreeInfo: info };
   }).pipe(Effect.provide(NodeContext.layer), Effect.runPromise);

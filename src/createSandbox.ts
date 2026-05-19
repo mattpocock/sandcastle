@@ -687,21 +687,37 @@ export const createSandbox = async (
   const worktreePath = worktreeInfo.path;
 
   // 2. Copy files if requested (bind-mount only; isolated providers handle this in startSandbox)
+  // If copy fails, remove the just-created worktree so the next run isn't blocked
+  // by a stale "branch already checked out" collision.
   if (
     options.copyToWorktree &&
     options.copyToWorktree.length > 0 &&
     options.sandbox.tag !== "isolated"
   ) {
-    await Effect.runPromise(
-      copyToWorktree(options.copyToWorktree, hostRepoDir, worktreePath, options.timeouts?.copyToWorktreeMs),
-    );
+    try {
+      await Effect.runPromise(
+        copyToWorktree(options.copyToWorktree, hostRepoDir, worktreePath, options.timeouts?.copyToWorktreeMs),
+      );
+    } catch (copyError) {
+      await Effect.runPromise(
+        WorktreeManager.remove(worktreePath).pipe(Effect.catchAll(() => Effect.void)),
+      );
+      throw copyError;
+    }
   }
 
   // 2b. Run host.onWorktreeReady hooks (after copyToWorktree, before sandbox creation)
   if (options.hooks?.host?.onWorktreeReady?.length) {
-    await Effect.runPromise(
-      runHostHooks(options.hooks.host.onWorktreeReady, worktreePath),
-    );
+    try {
+      await Effect.runPromise(
+        runHostHooks(options.hooks.host.onWorktreeReady, worktreePath),
+      );
+    } catch (hookError) {
+      await Effect.runPromise(
+        WorktreeManager.remove(worktreePath).pipe(Effect.catchAll(() => Effect.void)),
+      );
+      throw hookError;
+    }
   }
 
   // 3. Start sandbox via provider or local sandbox layer (test mode)
