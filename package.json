@@ -26,6 +26,10 @@
       "import": "./dist/sandboxes/daytona.js",
       "types": "./dist/sandboxes/daytona.d.ts"
     },
+    "./sandboxes/exe-dev": {
+      "import": "./dist/sandboxes/exe-dev.js",
+      "types": "./dist/sandboxes/exe-dev.d.ts"
+    },
     "./sandboxes/no-sandbox": {
       "import": "./dist/sandboxes/no-sandbox.js",
       "types": "./dist/sandboxes/no-sandbox.d.ts"

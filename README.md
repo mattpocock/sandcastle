@@ -14,7 +14,7 @@ A TypeScript library for orchestrating AI coding agents in isolated sandboxes:
 2. Sandcastle handles sandboxing the agent with a configurable branch strategy.
 3. The commits made on the branches get merged back.
 
-Sandcastle is provider-agnostic — it ships with built-in providers for Docker, Podman, and Vercel, and you can create your own. Great for parallelizing multiple AFK agents, creating review pipelines, or even just orchestrating your own agents.
+Sandcastle is provider-agnostic — it ships with built-in providers for Docker, Podman, Vercel, and exe.dev, and you can create your own. Great for parallelizing multiple AFK agents, creating review pipelines, or even just orchestrating your own agents.
 
 ## Prerequisites
 
@@ -23,6 +23,7 @@ Sandcastle is provider-agnostic — it ships with built-in providers for Docker,
   - [Docker Desktop](https://www.docker.com/) — most common for local development
   - [Podman](https://podman.io/) — rootless alternative to Docker
   - [Vercel](https://vercel.com/) — cloud-based Firecracker microVMs via `@vercel/sandbox`
+  - [exe.dev](https://exe.dev/) — cloud-based microVMs accessed over SSH
   - Or [create your own](#custom-sandbox-providers) using `createBindMountSandboxProvider` or `createIsolatedSandboxProvider`
 
 ## Quick start
@@ -58,7 +59,7 @@ import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 
 await run({
   agent: claudeCode("claude-opus-4-7"),
-  sandbox: docker(), // or podman(), vercel(), or your own provider
+  sandbox: docker(), // or podman(), vercel(), exeDev(), or your own provider
   promptFile: ".sandcastle/prompt.md",
 });
 ```
@@ -72,6 +73,7 @@ Sandcastle uses a `SandboxProvider` to create isolated environments. The `sandbo
 | Docker     | `@ai-hero/sandcastle/sandboxes/docker`     | Bind-mount | `run()`, `createSandbox()`, `interactive()`   |
 | Podman     | `@ai-hero/sandcastle/sandboxes/podman`     | Bind-mount | `run()`, `createSandbox()`, `interactive()`   |
 | Vercel     | `@ai-hero/sandcastle/sandboxes/vercel`     | Isolated   | `run()`, `createSandbox()`, `interactive()`   |
+| exe.dev    | `@ai-hero/sandcastle/sandboxes/exe-dev`    | Isolated   | `run()`, `createSandbox()`, `interactive()`   |
 | No-sandbox | `@ai-hero/sandcastle/sandboxes/no-sandbox` | None       | `interactive()`, `wt.interactive()` (default) |
 
 Worktree methods (`wt.run()`, `wt.interactive()`, `wt.createSandbox()`) accept the same providers as their top-level counterparts. `wt.interactive()` defaults to `noSandbox()` when no sandbox is specified.
@@ -80,9 +82,10 @@ Worktree methods (`wt.run()`, `wt.interactive()`, `wt.createSandbox()`) accept t
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { podman } from "@ai-hero/sandcastle/sandboxes/podman";
 import { vercel } from "@ai-hero/sandcastle/sandboxes/vercel";
+import { exeDev } from "@ai-hero/sandcastle/sandboxes/exe-dev";
 import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
 
-// Docker, Podman, and Vercel are interchangeable in run() and createSandbox():
+// Docker, Podman, Vercel, and exe.dev are interchangeable in run() and createSandbox():
 await run({
   agent: claudeCode("claude-opus-4-7"),
   sandbox: docker(),
@@ -99,6 +102,16 @@ await interactive({
 ```
 
 You can also [create your own provider](#custom-sandbox-providers) using `createBindMountSandboxProvider` or `createIsolatedSandboxProvider`.
+
+### exe.dev Configuration
+
+Sandcastle's [exe.dev](https://exe.dev/) Sandbox Provider does not use an API key. Instead, a single SSH key authenticates the CLI (`ssh exe.dev <command>`) and VM access (`ssh <vm>.exe.xyz`). Register your public SSH key with your [exe.dev profile](https://exe.dev/user).
+
+By default, the provider looks for a key at `~/.ssh/id_exe` (exe.dev's recommended location) and uses it automatically if found. If absent, `ssh`/`scp` fall back to the running SSH agent's keys and `~/.ssh/id_*` defaults.
+
+Pass `sshKeyPath` explicitly to use a different key path. When a key path is set, either found automatically or passed explicitly, Sandcastle locks `ssh`/`scp` to that key (`-i` + `IdentitiesOnly=yes`) and strips `SSH_AUTH_SOCK` from the child env, so the SSH agent is bypassed entirely.
+
+Requires `ssh` and `scp` on `PATH`.
 
 ## API
 
@@ -131,7 +144,7 @@ const result = await run({
   // Optional second arg for provider-specific options like effort level.
   agent: claudeCode("claude-opus-4-7", { effort: "high" }),
 
-  // Sandbox provider — required. Any SandboxProvider works (docker, podman, vercel, or custom).
+  // Sandbox provider — required. Any SandboxProvider works (docker, podman, vercel, exeDev, or custom).
   // Provider-specific config (like imageName, mounts) lives inside the provider factory call.
   sandbox: docker({
     imageName: "sandcastle:local",
@@ -836,7 +849,7 @@ Environment variables are also resolved automatically from `.sandcastle/.env` an
 
 ## Custom Sandbox Providers
 
-Sandcastle ships with built-in providers for Docker, Podman, and Vercel, but you can create your own. A sandbox provider tells Sandcastle how to execute commands in an isolated environment. There are two kinds:
+Sandcastle ships with built-in providers for Docker, Podman, Vercel, and exe.dev, but you can create your own. A sandbox provider tells Sandcastle how to execute commands in an isolated environment. There are two kinds:
 
 - **Bind-mount** — the sandbox can mount a host directory. Sandcastle creates a worktree on the host and the provider mounts it in. No file sync needed. Use this for Docker, Podman, or any local container runtime.
 - **Isolated** — the sandbox has its own filesystem (e.g. a cloud VM). The provider handles syncing code in and out via `copyIn` and `copyFileOut`. Use this when the sandbox cannot access the host filesystem.
@@ -1136,6 +1149,7 @@ For real-world examples, see:
 
 - [`src/sandboxes/docker.ts`](src/sandboxes/docker.ts) — bind-mount provider using Docker containers (with SELinux label support)
 - [`src/sandboxes/vercel.ts`](src/sandboxes/vercel.ts) — isolated provider using Vercel Firecracker microVMs via `@vercel/sandbox`
+- [`src/sandboxes/exe-dev.ts`](src/sandboxes/exe-dev.ts) — isolated provider using exe.dev microVMs over SSH
 - [`src/sandboxes/podman.ts`](src/sandboxes/podman.ts) — bind-mount provider using Podman containers (with SELinux label support)
 - [`src/sandboxes/test-isolated.ts`](src/sandboxes/test-isolated.ts) — isolated provider using temp directories (used in tests)
 
