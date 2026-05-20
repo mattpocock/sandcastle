@@ -101,6 +101,34 @@ const initModelOption = Options.text("model").pipe(
   Options.optional,
 );
 
+const sandboxProviderOption = Options.text("sandbox-provider").pipe(
+  Options.withDescription(
+    "Sandbox provider to use (docker, podman). Skips the interactive prompt.",
+  ),
+  Options.optional,
+);
+
+const backlogManagerOption = Options.text("backlog-manager").pipe(
+  Options.withDescription(
+    "Backlog manager to use (github-issues, beads). Skips the interactive prompt.",
+  ),
+  Options.optional,
+);
+
+const createLabelOption = Options.text("create-label").pipe(
+  Options.withDescription(
+    'Whether to create the "Sandcastle" GitHub label (true/false). Skips the interactive prompt.',
+  ),
+  Options.optional,
+);
+
+const buildImageOption = Options.text("build-image").pipe(
+  Options.withDescription(
+    "Whether to build the sandbox image after scaffolding (true/false). Skips the interactive prompt.",
+  ),
+  Options.optional,
+);
+
 const initCommand = Command.make(
   "init",
   {
@@ -108,12 +136,20 @@ const initCommand = Command.make(
     template: templateOption,
     agent: agentOption,
     model: initModelOption,
+    sandboxProvider: sandboxProviderOption,
+    backlogManager: backlogManagerOption,
+    createLabel: createLabelOption,
+    buildImage: buildImageOption,
   },
   ({
     imageName: imageNameFlag,
     template,
     agent: agentFlag,
     model: modelFlag,
+    sandboxProvider: sandboxProviderFlag,
+    backlogManager: backlogManagerFlag,
+    createLabel: createLabelFlag,
+    buildImage: buildImageFlag,
   }) =>
     Effect.gen(function* () {
       const d = yield* Display;
@@ -132,6 +168,58 @@ const initCommand = Command.make(
             }),
           );
         }
+      }
+
+      if (sandboxProviderFlag._tag === "Some") {
+        const valid = getSandboxProvider(sandboxProviderFlag.value);
+        if (!valid) {
+          const names = listSandboxProviders()
+            .map((p) => p.name)
+            .join(", ");
+          yield* Effect.fail(
+            new InitError({
+              message: `Unknown sandbox provider "${sandboxProviderFlag.value}". Available: ${names}`,
+            }),
+          );
+        }
+      }
+
+      if (backlogManagerFlag._tag === "Some") {
+        const valid = getBacklogManager(backlogManagerFlag.value);
+        if (!valid) {
+          const names = listBacklogManagers()
+            .map((b) => b.name)
+            .join(", ");
+          yield* Effect.fail(
+            new InitError({
+              message: `Unknown backlog manager "${backlogManagerFlag.value}". Available: ${names}`,
+            }),
+          );
+        }
+      }
+
+      if (
+        createLabelFlag._tag === "Some" &&
+        createLabelFlag.value !== "true" &&
+        createLabelFlag.value !== "false"
+      ) {
+        yield* Effect.fail(
+          new InitError({
+            message: `Unknown --create-label value "${createLabelFlag.value}". Available: true, false`,
+          }),
+        );
+      }
+
+      if (
+        buildImageFlag._tag === "Some" &&
+        buildImageFlag.value !== "true" &&
+        buildImageFlag.value !== "false"
+      ) {
+        yield* Effect.fail(
+          new InitError({
+            message: `Unknown --build-image value "${buildImageFlag.value}". Available: true, false`,
+          }),
+        );
       }
 
       // Resolve agent: CLI flag > interactive select
@@ -174,10 +262,14 @@ const initCommand = Command.make(
           ? modelFlag.value
           : selectedAgent.defaultModel;
 
-      // Resolve sandbox provider: interactive select (no default — user must choose)
+      // Resolve sandbox provider: CLI flag > interactive select (no default — user must choose)
       const sandboxProviders = listSandboxProviders();
       let selectedSandboxProvider: SandboxProviderEntry;
-      {
+      if (sandboxProviderFlag._tag === "Some") {
+        selectedSandboxProvider = getSandboxProvider(
+          sandboxProviderFlag.value,
+        )!;
+      } else {
         const selected = yield* Effect.promise(() =>
           clack.select({
             message: "Select a sandbox provider:",
@@ -197,10 +289,12 @@ const initCommand = Command.make(
         selectedSandboxProvider = getSandboxProvider(selected as string)!;
       }
 
-      // Resolve backlog manager: interactive select
+      // Resolve backlog manager: CLI flag > interactive select
       const backlogManagers = listBacklogManagers();
       let selectedBacklogManager: BacklogManagerEntry;
-      {
+      if (backlogManagerFlag._tag === "Some") {
+        selectedBacklogManager = getBacklogManager(backlogManagerFlag.value)!;
+      } else {
         const selected = yield* Effect.promise(() =>
           clack.select({
             message: "Select a backlog manager:",
@@ -245,16 +339,21 @@ const initCommand = Command.make(
         selectedTemplate = selected as string;
       }
 
-      // Offer to create the "Sandcastle" label on the repo (skip for non-GitHub backlog managers)
+      // Offer to create the "Sandcastle" label on the repo (skip for non-GitHub backlog managers).
+      // CLI flag --create-label true/false overrides the prompt.
       let shouldCreateLabel: boolean | symbol = false;
       if (selectedBacklogManager.name === "github-issues") {
-        shouldCreateLabel = yield* Effect.promise(() =>
-          clack.confirm({
-            message:
-              'Create a "Sandcastle" GitHub label? (Templates filter issues by this label)',
-            initialValue: true,
-          }),
-        );
+        if (createLabelFlag._tag === "Some") {
+          shouldCreateLabel = createLabelFlag.value === "true";
+        } else {
+          shouldCreateLabel = yield* Effect.promise(() =>
+            clack.confirm({
+              message:
+                'Create a "Sandcastle" GitHub label? (Templates filter issues by this label)',
+              initialValue: true,
+            }),
+          );
+        }
 
         if (shouldCreateLabel === true) {
           yield* Effect.try({
@@ -287,14 +386,19 @@ const initCommand = Command.make(
         ),
       );
 
-      // Prompt user before building image
+      // Prompt user before building image. CLI flag --build-image true/false overrides the prompt.
       const providerLabel = selectedSandboxProvider.label;
-      const shouldBuild = yield* Effect.promise(() =>
-        clack.confirm({
-          message: `Build the default ${providerLabel} image now?`,
-          initialValue: true,
-        }),
-      );
+      let shouldBuild: boolean | symbol;
+      if (buildImageFlag._tag === "Some") {
+        shouldBuild = buildImageFlag.value === "true";
+      } else {
+        shouldBuild = yield* Effect.promise(() =>
+          clack.confirm({
+            message: `Build the default ${providerLabel} image now?`,
+            initialValue: true,
+          }),
+        );
+      }
 
       if (shouldBuild === true) {
         const containerfileDir = join(cwd, CONFIG_DIR);

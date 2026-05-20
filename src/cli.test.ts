@@ -166,4 +166,142 @@ describe("sandcastle CLI", () => {
       expect(output).toContain("claude-code");
     }
   });
+
+  it("init --help exposes new non-interactive flags", async () => {
+    const { stdout } = await runCli("init --help", process.cwd());
+    expect(stdout).toContain("--sandbox-provider");
+    expect(stdout).toContain("--backlog-manager");
+    expect(stdout).toContain("--create-label");
+    expect(stdout).toContain("--build-image");
+    expect(stdout).not.toContain("--skip-label");
+    expect(stdout).not.toContain("--skip-build-image");
+  });
+
+  it("init --sandbox-provider nonexistent produces error listing available providers", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    try {
+      await runCli(
+        "init --agent claude-code --sandbox-provider nonexistent",
+        hostDir,
+      );
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const { stdout, stderr } = err as { stdout: string; stderr: string };
+      const output = stdout + stderr;
+      expect(output).toContain("nonexistent");
+      expect(output).toContain("docker");
+      expect(output).toContain("podman");
+    }
+  });
+
+  it("init --backlog-manager nonexistent produces error listing available managers", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    try {
+      await runCli(
+        "init --agent claude-code --backlog-manager nonexistent",
+        hostDir,
+      );
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const { stdout, stderr } = err as { stdout: string; stderr: string };
+      const output = stdout + stderr;
+      expect(output).toContain("nonexistent");
+      expect(output).toContain("github-issues");
+      expect(output).toContain("beads");
+    }
+  });
+
+  it("init --create-label with invalid value produces error listing valid values", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    try {
+      await runCli(
+        "init --agent claude-code --sandbox-provider docker --backlog-manager github-issues --create-label maybe --build-image false --template blank",
+        hostDir,
+      );
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const { stdout, stderr } = err as { stdout: string; stderr: string };
+      const output = stdout + stderr;
+      expect(output).toContain("maybe");
+      expect(output).toContain("true");
+      expect(output).toContain("false");
+    }
+  });
+
+  it("init --build-image with invalid value produces error listing valid values", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    try {
+      await runCli(
+        "init --agent claude-code --sandbox-provider docker --backlog-manager github-issues --create-label false --build-image maybe --template blank",
+        hostDir,
+      );
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const { stdout, stderr } = err as { stdout: string; stderr: string };
+      const output = stdout + stderr;
+      expect(output).toContain("maybe");
+      expect(output).toContain("true");
+      expect(output).toContain("false");
+    }
+  });
+
+  it("init runs end-to-end with stdin closed when all flags are provided", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    // Pipe an empty string to close stdin so any clack prompt would block forever.
+    // With all flags provided, init must skip every prompt and run to completion.
+    const { stdout, stderr } = await execAsync(
+      `echo "" | node ${cliPath} init --template blank --agent claude-code --sandbox-provider docker --backlog-manager github-issues --create-label false --build-image false`,
+      { cwd: hostDir },
+    );
+    const output = stdout + stderr;
+    expect(output).toContain("Init complete");
+
+    const fs = await import("node:fs/promises");
+    const configFiles = await fs.readdir(join(hostDir, ".sandcastle"));
+    expect(configFiles).toContain("Dockerfile");
+    expect(configFiles).toContain(".env.example");
+    expect(configFiles).toContain("prompt.md");
+  });
+
+  it("init --sandbox-provider podman writes a Containerfile (no prompt)", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const { stdout, stderr } = await execAsync(
+      `echo "" | node ${cliPath} init --template blank --agent claude-code --sandbox-provider podman --backlog-manager github-issues --create-label false --build-image false`,
+      { cwd: hostDir },
+    );
+    expect(stdout + stderr).toContain("Init complete");
+
+    const fs = await import("node:fs/promises");
+    const configFiles = await fs.readdir(join(hostDir, ".sandcastle"));
+    expect(configFiles).toContain("Containerfile");
+    expect(configFiles).not.toContain("Dockerfile");
+  });
+
+  it("init --backlog-manager beads omits GitHub label step entirely", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    // No --skip-label / --create-label needed: beads is not GitHub-based,
+    // so the label prompt is skipped regardless.
+    const { stdout, stderr } = await execAsync(
+      `echo "" | node ${cliPath} init --template blank --agent claude-code --sandbox-provider docker --backlog-manager beads --build-image false`,
+      { cwd: hostDir },
+    );
+    expect(stdout + stderr).toContain("Init complete");
+  });
 });
