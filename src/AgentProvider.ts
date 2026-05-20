@@ -21,7 +21,11 @@ const TOOL_ARG_FIELDS: Record<string, string> = {
 const extractErrorMessage = (obj: any): string | undefined => {
   const err = obj.error;
   if (typeof err === "string") return err;
-  if (typeof err === "object" && err !== null && typeof err.message === "string") {
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    typeof err.message === "string"
+  ) {
     return err.message;
   }
   if (typeof obj.message === "string") return obj.message;
@@ -302,41 +306,85 @@ export const codex = (
 // OpenCode agent provider
 // ---------------------------------------------------------------------------
 
+const PROVIDER_PRESETS: Record<string, { baseURL: string; apiKey: string }> = {
+  crofai: {
+    baseURL: "https://crof.ai/v1",
+    apiKey: "{env:CROF_API_KEY}",
+  },
+};
+
 /** Options for the opencode agent provider. */
 export interface OpenCodeOptions {
   /** Provider-specific reasoning effort variant (e.g. "high", "max", "low", "minimal"). */
   readonly variant?: string;
   /** Environment variables injected by this agent provider. */
   readonly env?: Record<string, string>;
+  /**
+   * Custom API base URL for OpenAI-compatible providers.
+   * Overrides the baseURL from `provider` preset if both are set.
+   */
+  readonly apiBaseUrl?: string;
+  /**
+   * Well-known provider preset. Configures baseURL and apiKey mapping automatically.
+   * Supported: "crofai". Extensible for any OpenAI-compatible provider.
+   * Use `apiBaseUrl` for providers without a preset.
+   */
+  readonly provider?: string;
 }
 
 export const opencode = (
   model: string,
   options?: OpenCodeOptions,
-): AgentProvider => ({
-  name: "opencode",
-  env: options?.env ?? {},
-  captureSessions: false,
+): AgentProvider => {
+  const extraEnv: Record<string, string> = { ...options?.env };
+  const preset = options?.provider
+    ? PROVIDER_PRESETS[options.provider]
+    : undefined;
+  const resolvedBaseUrl = options?.apiBaseUrl ?? preset?.baseURL;
 
-  buildPrintCommand({ prompt }: AgentCommandOptions): PrintCommand {
-    const variantFlag = options?.variant
-      ? ` --variant ${shellEscape(options.variant)}`
-      : "";
-    return {
-      command: `opencode run --model ${shellEscape(model)}${variantFlag} ${shellEscape(prompt)}`,
+  if (resolvedBaseUrl) {
+    const options: Record<string, string> = {
+      baseURL: resolvedBaseUrl,
     };
-  },
 
-  buildInteractiveArgs({ prompt }: AgentCommandOptions): string[] {
-    const args = ["opencode", "--model", model];
-    if (prompt) args.push("-p", prompt);
-    return args;
-  },
+    if (preset?.apiKey) {
+      options.apiKey = preset.apiKey;
+    }
 
-  parseStreamLine(_line: string): ParsedStreamEvent[] {
-    return [];
-  },
-});
+    extraEnv["OPENCODE_CONFIG_CONTENT"] = JSON.stringify({
+      provider: {
+        openai: {
+          options,
+        },
+      },
+    });
+  }
+
+  return {
+    name: "opencode",
+    env: extraEnv,
+    captureSessions: false,
+
+    buildPrintCommand({ prompt }: AgentCommandOptions): PrintCommand {
+      const variantFlag = options?.variant
+        ? ` --variant ${shellEscape(options.variant)}`
+        : "";
+      return {
+        command: `opencode run --model ${shellEscape(model)}${variantFlag} ${shellEscape(prompt)}`,
+      };
+    },
+
+    buildInteractiveArgs({ prompt }: AgentCommandOptions): string[] {
+      const args = ["opencode", "--model", model];
+      if (prompt) args.push("-p", prompt);
+      return args;
+    },
+
+    parseStreamLine(_line: string): ParsedStreamEvent[] {
+      return [];
+    },
+  };
+};
 
 // ---------------------------------------------------------------------------
 // Claude Code agent provider
