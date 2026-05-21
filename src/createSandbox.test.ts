@@ -1456,3 +1456,181 @@ describe("createSandbox", () => {
     }
   });
 });
+
+describe("createSandbox session capture (reuse factory)", () => {
+  // Regression coverage for the reuse factory forwarding `bindMountHandle`.
+  // The Orchestrator captures the session JSONL (and parses token usage from
+  // it) only when `bindMountHandle` is present in SandboxInfo. `sandbox.run()`
+  // builds its own factory; if it omits the handle, capture is silently
+  // skipped and `iterations[].sessionFilePath` / `.usage` come back empty.
+  const SESSION_ID = "reuse-capture-session-001";
+  const RAW_USAGE = {
+    input_tokens: 11,
+    cache_creation_input_tokens: 22,
+    cache_read_input_tokens: 33,
+    output_tokens: 44,
+  };
+  const EXPECTED_USAGE = {
+    inputTokens: 11,
+    cacheCreationInputTokens: 22,
+    cacheReadInputTokens: 33,
+    outputTokens: 44,
+  };
+
+  /** Claude stream that emits a session_id init line plus a usage-bearing
+   * assistant message, so the Orchestrator extracts a sessionId. */
+  const streamWithSession = (sessionId: string): string =>
+    [
+      JSON.stringify({
+        type: "system",
+        subtype: "init",
+        session_id: sessionId,
+      }),
+      JSON.stringify({
+        type: "assistant",
+        message: { usage: RAW_USAGE, content: [{ type: "text", text: "ok" }] },
+      }),
+      JSON.stringify({ type: "result", result: "ok" }),
+    ].join("\n");
+
+  /** Synthetic session JSONL the handle "copies out" of the sandbox.
+   * `parseSessionUsage` reads the assistant.usage entry. */
+  const sessionJsonl = (cwd: string): string =>
+    [
+      JSON.stringify({ type: "system", cwd, session_id: SESSION_ID }),
+      JSON.stringify({ type: "assistant", message: { usage: RAW_USAGE } }),
+    ].join("\n");
+
+  it("captures the session and reports usage on a reused bind-mount sandbox", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-capture-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const gitTmpDir = mkdtempSync(join(tmpdir(), "test-gitconfig-"));
+    const globalConfigPath = join(gitTmpDir, ".gitconfig");
+    writeFileSync(globalConfigPath, "");
+    const isolatedEnv = {
+      ...process.env,
+      GIT_CONFIG_GLOBAL: globalConfigPath,
+    };
+
+    const provider = createBindMountSandboxProvider({
+      name: "capturing-bind-mount",
+      create: async (opts) => ({
+        worktreePath: opts.worktreePath,
+        exec: async (cmd, execOpts) => {
+          const cwd = execOpts?.cwd ?? opts.worktreePath;
+          if (cmd.startsWith("claude ")) {
+            const stream = streamWithSession(SESSION_ID);
+            if (execOpts?.onLine) {
+              for (const line of stream.split("\n")) execOpts.onLine(line);
+            }
+            return { stdout: stream, stderr: "", exitCode: 0 };
+          }
+          const result = await execAsync(cmd, { cwd, env: isolatedEnv });
+          if (execOpts?.onLine) {
+            for (const line of result.stdout.split("\n")) execOpts.onLine(line);
+          }
+          return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
+        },
+        copyFileIn: async () => {},
+        // Ignore the requested sandbox path and hand back a synthetic session
+        // JSONL — this stands in for the file a real agent writes in-container.
+        copyFileOut: async (_sandboxPath, hostPath) => {
+          await writeFile(hostPath, sessionJsonl(opts.worktreePath));
+        },
+        close: async () => {},
+      }),
+    });
+
+    const sandbox = await createSandbox({
+      branch: "test-reuse-capture",
+      sandbox: provider,
+      cwd: hostDir,
+    });
+
+    // Redirect the host projects dir (defaultSessionPathsLayer reads HOME)
+    // to a temp dir so capture doesn't touch the real ~/.claude.
+    const origHome = process.env.HOME;
+    const tmpHome = await mkdtemp(join(tmpdir(), "capture-home-"));
+
+    try {
+      process.env.HOME = tmpHome;
+      const result = await sandbox.run({
+        agent: testProvider,
+        prompt: "do work",
+        maxIterations: 1,
+      });
+
+      const last = result.iterations.at(-1);
+      expect(last?.sessionId).toBe(SESSION_ID);
+      expect(last?.sessionFilePath).toBeDefined();
+      expect(last?.sessionFilePath).toContain(SESSION_ID);
+      expect(last?.usage).toEqual(EXPECTED_USAGE);
+    } finally {
+      process.env.HOME = origHome;
+      await sandbox.close();
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(gitTmpDir, { recursive: true, force: true });
+      await rm(tmpHome, { recursive: true, force: true });
+    }
+  });
+
+  it("does not capture for a non-bind-mount (isolated) provider", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-iso-nocapture-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    // Same session-bearing stream, but an isolated provider — the reuse
+    // factory must NOT forward its handle as a bindMountHandle, so capture is
+    // skipped even though a sessionId is extracted.
+    const base = testIsolated();
+    const provider = createIsolatedSandboxProvider({
+      name: "capturing-isolated",
+      create: async (opts) => {
+        const handle = await base.create(opts);
+        return {
+          ...handle,
+          exec: async (cmd: string, execOpts?: any) => {
+            if (cmd.startsWith("claude ")) {
+              const stream = streamWithSession(SESSION_ID);
+              if (execOpts?.onLine) {
+                for (const line of stream.split("\n")) execOpts.onLine(line);
+              }
+              return { stdout: stream, stderr: "", exitCode: 0 };
+            }
+            return handle.exec(cmd, execOpts);
+          },
+        };
+      },
+    });
+
+    const sandbox = await createSandbox({
+      branch: "test-iso-nocapture",
+      sandbox: provider,
+      cwd: hostDir,
+    });
+
+    const origHome = process.env.HOME;
+    const tmpHome = await mkdtemp(join(tmpdir(), "capture-home-"));
+
+    try {
+      process.env.HOME = tmpHome;
+      const result = await sandbox.run({
+        agent: testProvider,
+        prompt: "do work",
+        maxIterations: 1,
+      });
+
+      const last = result.iterations.at(-1);
+      expect(last?.sessionId).toBe(SESSION_ID);
+      expect(last?.sessionFilePath).toBeUndefined();
+      expect(last?.usage).toBeUndefined();
+    } finally {
+      process.env.HOME = origHome;
+      await sandbox.close();
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(tmpHome, { recursive: true, force: true });
+    }
+  });
+});
