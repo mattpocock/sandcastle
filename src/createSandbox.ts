@@ -191,6 +191,13 @@ interface SandboxHandleContext {
     | IsolatedSandboxHandle
     | NoSandboxHandle
     | undefined;
+  /**
+   * The provider handle narrowed to a bind-mount handle, set only when the
+   * sandbox provider is bind-mount backed. Forwarded into the orchestrator so
+   * session capture — and therefore token-usage reporting — can run on reused
+   * sandboxes, mirroring what the one-shot `run()` factory already provides.
+   */
+  readonly bindMountHandle?: BindMountSandboxHandle;
   readonly applyToHost: () => Effect.Effect<void, any>;
 }
 
@@ -211,6 +218,7 @@ const buildSandboxHandle = (
     sandboxRepoDir,
     sandboxLayer,
     providerHandle,
+    bindMountHandle,
     applyToHost,
   } = ctx;
 
@@ -296,6 +304,7 @@ const buildSandboxHandle = (
           makeEffect({
             hostWorktreePath: worktreePath,
             sandboxRepoPath: sandboxRepoDir,
+            bindMountHandle,
             applyToHost,
           }).pipe(
             Effect.provide(sandboxLayer),
@@ -666,6 +675,10 @@ export const createSandboxFromWorktree = async (
       sandboxRepoDir,
       sandboxLayer,
       providerHandle,
+      bindMountHandle:
+        options.sandbox.tag === "bind-mount"
+          ? (providerHandle as BindMountSandboxHandle | undefined)
+          : undefined,
       applyToHost,
     },
     async () => {
@@ -904,6 +917,10 @@ export const createSandbox = async (
       sandboxRepoDir,
       sandboxLayer,
       providerHandle,
+      bindMountHandle:
+        options.sandbox.tag === "bind-mount"
+          ? (providerHandle as BindMountSandboxHandle | undefined)
+          : undefined,
       applyToHost,
     },
     async () => {
