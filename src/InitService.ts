@@ -74,7 +74,11 @@ ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
 # Rename the base image's "node" user to "agent" and align UID/GID.
-RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+RUN if getent group $AGENT_GID >/dev/null 2>&1; then \
+        groupmod -g 99999 $(getent group $AGENT_GID | cut -d: -f1); \
+    fi && \
+    groupmod -g $AGENT_GID node && \
+    usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
 USER \${AGENT_UID}:\${AGENT_GID}
 
 # Install Claude Code CLI
@@ -109,7 +113,11 @@ ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
 # Rename the base image's "node" user to "agent" and align UID/GID.
-RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+RUN if getent group $AGENT_GID >/dev/null 2>&1; then \
+        groupmod -g 99999 $(getent group $AGENT_GID | cut -d: -f1); \
+    fi && \
+    groupmod -g $AGENT_GID node && \
+    usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
 
 # Install pi coding agent (run as root before USER agent)
 RUN npm install -g @mariozechner/pi-coding-agent
@@ -142,7 +150,11 @@ ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
 # Rename the base image's "node" user to "agent" and align UID/GID.
-RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+RUN if getent group $AGENT_GID >/dev/null 2>&1; then \
+        groupmod -g 99999 $(getent group $AGENT_GID | cut -d: -f1); \
+    fi && \
+    groupmod -g $AGENT_GID node && \
+    usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
 
 # Install Codex CLI (run as root before USER agent)
 RUN npm install -g @openai/codex
@@ -175,7 +187,11 @@ ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
 # Rename the base image's "node" user to "agent" and align UID/GID.
-RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+RUN if getent group $AGENT_GID >/dev/null 2>&1; then \
+        groupmod -g 99999 $(getent group $AGENT_GID | cut -d: -f1); \
+    fi && \
+    groupmod -g $AGENT_GID node && \
+    usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
 
 # Install OpenCode CLI (run as root before USER agent)
 RUN npm install -g opencode-ai@latest
