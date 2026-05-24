@@ -33,10 +33,10 @@ Sandcastle is provider-agnostic — it ships with built-in providers for Docker,
 npm install --save-dev @ai-hero/sandcastle
 ```
 
-2. Run `sandcastle init`. This scaffolds a `.sandcastle` directory with all the files needed.
+2. Run `npx @ai-hero/sandcastle init`. This scaffolds a `.sandcastle` directory with all the files needed.
 
 ```bash
-npx sandcastle init
+npx @ai-hero/sandcastle init
 ```
 
 3. Edit `.sandcastle/.env` and fill in your default values for `ANTHROPIC_API_KEY`. If you want to use your Claude subscription instead of an API key, see [#191](https://github.com/mattpocock/sandcastle/issues/191).
