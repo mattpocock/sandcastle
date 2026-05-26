@@ -28,17 +28,15 @@ const TOOL_ARG_FIELDS: Record<string, string> = {
 
 /**
  * Extract an error message from a parsed JSON error event.
- * Handles { error: "string" }, { error: { message: "string" } }, and { message: "string" }.
+ * Handles { error: "string" }, { error: { message: "string" } },
+ * { error: { data: { message: "string" } } }, and { message: "string" }.
  */
 const extractErrorMessage = (obj: any): string | undefined => {
   const err = obj.error;
   if (typeof err === "string") return err;
-  if (
-    typeof err === "object" &&
-    err !== null &&
-    typeof err.message === "string"
-  ) {
-    return err.message;
+  if (typeof err === "object" && err !== null) {
+    if (typeof err.message === "string") return err.message;
+    if (typeof err.data?.message === "string") return err.data.message;
   }
   if (typeof obj.message === "string") return obj.message;
   return undefined;
@@ -489,8 +487,9 @@ export const cursor = (
 // OpenCode agent provider
 // ---------------------------------------------------------------------------
 
-/** Maps allowlisted OpenCode tool names to the input field containing the
- *  display arg. The tool name is surfaced as-is (OpenCode's lowercase names). */
+/** Maps OpenCode tool names to the input field containing the friendly display
+ *  arg. Tools not listed here are still surfaced, falling back to a JSON dump of
+ *  the whole input. The tool name is surfaced as-is (OpenCode's lowercase names). */
 const OPENCODE_TOOL_ARG_FIELDS: Record<string, string> = {
   bash: "command",
   webfetch: "url",
@@ -522,15 +521,29 @@ const parseOpenCodeStreamLine = (line: string): ParsedStreamEvent[] => {
     }
 
     // tool_use event → tool call. Tool name is in part.tool, args in
-    // part.state.input. Only allowlisted tools are surfaced.
+    // part.state.input. Gate on the completed status so intermediate
+    // pending/running states don't surface duplicate tool calls.
     if (obj.type === "tool_use" && part?.type === "tool") {
-      const argField = OPENCODE_TOOL_ARG_FIELDS[part.tool];
-      if (argField === undefined) return []; // not allowlisted
-      const input = part.state?.input as Record<string, unknown> | undefined;
+      if (typeof part.tool !== "string") return [];
+      const state = part.state as
+        | { status?: string; input?: Record<string, unknown> }
+        | undefined;
+      if (state?.status !== "completed") return [];
+      const input = state.input;
       if (!input) return [];
-      const argValue = input[argField];
-      if (typeof argValue !== "string") return []; // missing/wrong arg field
-      return [{ type: "tool_call", name: part.tool, args: argValue }];
+      const argField = OPENCODE_TOOL_ARG_FIELDS[part.tool];
+      const argValue = argField !== undefined ? input[argField] : undefined;
+      const args =
+        typeof argValue === "string" ? argValue : JSON.stringify(input);
+      return [{ type: "tool_call", name: part.tool, args }];
+    }
+
+    // OpenCode emits error events on stdout (not stderr) for auth failures,
+    // rate limits, and API errors. Capture them as result events so the
+    // Orchestrator's stderr-empty fallback can surface them to the user.
+    if (obj.type === "error") {
+      const msg = extractErrorMessage(obj);
+      return msg ? [{ type: "result", result: msg }] : [];
     }
 
     // step_finish, tool output, etc. → skip
@@ -562,15 +575,21 @@ export const opencode = (
   env: options?.env ?? {},
   captureSessions: false,
 
-  buildPrintCommand({ prompt }: AgentCommandOptions): PrintCommand {
+  buildPrintCommand({
+    prompt,
+    dangerouslySkipPermissions,
+  }: AgentCommandOptions): PrintCommand {
     const variantFlag = options?.variant
       ? ` --variant ${shellEscape(options.variant)}`
       : "";
     const agentFlag = options?.agent
       ? ` --agent ${shellEscape(options.agent)}`
       : "";
+    const permissionsFlag = dangerouslySkipPermissions
+      ? " --dangerously-skip-permissions"
+      : "";
     return {
-      command: `opencode run --model ${shellEscape(model)}${variantFlag}${agentFlag} ${shellEscape(prompt)}`,
+      command: `opencode run --format json --model ${shellEscape(model)}${variantFlag}${agentFlag}${permissionsFlag} ${shellEscape(prompt)}`,
     };
   },
 

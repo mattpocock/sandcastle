@@ -26,7 +26,7 @@ Required environment variables:
 
 ### OpenCode
 
-Uses OpenCode as the AI coding agent. OpenCode output is passed through as raw stdout (no JSON parsing).
+Uses OpenCode as the AI coding agent. Sandcastle runs it with `--format json` and parses the structured event stream to surface live text, tool calls, and the session ID.
 
 Required environment variables:
 
