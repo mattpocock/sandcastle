@@ -591,7 +591,7 @@ export const opencode = (
 // ---------------------------------------------------------------------------
 
 export interface ClaudeCodeOptions {
-  readonly effort?: "low" | "medium" | "high" | "max";
+  readonly effort?: "low" | "medium" | "high" | "xhigh" | "max";
   /** Environment variables injected by this agent provider. */
   readonly env?: Record<string, string>;
   /** When false, session capture is disabled. Default: true. */

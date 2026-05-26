@@ -835,11 +835,11 @@ The `claudeCode()` factory accepts an optional second argument for provider-spec
 agent: claudeCode("claude-opus-4-7", { effort: "high" });
 ```
 
-| Option            | Type                                         | Default | Description                                               |
-| ----------------- | -------------------------------------------- | ------- | --------------------------------------------------------- |
-| `effort`          | `"low"` \| `"medium"` \| `"high"` \| `"max"` | —       | Claude Code reasoning effort level (`max` is Opus only)   |
-| `env`             | `Record<string, string>`                     | `{}`    | Environment variables injected by this agent provider     |
-| `captureSessions` | `boolean`                                    | `true`  | Capture agent session JSONL to host for `claude --resume` |
+| Option            | Type                                                      | Default | Description                                               |
+| ----------------- | --------------------------------------------------------- | ------- | --------------------------------------------------------- |
+| `effort`          | `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` \| `"max"` | —       | Claude Code reasoning effort level (`max` is Opus only)   |
+| `env`             | `Record<string, string>`                                  | `{}`    | Environment variables injected by this agent provider     |
+| `captureSessions` | `boolean`                                                 | `true`  | Capture agent session JSONL to host for `claude --resume` |
 
 ### `CodexOptions`
 

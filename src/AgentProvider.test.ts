@@ -121,7 +121,7 @@ describe("claudeCode factory", () => {
   });
 
   it("supports all effort levels", () => {
-    for (const effort of ["low", "medium", "high", "max"] as const) {
+    for (const effort of ["low", "medium", "high", "xhigh", "max"] as const) {
       const provider = claudeCode("claude-opus-4-7", { effort });
       expect(provider.buildPrintCommand(opts("test")).command).toContain(
         `--effort ${effort}`,
