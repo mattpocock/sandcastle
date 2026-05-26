@@ -225,8 +225,10 @@ OPENAI_KEY=`,
     defaultModel: "opencode/big-pickle",
     factoryImport: "opencode",
     dockerfileTemplate: OPENCODE_DOCKERFILE,
-    envExample: `# OpenCode API key
-OPENCODE_API_KEY=`,
+    envExample: `# OpenCode API key (required for opencode.ai provider)
+# OPENCODE_API_KEY=
+# CrofAI API key (required when using provider "crofai" preset)
+# CROF_API_KEY=`,
   },
 ];
 

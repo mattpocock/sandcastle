@@ -759,7 +759,9 @@ describe("opencode factory", () => {
   });
 
   it("buildPrintCommand shell-escapes the variant value", () => {
-    const provider = opencode("opencode/big-pickle", { variant: "it's tricky" });
+    const provider = opencode("opencode/big-pickle", {
+      variant: "it's tricky",
+    });
     const { command } = provider.buildPrintCommand(opts("test"));
     expect(command).toContain("--variant 'it'\\''s tricky'");
   });
@@ -807,6 +809,55 @@ describe("opencode factory", () => {
   it("defaults env to empty object when not provided", () => {
     const provider = opencode("opencode/big-pickle");
     expect(provider.env).toEqual({});
+  });
+
+  it("injects OPENCODE_CONFIG_CONTENT when apiBaseUrl is set (generic)", () => {
+    const provider = opencode("openai/gpt-4o-mini", {
+      apiBaseUrl: "https://custom-api.example.com/v1",
+    });
+    expect(provider.env).toHaveProperty("OPENCODE_CONFIG_CONTENT");
+    const config = JSON.parse(provider.env["OPENCODE_CONFIG_CONTENT"]!);
+    expect(config.provider.openai.options.baseURL).toBe(
+      "https://custom-api.example.com/v1",
+    );
+    expect(config.provider.openai.options.apiKey).toBeUndefined();
+  });
+
+  it("provider preset 'crofai' sets baseURL and apiKey mapping", () => {
+    const provider = opencode("openai/gpt-4o-mini", {
+      provider: "crofai",
+    });
+    expect(provider.env).toHaveProperty("OPENCODE_CONFIG_CONTENT");
+    const config = JSON.parse(provider.env["OPENCODE_CONFIG_CONTENT"]!);
+    expect(config.provider.openai.options.baseURL).toBe("https://crof.ai/v1");
+    expect(config.provider.openai.options.apiKey).toBe("{env:CROF_API_KEY}");
+  });
+
+  it("apiBaseUrl overrides provider preset baseURL", () => {
+    const provider = opencode("openai/gpt-4o-mini", {
+      provider: "crofai",
+      apiBaseUrl: "https://self-hosted.example.com/v1",
+    });
+    const config = JSON.parse(provider.env["OPENCODE_CONFIG_CONTENT"]!);
+    expect(config.provider.openai.options.baseURL).toBe(
+      "https://self-hosted.example.com/v1",
+    );
+    expect(config.provider.openai.options.apiKey).toBe("{env:CROF_API_KEY}");
+  });
+
+  it("merges provider config with user-provided env", () => {
+    const provider = opencode("openai/gpt-4o-mini", {
+      provider: "crofai",
+      env: { CROF_API_KEY: "my-key", EXTRA: "val" },
+    });
+    expect(provider.env["CROF_API_KEY"]).toBe("my-key");
+    expect(provider.env["EXTRA"]).toBe("val");
+    expect(provider.env).toHaveProperty("OPENCODE_CONFIG_CONTENT");
+  });
+
+  it("does not inject OPENCODE_CONFIG_CONTENT when neither apiBaseUrl nor provider is set", () => {
+    const provider = opencode("opencode/big-pickle");
+    expect(provider.env).not.toHaveProperty("OPENCODE_CONFIG_CONTENT");
   });
 });
 
