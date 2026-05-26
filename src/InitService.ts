@@ -245,6 +245,10 @@ export interface BacklogManagerEntry {
     readonly CLOSE_TASK_COMMAND: string;
     readonly BACKLOG_MANAGER_TOOLS: string;
   };
+  /** Runtime sandbox command that prepares auth or other backlog state before prompts run. */
+  readonly setupCommand?: string;
+  /** Runtime sandbox command that creates the Sandcastle label best-effort. */
+  readonly createLabelCommand?: string;
   /** Lines to append to `.env.example` for this backlog manager, or empty string if none needed. */
   readonly envExample: string;
 }
@@ -271,6 +275,17 @@ RUN curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/i
 
 RUN corepack enable`;
 
+const TEA_TOOLS = `# Install tea CLI for Gitea / Forgejo
+ARG TEA_VERSION=0.14.0
+RUN set -eux; \\
+  case "$(dpkg --print-architecture)" in \\
+    amd64) TEA_ARCH="linux-amd64" ;; \\
+    arm64) TEA_ARCH="linux-arm64" ;; \\
+    *) echo "Unsupported architecture for tea: $(dpkg --print-architecture)" >&2; exit 1 ;; \\
+  esac; \\
+  curl -fsSL -o /usr/local/bin/tea "https://dl.gitea.com/tea/\${TEA_VERSION}/tea-\${TEA_VERSION}-\${TEA_ARCH}"; \\
+  chmod +x /usr/local/bin/tea`;
+
 const BACKLOG_MANAGER_REGISTRY: BacklogManagerEntry[] = [
   {
     name: "github-issues",
@@ -283,6 +298,29 @@ const BACKLOG_MANAGER_REGISTRY: BacklogManagerEntry[] = [
     },
     envExample: `# GitHub personal access token
 GH_TOKEN=`,
+  },
+  {
+    name: "gitea-issues",
+    label: "Gitea / Forgejo Issues",
+    templateArgs: {
+      LIST_TASKS_COMMAND:
+        "tea issues list --state open --labels Sandcastle --fields index,title,body,labels,comments --output json",
+      VIEW_TASK_COMMAND: "tea issue {{TASK_ID}} --comments --output json",
+      CLOSE_TASK_COMMAND: `tea comment {{TASK_ID}} "Completed by Sandcastle" && tea issue close {{TASK_ID}}`,
+      BACKLOG_MANAGER_TOOLS: TEA_TOOLS,
+    },
+    setupCommand: `if [ -z "$GITEA_SERVER_URL" ] || [ -z "$GITEA_ACCESS_TOKEN" ]; then
+  echo "GITEA_SERVER_URL and GITEA_ACCESS_TOKEN must be set for Gitea / Forgejo backlog access" >&2
+  exit 1
+fi
+tea login add --name sandcastle --url "$GITEA_SERVER_URL" --token "$GITEA_ACCESS_TOKEN" --no-version-check 2>/dev/null || true
+tea login default sandcastle`,
+    createLabelCommand: `tea label create --name Sandcastle --color F9A825 --description "Issues for Sandcastle to work on" 2>/dev/null || true`,
+    envExample: `# Gitea / Forgejo server URL
+GITEA_SERVER_URL=
+
+# Gitea / Forgejo personal access token
+GITEA_ACCESS_TOKEN=`,
   },
   {
     name: "beads",
@@ -516,7 +554,9 @@ const rewritePromptFiles = (
           const content = yield* fs
             .readFileString(filePath)
             .pipe(Effect.mapError((e) => new Error(e.message)));
-          const updated = content.replace(/ --label Sandcastle/g, "");
+          const updated = content
+            .replace(/ --label Sandcastle/g, "")
+            .replace(/ --labels Sandcastle/g, "");
           if (updated !== content) {
             yield* fs
               .writeFileString(filePath, updated)
@@ -526,6 +566,77 @@ const rewritePromptFiles = (
       ),
       { concurrency: "unbounded" },
     );
+  });
+
+const joinShellCommands = (commands: readonly string[]): string =>
+  ["set -e", ...commands.filter((command) => command.trim().length > 0)].join(
+    "\n",
+  );
+
+const buildBacklogSetupCommand = (
+  backlogManager: BacklogManagerEntry,
+  createLabel: boolean,
+): string | undefined => {
+  const commands = [
+    backlogManager.setupCommand,
+    createLabel ? backlogManager.createLabelCommand : undefined,
+  ].filter((command): command is string => Boolean(command));
+
+  if (commands.length === 0) return undefined;
+  return joinShellCommands(commands);
+};
+
+const mergeBacklogSetupWithExistingCommand = (
+  existingCommand: string,
+  backlogSetupCommand: string,
+): string => joinShellCommands([existingCommand, backlogSetupCommand]);
+
+const rewriteMainTsHooks = (
+  configDir: string,
+  mainFilename: string,
+  backlogManager: BacklogManagerEntry,
+  createLabel: boolean,
+): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const backlogSetupCommand = buildBacklogSetupCommand(
+      backlogManager,
+      createLabel,
+    );
+    if (!backlogSetupCommand) return;
+
+    const fs = yield* FileSystem.FileSystem;
+    const mainTsPath = join(configDir, mainFilename);
+    const exists = yield* fs
+      .exists(mainTsPath)
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+    if (!exists) return;
+
+    const content = yield* fs
+      .readFileString(mainTsPath)
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+
+    const npmInstallHook = `onSandboxReady: [{ command: "npm install" }]`;
+    const mergedHookCommand = mergeBacklogSetupWithExistingCommand(
+      "npm install",
+      backlogSetupCommand,
+    );
+    let updated = content.replace(
+      npmInstallHook,
+      `onSandboxReady: [{ command: ${JSON.stringify(mergedHookCommand)} }]`,
+    );
+
+    if (updated === content) {
+      updated = content.replace(
+        /(\n\s*sandbox: [a-zA-Z]+\(\),\n)/,
+        `$1  hooks: {\n    sandbox: {\n      onSandboxReady: [{ command: ${JSON.stringify(backlogSetupCommand)} }],\n    },\n  },\n`,
+      );
+    }
+
+    if (updated !== content) {
+      yield* fs
+        .writeFileString(mainTsPath, updated)
+        .pipe(Effect.mapError((e) => new Error(e.message)));
+    }
   });
 
 /** Text file extensions eligible for `{{KEY}}` template argument substitution. */
@@ -695,6 +806,13 @@ export const scaffold = (
 
     // Rewrite main file with the selected agent factory and model
     yield* rewriteMainTs(configDir, agent, model, mainFilename);
+
+    yield* rewriteMainTsHooks(
+      configDir,
+      mainFilename,
+      backlogManager,
+      createLabel,
+    );
 
     // Replace backlog manager template arguments in all text files (must run before label stripping)
     yield* substituteTemplateArgs(configDir, backlogManager);

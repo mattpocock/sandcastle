@@ -1152,9 +1152,10 @@ describe("InitService scaffold", () => {
   // --- Backlog manager ---
 
   describe("Backlog manager registry", () => {
-    it("listBacklogManagers returns github-issues and beads", () => {
+    it("listBacklogManagers returns github-issues, gitea-issues, and beads", () => {
       const managers = listBacklogManagers();
       expect(managers.some((m) => m.name === "github-issues")).toBe(true);
+      expect(managers.some((m) => m.name === "gitea-issues")).toBe(true);
       expect(managers.some((m) => m.name === "beads")).toBe(true);
     });
 
@@ -1177,6 +1178,43 @@ describe("InitService scaffold", () => {
         "GitHub CLI",
       );
       expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).toContain("gh");
+    });
+
+    it("getBacklogManager returns gitea-issues entry with expected templateArgs and setup", () => {
+      const manager = getBacklogManager("gitea-issues");
+      expect(manager).toBeDefined();
+      expect(manager!.label).toBe("Gitea / Forgejo Issues");
+      expect(manager!.envExample).toContain("GITEA_SERVER_URL=");
+      expect(manager!.envExample).toContain("GITEA_ACCESS_TOKEN=");
+      expect(manager!.envExample).not.toContain("GITEA_SERVER_TOKEN=");
+      expect(manager!.setupCommand).toContain("GITEA_SERVER_URL");
+      expect(manager!.setupCommand).toContain("GITEA_ACCESS_TOKEN");
+      expect(manager!.setupCommand).toContain("tea login add");
+      expect(manager!.createLabelCommand).toContain("tea label create");
+      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain(
+        "tea issues list",
+      );
+      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain(
+        "--labels Sandcastle",
+      );
+      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain(
+        "--output json",
+      );
+      expect(manager!.templateArgs.VIEW_TASK_COMMAND).toContain("tea issue");
+      expect(manager!.templateArgs.VIEW_TASK_COMMAND).toContain("--comments");
+      expect(manager!.templateArgs.CLOSE_TASK_COMMAND).toContain("tea comment");
+      expect(manager!.templateArgs.CLOSE_TASK_COMMAND).toContain(
+        "tea issue close",
+      );
+      expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).toContain(
+        "TEA_VERSION",
+      );
+      expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).toContain(
+        "dl.gitea.com/tea",
+      );
+      expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).not.toContain(
+        "go install",
+      );
     });
 
     it("getBacklogManager returns beads entry with expected templateArgs", () => {
@@ -1703,6 +1741,196 @@ describe("InitService scaffold", () => {
         "utf-8",
       );
       expect(prompt).not.toContain("GitHub issue");
+    });
+
+    it("generates .env.example with Gitea / Forgejo env vars when backlog manager is gitea-issues", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        backlogManager: getBacklogManager("gitea-issues"),
+      });
+
+      const envExample = await readFile(
+        join(dir, ".sandcastle", ".env.example"),
+        "utf-8",
+      );
+      expect(envExample).toContain("GITEA_SERVER_URL=");
+      expect(envExample).toContain("GITEA_ACCESS_TOKEN=");
+      expect(envExample).not.toContain("GITEA_SERVER_TOKEN=");
+      expect(envExample).not.toContain("GH_TOKEN=");
+    });
+
+    it("scaffold with gitea-issues produces Dockerfile with tea install", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        backlogManager: getBacklogManager("gitea-issues"),
+      });
+
+      const dockerfile = await readFile(
+        join(dir, ".sandcastle", "Dockerfile"),
+        "utf-8",
+      );
+      expect(dockerfile).toContain("ARG TEA_VERSION=0.14.0");
+      expect(dockerfile).toContain("dl.gitea.com/tea");
+      expect(dockerfile).toContain("linux-amd64");
+      expect(dockerfile).toContain("linux-arm64");
+      expect(dockerfile).toContain("/usr/local/bin/tea");
+      expect(dockerfile).not.toContain("GitHub CLI");
+      expect(dockerfile).not.toContain("{{BACKLOG_MANAGER_TOOLS}}");
+    });
+
+    it("scaffold with gitea-issues + podman produces Containerfile with tea install", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        backlogManager: getBacklogManager("gitea-issues"),
+        sandboxProvider: getSandboxProvider("podman")!,
+      });
+
+      const containerfile = await readFile(
+        join(dir, ".sandcastle", "Containerfile"),
+        "utf-8",
+      );
+      expect(containerfile).toContain("ARG TEA_VERSION=0.14.0");
+      expect(containerfile).toContain("dl.gitea.com/tea");
+      expect(containerfile).not.toContain("GitHub CLI");
+      expect(containerfile).not.toContain("{{BACKLOG_MANAGER_TOOLS}}");
+    });
+
+    it("simple-loop with gitea-issues produces prompt with tea commands", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        backlogManager: getBacklogManager("gitea-issues"),
+      });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).toContain("tea issues list");
+      expect(prompt).toContain("--labels Sandcastle");
+      expect(prompt).toContain("tea comment");
+      expect(prompt).toContain("tea issue close");
+      expect(prompt).not.toContain("gh issue");
+      expect(prompt).not.toContain("{{LIST_TASKS_COMMAND}}");
+      expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
+    });
+
+    it("parallel-planner with gitea-issues substitutes list/view/close tea commands", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "parallel-planner",
+        backlogManager: getBacklogManager("gitea-issues"),
+      });
+
+      const planPrompt = await readFile(
+        join(dir, ".sandcastle", "plan-prompt.md"),
+        "utf-8",
+      );
+      const implementPrompt = await readFile(
+        join(dir, ".sandcastle", "implement-prompt.md"),
+        "utf-8",
+      );
+      const mergePrompt = await readFile(
+        join(dir, ".sandcastle", "merge-prompt.md"),
+        "utf-8",
+      );
+
+      expect(planPrompt).toContain("tea issues list");
+      expect(implementPrompt).toContain(
+        "tea issue {{TASK_ID}} --comments --output json",
+      );
+      expect(mergePrompt).toContain("tea comment");
+      expect(mergePrompt).toContain("tea issue close");
+      expect(planPrompt + implementPrompt + mergePrompt).not.toContain(
+        "gh issue",
+      );
+    });
+
+    it("gitea-issues strips --labels Sandcastle when createLabel is false", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        backlogManager: getBacklogManager("gitea-issues"),
+        createLabel: false,
+      });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).toContain("tea issues list");
+      expect(prompt).not.toContain("--labels Sandcastle");
+    });
+
+    it("gitea-issues injects ordered tea setup into simple-loop onSandboxReady hook", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        backlogManager: getBacklogManager("gitea-issues"),
+        createLabel: true,
+      });
+
+      const main = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      const npmIndex = main.indexOf("npm install");
+      const loginIndex = main.indexOf("tea login add");
+      const labelIndex = main.indexOf("tea label create");
+
+      expect(npmIndex).toBeGreaterThan(-1);
+      expect(loginIndex).toBeGreaterThan(npmIndex);
+      expect(labelIndex).toBeGreaterThan(loginIndex);
+      expect(main.match(/onSandboxReady:/g)?.length).toBe(1);
+    });
+
+    it("gitea-issues injects setup without label creation when createLabel is false", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        backlogManager: getBacklogManager("gitea-issues"),
+        createLabel: false,
+      });
+
+      const main = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(main).toContain("tea login add");
+      expect(main).not.toContain("tea label create");
+    });
+
+    it("gitea-issues injects a minimal hook into blank main.mts", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "blank",
+        backlogManager: getBacklogManager("gitea-issues"),
+      });
+
+      const main = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(main).toContain("hooks");
+      expect(main).toContain("onSandboxReady");
+      expect(main).toContain("tea login add");
+    });
+
+    it("github-issues does not inject runtime label setup", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        backlogManager: getBacklogManager("github-issues"),
+        createLabel: true,
+      });
+
+      const main = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(main).toContain("npm install");
+      expect(main).not.toContain("gh label create");
+      expect(main).not.toContain("tea login add");
     });
 
     // --- Dockerfile backlog manager tools ---
