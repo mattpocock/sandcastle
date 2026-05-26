@@ -12,7 +12,6 @@ import {
 import { resolveEnv } from "./EnvResolver.js";
 import { mergeProviderEnv } from "./mergeProviderEnv.js";
 import { orchestrate, type IterationResult } from "./Orchestrator.js";
-import { defaultSessionPathsLayer } from "./SessionPaths.js";
 import {
   callbackAgentStreamEmitterLayer,
   noopAgentStreamEmitterLayer,
@@ -314,7 +313,6 @@ const buildSandboxHandle = (
       const runLayer = Layer.mergeAll(
         reuseFactoryLayer,
         runDisplayLayer,
-        defaultSessionPathsLayer,
         agentStreamEmitterLayer,
       );
 

@@ -1,4 +1,5 @@
 import { Deferred, Effect } from "effect";
+import { join, posix } from "node:path";
 import { AgentStreamEmitter } from "./AgentStreamEmitter.js";
 import { Display } from "./Display.js";
 import { preprocessPrompt } from "./PromptPreprocessor.js";
@@ -11,14 +12,17 @@ import type { SandboxError } from "./errors.js";
 import type { SandboxService } from "./SandboxFactory.js";
 import { SandboxFactory, SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 import { withSandboxLifecycle, type SandboxHooks } from "./SandboxLifecycle.js";
-import type { AgentProvider, IterationUsage } from "./AgentProvider.js";
+import type {
+  AgentProvider,
+  IterationUsage,
+  ParsedStreamEvent,
+} from "./AgentProvider.js";
 import { TextDeltaBuffer } from "./TextDeltaBuffer.js";
 import {
   hostSessionStore,
   sandboxSessionStore,
   transferSession,
 } from "./SessionStore.js";
-import { SessionPaths } from "./SessionPaths.js";
 
 export type { ParsedStreamEvent, IterationUsage } from "./AgentProvider.js";
 
@@ -104,11 +108,18 @@ const invokeAgent = (
         onLine: (line) => {
           resetIdleTimer();
           for (const parsed of provider.parseStreamLine(line)) {
-            if (parsed.type === "text") {
+            if (parsed.type === "text" && parsed.text !== undefined) {
               onText(parsed.text);
-            } else if (parsed.type === "result") {
+            } else if (
+              parsed.type === "result" &&
+              parsed.result !== undefined
+            ) {
               resultText = parsed.result;
-            } else if (parsed.type === "tool_call") {
+            } else if (
+              parsed.type === "tool_call" &&
+              parsed.name !== undefined &&
+              parsed.args !== undefined
+            ) {
               onToolCall(parsed.name, parsed.args);
             } else if (parsed.type === "session_id") {
               sessionId = parsed.sessionId;
@@ -127,9 +138,7 @@ const invokeAgent = (
           errorDetail = resultText;
         }
         if (!errorDetail.trim()) {
-          const lines = execResult.stdout
-            .split("\n")
-            .filter((l) => l.trim());
+          const lines = execResult.stdout.split("\n").filter((l) => l.trim());
           errorDetail = lines.slice(-20).join("\n");
         }
         return yield* Effect.fail(
@@ -195,6 +204,10 @@ export interface OrchestrateOptions {
   readonly signal?: AbortSignal;
   /** When true, skip prompt expansion (shell expression evaluation). Set for dynamic inline prompts. */
   readonly skipPromptExpansion?: boolean;
+  /** @internal Override for the host-side Claude projects directory. Default: `~/.claude/projects`. */
+  readonly _hostProjectsDir?: string;
+  /** @internal Override for the sandbox-side Claude projects directory. Default: `/home/agent/.claude/projects`. */
+  readonly _sandboxProjectsDir?: string;
 }
 
 /** Per-iteration result carrying an optional session ID. */
@@ -224,7 +237,7 @@ export const orchestrate = (
 ): Effect.Effect<
   OrchestrateResult,
   SandboxError,
-  SandboxFactory | Display | SessionPaths | AgentStreamEmitter
+  SandboxFactory | Display | AgentStreamEmitter
 > => {
   const idleTimeoutMs =
     (options.idleTimeoutSeconds ?? DEFAULT_IDLE_TIMEOUT_SECONDS) * 1000;
@@ -232,7 +245,12 @@ export const orchestrate = (
     const factory = yield* SandboxFactory;
     const display = yield* Display;
     const streamEmitter = yield* AgentStreamEmitter;
-    const { hostProjectsDir, sandboxProjectsDir } = yield* SessionPaths;
+    const hostProjectsDir =
+      options._hostProjectsDir ??
+      join(process.env.HOME ?? "~", ".claude", "projects");
+    const sandboxProjectsDir =
+      options._sandboxProjectsDir ??
+      posix.join("/home/agent", ".claude", "projects");
     const { hostRepoDir, iterations, hooks, prompt, branch, provider } =
       options;
     let completionSignals: string[];

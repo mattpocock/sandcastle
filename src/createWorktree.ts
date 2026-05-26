@@ -33,7 +33,6 @@ import type { InteractiveResult } from "./interactive.js";
 import { buildLogFilename, printFileDisplayStartup } from "./run.js";
 import type { LoggingOption } from "./run.js";
 import { orchestrate, type IterationResult } from "./Orchestrator.js";
-import { defaultSessionPathsLayer } from "./SessionPaths.js";
 import {
   callbackAgentStreamEmitterLayer,
   noopAgentStreamEmitterLayer,
@@ -627,7 +626,6 @@ export const createWorktree = async (
       const runLayer = Layer.mergeAll(
         reuseFactoryLayer,
         runDisplayLayer,
-        defaultSessionPathsLayer,
         agentStreamEmitterLayer,
       );
 
