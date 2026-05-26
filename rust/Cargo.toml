@@ -17,3 +17,4 @@ tokio = { version = "1.52.3", features = ["full"] }
 
 [dev-dependencies]
 mockall = "0.14.0"
+tempfile = "3.27.0"

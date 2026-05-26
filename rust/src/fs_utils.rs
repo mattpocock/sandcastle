@@ -60,3 +60,32 @@ pub fn copy_file_out(
     // For isolated, it might use `docker cp` or similar.
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_copy_to_worktree() {
+        let host_dir = tempdir().unwrap();
+        let wt_dir = tempdir().unwrap();
+        
+        let host_path = host_dir.path();
+        let wt_path = wt_dir.path();
+        
+        fs::write(host_path.join("file1.txt"), "hello").unwrap();
+        fs::create_dir(host_path.join("dir1")).unwrap();
+        fs::write(host_path.join("dir1/file2.txt"), "world").unwrap();
+        
+        copy_to_worktree(
+            &["file1.txt".to_string(), "dir1".to_string(), "missing.txt".to_string()],
+            host_path.to_str().unwrap(),
+            wt_path.to_str().unwrap(),
+        ).expect("copy_to_worktree failed");
+        
+        assert_eq!(fs::read_to_string(wt_path.join("file1.txt")).unwrap(), "hello");
+        assert_eq!(fs::read_to_string(wt_path.join("dir1/file2.txt")).unwrap(), "world");
+    }
+}
