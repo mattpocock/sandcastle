@@ -41,3 +41,43 @@ impl Orchestrator {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sandboxes::traits::{MockSandbox, ExecResult};
+    use crate::agents::traits::{MockAgentProvider, PrintCommand, AgentEvent};
+    use mockall::predicate::*;
+
+    #[tokio::test]
+    async fn test_orchestrator_run() {
+        let mut mock_sandbox = MockSandbox::new();
+        let mut mock_agent = MockAgentProvider::new();
+
+        mock_agent.expect_build_print_command()
+            .with(eq("do something"), eq(true), eq(None))
+            .returning(|_, _, _| PrintCommand {
+                command: "agent-cmd".to_string(),
+                stdin: Some("prompt".to_string()),
+            });
+
+        mock_sandbox.expect_exec()
+            .with(eq("agent-cmd"), function(|opts: &ExecOptions| opts.stdin == Some("prompt".to_string())))
+            .returning(|_, _| Ok(ExecResult {
+                stdout: "line1\nline2".to_string(),
+                stderr: "".to_string(),
+                exit_code: 0,
+            }));
+
+        mock_agent.expect_parse_stream_line()
+            .with(eq("line1"))
+            .returning(|_| vec![AgentEvent::Text("parsed-line1".to_string())]);
+
+        mock_agent.expect_parse_stream_line()
+            .with(eq("line2"))
+            .returning(|_| vec![AgentEvent::Text("parsed-line2".to_string())]);
+
+        let orchestrator = Orchestrator::new(Box::new(mock_sandbox), Box::new(mock_agent));
+        orchestrator.run("do something", 1).await.unwrap();
+    }
+}

@@ -14,6 +14,7 @@ pub struct ExecResult {
     pub exit_code: i32,
 }
 
+#[cfg_attr(test, mockall::automock)]
 #[async_trait]
 pub trait Sandbox: Send + Sync {
     async fn exec(
