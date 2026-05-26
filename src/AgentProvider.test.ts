@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { claudeCode, codex, opencode, pi } from "./AgentProvider.js";
+import {
+  claudeCode,
+  claudeCodeVertex,
+  codex,
+  opencode,
+  pi,
+} from "./AgentProvider.js";
 import type { AgentCommandOptions } from "./AgentProvider.js";
 
 /** Shorthand: build options with dangerouslySkipPermissions: true (mirrors existing sandbox callers). */
@@ -759,7 +765,9 @@ describe("opencode factory", () => {
   });
 
   it("buildPrintCommand shell-escapes the variant value", () => {
-    const provider = opencode("opencode/big-pickle", { variant: "it's tricky" });
+    const provider = opencode("opencode/big-pickle", {
+      variant: "it's tricky",
+    });
     const { command } = provider.buildPrintCommand(opts("test"));
     expect(command).toContain("--variant 'it'\\''s tricky'");
   });
@@ -971,5 +979,263 @@ describe("captureSessions flag", () => {
 
   it("opencode has captureSessions false", () => {
     expect(opencode("opencode-model").captureSessions).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// claudeCodeVertex factory
+// ---------------------------------------------------------------------------
+
+describe("claudeCodeVertex factory", () => {
+  it("returns a provider with name 'claude-code-vertex'", () => {
+    const provider = claudeCodeVertex("claude-opus-4-7", {
+      region: "us-east5",
+    });
+    expect(provider.name).toBe("claude-code-vertex");
+  });
+
+  it("env always contains CLAUDE_CODE_USE_VERTEX=1", () => {
+    const provider = claudeCodeVertex("claude-opus-4-7", {
+      region: "us-east5",
+    });
+    expect(provider.env).toMatchObject({ CLAUDE_CODE_USE_VERTEX: "1" });
+  });
+
+  it("env always contains CLOUD_ML_REGION from options", () => {
+    const provider = claudeCodeVertex("claude-opus-4-7", {
+      region: "us-east5",
+    });
+    expect(provider.env).toMatchObject({ CLOUD_ML_REGION: "us-east5" });
+  });
+
+  it("env includes ANTHROPIC_VERTEX_PROJECT_ID when projectId provided", () => {
+    const provider = claudeCodeVertex("claude-opus-4-7", {
+      region: "us-east5",
+      projectId: "my-gcp-project",
+    });
+    expect(provider.env).toMatchObject({
+      ANTHROPIC_VERTEX_PROJECT_ID: "my-gcp-project",
+    });
+  });
+
+  it("env omits ANTHROPIC_VERTEX_PROJECT_ID when projectId not provided", () => {
+    const provider = claudeCodeVertex("claude-opus-4-7", {
+      region: "us-east5",
+    });
+    expect(provider.env).not.toHaveProperty("ANTHROPIC_VERTEX_PROJECT_ID");
+  });
+
+  it("env merges caller-provided env (e.g. GOOGLE_APPLICATION_CREDENTIALS)", () => {
+    const provider = claudeCodeVertex("claude-opus-4-7", {
+      region: "global",
+      env: { GOOGLE_APPLICATION_CREDENTIALS: "/secrets/sa.json" },
+    });
+    expect(provider.env).toMatchObject({
+      CLAUDE_CODE_USE_VERTEX: "1",
+      CLOUD_ML_REGION: "global",
+      GOOGLE_APPLICATION_CREDENTIALS: "/secrets/sa.json",
+    });
+  });
+
+  it("buildPrintCommand includes the model, --print, and stream-json format", () => {
+    const provider = claudeCodeVertex("claude-sonnet-4-6", { region: "eu" });
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).toContain("claude-sonnet-4-6");
+    expect(command).toContain("--print");
+    expect(command).toContain("--output-format stream-json");
+  });
+
+  it("buildPrintCommand delivers prompt via stdin, not argv", () => {
+    const provider = claudeCodeVertex("claude-opus-4-7", {
+      region: "us-east5",
+    });
+    const { command, stdin } = provider.buildPrintCommand(opts("do something"));
+    expect(command).toContain("-p -");
+    expect(command).not.toContain("'do something'");
+    expect(stdin).toBe("do something");
+  });
+
+  it("buildPrintCommand includes --dangerously-skip-permissions when true", () => {
+    const provider = claudeCodeVertex("claude-opus-4-7", {
+      region: "us-east5",
+    });
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+    });
+    expect(command).toContain("--dangerously-skip-permissions");
+  });
+
+  it("buildPrintCommand omits --dangerously-skip-permissions when false", () => {
+    const provider = claudeCodeVertex("claude-opus-4-7", {
+      region: "us-east5",
+    });
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: false,
+    });
+    expect(command).not.toContain("--dangerously-skip-permissions");
+  });
+
+  it("buildPrintCommand includes --effort when specified", () => {
+    const provider = claudeCodeVertex("claude-opus-4-7", {
+      region: "us-east5",
+      effort: "high",
+    });
+    const { command } = provider.buildPrintCommand(opts("test"));
+    expect(command).toContain("--effort high");
+  });
+
+  it("buildPrintCommand omits --effort when not specified", () => {
+    const provider = claudeCodeVertex("claude-opus-4-7", {
+      region: "us-east5",
+    });
+    const { command } = provider.buildPrintCommand(opts("test"));
+    expect(command).not.toContain("--effort");
+  });
+
+  it("supports all effort levels", () => {
+    for (const effort of ["low", "medium", "high", "max"] as const) {
+      const provider = claudeCodeVertex("claude-opus-4-7", {
+        region: "us-east5",
+        effort,
+      });
+      expect(provider.buildPrintCommand(opts("test")).command).toContain(
+        `--effort ${effort}`,
+      );
+    }
+  });
+
+  it("buildPrintCommand includes --resume when resumeSession is set", () => {
+    const provider = claudeCodeVertex("claude-opus-4-7", {
+      region: "us-east5",
+    });
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+      resumeSession: "abc-123",
+    });
+    expect(command).toContain("--resume 'abc-123'");
+  });
+
+  it("buildPrintCommand omits --resume when resumeSession is not set", () => {
+    const provider = claudeCodeVertex("claude-opus-4-7", {
+      region: "us-east5",
+    });
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+    });
+    expect(command).not.toContain("--resume");
+  });
+
+  it("parseStreamLine extracts text from assistant message", () => {
+    const provider = claudeCodeVertex("claude-opus-4-7", {
+      region: "us-east5",
+    });
+    const line = JSON.stringify({
+      type: "assistant",
+      message: { content: [{ type: "text", text: "Hello world" }] },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "text", text: "Hello world" },
+    ]);
+  });
+
+  it("parseStreamLine emits session_id from init line", () => {
+    const provider = claudeCodeVertex("claude-opus-4-7", {
+      region: "us-east5",
+    });
+    const line = JSON.stringify({
+      type: "system",
+      subtype: "init",
+      session_id: "vertex-session-1",
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "session_id", sessionId: "vertex-session-1" },
+    ]);
+  });
+
+  it("parseSessionUsage extracts token usage from JSONL content", () => {
+    const provider = claudeCodeVertex("claude-opus-4-7", {
+      region: "us-east5",
+    });
+    const content = JSON.stringify({
+      type: "assistant",
+      message: {
+        usage: {
+          input_tokens: 10,
+          cache_creation_input_tokens: 20,
+          cache_read_input_tokens: 30,
+          output_tokens: 40,
+        },
+      },
+    });
+    expect(provider.parseSessionUsage!(content)).toEqual({
+      inputTokens: 10,
+      cacheCreationInputTokens: 20,
+      cacheReadInputTokens: 30,
+      outputTokens: 40,
+    });
+  });
+
+  it("captureSessions defaults to true", () => {
+    const provider = claudeCodeVertex("claude-opus-4-7", {
+      region: "us-east5",
+    });
+    expect(provider.captureSessions).toBe(true);
+  });
+
+  it("captureSessions can be set to false", () => {
+    const provider = claudeCodeVertex("claude-opus-4-7", {
+      region: "us-east5",
+      captureSessions: false,
+    });
+    expect(provider.captureSessions).toBe(false);
+  });
+
+  it("buildInteractiveArgs includes claude and model", () => {
+    const provider = claudeCodeVertex("claude-opus-4-7", {
+      region: "us-east5",
+    });
+    const args = provider.buildInteractiveArgs!(opts("test"));
+    expect(args[0]).toBe("claude");
+    expect(args).toContain("claude-opus-4-7");
+  });
+
+  it("buildInteractiveArgs includes --dangerously-skip-permissions when true", () => {
+    const provider = claudeCodeVertex("claude-opus-4-7", {
+      region: "us-east5",
+    });
+    const args = provider.buildInteractiveArgs!({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+    });
+    expect(args).toContain("--dangerously-skip-permissions");
+  });
+
+  it("buildInteractiveArgs omits --dangerously-skip-permissions when false", () => {
+    const provider = claudeCodeVertex("claude-opus-4-7", {
+      region: "us-east5",
+    });
+    const args = provider.buildInteractiveArgs!({
+      prompt: "test",
+      dangerouslySkipPermissions: false,
+    });
+    expect(args).not.toContain("--dangerously-skip-permissions");
+  });
+
+  it("bakes model into each provider instance independently", () => {
+    const provider1 = claudeCodeVertex("model-a", { region: "us-east5" });
+    const provider2 = claudeCodeVertex("model-b", { region: "us-east5" });
+    expect(provider1.buildPrintCommand(opts("test")).command).toContain(
+      "model-a",
+    );
+    expect(provider2.buildPrintCommand(opts("test")).command).toContain(
+      "model-b",
+    );
+    expect(provider1.buildPrintCommand(opts("test")).command).not.toContain(
+      "model-b",
+    );
   });
 });

@@ -21,7 +21,11 @@ const TOOL_ARG_FIELDS: Record<string, string> = {
 const extractErrorMessage = (obj: any): string | undefined => {
   const err = obj.error;
   if (typeof err === "string") return err;
-  if (typeof err === "object" && err !== null && typeof err.message === "string") {
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    typeof err.message === "string"
+  ) {
     return err.message;
   }
   if (typeof obj.message === "string") return obj.message;
@@ -384,6 +388,98 @@ export const claudeCode = (
     if (dangerouslySkipPermissions) args.push("--dangerously-skip-permissions");
     args.push("--model", model);
     if (options?.effort) args.push("--effort", options.effort);
+    if (prompt) args.push(prompt);
+    return args;
+  },
+
+  parseStreamLine(line: string): ParsedStreamEvent[] {
+    return parseStreamJsonLine(line);
+  },
+
+  parseSessionUsage(content: string): IterationUsage | undefined {
+    const lines = content.split("\n");
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i]!;
+      if (!line.startsWith("{")) continue;
+      try {
+        const obj = JSON.parse(line);
+        if (obj.type === "assistant" && obj.message?.usage) {
+          const u = obj.message.usage;
+          if (
+            typeof u.input_tokens === "number" &&
+            typeof u.cache_creation_input_tokens === "number" &&
+            typeof u.cache_read_input_tokens === "number" &&
+            typeof u.output_tokens === "number"
+          ) {
+            return {
+              inputTokens: u.input_tokens,
+              cacheCreationInputTokens: u.cache_creation_input_tokens,
+              cacheReadInputTokens: u.cache_read_input_tokens,
+              outputTokens: u.output_tokens,
+            };
+          }
+        }
+      } catch {
+        // Not valid JSON — skip
+      }
+    }
+    return undefined;
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Claude Code (Vertex AI) agent provider
+// ---------------------------------------------------------------------------
+
+export interface ClaudeCodeVertexOptions {
+  readonly projectId?: string;
+  readonly region: string;
+  readonly effort?: "low" | "medium" | "high" | "max";
+  readonly env?: Record<string, string>;
+  readonly captureSessions?: boolean;
+}
+
+export const claudeCodeVertex = (
+  model: string,
+  options: ClaudeCodeVertexOptions,
+): AgentProvider => ({
+  name: "claude-code-vertex",
+  env: {
+    CLAUDE_CODE_USE_VERTEX: "1",
+    CLOUD_ML_REGION: options.region,
+    ...(options.projectId
+      ? { ANTHROPIC_VERTEX_PROJECT_ID: options.projectId }
+      : {}),
+    ...options.env,
+  },
+  captureSessions: options.captureSessions ?? true,
+
+  buildPrintCommand({
+    prompt,
+    dangerouslySkipPermissions,
+    resumeSession,
+  }: AgentCommandOptions): PrintCommand {
+    const skipPerms = dangerouslySkipPermissions
+      ? " --dangerously-skip-permissions"
+      : "";
+    const effortFlag = options.effort ? ` --effort ${options.effort}` : "";
+    const resumeFlag = resumeSession
+      ? ` --resume ${shellEscape(resumeSession)}`
+      : "";
+    return {
+      command: `claude --print --verbose${skipPerms} --output-format stream-json --model ${shellEscape(model)}${effortFlag}${resumeFlag} -p -`,
+      stdin: prompt,
+    };
+  },
+
+  buildInteractiveArgs({
+    prompt,
+    dangerouslySkipPermissions,
+  }: AgentCommandOptions): string[] {
+    const args = ["claude"];
+    if (dangerouslySkipPermissions) args.push("--dangerously-skip-permissions");
+    args.push("--model", model);
+    if (options.effort) args.push("--effort", options.effort);
     if (prompt) args.push(prompt);
     return args;
   },

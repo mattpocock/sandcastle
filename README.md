@@ -726,26 +726,26 @@ Removes the Podman image.
 
 ### `RunOptions`
 
-| Option               | Type               | Default                       | Description                                                                                                                                                     |
-| -------------------- | ------------------ | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agent`              | AgentProvider      | —                             | **Required.** Agent provider (e.g. `claudeCode("claude-opus-4-7")`, `pi("claude-sonnet-4-6")`, `codex("gpt-5.4-mini")`, `opencode("opencode/big-pickle")`)      |
-| `sandbox`            | SandboxProvider    | —                             | **Required.** Sandbox provider (e.g. `docker()`, `podman()`, `docker({ imageName: "sandcastle:local" })`)                                                       |
-| `cwd`                | string             | `process.cwd()`               | Host repo directory — anchor for `.sandcastle/` artifacts and git operations. Relative paths resolve against `process.cwd()`.                                   |
-| `prompt`             | string             | —                             | Inline prompt (mutually exclusive with `promptFile`)                                                                                                            |
-| `promptFile`         | string             | —                             | Path to prompt file (mutually exclusive with `prompt`). Resolves against `process.cwd()`, **not** `cwd`.                                                        |
-| `maxIterations`      | number             | `1`                           | Maximum iterations to run                                                                                                                                       |
-| `hooks`              | SandboxHooks       | —                             | Lifecycle hooks (`host.*`, `sandbox.*`)                                                                                                                         |
-| `name`               | string             | —                             | Display name for the run, shown as a prefix in log output                                                                                                       |
-| `promptArgs`         | PromptArgs         | —                             | Key-value map for `{{KEY}}` placeholder substitution                                                                                                            |
-| `branchStrategy`     | BranchStrategy     | per-provider default          | Branch strategy: `{ type: 'head' }`, `{ type: 'merge-to-head' }`, or `{ type: 'branch', branch: '…' }`                                                          |
-| `copyToWorktree`     | string[]           | —                             | Host-relative file paths to copy into the sandbox before start (not supported with `branchStrategy: { type: 'head' }`)                                          |
-| `logging`            | object             | file (auto-generated)         | `{ type: 'file', path }` or `{ type: 'stdout' }`                                                                                                                |
-| `completionSignal`   | string \| string[] | `<promise>COMPLETE</promise>` | String or array of strings the agent emits to stop the iteration loop early                                                                                     |
-| `idleTimeoutSeconds` | number             | `600`                         | Idle timeout in seconds — resets on each agent output event                                                                                                     |
-| `resumeSession`      | string             | —                             | Resume a prior Claude Code session by ID. Incompatible with `maxIterations > 1`. Session file must exist on host.                                               |
-| `signal`             | AbortSignal        | —                             | Cancel the run when aborted. Kills the in-flight agent subprocess and cancels lifecycle hooks; the worktree is preserved on disk. Rejects with `signal.reason`. |
-| `timeouts`           | Timeouts           | —                             | Override default timeouts for built-in lifecycle steps. Currently supports `{ copyToWorktreeMs?: number }` (default: 60 000).                                   |
-| `output`             | OutputDefinition   | —                             | Structured output definition (`Output.object(…)` or `Output.string(…)`). Requires `maxIterations === 1`. See [Structured output](#structured-output).           |
+| Option               | Type               | Default                       | Description                                                                                                                                                                                                                        |
+| -------------------- | ------------------ | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent`              | AgentProvider      | —                             | **Required.** Agent provider (e.g. `claudeCode("claude-opus-4-7")`, `claudeCodeVertex("claude-opus-4-1@20250805", { region: "us-east5" })`, `pi("claude-sonnet-4-6")`, `codex("gpt-5.4-mini")`, `opencode("opencode/big-pickle")`) |
+| `sandbox`            | SandboxProvider    | —                             | **Required.** Sandbox provider (e.g. `docker()`, `podman()`, `docker({ imageName: "sandcastle:local" })`)                                                                                                                          |
+| `cwd`                | string             | `process.cwd()`               | Host repo directory — anchor for `.sandcastle/` artifacts and git operations. Relative paths resolve against `process.cwd()`.                                                                                                      |
+| `prompt`             | string             | —                             | Inline prompt (mutually exclusive with `promptFile`)                                                                                                                                                                               |
+| `promptFile`         | string             | —                             | Path to prompt file (mutually exclusive with `prompt`). Resolves against `process.cwd()`, **not** `cwd`.                                                                                                                           |
+| `maxIterations`      | number             | `1`                           | Maximum iterations to run                                                                                                                                                                                                          |
+| `hooks`              | SandboxHooks       | —                             | Lifecycle hooks (`host.*`, `sandbox.*`)                                                                                                                                                                                            |
+| `name`               | string             | —                             | Display name for the run, shown as a prefix in log output                                                                                                                                                                          |
+| `promptArgs`         | PromptArgs         | —                             | Key-value map for `{{KEY}}` placeholder substitution                                                                                                                                                                               |
+| `branchStrategy`     | BranchStrategy     | per-provider default          | Branch strategy: `{ type: 'head' }`, `{ type: 'merge-to-head' }`, or `{ type: 'branch', branch: '…' }`                                                                                                                             |
+| `copyToWorktree`     | string[]           | —                             | Host-relative file paths to copy into the sandbox before start (not supported with `branchStrategy: { type: 'head' }`)                                                                                                             |
+| `logging`            | object             | file (auto-generated)         | `{ type: 'file', path }` or `{ type: 'stdout' }`                                                                                                                                                                                   |
+| `completionSignal`   | string \| string[] | `<promise>COMPLETE</promise>` | String or array of strings the agent emits to stop the iteration loop early                                                                                                                                                        |
+| `idleTimeoutSeconds` | number             | `600`                         | Idle timeout in seconds — resets on each agent output event                                                                                                                                                                        |
+| `resumeSession`      | string             | —                             | Resume a prior Claude Code session by ID. Incompatible with `maxIterations > 1`. Session file must exist on host.                                                                                                                  |
+| `signal`             | AbortSignal        | —                             | Cancel the run when aborted. Kills the in-flight agent subprocess and cancels lifecycle hooks; the worktree is preserved on disk. Rejects with `signal.reason`.                                                                    |
+| `timeouts`           | Timeouts           | —                             | Override default timeouts for built-in lifecycle steps. Currently supports `{ copyToWorktreeMs?: number }` (default: 60 000).                                                                                                      |
+| `output`             | OutputDefinition   | —                             | Structured output definition (`Output.object(…)` or `Output.string(…)`). Requires `maxIterations === 1`. See [Structured output](#structured-output).                                                                              |
 
 ### `RunResult`
 
@@ -780,7 +780,7 @@ Removes the Podman image.
 
 After each Claude Code iteration, Sandcastle automatically captures the agent's session JSONL from the sandbox to the host at `~/.claude/projects/<encoded-path>/sessions/<session-id>.jsonl`. The `cwd` fields inside each JSONL entry are rewritten to match the host repo root, so `claude --resume` works natively.
 
-Session capture is enabled by default for `claudeCode()` and can be opted out via `captureSessions: false`. Non-Claude agent providers never attempt capture. Capture failure fails the run.
+Session capture is enabled by default for `claudeCode()` and `claudeCodeVertex()` and can be opted out via `captureSessions: false`. Non-Claude agent providers never attempt capture. Capture failure fails the run.
 
 ### Session resume
 
@@ -817,6 +817,41 @@ agent: claudeCode("claude-opus-4-7", { effort: "high" });
 | `effort`          | `"low"` \| `"medium"` \| `"high"` \| `"max"` | —       | Claude Code reasoning effort level (`max` is Opus only)   |
 | `env`             | `Record<string, string>`                     | `{}`    | Environment variables injected by this agent provider     |
 | `captureSessions` | `boolean`                                    | `true`  | Capture agent session JSONL to host for `claude --resume` |
+
+### `ClaudeCodeVertexOptions`
+
+The `claudeCodeVertex()` factory routes Claude Code through [Google Vertex AI](https://code.claude.com/docs/en/google-vertex-ai). It uses the same `claude` CLI binary as `claudeCode()` and produces an identical session format, so all `claudeCode()` features (session capture, `resumeSession`, `effort`) work the same way.
+
+```typescript
+agent: claudeCodeVertex("claude-opus-4-1@20250805", {
+  region: "eu",
+  projectId: "my-gcp-project",
+});
+```
+
+| Option            | Type                                         | Default | Description                                                                                                                                                                       |
+| ----------------- | -------------------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `region`          | `string`                                     | —       | **Required.** Vertex AI region (e.g. `"global"`, `"eu"`, `"us"`, `"us-east5"`). Sets `CLOUD_ML_REGION`.                                                                           |
+| `projectId`       | `string`                                     | —       | GCP project ID. Sets `ANTHROPIC_VERTEX_PROJECT_ID`. Optional — if omitted, the project resolves from `GOOGLE_APPLICATION_CREDENTIALS`, `gcloud`, or the attached service account. |
+| `effort`          | `"low"` \| `"medium"` \| `"high"` \| `"max"` | —       | Claude Code reasoning effort level (`max` is Opus only)                                                                                                                           |
+| `env`             | `Record<string, string>`                     | `{}`    | Environment variables injected by this agent provider                                                                                                                             |
+| `captureSessions` | `boolean`                                    | `true`  | Capture agent session JSONL to host for `claude --resume`                                                                                                                         |
+
+**Model IDs on Vertex AI.** The `model` argument is passed to `claude --model` and must match a model ID that is **enabled in your project's [Vertex AI Model Garden](https://console.cloud.google.com/vertex-ai/model-garden)**. These IDs do not always match Anthropic API names — Vertex commonly requires a dated suffix (e.g. `claude-opus-4-1@20250805`, `claude-haiku-4-5@20251001`). For AFK / unattended runs, pin a dated version so deployments stay reproducible across model rollouts. If the requested model is not enabled in your project, Claude Code fails with: _"The model `<id>` is not available on your vertex deployment."_
+
+**Region must match model availability.** `region` selects the Vertex AI endpoint (`global`, multi-region like `eu`/`us`, or specific like `us-east5`). A model enabled in your Model Garden is not automatically available on every endpoint — many newer Claude models are only served by the `global` endpoint. If you get an error like _"model `<id>` is not available on your vertex deployment"_ but the model is enabled in your project, try `region: "global"` first. See [Vertex AI partner model locations](https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations#genai-partner-models).
+
+**Small/fast model.** At startup, Claude Code [verifies access](https://code.claude.com/docs/en/google-vertex-ai#startup-model-checks) to **both** the primary model and a small/fast "haiku" model (default: `claude-haiku-4-5@20251001`). If that haiku ID is not enabled in your project, startup fails with _"There's an issue with the selected model (`<id>`). It may not exist or you may not have access to it."_ — even when the primary model is fine. Pin the small/fast model via `env` to any model your project can invoke:
+
+```typescript
+claudeCodeVertex("claude-opus-4-7", {
+  region: "global",
+  projectId: "my-gcp-project",
+  env: { ANTHROPIC_DEFAULT_HAIKU_MODEL: "claude-haiku-4-5@20251001" },
+});
+```
+
+**Credentials.** Google credentials are supplied via the sandbox environment, never through factory options. Use either `GOOGLE_APPLICATION_CREDENTIALS` (path to a service account JSON file) or Application Default Credentials from `gcloud auth application-default login`. The factory injects only non-secret routing config (`CLAUDE_CODE_USE_VERTEX=1`, `CLOUD_ML_REGION`, and `ANTHROPIC_VERTEX_PROJECT_ID` when provided).
 
 ### `CodexOptions`
 
