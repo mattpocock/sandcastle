@@ -21,7 +21,11 @@ const TOOL_ARG_FIELDS: Record<string, string> = {
 const extractErrorMessage = (obj: any): string | undefined => {
   const err = obj.error;
   if (typeof err === "string") return err;
-  if (typeof err === "object" && err !== null && typeof err.message === "string") {
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    typeof err.message === "string"
+  ) {
     return err.message;
   }
   if (typeof obj.message === "string") return obj.message;
@@ -335,6 +339,142 @@ export const opencode = (
 
   parseStreamLine(_line: string): ParsedStreamEvent[] {
     return [];
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Cursor agent provider
+// ---------------------------------------------------------------------------
+
+const parseCursorToolCall = (toolCall: unknown): ParsedStreamEvent[] => {
+  if (typeof toolCall !== "object" || toolCall === null) return [];
+
+  const obj = toolCall as Record<string, any>;
+  if (typeof obj.writeToolCall?.args?.path === "string") {
+    return [
+      { type: "tool_call", name: "Write", args: obj.writeToolCall.args.path },
+    ];
+  }
+  if (typeof obj.readToolCall?.args?.path === "string") {
+    return [
+      { type: "tool_call", name: "Read", args: obj.readToolCall.args.path },
+    ];
+  }
+  if (
+    typeof obj.function?.name === "string" &&
+    typeof obj.function?.arguments === "string"
+  ) {
+    const functionName = obj.function.name;
+    const functionArgs = obj.function.arguments;
+    if (functionName === "shell" || functionName === "bash") {
+      let command = functionArgs;
+      try {
+        const parsedArgs = JSON.parse(functionArgs);
+        if (
+          typeof parsedArgs === "object" &&
+          parsedArgs !== null &&
+          typeof parsedArgs.command === "string"
+        ) {
+          command = parsedArgs.command;
+        }
+      } catch {
+        // Function arguments are often plain strings; use them as-is.
+      }
+      return [{ type: "tool_call", name: "Bash", args: command }];
+    }
+    return [
+      {
+        type: "tool_call",
+        name: functionName,
+        args: functionArgs,
+      },
+    ];
+  }
+  return [];
+};
+
+const parseCursorStreamLine = (line: string): ParsedStreamEvent[] => {
+  if (!line.startsWith("{")) return [];
+  try {
+    const obj = JSON.parse(line);
+    if (obj.type === "assistant" && Array.isArray(obj.message?.content)) {
+      const texts: string[] = [];
+      for (const block of obj.message.content as {
+        type: string;
+        text?: string;
+      }[]) {
+        if (block.type === "text" && typeof block.text === "string") {
+          texts.push(block.text);
+        }
+      }
+      return texts.length > 0 ? [{ type: "text", text: texts.join("") }] : [];
+    }
+    if (
+      obj.type === "result" &&
+      obj.subtype === "success" &&
+      obj.is_error === false &&
+      typeof obj.result === "string"
+    ) {
+      return [{ type: "result", result: obj.result }];
+    }
+    if (obj.type === "tool_call" && obj.subtype === "started") {
+      return parseCursorToolCall(obj.tool_call);
+    }
+    if (
+      obj.type === "system" &&
+      obj.subtype === "init" &&
+      typeof obj.session_id === "string"
+    ) {
+      return [{ type: "session_id", sessionId: obj.session_id }];
+    }
+    if (obj.type === "error") {
+      const msg = extractErrorMessage(obj);
+      return msg ? [{ type: "result", result: msg }] : [];
+    }
+  } catch {
+    // Not valid JSON — skip
+  }
+  return [];
+};
+
+/** Options for the cursor agent provider. */
+export interface CursorOptions {
+  /** Environment variables injected by this agent provider. */
+  readonly env?: Record<string, string>;
+  /** When false, session capture is disabled. Default: true. */
+  readonly captureSessions?: boolean;
+}
+
+export const cursor = (
+  model: string = "auto",
+  options?: CursorOptions,
+): AgentProvider => ({
+  name: "cursor",
+  env: options?.env ?? {},
+  captureSessions: options?.captureSessions ?? true,
+
+  buildPrintCommand({
+    prompt,
+    resumeSession,
+    dangerouslySkipPermissions,
+  }: AgentCommandOptions): PrintCommand {
+    const skipPerms = dangerouslySkipPermissions ? " --force" : "";
+    const resumeFlag = resumeSession
+      ? ` --resume ${shellEscape(resumeSession)}`
+      : "";
+    return {
+      command: `agent -p --output-format stream-json --model ${shellEscape(model)}${skipPerms}${resumeFlag} ${shellEscape(prompt)}`,
+    };
+  },
+
+  buildInteractiveArgs({ prompt }: AgentCommandOptions): string[] {
+    const args = ["agent", "--model", model];
+    if (prompt) args.push(prompt);
+    return args;
+  },
+
+  parseStreamLine(line: string): ParsedStreamEvent[] {
+    return parseCursorStreamLine(line);
   },
 });
 

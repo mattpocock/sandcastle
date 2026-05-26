@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { claudeCode, codex, opencode, pi } from "./AgentProvider.js";
+import { claudeCode, codex, cursor, opencode, pi } from "./AgentProvider.js";
 import type { AgentCommandOptions } from "./AgentProvider.js";
 
 /** Shorthand: build options with dangerouslySkipPermissions: true (mirrors existing sandbox callers). */
@@ -759,7 +759,9 @@ describe("opencode factory", () => {
   });
 
   it("buildPrintCommand shell-escapes the variant value", () => {
-    const provider = opencode("opencode/big-pickle", { variant: "it's tricky" });
+    const provider = opencode("opencode/big-pickle", {
+      variant: "it's tricky",
+    });
     const { command } = provider.buildPrintCommand(opts("test"));
     expect(command).toContain("--variant 'it'\\''s tricky'");
   });
@@ -807,6 +809,338 @@ describe("opencode factory", () => {
   it("defaults env to empty object when not provided", () => {
     const provider = opencode("opencode/big-pickle");
     expect(provider.env).toEqual({});
+  });
+});
+
+// ---------------------------------------------------------------------------
+// cursor factory
+// ---------------------------------------------------------------------------
+
+describe("cursor factory", () => {
+  it("returns a provider with name 'cursor'", () => {
+    const provider = cursor("auto");
+    expect(provider.name).toBe("cursor");
+  });
+
+  it("does not expose envManifest or dockerfileTemplate", () => {
+    const provider = cursor("auto");
+    expect(provider).not.toHaveProperty("envManifest");
+    expect(provider).not.toHaveProperty("dockerfileTemplate");
+  });
+
+  it("buildPrintCommand includes the model and headless flags", () => {
+    const provider = cursor("auto");
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).toContain("agent -p");
+    expect(command).toContain("--force");
+    expect(command).toContain("--output-format stream-json");
+    expect(command).toContain("--model 'auto'");
+  });
+
+  it("buildPrintCommand omits Cursor sandbox flags", () => {
+    const provider = cursor("auto");
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).not.toContain("--sandbox");
+  });
+
+  it("buildPrintCommand includes the prompt in command (no stdin)", () => {
+    const provider = cursor("auto");
+    const { command, stdin } = provider.buildPrintCommand(opts("do something"));
+    expect(command).toContain("'do something'");
+    expect(stdin).toBeUndefined();
+  });
+
+  it("buildPrintCommand shell-escapes the prompt", () => {
+    const provider = cursor("auto");
+    const { command } = provider.buildPrintCommand(opts("it's a test"));
+    expect(command).toContain("'it'\\''s a test'");
+  });
+
+  it("buildPrintCommand shell-escapes the model", () => {
+    const provider = cursor("composer-2");
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).toContain("--model 'composer-2'");
+  });
+
+  it("defaults model to auto", () => {
+    const provider = cursor();
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).toContain("--model 'auto'");
+  });
+
+  it("buildInteractiveArgs includes prompt as positional argument", () => {
+    const provider = cursor("auto");
+    const args = provider.buildInteractiveArgs!(opts("fix the bug"));
+    expect(args[0]).toBe("agent");
+    expect(args).toContain("--model");
+    expect(args).toContain("auto");
+    expect(args[args.length - 1]).toBe("fix the bug");
+  });
+
+  it("buildInteractiveArgs omits prompt when empty string", () => {
+    const provider = cursor("auto");
+    const args = provider.buildInteractiveArgs!(opts(""));
+    expect(args).not.toContain("");
+  });
+
+  it("parseStreamLine extracts text from assistant message", () => {
+    const provider = cursor("auto");
+    const line = JSON.stringify({
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "Hello world" }],
+      },
+      session_id: "session-1",
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "text", text: "Hello world" },
+    ]);
+  });
+
+  it("parseStreamLine extracts result from result message", () => {
+    const provider = cursor("auto");
+    const line = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      duration_ms: 1234,
+      duration_api_ms: 1234,
+      is_error: false,
+      result: "Final answer <promise>COMPLETE</promise>",
+      session_id: "session-1",
+      request_id: "request-1",
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      {
+        type: "result",
+        result: "Final answer <promise>COMPLETE</promise>",
+      },
+    ]);
+  });
+
+  it("parseStreamLine extracts session id from init system messages", () => {
+    const provider = cursor("auto");
+    const line = JSON.stringify({
+      type: "system",
+      subtype: "init",
+      apiKeySource: "env",
+      cwd: "/absolute/path",
+      session_id: "cursor-session-1",
+      model: "Cursor Model",
+      permissionMode: "default",
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "session_id", sessionId: "cursor-session-1" },
+    ]);
+  });
+
+  it("parseStreamLine ignores non-success result messages", () => {
+    const provider = cursor("auto");
+    const line = JSON.stringify({
+      type: "result",
+      subtype: "error",
+      is_error: true,
+      result: "Something failed",
+    });
+    expect(provider.parseStreamLine(line)).toEqual([]);
+  });
+
+  it("parseStreamLine extracts read tool paths", () => {
+    const provider = cursor("auto");
+    const line = JSON.stringify({
+      type: "tool_call",
+      subtype: "started",
+      call_id: "tool-1",
+      tool_call: { readToolCall: { args: { path: "README.md" } } },
+      session_id: "session-1",
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "tool_call", name: "Read", args: "README.md" },
+    ]);
+  });
+
+  it("parseStreamLine extracts write tool paths", () => {
+    const provider = cursor("auto");
+    const line = JSON.stringify({
+      type: "tool_call",
+      subtype: "started",
+      call_id: "tool-2",
+      tool_call: {
+        writeToolCall: {
+          args: {
+            path: "src/index.ts",
+            fileText: "export {};",
+            toolCallId: "tool-2",
+          },
+        },
+      },
+      session_id: "session-1",
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "tool_call", name: "Write", args: "src/index.ts" },
+    ]);
+  });
+
+  it("parseStreamLine extracts generic function tool calls", () => {
+    const provider = cursor("auto");
+    const line = JSON.stringify({
+      type: "tool_call",
+      subtype: "started",
+      call_id: "tool-3",
+      tool_call: {
+        function: { name: "custom_tool", arguments: "some args" },
+      },
+      session_id: "session-1",
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "tool_call", name: "custom_tool", args: "some args" },
+    ]);
+  });
+
+  it("parseStreamLine maps shell function tool calls to Bash", () => {
+    const provider = cursor("auto");
+    const line = JSON.stringify({
+      type: "tool_call",
+      subtype: "started",
+      call_id: "tool-4",
+      tool_call: {
+        function: { name: "shell", arguments: "npm test" },
+      },
+      session_id: "session-1",
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "tool_call", name: "Bash", args: "npm test" },
+    ]);
+  });
+
+  it("parseStreamLine maps bash function tool calls to Bash", () => {
+    const provider = cursor("auto");
+    const line = JSON.stringify({
+      type: "tool_call",
+      subtype: "started",
+      call_id: "tool-5",
+      tool_call: {
+        function: { name: "bash", arguments: "npm run typecheck" },
+      },
+      session_id: "session-1",
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "tool_call", name: "Bash", args: "npm run typecheck" },
+    ]);
+  });
+
+  it("parseStreamLine extracts command from JSON-encoded shell arguments", () => {
+    const provider = cursor("auto");
+    const line = JSON.stringify({
+      type: "tool_call",
+      subtype: "started",
+      call_id: "tool-6",
+      tool_call: {
+        function: {
+          name: "shell",
+          arguments: JSON.stringify({ command: "npm test", timeout_ms: 1000 }),
+        },
+      },
+      session_id: "session-1",
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "tool_call", name: "Bash", args: "npm test" },
+    ]);
+  });
+
+  it("parseStreamLine ignores completed tool calls", () => {
+    const provider = cursor("auto");
+    const line = JSON.stringify({
+      type: "tool_call",
+      subtype: "completed",
+      call_id: "tool-1",
+      tool_call: {
+        readToolCall: {
+          args: { path: "README.md" },
+          result: {
+            success: {
+              content: "# Test",
+              isEmpty: false,
+              exceededLimit: false,
+              totalLines: 1,
+              totalChars: 6,
+            },
+          },
+        },
+      },
+      session_id: "session-1",
+    });
+    expect(provider.parseStreamLine(line)).toEqual([]);
+  });
+
+  it("parseStreamLine ignores unknown Cursor tool calls", () => {
+    const provider = cursor("auto");
+    const line = JSON.stringify({
+      type: "tool_call",
+      subtype: "started",
+      tool_call: {
+        unknownToolCall: { args: { value: "something" } },
+      },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([]);
+  });
+
+  it("parseStreamLine returns empty array for non-JSON lines", () => {
+    const provider = cursor("auto");
+    expect(provider.parseStreamLine("not json")).toEqual([]);
+    expect(provider.parseStreamLine("")).toEqual([]);
+  });
+
+  it("parseStreamLine returns empty array for malformed JSON", () => {
+    const provider = cursor("auto");
+    expect(provider.parseStreamLine("{bad json")).toEqual([]);
+  });
+
+  it("accepts an env option and exposes it on the provider", () => {
+    const provider = cursor("auto", { env: { CURSOR_API_KEY: "key-test" } });
+    expect(provider.env).toEqual({ CURSOR_API_KEY: "key-test" });
+  });
+
+  it("defaults env to empty object when not provided", () => {
+    const provider = cursor("auto");
+    expect(provider.env).toEqual({});
+  });
+
+  it("cursor provides force flag when dangerouslySkipPermissions is true", () => {
+    const provider = cursor("auto");
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+    });
+    expect(command).toContain("--force");
+  });
+
+  it("cursor does not provide force flag when dangerouslySkipPermissions is false", () => {
+    const provider = cursor("auto");
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: false,
+    });
+    expect(command).not.toContain("--force");
+  });
+
+  it("cursor provides resume flag when resumeSession is set", () => {
+    const provider = cursor("auto");
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+      resumeSession: "abc-123",
+    });
+    expect(command).toContain("--resume 'abc-123'");
+  });
+
+  it("cursor does not provide resume flag when resumeSession is not set", () => {
+    const provider = cursor("auto");
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+    });
+    expect(command).not.toContain("--resume");
   });
 });
 
@@ -948,6 +1282,10 @@ describe("parseSessionUsage (Claude Code)", () => {
   it("is not defined on opencode provider", () => {
     expect(opencode("model").parseSessionUsage).toBeUndefined();
   });
+
+  it("is not defined on cursor provider", () => {
+    expect(cursor("model").parseSessionUsage).toBeUndefined();
+  });
 });
 
 describe("captureSessions flag", () => {
@@ -971,5 +1309,9 @@ describe("captureSessions flag", () => {
 
   it("opencode has captureSessions false", () => {
     expect(opencode("opencode-model").captureSessions).toBe(false);
+  });
+
+  it("cursor defaults captureSessions to true", () => {
+    expect(cursor("auto").captureSessions).toBe(true);
   });
 });
