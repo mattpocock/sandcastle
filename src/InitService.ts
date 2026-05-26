@@ -74,7 +74,7 @@ ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
 # Rename the base image's "node" user to "agent" and align UID/GID.
-RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+RUN groupmod -g $AGENT_GID --non-unique node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent --non-unique node
 USER \${AGENT_UID}:\${AGENT_GID}
 
 # Install Claude Code CLI
@@ -109,7 +109,7 @@ ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
 # Rename the base image's "node" user to "agent" and align UID/GID.
-RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+RUN groupmod -g $AGENT_GID --non-unique node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent --non-unique node
 
 # Install pi coding agent (run as root before USER agent)
 RUN npm install -g @mariozechner/pi-coding-agent
@@ -142,7 +142,7 @@ ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
 # Rename the base image's "node" user to "agent" and align UID/GID.
-RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+RUN groupmod -g $AGENT_GID --non-unique node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent --non-unique node
 
 # Install Codex CLI (run as root before USER agent)
 RUN npm install -g @openai/codex
@@ -175,7 +175,7 @@ ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
 # Rename the base image's "node" user to "agent" and align UID/GID.
-RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+RUN groupmod -g $AGENT_GID --non-unique node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent --non-unique node
 
 # Install OpenCode CLI (run as root before USER agent)
 RUN npm install -g opencode-ai@latest
