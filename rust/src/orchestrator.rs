@@ -1,4 +1,4 @@
-use crate::sandboxes::traits::Sandbox;
+use crate::sandboxes::traits::{Sandbox, ExecOptions};
 use crate::agents::traits::AgentProvider;
 use crate::errors::SandcastleError;
 
@@ -15,8 +15,11 @@ impl Orchestrator {
     pub async fn run(&self, prompt: &str, max_iterations: usize) -> Result<(), SandcastleError> {
         for i in 0..max_iterations {
             println!("Starting iteration {}", i + 1);
-            let command = self.agent.build_print_command(prompt, true, None);
-            let result = self.sandbox.exec(&command, Default::default()).await?;
+            let print_cmd = self.agent.build_print_command(prompt, true, None);
+            let result = self.sandbox.exec(&print_cmd.command, ExecOptions {
+                stdin: print_cmd.stdin,
+                ..Default::default()
+            }).await?;
             
             for line in result.stdout.lines() {
                 let events = self.agent.parse_stream_line(line);
@@ -28,7 +31,7 @@ impl Orchestrator {
             if result.exit_code != 0 {
                 return Err(SandcastleError::Exec {
                     message: "Agent iteration failed".to_string(),
-                    command,
+                    command: print_cmd.command,
                     exit_code: Some(result.exit_code),
                 });
             }
