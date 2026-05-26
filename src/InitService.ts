@@ -271,6 +271,23 @@ RUN curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/i
 
 RUN corepack enable`;
 
+const GLAB_TOOLS = `# Install GitLab CLI
+RUN set -eux; \\
+  arch="$(dpkg --print-architecture)"; \\
+  case "$arch" in \\
+    amd64) glab_arch="amd64" ;; \\
+    arm64) glab_arch="arm64" ;; \\
+    armhf) glab_arch="armv6" ;; \\
+    i386) glab_arch="386" ;; \\
+    ppc64el) glab_arch="ppc64le" ;; \\
+    s390x) glab_arch="s390x" ;; \\
+    *) echo "Unsupported architecture for glab: $arch"; exit 1 ;; \\
+  esac; \\
+  glab_version="$(curl -fsSL https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/releases/permalink/latest | jq -r '.tag_name | ltrimstr("v")')"; \\
+  curl -fsSL -o /tmp/glab.deb "https://gitlab.com/gitlab-org/cli/-/releases/v\${glab_version}/downloads/glab_\${glab_version}_linux_\${glab_arch}.deb"; \\
+  dpkg -i /tmp/glab.deb; \\
+  rm /tmp/glab.deb`;
+
 const BACKLOG_MANAGER_REGISTRY: BacklogManagerEntry[] = [
   {
     name: "github-issues",
@@ -294,6 +311,20 @@ GH_TOKEN=`,
       BACKLOG_MANAGER_TOOLS: BEADS_TOOLS,
     },
     envExample: "",
+  },
+  {
+    name: "gitlab",
+    label: "GitLab Issues",
+    templateArgs: {
+      LIST_TASKS_COMMAND: "glab issue list --opened --output json",
+      VIEW_TASK_COMMAND: "glab issue view <ID> --comments",
+      CLOSE_TASK_COMMAND: "glab issue close <ID>",
+      BACKLOG_MANAGER_TOOLS: GLAB_TOOLS,
+    },
+    envExample: `# GitLab personal access token
+GITLAB_TOKEN=
+# Optional: set for GitLab Self-Managed or GitLab Dedicated instances
+# GITLAB_HOST=`,
   },
 ];
 
