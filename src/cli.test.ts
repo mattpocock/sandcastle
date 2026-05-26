@@ -166,4 +166,28 @@ describe("sandcastle CLI", () => {
       expect(output).toContain("claude-code");
     }
   });
+
+  it("init --help exposes --backlog-manager flag", async () => {
+    const { stdout } = await runCli("init --help", process.cwd());
+    expect(stdout).toContain("--backlog-manager");
+  });
+
+  it("init --backlog-manager nonexistent produces error listing available managers", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    try {
+      await runCli(
+        "init --agent claude-code --backlog-manager nonexistent",
+        hostDir,
+      );
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const { stdout, stderr } = err as { stdout: string; stderr: string };
+      const output = stdout + stderr;
+      expect(output).toContain("nonexistent");
+      expect(output).toContain("github-issues");
+      expect(output).toContain("gitlab-issues");
+    }
+  });
 });

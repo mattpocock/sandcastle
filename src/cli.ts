@@ -101,6 +101,13 @@ const initModelOption = Options.text("model").pipe(
   Options.optional,
 );
 
+const backlogManagerOption = Options.text("backlog-manager").pipe(
+  Options.withDescription(
+    "Backlog manager to use (e.g. github-issues, gitlab-issues, beads)",
+  ),
+  Options.optional,
+);
+
 const initCommand = Command.make(
   "init",
   {
@@ -108,12 +115,14 @@ const initCommand = Command.make(
     template: templateOption,
     agent: agentOption,
     model: initModelOption,
+    backlogManager: backlogManagerOption,
   },
   ({
     imageName: imageNameFlag,
     template,
     agent: agentFlag,
     model: modelFlag,
+    backlogManager: backlogManagerFlag,
   }) =>
     Effect.gen(function* () {
       const d = yield* Display;
@@ -197,10 +206,21 @@ const initCommand = Command.make(
         selectedSandboxProvider = getSandboxProvider(selected as string)!;
       }
 
-      // Resolve backlog manager: interactive select
+      // Resolve backlog manager: CLI flag > interactive select
       const backlogManagers = listBacklogManagers();
       let selectedBacklogManager: BacklogManagerEntry;
-      {
+      if (backlogManagerFlag._tag === "Some") {
+        const entry = getBacklogManager(backlogManagerFlag.value);
+        if (!entry) {
+          const names = backlogManagers.map((b) => b.name).join(", ");
+          yield* Effect.fail(
+            new InitError({
+              message: `Unknown backlog manager "${backlogManagerFlag.value}". Available: ${names}`,
+            }),
+          );
+        }
+        selectedBacklogManager = entry!;
+      } else {
         const selected = yield* Effect.promise(() =>
           clack.select({
             message: "Select a backlog manager:",
@@ -245,7 +265,8 @@ const initCommand = Command.make(
         selectedTemplate = selected as string;
       }
 
-      // Offer to create the "Sandcastle" label on the repo (skip for non-GitHub backlog managers)
+      // Offer to create the "Sandcastle" label on the repo (skip for backlog managers
+      // that don't use labels, e.g. beads).
       let shouldCreateLabel: boolean | symbol = false;
       if (selectedBacklogManager.name === "github-issues") {
         shouldCreateLabel = yield* Effect.promise(() =>
@@ -261,6 +282,25 @@ const initCommand = Command.make(
             try: () =>
               execSync(
                 'gh label create "Sandcastle" --description "Issues for Sandcastle to work on" --color "F9A825" 2>/dev/null',
+                { cwd, stdio: "ignore" },
+              ),
+            catch: () => undefined,
+          }).pipe(Effect.ignore);
+        }
+      } else if (selectedBacklogManager.name === "gitlab-issues") {
+        shouldCreateLabel = yield* Effect.promise(() =>
+          clack.confirm({
+            message:
+              'Create a "Sandcastle" GitLab label? (Templates filter issues by this label)',
+            initialValue: true,
+          }),
+        );
+
+        if (shouldCreateLabel === true) {
+          yield* Effect.try({
+            try: () =>
+              execSync(
+                'glab label create --name "Sandcastle" --description "Issues for Sandcastle to work on" --color "#F9A825" 2>/dev/null',
                 { cwd, stdio: "ignore" },
               ),
             catch: () => undefined,
