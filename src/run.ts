@@ -248,8 +248,17 @@ export interface RunOptions {
   /** Branch strategy — controls how the agent's changes relate to branches.
    * Defaults to { type: "head" } for bind-mount providers and { type: "merge-to-head" } for isolated providers. */
   readonly branchStrategy?: BranchStrategy;
-  /** Resume a prior Claude Code session by ID. The session JSONL must exist on the host. Incompatible with maxIterations > 1. */
+  /** Resume a prior Claude Code session by ID. The session JSONL must exist on the host. Incompatible with maxIterations > 1 unless allowIterResume is set. */
   readonly resumeSession?: string;
+  /**
+   * When true, chain each iteration's sessionId forward as the resumeSession
+   * for the next iteration. This lets iter 2..N resume from the prior iter's
+   * warm prompt-cache, reducing token cost for multi-iteration runs.
+   *
+   * Requires `maxIterations > 1` to have any effect. When false (default),
+   * only iteration 1 resumes from `resumeSession` (original behaviour).
+   */
+  readonly allowIterResume?: boolean;
   /**
    * An `AbortSignal` that cancels the run when aborted.
    *
@@ -351,11 +360,13 @@ export async function run(
     );
   }
 
-  // Validate: resumeSession + maxIterations > 1 is not allowed
-  if (options.resumeSession && maxIterations > 1) {
+  // Validate: resumeSession + maxIterations > 1 is not allowed unless
+  // allowIterResume is set (which chains sessions across iterations).
+  if (options.resumeSession && maxIterations > 1 && !options.allowIterResume) {
     throw new Error(
       "resumeSession cannot be combined with maxIterations > 1. " +
-        "Resume applies to iteration 1 only; multi-iteration resume semantics are not supported.",
+        "Resume applies to iteration 1 only; multi-iteration resume semantics are not supported. " +
+        "Set allowIterResume: true to chain sessions across iterations.",
     );
   }
 
@@ -544,6 +555,7 @@ export async function run(
       idleTimeoutSeconds: options.idleTimeoutSeconds,
       name: options.name,
       resumeSession: options.resumeSession,
+      allowIterResume: options.allowIterResume,
       signal: options.signal,
       skipPromptExpansion: isInlinePrompt,
     });

@@ -189,8 +189,17 @@ export interface OrchestrateOptions {
   readonly name?: string;
   /** @internal Test-only override for the idle warning interval in milliseconds. Default: 60000 (1 minute). */
   readonly _idleWarningIntervalMs?: number;
-  /** Resume a prior Claude Code session by ID. Applied to iteration 1 only. */
+  /** Resume a prior Claude Code session by ID. Applied to iteration 1 only (unless allowIterResume is true). */
   readonly resumeSession?: string;
+  /**
+   * When true, chain the sessionId from each iteration forward as the
+   * resumeSession for the next iteration. This lets iter 2..N resume from the
+   * prior iter's warm prompt-cache instead of starting cold.
+   *
+   * Requires `iterations > 1` to have any effect. When false (default),
+   * only iteration 1 resumes from `resumeSession` (original behaviour).
+   */
+  readonly allowIterResume?: boolean;
   /** An AbortSignal that cancels the orchestration when aborted. */
   readonly signal?: AbortSignal;
   /** When true, skip prompt expansion (shell expression evaluation). Set for dynamic inline prompts. */
@@ -258,6 +267,10 @@ export const orchestrate = (
     const checkAbort = (): Effect.Effect<void> =>
       options.signal?.aborted ? Effect.die(options.signal.reason) : Effect.void;
 
+    // When allowIterResume is true, chain each iteration's sessionId forward.
+    // Starts from options.resumeSession (may be undefined); updated after each iter.
+    let currentResumeSession = options.resumeSession;
+
     for (let i = 1; i <= iterations; i++) {
       yield* checkAbort();
       yield* display.status(label(`Iteration ${i}/${iterations}`), "info");
@@ -276,9 +289,12 @@ export const orchestrate = (
             },
             (ctx) =>
               Effect.gen(function* () {
-                // Resume session: transfer JSONL from host to sandbox before iteration 1
-                const iterationResumeSession =
-                  i === 1 ? options.resumeSession : undefined;
+                // Resume session: when allowIterResume is true, chain the
+                // sessionId from the prior iteration (warm cache). Otherwise
+                // apply resumeSession to iteration 1 only (original behaviour).
+                const iterationResumeSession = options.allowIterResume
+                  ? currentResumeSession
+                  : i === 1 ? options.resumeSession : undefined;
                 if (iterationResumeSession && bindMountHandle) {
                   yield* display.status(label("Resuming session"), "info");
                   const sbStore = sandboxSessionStore(
@@ -426,6 +442,12 @@ export const orchestrate = (
         sessionFilePath: lifecycleResult.result.sessionFilePath,
         usage: lifecycleResult.result.usage,
       });
+
+      // When allowIterResume is enabled, carry this iteration's sessionId
+      // forward so the next iteration resumes from the warm cache.
+      if (options.allowIterResume && lifecycleResult.result.sessionId) {
+        currentResumeSession = lifecycleResult.result.sessionId;
+      }
 
       if (lifecycleResult.result.completionSignal !== undefined) {
         yield* display.status(
