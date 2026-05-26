@@ -2,27 +2,18 @@ use std::process::Command;
 use crate::errors::SandcastleError;
 use chrono::Local;
 
-pub struct GitManager {
-    pub repo_dir: String,
+#[cfg_attr(test, mockall::automock)]
+pub trait GitExecutor: Send + Sync {
+    fn exec_git(&self, args: Vec<String>, cwd: &str) -> Result<String, SandcastleError>;
 }
 
-#[derive(Debug)]
-pub struct WorktreeEntry {
-    pub path: String,
-    pub branch: Option<String>,
-}
+pub struct RealGitExecutor;
 
-impl GitManager {
-    pub fn new(repo_dir: &str) -> Self {
-        Self {
-            repo_dir: repo_dir.to_string(),
-        }
-    }
-
-    pub fn exec_git(&self, args: &[&str]) -> Result<String, SandcastleError> {
+impl GitExecutor for RealGitExecutor {
+    fn exec_git(&self, args: Vec<String>, cwd: &str) -> Result<String, SandcastleError> {
         let output = Command::new("git")
-            .args(args)
-            .current_dir(&self.repo_dir)
+            .args(&args)
+            .current_dir(cwd)
             .env("LC_ALL", "C")
             .output()
             .map_err(|e| SandcastleError::Worktree {
@@ -36,6 +27,37 @@ impl GitManager {
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+}
+
+pub struct GitManager {
+    pub repo_dir: String,
+    pub executor: Box<dyn GitExecutor>,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct WorktreeEntry {
+    pub path: String,
+    pub branch: Option<String>,
+}
+
+impl GitManager {
+    pub fn new(repo_dir: &str) -> Self {
+        Self {
+            repo_dir: repo_dir.to_string(),
+            executor: Box::new(RealGitExecutor),
+        }
+    }
+
+    pub fn with_executor(repo_dir: &str, executor: Box<dyn GitExecutor>) -> Self {
+        Self {
+            repo_dir: repo_dir.to_string(),
+            executor,
+        }
+    }
+
+    pub fn exec_git(&self, args: &[&str]) -> Result<String, SandcastleError> {
+        self.executor.exec_git(args.iter().map(|s| s.to_string()).collect(), &self.repo_dir)
     }
 
     pub fn get_current_branch(&self) -> Result<String, SandcastleError> {
@@ -87,5 +109,57 @@ pub fn generate_temp_branch_name(name: Option<&str>) -> String {
     match name {
         Some(n) => format!("sandcastle/{}/{}", sanitize_name(n), ts),
         None => format!("sandcastle/{}", ts),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_name() {
+        assert_eq!(sanitize_name("My Project"), "my-project");
+        assert_eq!(sanitize_name("foo_bar"), "foo-bar");
+        assert_eq!(sanitize_name("123-ABC"), "123-abc");
+        assert_eq!(sanitize_name("!@#$%^&*()"), "----------");
+    }
+
+    #[test]
+    fn test_generate_temp_branch_name() {
+        let name = generate_temp_branch_name(Some("fix-bug"));
+        assert!(name.starts_with("sandcastle/fix-bug/"));
+        
+        let name_no_suffix = generate_temp_branch_name(None);
+        assert!(name_no_suffix.starts_with("sandcastle/"));
+    }
+
+    #[test]
+    fn test_list_worktrees_parsing() {
+        let mut mock = MockGitExecutor::new();
+        mock.expect_exec_git()
+            .with(
+                mockall::predicate::eq(vec!["worktree".to_string(), "list".to_string(), "--porcelain".to_string()]),
+                mockall::predicate::eq("/tmp/repo")
+            )
+            .returning(|_, _| Ok(
+                "worktree /tmp/repo\nHEAD 1234567890abcdef\nbranch refs/heads/main\n\nworktree /tmp/wt1\nHEAD 1234567890abcdef\nbranch refs/heads/feature\n\nworktree /tmp/wt2\nHEAD 1234567890abcdef\n\n".to_string()
+            ));
+
+        let manager = GitManager::with_executor("/tmp/repo", Box::new(mock));
+        let worktrees = manager.list_worktrees().unwrap();
+
+        assert_eq!(worktrees.len(), 3);
+        assert_eq!(worktrees[0], WorktreeEntry {
+            path: "/tmp/repo".to_string(),
+            branch: Some("refs/heads/main".to_string()),
+        });
+        assert_eq!(worktrees[1], WorktreeEntry {
+            path: "/tmp/wt1".to_string(),
+            branch: Some("refs/heads/feature".to_string()),
+        });
+        assert_eq!(worktrees[2], WorktreeEntry {
+            path: "/tmp/wt2".to_string(),
+            branch: None,
+        });
     }
 }
