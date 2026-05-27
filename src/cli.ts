@@ -3,11 +3,13 @@ import { FileSystem } from "@effect/platform";
 import { Effect } from "effect";
 import * as clack from "@clack/prompts";
 import { execSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { styleText } from "node:util";
 
 import { Display } from "./Display.js";
+import type { DisplayService } from "./Display.js";
 import { buildImage, removeImage } from "./DockerLifecycle.js";
 import {
   buildImage as podmanBuildImage,
@@ -46,6 +48,135 @@ const resolveImageName = (
   cliFlag: import("effect").Option.Option<string>,
   cwd: string,
 ): string => (cliFlag._tag === "Some" ? cliFlag.value : defaultImageName(cwd));
+
+type OptionalTextFlag = import("effect").Option.Option<string>;
+
+type PackageManager = "npm" | "pnpm" | "yarn" | "bun";
+
+const parseStrictBoolean = (
+  flagLabel: string,
+  raw: string,
+): Effect.Effect<boolean, InitError, never> => {
+  const value = raw.trim().toLowerCase();
+  if (["true", "1", "yes"].includes(value)) return Effect.succeed(true);
+  if (["false", "0", "no"].includes(value)) return Effect.succeed(false);
+  return Effect.fail(
+    new InitError({
+      message: `Invalid value for --${flagLabel}: "${raw}". Expected true or false.`,
+    }),
+  );
+};
+
+const readPackageJson = (cwd: string): Record<string, unknown> | undefined => {
+  const packageJsonPath = join(cwd, "package.json");
+  if (!existsSync(packageJsonPath)) return undefined;
+  try {
+    return JSON.parse(readFileSync(packageJsonPath, "utf-8")) as Record<
+      string,
+      unknown
+    >;
+  } catch {
+    return undefined;
+  }
+};
+
+export const detectPackageManager = (cwd: string): PackageManager => {
+  const packageManager = readPackageJson(cwd)?.packageManager;
+  if (typeof packageManager === "string") {
+    const name = packageManager.split("@")[0];
+    if (name === "pnpm" || name === "yarn" || name === "bun") return name;
+    if (name === "npm") return "npm";
+  }
+
+  if (existsSync(join(cwd, "pnpm-lock.yaml"))) return "pnpm";
+  if (existsSync(join(cwd, "bun.lock")) || existsSync(join(cwd, "bun.lockb"))) {
+    return "bun";
+  }
+  if (existsSync(join(cwd, "yarn.lock"))) return "yarn";
+  return "npm";
+};
+
+export const zodInstallCommand = (packageManager: PackageManager): string => {
+  switch (packageManager) {
+    case "pnpm":
+      return "pnpm add zod";
+    case "yarn":
+      return "yarn add zod";
+    case "bun":
+      return "bun add zod";
+    case "npm":
+      return "npm install zod";
+  }
+};
+
+const packageHasDependency = (cwd: string, dependency: string): boolean => {
+  const pkg = readPackageJson(cwd);
+  if (!pkg) return false;
+  return [
+    "dependencies",
+    "devDependencies",
+    "peerDependencies",
+    "optionalDependencies",
+  ].some((field) => {
+    const deps = pkg[field];
+    return (
+      deps !== null &&
+      typeof deps === "object" &&
+      !Array.isArray(deps) &&
+      Object.prototype.hasOwnProperty.call(deps, dependency)
+    );
+  });
+};
+
+const templateUsesZod = (template: string): boolean =>
+  template === "parallel-planner" ||
+  template === "parallel-planner-with-review";
+
+const maybeInstallZodForTemplate = (
+  cwd: string,
+  template: string,
+  installFlag: OptionalTextFlag,
+  d: DisplayService,
+): Effect.Effect<void, InitError, never> =>
+  Effect.gen(function* () {
+    if (!templateUsesZod(template) || packageHasDependency(cwd, "zod")) return;
+
+    const packageManager = detectPackageManager(cwd);
+    const command = zodInstallCommand(packageManager);
+    const shouldInstall =
+      installFlag._tag === "Some"
+        ? yield* parseStrictBoolean(
+            "install-template-dependencies",
+            installFlag.value,
+          )
+        : yield* Effect.promise(() =>
+            clack.confirm({
+              message: `Install Zod for the planner template now? (${command})`,
+              initialValue: true,
+            }),
+          );
+
+    if (clack.isCancel(shouldInstall)) {
+      yield* Effect.fail(
+        new InitError({ message: "Template dependency install cancelled." }),
+      );
+    }
+
+    if (shouldInstall !== true) return;
+
+    yield* d.spinner(
+      `Installing planner template dependency with ${packageManager}...`,
+      Effect.try({
+        try: () => execSync(command, { cwd, stdio: "pipe" }),
+        catch: (error) =>
+          new InitError({
+            message: `Failed to install Zod with \`${command}\`: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          }),
+      }),
+    );
+  });
 
 // --- UID build-args ---
 
@@ -106,6 +237,15 @@ const sandboxOption = Options.text("sandbox").pipe(
   Options.optional,
 );
 
+const installTemplateDependenciesOption = Options.text(
+  "install-template-dependencies",
+).pipe(
+  Options.withDescription(
+    "true or false: install dependencies required by the selected template during init",
+  ),
+  Options.optional,
+);
+
 const initCommand = Command.make(
   "init",
   {
@@ -114,6 +254,7 @@ const initCommand = Command.make(
     agent: agentOption,
     model: initModelOption,
     sandbox: sandboxOption,
+    installTemplateDependencies: installTemplateDependenciesOption,
   },
   ({
     imageName: imageNameFlag,
@@ -121,6 +262,7 @@ const initCommand = Command.make(
     agent: agentFlag,
     model: modelFlag,
     sandbox: sandboxFlag,
+    installTemplateDependencies,
   }) =>
     Effect.gen(function* () {
       const d = yield* Display;
@@ -308,6 +450,13 @@ const initCommand = Command.make(
               }),
           ),
         ),
+      );
+
+      yield* maybeInstallZodForTemplate(
+        cwd,
+        selectedTemplate,
+        installTemplateDependencies,
+        d,
       );
 
       // Prompt user before building image. The custom issue tracker scaffolds

@@ -83,6 +83,11 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("--model");
   });
 
+  it("init --help exposes --install-template-dependencies flag", async () => {
+    const { stdout } = await runCli("init --help", process.cwd());
+    expect(stdout).toContain("--install-template-dependencies");
+  });
+
   it("init --help exposes --sandbox flag", async () => {
     const { stdout } = await runCli("init --help", process.cwd());
     expect(stdout).toContain("--sandbox");
