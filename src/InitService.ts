@@ -516,7 +516,6 @@ export function getNextStepsLines(
     ];
   } else {
     const hasReviewer = template.includes("review");
-    const usesPlanSchema = template.includes("planner");
     let step = 1;
     const lines: string[] = [
       "Next steps:",
@@ -525,11 +524,6 @@ export function getNextStepsLines(
       `${step++}. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
       `${step++}. Templates use \`copyToWorktree: ["node_modules"]\` to copy your host node_modules into the sandbox for fast startup — the \`npm install\` in the onSandboxReady hook is a safety net for platform-specific binaries. Adjust both if you use a different package manager`,
     ];
-    if (usesPlanSchema) {
-      lines.push(
-        `${step++}. Install a schema validator for the planner's \`<plan>\` output — the template uses Zod (\`npm install zod\`), but Valibot, ArkType, or any Standard Schema library works (https://standardschema.dev)`,
-      );
-    }
     lines.push(
       `${step++}. Read and customize the prompt files in .sandcastle/ — they shape what the agent does`,
     );

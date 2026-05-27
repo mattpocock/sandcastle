@@ -72,8 +72,7 @@
     "prettier": "^3.5.3",
     "tsx": "^4.21.0",
     "vitest": "^3.2.0",
-    "@daytona/sdk": "^0.164.0",
-    "zod": "^4.4.3"
+    "@daytona/sdk": "^0.164.0"
   },
   "dependencies": {
     "@clack/prompts": "^1.1.0",
@@ -82,7 +81,8 @@
     "@effect/platform-node": "^0.105.0",
     "@effect/printer": "^0.48.0",
     "@effect/printer-ansi": "^0.48.0",
-    "effect": "^3.20.0"
+    "effect": "^3.20.0",
+    "zod": "^4.4.3"
   },
   "peerDependencies": {
     "@vercel/sandbox": ">=1.0.0",

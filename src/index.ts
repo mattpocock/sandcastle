@@ -46,6 +46,7 @@ export type {
   OutputObjectDefinition,
   OutputStringDefinition,
 } from "./Output.js";
+export { z } from "zod";
 export { CwdError } from "./resolveCwd.js";
 export {
   claudeCode,

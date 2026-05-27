@@ -18,15 +18,18 @@
 
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
-import { z } from "zod";
 
 // The planner emits its plan as JSON inside <plan> tags; Output.object extracts
-// and validates it against this schema. We use Zod here, but any Standard
-// Schema validator works just as well — Valibot, ArkType, etc. See
+// and validates it against this schema. The template uses Sandcastle's bundled
+// Zod export, but any Standard Schema validator works just as well. See
 // https://standardschema.dev.
-const planSchema = z.object({
-  issues: z.array(
-    z.object({ id: z.string(), title: z.string(), branch: z.string() }),
+const planSchema = sandcastle.z.object({
+  issues: sandcastle.z.array(
+    sandcastle.z.object({
+      id: sandcastle.z.string(),
+      title: sandcastle.z.string(),
+      branch: sandcastle.z.string(),
+    }),
   ),
 });
 
