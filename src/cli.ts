@@ -23,6 +23,10 @@ import {
   listSandboxProviders,
   getSandboxProvider,
   getNextStepsLines,
+  detectPackageManager,
+  addDependencyCommand,
+  hostHasDependency,
+  getTemplateDependencies,
 } from "./InitService.js";
 import { defaultImageName } from "./sandboxes/docker.js";
 import type {
@@ -310,6 +314,43 @@ const initCommand = Command.make(
         ),
       );
 
+      // Detect the host package manager so the zod offer below and the next
+      // steps below both use the right install command.
+      const packageManager = yield* detectPackageManager(cwd);
+
+      // If the chosen template imports zod on the host (the planner templates
+      // build their <plan> output schema with it) and the host doesn't already
+      // declare it, offer to install it. Without this, the very first
+      // `npx tsx .sandcastle/main.ts` crashes with ERR_MODULE_NOT_FOUND.
+      if (getTemplateDependencies(selectedTemplate).includes("zod")) {
+        const alreadyInstalled = yield* hostHasDependency(cwd, "zod");
+        if (!alreadyInstalled) {
+          const installCmd = addDependencyCommand(packageManager, "zod");
+          const shouldInstall = yield* Effect.promise(() =>
+            clack.confirm({
+              message: `The ${selectedTemplate} template needs a schema validator. Install zod now (\`${installCmd}\`)?`,
+              initialValue: true,
+            }),
+          );
+          if (shouldInstall === true) {
+            const installed = yield* Effect.sync(() => {
+              try {
+                execSync(installCmd, { cwd, stdio: "ignore" });
+                return true;
+              } catch {
+                return false;
+              }
+            });
+            yield* installed
+              ? d.status(`Installed zod with ${packageManager}.`, "success")
+              : d.status(
+                  `Couldn't install zod automatically. Run \`${installCmd}\` before running the agent.`,
+                  "warn",
+                );
+          }
+        }
+      }
+
       // Prompt user before building image. The custom issue tracker scaffolds
       // an intentionally unfinished Dockerfile (the install block is a TODO),
       // so there is nothing valid to build yet — skip the build prompt entirely
@@ -361,6 +402,7 @@ const initCommand = Command.make(
         scaffoldResult.mainFilename,
         selectedIssueTracker,
         selectedAgent,
+        packageManager,
       );
       for (const [i, line] of nextSteps.entries()) {
         yield* d.text(i === 0 ? line : styleText("dim", line));

@@ -20,6 +20,13 @@ const SETUP_ISSUE_TRACKER_PATH = `.sandcastle/${SETUP_ISSUE_TRACKER_DOC}`;
 export interface TemplateMetadata {
   name: string;
   description: string;
+  /**
+   * Host-side npm packages the template's `main` file imports directly (e.g.
+   * the planner templates import `zod` for their `<plan>` output schema). Init
+   * offers to install these with the detected package manager so that
+   * `npx tsx .sandcastle/main.ts` doesn't crash with ERR_MODULE_NOT_FOUND.
+   */
+  dependencies?: readonly string[];
 }
 
 const TEMPLATES: TemplateMetadata[] = [
@@ -40,15 +47,146 @@ const TEMPLATES: TemplateMetadata[] = [
     name: "parallel-planner",
     description:
       "Plans parallelizable issues, executes on separate branches, merges",
+    dependencies: ["zod"],
   },
   {
     name: "parallel-planner-with-review",
     description:
       "Plans parallelizable issues, executes with per-branch review, merges",
+    dependencies: ["zod"],
   },
 ];
 
 export const listTemplates = (): TemplateMetadata[] => TEMPLATES;
+
+/**
+ * Host-side npm packages the given template imports directly. Empty when the
+ * template name is unknown or the template declares no extra dependencies.
+ */
+export const getTemplateDependencies = (
+  templateName: string,
+): readonly string[] =>
+  TEMPLATES.find((t) => t.name === templateName)?.dependencies ?? [];
+
+// ---------------------------------------------------------------------------
+// Package manager detection (internal — not part of public API)
+// ---------------------------------------------------------------------------
+
+/** A package manager Sandcastle can detect on the host and build install commands for. */
+export type PackageManager = "npm" | "pnpm" | "yarn" | "bun";
+
+const PACKAGE_MANAGERS: readonly PackageManager[] = [
+  "npm",
+  "pnpm",
+  "yarn",
+  "bun",
+];
+
+// Lockfiles checked in priority order. bun.lock / bun.lockb are both valid bun
+// lockfiles (text vs binary), so both map to bun.
+const LOCKFILES: ReadonlyArray<readonly [string, PackageManager]> = [
+  ["bun.lockb", "bun"],
+  ["bun.lock", "bun"],
+  ["pnpm-lock.yaml", "pnpm"],
+  ["yarn.lock", "yarn"],
+  ["package-lock.json", "npm"],
+];
+
+/**
+ * Detect the host project's package manager. An explicit corepack-style
+ * `packageManager` field in package.json wins; otherwise the first matching
+ * lockfile decides. Defaults to npm when nothing matches.
+ */
+export const detectPackageManager = (
+  repoDir: string,
+): Effect.Effect<PackageManager, never, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+
+    const pkgPath = join(repoDir, "package.json");
+    const pkgExists = yield* fs
+      .exists(pkgPath)
+      .pipe(Effect.orElseSucceed(() => false));
+    if (pkgExists) {
+      const content = yield* fs
+        .readFileString(pkgPath)
+        .pipe(Effect.orElseSucceed(() => ""));
+      try {
+        const pkg = JSON.parse(content) as Record<string, unknown>;
+        const field = pkg["packageManager"];
+        if (typeof field === "string") {
+          const name = field.split("@")[0];
+          const match = PACKAGE_MANAGERS.find((pm) => pm === name);
+          if (match) return match;
+        }
+      } catch {
+        // Malformed package.json — fall through to lockfile detection.
+      }
+    }
+
+    for (const [file, pm] of LOCKFILES) {
+      const exists = yield* fs
+        .exists(join(repoDir, file))
+        .pipe(Effect.orElseSucceed(() => false));
+      if (exists) return pm;
+    }
+
+    return "npm";
+  });
+
+/** Build the command that adds a runtime dependency for the given package manager. */
+export const addDependencyCommand = (
+  packageManager: PackageManager,
+  pkg: string,
+): string => {
+  switch (packageManager) {
+    case "pnpm":
+      return `pnpm add ${pkg}`;
+    case "yarn":
+      return `yarn add ${pkg}`;
+    case "bun":
+      return `bun add ${pkg}`;
+    case "npm":
+      return `npm install ${pkg}`;
+  }
+};
+
+/**
+ * Whether the host package.json already declares `pkg` in any of its dependency
+ * maps. Used so init doesn't offer to install something already present.
+ */
+export const hostHasDependency = (
+  repoDir: string,
+  pkg: string,
+): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const pkgPath = join(repoDir, "package.json");
+    const exists = yield* fs
+      .exists(pkgPath)
+      .pipe(Effect.orElseSucceed(() => false));
+    if (!exists) return false;
+    const content = yield* fs
+      .readFileString(pkgPath)
+      .pipe(Effect.orElseSucceed(() => ""));
+    try {
+      const parsed = JSON.parse(content) as Record<string, unknown>;
+      const depMaps = [
+        "dependencies",
+        "devDependencies",
+        "peerDependencies",
+        "optionalDependencies",
+      ];
+      return depMaps.some((key) => {
+        const deps = parsed[key];
+        return (
+          typeof deps === "object" && deps !== null && pkg in (deps as object)
+        );
+      });
+    } catch {
+      return false;
+    }
+  });
 
 // ---------------------------------------------------------------------------
 // Agent registry (internal — not part of public API)
@@ -489,6 +627,7 @@ export function getNextStepsLines(
   mainFilename: string,
   issueTracker: IssueTrackerEntry,
   agent: AgentEntry,
+  packageManager: PackageManager,
 ): string[] {
   // The custom issue tracker scaffolds a broken-until-configured project, so
   // its next steps are about running the setup prompt — not the template's
@@ -516,7 +655,7 @@ export function getNextStepsLines(
     ];
   } else {
     const hasReviewer = template.includes("review");
-    const usesPlanSchema = template.includes("planner");
+    const usesPlanSchema = getTemplateDependencies(template).includes("zod");
     let step = 1;
     const lines: string[] = [
       "Next steps:",
@@ -527,7 +666,7 @@ export function getNextStepsLines(
     ];
     if (usesPlanSchema) {
       lines.push(
-        `${step++}. Install a schema validator for the planner's \`<plan>\` output — the template uses Zod (\`npm install zod\`), but Valibot, ArkType, or any Standard Schema library works (https://standardschema.dev)`,
+        `${step++}. Install a schema validator for the planner's \`<plan>\` output — the template uses Zod (\`${addDependencyCommand(packageManager, "zod")}\`), but Valibot, ArkType, or any Standard Schema library works (https://standardschema.dev)`,
       );
     }
     lines.push(

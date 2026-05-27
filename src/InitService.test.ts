@@ -14,8 +14,16 @@ import {
   getIssueTracker,
   listSandboxProviders,
   getSandboxProvider,
+  detectPackageManager,
+  addDependencyCommand,
+  hostHasDependency,
+  getTemplateDependencies,
 } from "./InitService.js";
-import type { AgentEntry, ScaffoldOptions } from "./InitService.js";
+import type {
+  AgentEntry,
+  PackageManager,
+  ScaffoldOptions,
+} from "./InitService.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 import { SKELETON_PROMPT } from "./templates.js";
 
@@ -669,8 +677,18 @@ describe("InitService scaffold", () => {
     const customManager = getIssueTracker("custom")!;
     // Non-custom issue tracker keeps the template-driven next steps; the
     // custom branch is exercised separately below.
-    const next = (template: string, mainFilename: string) =>
-      getNextStepsLines(template, mainFilename, ghIssues, claudeCodeAgent);
+    const next = (
+      template: string,
+      mainFilename: string,
+      packageManager: PackageManager = "npm",
+    ) =>
+      getNextStepsLines(
+        template,
+        mainFilename,
+        ghIssues,
+        claudeCodeAgent,
+        packageManager,
+      );
 
     it("blank template returns steps mentioning .env and main filename (not npx sandcastle run)", () => {
       const lines = next("blank", "main.mts");
@@ -780,6 +798,18 @@ describe("InitService scaffold", () => {
       expect(joined).toContain("npm install zod");
     });
 
+    it("planner zod step uses the detected package manager's add command", () => {
+      expect(next("parallel-planner", "main.mts", "pnpm").join("\n")).toContain(
+        "pnpm add zod",
+      );
+      expect(next("parallel-planner", "main.mts", "yarn").join("\n")).toContain(
+        "yarn add zod",
+      );
+      expect(next("parallel-planner", "main.mts", "bun").join("\n")).toContain(
+        "bun add zod",
+      );
+    });
+
     it("non-planner template does not mention installing zod", () => {
       const lines = next("simple-loop", "main.mts");
       const joined = lines.join("\n");
@@ -792,6 +822,7 @@ describe("InitService scaffold", () => {
         "main.mts",
         customManager,
         claudeCodeAgent,
+        "npm",
       );
       const joined = lines.join("\n");
       expect(joined).toContain("SETUP_ISSUE_TRACKER.md");
@@ -806,6 +837,7 @@ describe("InitService scaffold", () => {
         "main.mts",
         customManager,
         getAgent("opencode")!,
+        "npm",
       );
       const joined = lines.join("\n");
       expect(joined.toLowerCase()).toContain("host");
@@ -2437,5 +2469,112 @@ describe("Sandbox provider registry", () => {
 
   it("getSandboxProvider returns undefined for unknown provider", () => {
     expect(getSandboxProvider("nonexistent")).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Package manager detection
+// ---------------------------------------------------------------------------
+
+describe("detectPackageManager", () => {
+  const detect = (dir: string) =>
+    Effect.runPromise(
+      detectPackageManager(dir).pipe(Effect.provide(NodeFileSystem.layer)),
+    );
+
+  it("defaults to npm when no lockfile or packageManager field is present", async () => {
+    const dir = await makeDir();
+    expect(await detect(dir)).toBe("npm");
+  });
+
+  it.each([
+    { file: "pnpm-lock.yaml", expected: "pnpm" },
+    { file: "yarn.lock", expected: "yarn" },
+    { file: "bun.lockb", expected: "bun" },
+    { file: "bun.lock", expected: "bun" },
+    { file: "package-lock.json", expected: "npm" },
+  ])("detects $expected from $file", async ({ file, expected }) => {
+    const dir = await makeDir();
+    await writeFile(join(dir, file), "");
+    expect(await detect(dir)).toBe(expected);
+  });
+
+  it("prefers the package.json packageManager field over a lockfile", async () => {
+    const dir = await makeDir();
+    // Lockfile says npm, but the explicit field says pnpm — field wins.
+    await writeFile(join(dir, "package-lock.json"), "");
+    await writeFile(
+      join(dir, "package.json"),
+      JSON.stringify({ name: "test", packageManager: "pnpm@9.1.0" }),
+    );
+    expect(await detect(dir)).toBe("pnpm");
+  });
+
+  it("ignores an unrecognized packageManager field and falls back to lockfile", async () => {
+    const dir = await makeDir();
+    await writeFile(join(dir, "yarn.lock"), "");
+    await writeFile(
+      join(dir, "package.json"),
+      JSON.stringify({ name: "test", packageManager: "deno@1.0.0" }),
+    );
+    expect(await detect(dir)).toBe("yarn");
+  });
+});
+
+describe("addDependencyCommand", () => {
+  it.each([
+    { pm: "npm" as const, expected: "npm install zod" },
+    { pm: "pnpm" as const, expected: "pnpm add zod" },
+    { pm: "yarn" as const, expected: "yarn add zod" },
+    { pm: "bun" as const, expected: "bun add zod" },
+  ])("$pm builds '$expected'", ({ pm, expected }) => {
+    expect(addDependencyCommand(pm, "zod")).toBe(expected);
+  });
+});
+
+describe("hostHasDependency", () => {
+  const has = (dir: string, pkg: string) =>
+    Effect.runPromise(
+      hostHasDependency(dir, pkg).pipe(Effect.provide(NodeFileSystem.layer)),
+    );
+
+  it("returns false when there is no package.json", async () => {
+    const dir = await makeDir();
+    expect(await has(dir, "zod")).toBe(false);
+  });
+
+  it("returns false when the package is not declared", async () => {
+    const dir = await makeDir();
+    await writeFile(
+      join(dir, "package.json"),
+      JSON.stringify({ name: "test", dependencies: { effect: "^3" } }),
+    );
+    expect(await has(dir, "zod")).toBe(false);
+  });
+
+  it.each(["dependencies", "devDependencies"])(
+    "returns true when the package is in %s",
+    async (key) => {
+      const dir = await makeDir();
+      await writeFile(
+        join(dir, "package.json"),
+        JSON.stringify({ name: "test", [key]: { zod: "^3" } }),
+      );
+      expect(await has(dir, "zod")).toBe(true);
+    },
+  );
+});
+
+describe("getTemplateDependencies", () => {
+  it("reports zod as a dependency of the planner templates", () => {
+    expect(getTemplateDependencies("parallel-planner")).toContain("zod");
+    expect(getTemplateDependencies("parallel-planner-with-review")).toContain(
+      "zod",
+    );
+  });
+
+  it("reports no dependencies for templates that don't need a schema validator", () => {
+    expect(getTemplateDependencies("simple-loop")).not.toContain("zod");
+    expect(getTemplateDependencies("blank")).not.toContain("zod");
   });
 });
