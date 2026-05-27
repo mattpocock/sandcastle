@@ -1,6 +1,6 @@
-use std::process::Command;
 use crate::errors::SandcastleError;
 use chrono::Local;
+use std::process::Command;
 
 #[cfg_attr(test, mockall::automock)]
 pub trait GitExecutor: Send + Sync {
@@ -57,7 +57,8 @@ impl GitManager {
     }
 
     pub fn exec_git(&self, args: &[&str]) -> Result<String, SandcastleError> {
-        self.executor.exec_git(args.iter().map(|s| s.to_string()).collect(), &self.repo_dir)
+        self.executor
+            .exec_git(args.iter().map(|s| s.to_string()).collect(), &self.repo_dir)
     }
 
     pub fn get_current_branch(&self) -> Result<String, SandcastleError> {
@@ -71,22 +72,19 @@ impl GitManager {
         let mut current_path = None;
 
         for line in output.lines() {
-            if line.starts_with("worktree ") {
-                current_path = Some(line[9..].to_string());
-            } else if line.starts_with("branch ") {
+            if let Some(stripped) = line.strip_prefix("worktree ") {
+                current_path = Some(stripped.to_string());
+            } else if let Some(stripped) = line.strip_prefix("branch ") {
                 if let Some(path) = current_path.take() {
                     entries.push(WorktreeEntry {
                         path,
-                        branch: Some(line[7..].to_string()),
+                        branch: Some(stripped.to_string()),
                     });
                 }
-            } else if line.is_empty() {
-                if let Some(path) = current_path.take() {
-                    entries.push(WorktreeEntry {
-                        path,
-                        branch: None,
-                    });
-                }
+            } else if line.is_empty()
+                && let Some(path) = current_path.take()
+            {
+                entries.push(WorktreeEntry { path, branch: None });
             }
         }
         Ok(entries)
@@ -128,7 +126,7 @@ mod tests {
     fn test_generate_temp_branch_name() {
         let name = generate_temp_branch_name(Some("fix-bug"));
         assert!(name.starts_with("sandcastle/fix-bug/"));
-        
+
         let name_no_suffix = generate_temp_branch_name(None);
         assert!(name_no_suffix.starts_with("sandcastle/"));
     }
@@ -149,17 +147,26 @@ mod tests {
         let worktrees = manager.list_worktrees().unwrap();
 
         assert_eq!(worktrees.len(), 3);
-        assert_eq!(worktrees[0], WorktreeEntry {
-            path: "/tmp/repo".to_string(),
-            branch: Some("refs/heads/main".to_string()),
-        });
-        assert_eq!(worktrees[1], WorktreeEntry {
-            path: "/tmp/wt1".to_string(),
-            branch: Some("refs/heads/feature".to_string()),
-        });
-        assert_eq!(worktrees[2], WorktreeEntry {
-            path: "/tmp/wt2".to_string(),
-            branch: None,
-        });
+        assert_eq!(
+            worktrees[0],
+            WorktreeEntry {
+                path: "/tmp/repo".to_string(),
+                branch: Some("refs/heads/main".to_string()),
+            }
+        );
+        assert_eq!(
+            worktrees[1],
+            WorktreeEntry {
+                path: "/tmp/wt1".to_string(),
+                branch: Some("refs/heads/feature".to_string()),
+            }
+        );
+        assert_eq!(
+            worktrees[2],
+            WorktreeEntry {
+                path: "/tmp/wt2".to_string(),
+                branch: None,
+            }
+        );
     }
 }

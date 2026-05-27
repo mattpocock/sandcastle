@@ -1,4 +1,4 @@
-use crate::agents::traits::{AgentProvider, AgentEvent, PrintCommand};
+use crate::agents::traits::{AgentEvent, AgentProvider, PrintCommand};
 use serde_json::Value;
 
 pub struct ClaudeCode {
@@ -22,7 +22,7 @@ impl AgentProvider for ClaudeCode {
         &self,
         prompt: &str,
         dangerously_skip_permissions: bool,
-        resume_session: Option<&str>,
+        resume_session: Option<String>,
     ) -> PrintCommand {
         let skip_perms = if dangerously_skip_permissions {
             " --dangerously-skip-permissions"
@@ -30,7 +30,7 @@ impl AgentProvider for ClaudeCode {
             ""
         };
         let resume_flag = match resume_session {
-            Some(s) => format!(" --resume {}", shell_escape(s)),
+            Some(s) => format!(" --resume {}", shell_escape(&s)),
             None => "".to_string(),
         };
 
@@ -57,56 +57,57 @@ impl AgentProvider for ClaudeCode {
 
         let mut events = Vec::new();
 
-        if obj["type"] == "assistant" {
-            if let Some(content) = obj["message"]["content"].as_array() {
-                let mut texts = String::new();
-                for block in content {
-                    if block["type"] == "text" {
-                        if let Some(text) = block["text"].as_str() {
-                            texts.push_str(text);
-                        }
-                    } else if block["type"] == "tool_use" {
-                        if let Some(name) = block["name"].as_str() {
-                            let arg_field = match name {
-                                "Bash" => Some("command"),
-                                "WebSearch" => Some("query"),
-                                "WebFetch" => Some("url"),
-                                "Agent" => Some("description"),
-                                _ => None,
-                            };
+        if obj["type"] == "assistant"
+            && let Some(content) = obj["message"]["content"].as_array()
+        {
+            let mut texts = String::new();
+            for block in content {
+                if block["type"] == "text" {
+                    if let Some(text) = block["text"].as_str() {
+                        texts.push_str(text);
+                    }
+                } else if block["type"] == "tool_use"
+                    && let Some(name) = block["name"].as_str()
+                {
+                    let arg_field = match name {
+                        "Bash" => Some("command"),
+                        "WebSearch" => Some("query"),
+                        "WebFetch" => Some("url"),
+                        "Agent" => Some("description"),
+                        _ => None,
+                    };
 
-                            if let Some(field) = arg_field {
-                                if let Some(arg_value) = block["input"][field].as_str() {
-                                    if !texts.is_empty() {
-                                        events.push(AgentEvent::Text(texts.clone()));
-                                        texts.clear();
-                                    }
-                                    events.push(AgentEvent::ToolCall {
-                                        name: name.to_string(),
-                                        args: arg_value.to_string(),
-                                    });
-                                }
-                            }
+                    if let Some(field) = arg_field
+                        && let Some(arg_value) = block["input"][field].as_str()
+                    {
+                        if !texts.is_empty() {
+                            events.push(AgentEvent::Text(texts.clone()));
+                            texts.clear();
                         }
+                        events.push(AgentEvent::ToolCall {
+                            name: name.to_string(),
+                            args: arg_value.to_string(),
+                        });
                     }
                 }
-                if !texts.is_empty() {
-                    events.push(AgentEvent::Text(texts));
-                }
-                return events;
             }
+            if !texts.is_empty() {
+                events.push(AgentEvent::Text(texts));
+            }
+            return events;
         }
 
-        if obj["type"] == "result" {
-            if let Some(result) = obj["result"].as_str() {
-                return vec![AgentEvent::Result(result.to_string())];
-            }
+        if obj["type"] == "result"
+            && let Some(result) = obj["result"].as_str()
+        {
+            return vec![AgentEvent::Result(result.to_string())];
         }
 
-        if obj["type"] == "system" && obj["subtype"] == "init" {
-            if let Some(session_id) = obj["session_id"].as_str() {
-                return vec![AgentEvent::SessionId(session_id.to_string())];
-            }
+        if obj["type"] == "system"
+            && obj["subtype"] == "init"
+            && let Some(session_id) = obj["session_id"].as_str()
+        {
+            return vec![AgentEvent::SessionId(session_id.to_string())];
         }
 
         Vec::new()
@@ -120,8 +121,8 @@ mod tests {
     #[test]
     fn test_claude_code_build_print_command() {
         let provider = ClaudeCode::new("claude-sonnet");
-        let cmd = provider.build_print_command("hello", true, Some("session-123"));
-        
+        let cmd = provider.build_print_command("hello", true, Some("session-123".to_string()));
+
         assert!(cmd.command.contains("--dangerously-skip-permissions"));
         assert!(cmd.command.contains("--model 'claude-sonnet'"));
         assert!(cmd.command.contains("--resume 'session-123'"));
@@ -131,9 +132,10 @@ mod tests {
     #[test]
     fn test_claude_code_parse_stream_line_text() {
         let provider = ClaudeCode::new("claude-sonnet");
-        let line = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Hello world"}]}}"#;
+        let line =
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Hello world"}]}}"#;
         let events = provider.parse_stream_line(line);
-        
+
         assert_eq!(events.len(), 1);
         if let AgentEvent::Text(text) = &events[0] {
             assert_eq!(text, "Hello world");
@@ -147,14 +149,14 @@ mod tests {
         let provider = ClaudeCode::new("claude-sonnet");
         let line = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Running command..."},{"type":"tool_use","name":"Bash","input":{"command":"ls -la"}}]}}"#;
         let events = provider.parse_stream_line(line);
-        
+
         assert_eq!(events.len(), 2);
         if let AgentEvent::Text(text) = &events[0] {
             assert_eq!(text, "Running command...");
         } else {
             panic!("Expected Text event");
         }
-        
+
         if let AgentEvent::ToolCall { name, args } = &events[1] {
             assert_eq!(name, "Bash");
             assert_eq!(args, "ls -la");
@@ -168,7 +170,7 @@ mod tests {
         let provider = ClaudeCode::new("claude-sonnet");
         let line = r#"{"type":"result","result":"Success"}"#;
         let events = provider.parse_stream_line(line);
-        
+
         assert_eq!(events.len(), 1);
         if let AgentEvent::Result(res) = &events[0] {
             assert_eq!(res, "Success");
@@ -182,7 +184,7 @@ mod tests {
         let provider = ClaudeCode::new("claude-sonnet");
         let line = r#"{"type":"system","subtype":"init","session_id":"sess_123"}"#;
         let events = provider.parse_stream_line(line);
-        
+
         assert_eq!(events.len(), 1);
         if let AgentEvent::SessionId(id) = &events[0] {
             assert_eq!(id, "sess_123");
