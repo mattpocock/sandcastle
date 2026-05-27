@@ -1343,10 +1343,11 @@ describe("InitService scaffold", () => {
   // --- Issue tracker ---
 
   describe("Issue tracker registry", () => {
-    it("listIssueTrackers returns github-issues and beads", () => {
+    it("listIssueTrackers returns github-issues, beads, and linear", () => {
       const managers = listIssueTrackers();
       expect(managers.some((m) => m.name === "github-issues")).toBe(true);
       expect(managers.some((m) => m.name === "beads")).toBe(true);
+      expect(managers.some((m) => m.name === "linear")).toBe(true);
     });
 
     it("getIssueTracker returns github-issues entry with expected templateArgs", () => {
@@ -1389,6 +1390,25 @@ describe("InitService scaffold", () => {
       expect(manager!.templateArgs.ISSUE_TRACKER_TOOLS).toContain(
         "dpkg-architecture -qDEB_HOST_MULTIARCH",
       );
+    });
+
+    it("getIssueTracker returns linear entry with expected templateArgs", () => {
+      const manager = getIssueTracker("linear");
+      expect(manager).toBeDefined();
+      expect(manager!.label).toBe("Linear");
+      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain(
+        "api.linear.app/graphql",
+      );
+      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain("jq");
+      expect(manager!.templateArgs.VIEW_TASK_COMMAND).toContain(
+        "api.linear.app/graphql",
+      );
+      expect(manager!.templateArgs.CLOSE_TASK_COMMAND).toContain(
+        "workflowStates",
+      );
+      expect(manager!.templateArgs.CLOSE_TASK_COMMAND).toContain("issueUpdate");
+      expect(manager!.templateArgs.ISSUE_TRACKER_TOOLS).toBe("");
+      expect(manager!.envExample).toContain("LINEAR_API_KEY=");
     });
 
     it("getIssueTracker returns custom entry with broken-until-configured templateArgs", () => {
@@ -1514,6 +1534,39 @@ describe("InitService scaffold", () => {
         "utf-8",
       );
       expect(prompt).not.toContain("--label Sandcastle");
+    });
+
+    it("simple-loop with linear produces prompt with linear commands", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        issueTracker: getIssueTracker("linear"),
+      });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).toContain("api.linear.app/graphql");
+      expect(prompt).toContain("jq");
+      expect(prompt).not.toContain("gh issue list");
+      expect(prompt).not.toContain("gh issue close");
+      expect(prompt).not.toContain("{{LIST_TASKS_COMMAND}}");
+      expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
+    });
+
+    it("generates .env.example with LINEAR_API_KEY when issue tracker is linear", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        issueTracker: getIssueTracker("linear"),
+      });
+
+      const envExample = await readFile(
+        join(dir, ".sandcastle", ".env.example"),
+        "utf-8",
+      );
+      expect(envExample).toContain("LINEAR_API_KEY=");
+      expect(envExample).not.toContain("GH_TOKEN=");
     });
 
     it("simple-loop with github-issues retains --label Sandcastle when createLabel is true", async () => {
@@ -2151,6 +2204,21 @@ describe("InitService scaffold", () => {
       expect(dockerfile).not.toContain("{{ISSUE_TRACKER_TOOLS}}");
       expect(dockerfile).not.toContain("x86_64-linux-gnu");
       expect(dockerfile).toContain("dpkg-architecture -qDEB_HOST_MULTIARCH");
+    });
+
+    it("scaffold with linear produces Dockerfile with no extra tools (curl/jq already in base image)", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        issueTracker: getIssueTracker("linear"),
+      });
+
+      const dockerfile = await readFile(
+        join(dir, ".sandcastle", "Dockerfile"),
+        "utf-8",
+      );
+      expect(dockerfile).not.toContain("GitHub CLI");
+      expect(dockerfile).not.toContain("beads");
+      expect(dockerfile).not.toContain("{{ISSUE_TRACKER_TOOLS}}");
     });
 
     it("scaffold with beads + podman produces Containerfile with beads install", async () => {

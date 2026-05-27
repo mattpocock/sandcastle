@@ -419,6 +419,31 @@ GH_TOKEN=`,
     envExample: "",
   },
   {
+    name: "linear",
+    label: "Linear",
+    templateArgs: {
+      LIST_TASKS_COMMAND: `curl -s -X POST https://api.linear.app/graphql \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: $LINEAR_API_KEY" \\
+  -d '{"query": "query { issues(filter: { state: { name: { nin: [\\"Done\\", \\"Canceled\\"] } } }) { nodes { id title description } } }"}' | jq '[.data.issues.nodes[] | {id, title, description}]'`,
+      VIEW_TASK_COMMAND: `curl -s -X POST https://api.linear.app/graphql \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: $LINEAR_API_KEY" \\
+  -d '{"query": "query { issue(id: \\"<ID>\\") { id title description } }"}' | jq '{title: .data.issue.title, description: .data.issue.description}'`,
+      CLOSE_TASK_COMMAND: `STATE_ID=$(curl -s -X POST https://api.linear.app/graphql \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: $LINEAR_API_KEY" \\
+  -d '{"query":"{workflowStates(filter:{type:{eq:\\"completed\\"}}){nodes{id}}}"}' | jq -r '.data.workflowStates.nodes[0].id') \\
+&& curl -s -X POST https://api.linear.app/graphql \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: $LINEAR_API_KEY" \\
+  -d "$(jq -n --arg id '<ID>' --arg stateId "$STATE_ID" '{query: ("mutation { issueUpdate(id: " + ($id | tojson) + ", input: { stateId: " + ($stateId | tojson) + " }) { success } }")}')"`,
+      ISSUE_TRACKER_TOOLS: "",
+    },
+    envExample: `# Linear API key
+LINEAR_API_KEY=`,
+  },
+  {
     name: "custom",
     label: "Custom",
     templateArgs: {
