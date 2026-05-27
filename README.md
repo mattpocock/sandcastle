@@ -664,7 +664,7 @@ try {
 
 ### Templates
 
-`sandcastle init` prompts you to choose a sandbox provider (Docker or Podman), an issue tracker (GitHub Issues, Beads, or Custom), and a template, which scaffolds a ready-to-use prompt and `main.mts` suited to a specific workflow. If your project's `package.json` has `"type": "module"`, the file will be named `main.ts` instead. Choosing **Custom** scaffolds the project in a deliberately broken-until-configured state plus a `.sandcastle/SETUP_ISSUE_TRACKER.md` prompt you feed to your coding agent, which wires up your own tracker by editing the scaffolded files in place. Five templates are available:
+`sandcastle init` prompts you to choose a sandbox provider (Docker or Podman), an issue tracker (GitHub Issues, Beads, Linear, or Custom), and a template, which scaffolds a ready-to-use prompt and `main.mts` suited to a specific workflow. If your project's `package.json` has `"type": "module"`, the file will be named `main.ts` instead. Choosing **Custom** scaffolds the project in a deliberately broken-until-configured state plus a `.sandcastle/SETUP_ISSUE_TRACKER.md` prompt you feed to your coding agent, which wires up your own tracker by editing the scaffolded files in place. Five templates are available:
 
 | Template                       | Description                                                               |
 | ------------------------------ | ------------------------------------------------------------------------- |
