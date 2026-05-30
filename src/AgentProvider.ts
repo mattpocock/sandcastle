@@ -1066,7 +1066,7 @@ export const copilot = (
 // ---------------------------------------------------------------------------
 
 export interface ClaudeCodeOptions {
-  readonly effort?: "low" | "medium" | "high" | "xhigh" | "max";
+  readonly effort?: "low" | "medium" | "high" | "xhigh" | "max" | "ultracode";
   /** Environment variables injected by this agent provider. */
   readonly env?: Record<string, string>;
   /** When false, session capture is disabled. Default: true. */
