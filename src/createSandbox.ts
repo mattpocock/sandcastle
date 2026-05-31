@@ -303,6 +303,9 @@ const buildSandboxHandle = (
               hostWorktreePath: worktreePath,
               sandboxRepoPath: sandboxRepoDir,
               applyToHost,
+              bindMountHandle: providerHandle as
+                | BindMountSandboxHandle
+                | undefined,
             },
             sandbox,
           ).pipe(
