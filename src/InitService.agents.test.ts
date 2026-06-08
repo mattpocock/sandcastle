@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { AGENT_DEFAULT_MODELS } from "./AgentProvider.js";
 import { listAgents, getAgent } from "./InitService.js";
 
 describe("Agent registry", () => {
@@ -94,5 +95,13 @@ describe("Agent registry", () => {
     expect(agent!.factoryImport).toBe("copilot");
     expect(agent!.dockerfileTemplate).toContain("FROM");
     expect(agent!.dockerfileTemplate).toContain("@github/copilot");
+  });
+
+  it("default-model lookups for init come from AGENT_DEFAULT_MODELS", () => {
+    for (const agent of listAgents()) {
+      expect(agent.defaultModel).toBe(
+        AGENT_DEFAULT_MODELS[agent.name as keyof typeof AGENT_DEFAULT_MODELS],
+      );
+    }
   });
 });

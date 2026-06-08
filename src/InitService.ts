@@ -2,6 +2,7 @@ import { FileSystem } from "@effect/platform";
 import { Effect } from "effect";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { AGENT_DEFAULT_MODELS } from "./AgentProvider.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 
 const GITIGNORE = `.env
@@ -410,7 +411,7 @@ const AGENT_REGISTRY: AgentEntry[] = [
   {
     name: "claude-code",
     label: "Claude Code",
-    defaultModel: "claude-opus-4-7",
+    defaultModel: AGENT_DEFAULT_MODELS["claude-code"],
     factoryImport: "claudeCode",
     dockerfileTemplate: CLAUDE_CODE_DOCKERFILE,
     envExample: `# Anthropic API key
@@ -421,7 +422,7 @@ ANTHROPIC_API_KEY=`,
   {
     name: "pi",
     label: "Pi",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: AGENT_DEFAULT_MODELS.pi,
     factoryImport: "pi",
     dockerfileTemplate: PI_DOCKERFILE,
     envExample: `# Anthropic API key
@@ -431,7 +432,7 @@ ANTHROPIC_API_KEY=`,
   {
     name: "codex",
     label: "Codex",
-    defaultModel: "gpt-5.4-mini",
+    defaultModel: AGENT_DEFAULT_MODELS.codex,
     factoryImport: "codex",
     dockerfileTemplate: CODEX_DOCKERFILE,
     envExample: `# OpenAI API key
@@ -441,7 +442,7 @@ OPENAI_KEY=`,
   {
     name: "cursor",
     label: "Cursor",
-    defaultModel: "composer-2",
+    defaultModel: AGENT_DEFAULT_MODELS.cursor,
     factoryImport: "cursor",
     dockerfileTemplate: CURSOR_DOCKERFILE,
     envExample: `# Cursor API key (recommended)
@@ -452,7 +453,7 @@ CURSOR_API_KEY=`,
   {
     name: "opencode",
     label: "OpenCode",
-    defaultModel: "opencode/big-pickle",
+    defaultModel: AGENT_DEFAULT_MODELS.opencode,
     factoryImport: "opencode",
     dockerfileTemplate: OPENCODE_DOCKERFILE,
     envExample: `# OpenCode API key
@@ -462,7 +463,7 @@ OPENCODE_API_KEY=`,
   {
     name: "copilot",
     label: "GitHub Copilot CLI",
-    defaultModel: "claude-sonnet-4.5",
+    defaultModel: AGENT_DEFAULT_MODELS.copilot,
     factoryImport: "copilot",
     dockerfileTemplate: COPILOT_DOCKERFILE,
     envExample: `# GitHub token with the "Copilot Requests" permission

@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  agent,
+  AGENT_DEFAULT_MODELS,
   claudeCode,
   codex,
   copilot,
@@ -10,6 +12,7 @@ import {
   opencode,
   pi,
 } from "./AgentProvider.js";
+import { agent as publicAgent } from "./index.js";
 import type { AgentCommandOptions } from "./AgentProvider.js";
 import type { BindMountSandboxHandle } from "./SandboxProvider.js";
 
@@ -17,6 +20,74 @@ import type { BindMountSandboxHandle } from "./SandboxProvider.js";
 const opts = (prompt: string): AgentCommandOptions => ({
   prompt,
   dangerouslySkipPermissions: true,
+});
+
+describe("agent resolver", () => {
+  it("exports agent from src/index.ts while keeping existing factory exports", () => {
+    const provider = publicAgent({ env: { AGENT: "codex" } });
+    expect(provider.name).toBe("codex");
+    expect(claudeCode("claude-opus-4-7").name).toBe("claude-code");
+  });
+
+  it("with AGENT=codex resolves codex and buildPrintCommand contains the default model", () => {
+    const provider = agent({ env: { AGENT: "codex" } });
+    expect(provider.name).toBe("codex");
+    expect(provider.buildPrintCommand(opts("test")).command).toContain(
+      AGENT_DEFAULT_MODELS.codex,
+    );
+  });
+
+  it("with AGENT=claude-code matches Claude Code behavior and exposes sessionStorage", () => {
+    const provider = agent({ env: { AGENT: "claude-code" } });
+    expect(provider.name).toBe("claude-code");
+    expect(provider.buildPrintCommand(opts("test")).command).toContain(
+      "--output-format stream-json",
+    );
+    expect(provider.sessionStorage).toBeDefined();
+  });
+
+  it("AGENT_MODEL set uses that model and unset uses the provider default", () => {
+    const explicit = agent({
+      env: { AGENT: "codex", AGENT_MODEL: "gpt-custom" },
+    });
+    const fallback = agent({ env: { AGENT: "codex" } });
+
+    expect(explicit.buildPrintCommand(opts("test")).command).toContain(
+      "-m 'gpt-custom'",
+    );
+    expect(fallback.buildPrintCommand(opts("test")).command).toContain(
+      `-m '${AGENT_DEFAULT_MODELS.codex}'`,
+    );
+  });
+
+  it("AGENT unset resolves to options.default", () => {
+    const provider = agent({ default: "codex", env: {} });
+    expect(provider.name).toBe("codex");
+  });
+
+  it("unknown AGENT throws an error listing valid names", () => {
+    expect(() => agent({ env: { AGENT: "unknown" } })).toThrow(
+      /Unknown agent provider "unknown".*claude-code.*codex.*copilot/,
+    );
+  });
+
+  it('agent({ codex: { effort: "high" } }) with AGENT=codex forwards only codex options', () => {
+    const provider = agent({
+      env: { AGENT: "codex" },
+      codex: { effort: "high" },
+      claudeCode: { effort: "max" },
+    });
+    const command = provider.buildPrintCommand(opts("test")).command;
+
+    expect(command).toContain(`model_reasoning_effort="high"`);
+    expect(command).not.toContain("max");
+  });
+
+  it("throws when AGENT is unset and no default is provided", () => {
+    expect(() => agent({ env: {} })).toThrow(
+      /Set AGENT or pass agent\(\{ default: \.\.\. \}\)/,
+    );
+  });
 });
 
 describe("claudeCode factory", () => {

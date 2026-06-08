@@ -51,6 +51,8 @@ export type {
 } from "./Output.js";
 export { CwdError } from "./CwdError.js";
 export {
+  agent,
+  AGENT_DEFAULT_MODELS,
   claudeCode,
   codex,
   copilot,
@@ -60,6 +62,8 @@ export {
 } from "./AgentProvider.js";
 export type {
   AgentProvider,
+  AgentName,
+  AgentResolverOptions,
   AgentCommandOptions,
   PrintCommand,
   ClaudeCodeOptions,

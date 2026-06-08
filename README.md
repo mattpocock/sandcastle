@@ -895,6 +895,22 @@ const [reviewA, reviewB] = await Promise.all([
 
 ### `ClaudeCodeOptions`
 
+Use `agent()` to choose a provider at runtime from `AGENT` and `AGENT_MODEL`.
+`AGENT` selects the provider, `AGENT_MODEL` overrides that provider's default
+model, and `default` is used when `AGENT` is unset:
+
+```typescript
+import { agent, run } from "@ai-hero/sandcastle";
+
+await run({
+  agent: agent({
+    default: "claude-code",
+    codex: { effort: "high" },
+  }),
+  prompt: "Fix issue #42",
+});
+```
+
 The `claudeCode()` factory accepts an optional second argument for provider-specific options:
 
 ```typescript

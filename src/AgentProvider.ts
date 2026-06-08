@@ -274,7 +274,18 @@ export interface AgentProvider {
   parseSessionUsage?(content: string): IterationUsage | undefined;
 }
 
-export const DEFAULT_MODEL = "claude-opus-4-7";
+export const AGENT_DEFAULT_MODELS = {
+  "claude-code": "claude-opus-4-7",
+  pi: "claude-sonnet-4-6",
+  codex: "gpt-5.4-mini",
+  cursor: "composer-2",
+  opencode: "opencode/big-pickle",
+  copilot: "claude-sonnet-4.5",
+} as const;
+
+export type AgentName = keyof typeof AGENT_DEFAULT_MODELS;
+
+export const DEFAULT_MODEL = AGENT_DEFAULT_MODELS["claude-code"];
 
 // ---------------------------------------------------------------------------
 // Session storage helpers — file I/O lives here so callers (Orchestrator,
@@ -1156,3 +1167,56 @@ export const claudeCode = (
     return undefined;
   },
 });
+
+export interface AgentResolverOptions {
+  /** Provider name used when AGENT is unset. */
+  readonly default?: AgentName;
+  /** Environment source for AGENT and AGENT_MODEL. Defaults to process.env. */
+  readonly env?: Record<string, string | undefined>;
+  readonly claudeCode?: ClaudeCodeOptions;
+  readonly "claude-code"?: ClaudeCodeOptions;
+  readonly pi?: PiOptions;
+  readonly codex?: CodexOptions;
+  readonly cursor?: CursorOptions;
+  readonly opencode?: OpenCodeOptions;
+  readonly copilot?: CopilotOptions;
+}
+
+const VALID_AGENT_NAMES = Object.keys(AGENT_DEFAULT_MODELS) as AgentName[];
+
+const isAgentName = (name: string): name is AgentName =>
+  Object.hasOwn(AGENT_DEFAULT_MODELS, name);
+
+export const agent = (options: AgentResolverOptions = {}): AgentProvider => {
+  const env = options.env ?? process.env;
+  const agentName = env.AGENT ?? options.default;
+
+  if (!agentName) {
+    throw new Error(
+      `No agent provider selected. Set AGENT or pass agent({ default: ... }). Valid agents: ${VALID_AGENT_NAMES.join(", ")}`,
+    );
+  }
+
+  if (!isAgentName(agentName)) {
+    throw new Error(
+      `Unknown agent provider "${agentName}". Valid agents: ${VALID_AGENT_NAMES.join(", ")}`,
+    );
+  }
+
+  const model = env.AGENT_MODEL ?? AGENT_DEFAULT_MODELS[agentName];
+
+  switch (agentName) {
+    case "claude-code":
+      return claudeCode(model, options.claudeCode ?? options["claude-code"]);
+    case "pi":
+      return pi(model, options.pi);
+    case "codex":
+      return codex(model, options.codex);
+    case "cursor":
+      return cursor(model, options.cursor);
+    case "opencode":
+      return opencode(model, options.opencode);
+    case "copilot":
+      return copilot(model, options.copilot);
+  }
+};
