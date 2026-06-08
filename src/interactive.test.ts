@@ -1,5 +1,11 @@
 import { execSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, existsSync, readdirSync } from "node:fs";
+import {
+  mkdtempSync,
+  writeFileSync,
+  existsSync,
+  readdirSync,
+  realpathSync,
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
@@ -7,6 +13,7 @@ import { interactive, type InteractiveOptions } from "./interactive.js";
 import {
   createBindMountSandboxProvider,
   type BindMountSandboxHandle,
+  type BindMountCreateOptions,
   type InteractiveExecOptions,
 } from "./SandboxProvider.js";
 import { claudeCode, pi, codex, opencode } from "./AgentProvider.js";
@@ -114,10 +121,12 @@ describe("interactive()", () => {
       args: string[],
       opts: InteractiveExecOptions,
     ) => Promise<{ exitCode: number }>,
+    onCreate?: (options: BindMountCreateOptions) => void,
   ) =>
     createBindMountSandboxProvider({
       name: "test-interactive",
       create: async (options) => {
+        onCreate?.(options);
         const handle: BindMountSandboxHandle = {
           worktreePath: options.worktreePath,
           exec: async (command) => {
@@ -718,7 +727,9 @@ describe("interactive()", () => {
 
   it("uses cwd as host repo directory for worktree placement", async () => {
     // Create a second git repo in a separate temp dir
-    const otherRepo = mkdtempSync(join(tmpdir(), "sandcastle-cwd-test-"));
+    const otherRepo = realpathSync(
+      mkdtempSync(join(tmpdir(), "sandcastle-cwd-test-")),
+    );
     execSync("git init", { cwd: otherRepo, stdio: "ignore" });
     execSync('git config user.email "test@test.com"', {
       cwd: otherRepo,
@@ -733,23 +744,31 @@ describe("interactive()", () => {
     execSync('git commit -m "initial"', { cwd: otherRepo, stdio: "ignore" });
 
     let worktreeCwd: string | undefined;
+    let hostWorktreePath: string | undefined;
 
-    const provider = makeTestProvider(async (_args, opts) => {
-      worktreeCwd = opts.cwd;
-      return { exitCode: 0 };
-    });
+    const provider = makeTestProvider(
+      async (_args, opts) => {
+        worktreeCwd = opts.cwd;
+        return { exitCode: 0 };
+      },
+      (options) => {
+        hostWorktreePath = options.worktreePath;
+      },
+    );
 
     const result = await interactive({
       agent: claudeCode("claude-opus-4-7"),
       sandbox: provider,
       prompt: "test",
       cwd: otherRepo,
+      branchStrategy: { type: "merge-to-head" },
     });
 
     expect(result.exitCode).toBe(0);
-    // The worktree should be under the other repo's .sandcastle/worktrees/ dir
+    // The host worktree should be under the other repo's .sandcastle/worktrees/ dir
+    expect(hostWorktreePath).toBeDefined();
+    expect(hostWorktreePath!.startsWith(realpathSync(otherRepo))).toBe(true);
     expect(worktreeCwd).toBeDefined();
-    expect(worktreeCwd!.startsWith(otherRepo)).toBe(true);
   });
 
   it("without cwd behaves identically to process.cwd()", async () => {
@@ -770,7 +789,7 @@ describe("interactive()", () => {
     expect(result.exitCode).toBe(0);
     // The worktree should be under process.cwd() (which is hostDir)
     expect(worktreeCwd).toBeDefined();
-    expect(worktreeCwd!.startsWith(hostDir)).toBe(true);
+    expect(worktreeCwd!.startsWith(realpathSync(hostDir))).toBe(true);
   });
 
   it("copies files to worktree with copyToWorktree", async () => {

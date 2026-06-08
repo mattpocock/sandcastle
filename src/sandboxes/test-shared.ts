@@ -7,7 +7,7 @@
  */
 
 import { execFile, spawn } from "node:child_process";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -38,6 +38,7 @@ export const createTempSandbox = async (
   const sandboxRoot = await mkdtemp(join(tmpdir(), prefix));
   const worktreePath = join(sandboxRoot, "workspace");
   await mkdir(worktreePath, { recursive: true });
+  const realWorktreePath = await realpath(worktreePath);
 
   const exec = (
     command: string,
@@ -106,7 +107,7 @@ export const createTempSandbox = async (
   };
 
   return {
-    worktreePath,
+    worktreePath: realWorktreePath,
     exec,
     close: () => rm(sandboxRoot, { recursive: true, force: true }),
   };

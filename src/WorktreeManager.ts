@@ -2,7 +2,7 @@ import { Effect, Option } from "effect";
 import { FileSystem } from "@effect/platform";
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { join, normalize } from "node:path";
+import { dirname, join, normalize } from "node:path";
 import { WorktreeError, WorktreeTimeoutError, withTimeout } from "./errors.js";
 
 const WORKTREE_TIMEOUT_MS = 30_000;
@@ -333,10 +333,20 @@ export const create = (
       // Match by branch first; fall back to target path (covers mid-rebase
       // detached-HEAD state where the branch field is null).
       const existing = yield* listWorktrees(repoDir);
-      const collision = findCollidingWorktree(existing, branch, worktreePath);
+      const realWorktreePath = yield* fs
+        .realPath(worktreePath)
+        .pipe(Effect.catchAll(() => Effect.succeed(worktreePath)));
+      const collision = findCollidingWorktree(
+        existing,
+        branch,
+        realWorktreePath,
+      );
       if (collision) {
+        const realWorktreesDir = yield* fs
+          .realPath(worktreesDir)
+          .pipe(Effect.catchAll(() => Effect.succeed(worktreesDir)));
         // Only reuse worktrees managed by sandcastle (under .sandcastle/worktrees/)
-        if (isManagedWorktreePath(collision.path, worktreesDir)) {
+        if (isManagedWorktreePath(collision.path, realWorktreesDir)) {
           const dirty = yield* hasUncommittedChanges(collision.path);
           if (dirty) {
             console.warn(
@@ -411,7 +421,11 @@ export const create = (
       );
     }
 
-    return { path: worktreePath, branch };
+    const realWorktreePath = yield* fs
+      .realPath(worktreePath)
+      .pipe(Effect.catchAll(() => Effect.succeed(worktreePath)));
+
+    return { path: realWorktreePath, branch };
   }).pipe(
     withTimeout(
       WORKTREE_TIMEOUT_MS,
@@ -439,18 +453,23 @@ export const hasUncommittedChanges = (
 /**
  * Removes a worktree and its git metadata.
  *
- * The `worktreePath` must be a path inside `.sandcastle/worktrees/` so that
- * the main repository directory can be derived from it.
+ * The main repository directory is resolved through git so this also works
+ * when `.sandcastle` is a symlink and `worktreePath` is a canonical realpath.
  */
 export const remove = (
   worktreePath: string,
-): Effect.Effect<void, WorktreeError> => {
-  // Derive the main repo dir: worktreePath = <repoDir>/.sandcastle/worktrees/<name>
-  const repoDir = join(worktreePath, "..", "..", "..");
-  return execGit(["worktree", "remove", "--force", worktreePath], repoDir).pipe(
-    Effect.asVoid,
-  );
-};
+): Effect.Effect<void, WorktreeError> =>
+  Effect.gen(function* () {
+    const commonDir = yield* execGit(
+      ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+      worktreePath,
+    ).pipe(Effect.map((output) => output.trim()));
+    const repoDir = commonDir.endsWith(".git")
+      ? dirname(commonDir)
+      : dirname(dirname(commonDir));
+
+    yield* execGit(["worktree", "remove", "--force", worktreePath], repoDir);
+  });
 
 /**
  * Prunes stale git worktree metadata and removes orphaned directories under

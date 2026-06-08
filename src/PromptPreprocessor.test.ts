@@ -7,7 +7,7 @@ import {
   TestClock,
   TestContext,
 } from "effect";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -20,7 +20,9 @@ import { PromptError, PromptExpansionTimeoutError } from "./errors.js";
 
 describe("PromptPreprocessor", () => {
   const setup = async () => {
-    const sandboxDir = await mkdtemp(join(tmpdir(), "preprocess-test-"));
+    const sandboxDir = await realpath(
+      await mkdtemp(join(tmpdir(), "preprocess-test-")),
+    );
     const displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
     const displayLayer = SilentDisplay.layer(displayRef);
     const sandbox = makeLocalSandbox(sandboxDir);

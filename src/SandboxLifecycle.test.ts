@@ -1,6 +1,12 @@
 import { Effect, Layer, Ref } from "effect";
 import { exec } from "node:child_process";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -1478,7 +1484,7 @@ describe("runHostHooks", () => {
   });
 
   it("uses the provided cwd", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "host-hooks-"));
+    const dir = await realpath(await mkdtemp(join(tmpdir(), "host-hooks-")));
 
     await Effect.runPromise(runHostHooks([{ command: "pwd > cwd.txt" }], dir));
 
