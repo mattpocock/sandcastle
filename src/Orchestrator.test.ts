@@ -34,6 +34,7 @@ import {
   agentStreamEmitterLayer,
   type AgentStreamEvent,
 } from "./AgentStreamEmitter.js";
+import { getAbortMetadata } from "./AbortMetadata.js";
 import type { BindMountSandboxHandle } from "./SandboxProvider.js";
 
 const noopAgentStreamEmitterLayer = agentStreamEmitterLayer();
@@ -3063,6 +3064,9 @@ describe("Session capture integration", () => {
       iterationIndex: number,
     ) => Promise<string>,
     sessionId: string | ((iterationIndex: number) => string),
+    factoryOptions?: {
+      emitInitBeforeBehavior?: boolean;
+    },
   ): { factoryLayer: Layer.Layer<SandboxFactory> } => {
     const sandboxBaseDir = join(tmpdir(), `orch-session-${randomUUID()}`);
     let branchCounter = 0;
@@ -3113,16 +3117,27 @@ describe("Session capture integration", () => {
                   return Effect.gen(function* () {
                     const cwd = options?.cwd ?? sandboxBaseDir;
                     const iterationIndex = branchCounter - 1;
-                    const output = yield* Effect.promise(() =>
-                      mockAgentBehavior(cwd, command, iterationIndex),
-                    );
                     const effectiveSessionId =
                       typeof sessionId === "function"
                         ? sessionId(iterationIndex)
                         : sessionId;
+                    if (factoryOptions?.emitInitBeforeBehavior) {
+                      onLine(
+                        JSON.stringify({
+                          type: "system",
+                          subtype: "init",
+                          session_id: effectiveSessionId,
+                        }),
+                      );
+                    }
+                    const output = yield* Effect.promise(() =>
+                      mockAgentBehavior(cwd, command, iterationIndex),
+                    );
                     const streamOutput = toStreamJson(
                       output,
-                      effectiveSessionId,
+                      factoryOptions?.emitInitBeforeBehavior
+                        ? undefined
+                        : effectiveSessionId,
                     );
                     for (const line of streamOutput.split("\n")) {
                       onLine(line);
@@ -3713,6 +3728,72 @@ describe("Session capture integration", () => {
     );
 
     expect(result.iterations[0]!.usage).toBeUndefined();
+  });
+
+  it("preserves partial session metadata when aborted after the session ID is observed", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-abort-session-host-"));
+    const hostProjectsDir = await mkdtemp(
+      join(tmpdir(), "orch-abort-session-projects-"),
+    );
+    const sandboxProjectsDir = await mkdtemp(
+      join(tmpdir(), "orch-abort-session-sb-projects-"),
+    );
+    const provider = claudeCode("test-model", {
+      sessionStorage: { hostProjectsDir, sandboxProjectsDir },
+    });
+    const mockSessionId = "abort-session-123";
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const reason = new DOMException("cancelled mid-iteration", "AbortError");
+    const ac = new AbortController();
+
+    const { factoryLayer } = makeSessionCaptureFactory(
+      hostDir,
+      async (repoDir) => {
+        const encoded = encodeProjectPath(repoDir);
+        const sessionsDir = join(sandboxProjectsDir, encoded);
+        await mkdir(sessionsDir, { recursive: true });
+        await writeFile(
+          join(sessionsDir, `${mockSessionId}.jsonl`),
+          [
+            JSON.stringify({ type: "system", cwd: repoDir }),
+            JSON.stringify({ type: "message", cwd: repoDir, text: "hello" }),
+          ].join("\n"),
+        );
+        ac.abort(reason);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return "Done.";
+      },
+      mockSessionId,
+      { emitInitBeforeBehavior: true },
+    );
+
+    await expect(
+      Effect.runPromise(
+        orchestrate({
+          provider,
+          hostRepoDir: hostDir,
+          iterations: 1,
+          prompt: "do some work",
+          signal: ac.signal,
+        }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      ),
+    ).rejects.toThrow("cancelled mid-iteration");
+
+    expect(ac.signal.reason).toBe(reason);
+    const metadata = getAbortMetadata(reason);
+    expect(metadata?.iterations).toHaveLength(1);
+    expect(metadata?.iterations[0]!.sessionId).toBe(mockSessionId);
+    expect(metadata?.iterations[0]!.sessionFilePath).toBeDefined();
+
+    const capturedPath = metadata?.iterations[0]!.sessionFilePath!;
+    const capturedContent = await readFile(capturedPath, "utf-8");
+    const firstEntry = JSON.parse(capturedContent.split("\n")[0]!) as {
+      cwd: string;
+    };
+    expect(firstEntry.cwd).toBe(hostDir);
   });
 });
 
