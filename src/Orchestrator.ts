@@ -333,6 +333,7 @@ export const orchestrate = (
     let allStdout = "";
     let resolvedBranch = "";
     let iterationPreservedPath: string | undefined;
+    let resumeSessionId = options.resumeSession;
 
     // Helper: check abort signal and bail via defect so run() can
     // re-throw the signal's reason verbatim (no Sandcastle wrapping).
@@ -362,9 +363,10 @@ export const orchestrate = (
             sandbox,
             (ctx) =>
               Effect.gen(function* () {
-                // Resume session: transfer JSONL from host to sandbox before iteration 1
-                const iterationResumeSession =
-                  i === 1 ? options.resumeSession : undefined;
+                // Resume session: transfer JSONL from host to sandbox before each
+                // iteration when a prior captured session is available. Forking
+                // remains a first-iteration-only behavior.
+                const iterationResumeSession = resumeSessionId;
                 const iterationForkSession =
                   i === 1 ? options.forkSession : undefined;
                 if (
@@ -546,6 +548,10 @@ export const orchestrate = (
         sessionFilePath: lifecycleResult.result.sessionFilePath,
         usage: lifecycleResult.result.usage,
       });
+
+      if (lifecycleResult.result.sessionId) {
+        resumeSessionId = lifecycleResult.result.sessionId;
+      }
 
       if (lifecycleResult.result.completionSignal !== undefined) {
         yield* display.status(

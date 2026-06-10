@@ -408,7 +408,7 @@ describe("signal (AbortSignal)", () => {
 });
 
 describe("resumeSession validation", () => {
-  it("throws when resumeSession is set with maxIterations > 1", async () => {
+  it("allows resumeSession with maxIterations > 1 and continues to session-file validation", async () => {
     await expect(
       run({
         agent: claudeCode("claude-opus-4-7"),
@@ -418,9 +418,7 @@ describe("resumeSession validation", () => {
         resumeSession: "abc-123",
         maxIterations: 2,
       }),
-    ).rejects.toThrow(
-      "resumeSession cannot be combined with maxIterations > 1",
-    );
+    ).rejects.toThrow('resumeSession "abc-123" not found');
   });
 
   it("throws when resumeSession file does not exist on host", async () => {

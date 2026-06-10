@@ -481,13 +481,6 @@ export const createWorktree = async (
     const sandboxProvider = opts.sandbox;
     const maxIterations = opts.maxIterations ?? 1;
 
-    if (opts.resumeSession && maxIterations > 1) {
-      throw new Error(
-        "resumeSession cannot be combined with maxIterations > 1. " +
-          "Resume applies to iteration 1 only; multi-iteration resume semantics are not supported.",
-      );
-    }
-
     if (opts.resumeSession) {
       await assertResumeSessionExists({
         provider,

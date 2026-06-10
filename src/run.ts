@@ -409,14 +409,6 @@ export async function run(
     );
   }
 
-  // Validate: resumeSession + maxIterations > 1 is not allowed
-  if (options.resumeSession && maxIterations > 1) {
-    throw new Error(
-      "resumeSession cannot be combined with maxIterations > 1. " +
-        "Resume applies to iteration 1 only; multi-iteration resume semantics are not supported.",
-    );
-  }
-
   // Validate: forkSession only makes sense alongside resumeSession.
   // It is wired internally by RunResult.fork() and never set on its own.
   if (options.forkSession && !options.resumeSession) {
