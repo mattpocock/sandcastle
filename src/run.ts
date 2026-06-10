@@ -188,10 +188,11 @@ export type LoggingOption =
       readonly type: "file";
       readonly path: string;
       /**
-       * Optional callback invoked for each agent stream event (text chunk or
-       * tool call) in addition to being written to the log file. Intended for
-       * forwarding the agent's output stream to external observability
-       * systems. Errors thrown by the callback are swallowed.
+       * Optional callback invoked for each provider-observable agent stream
+       * event (`text`, `toolCall`, `result`, or `sessionId`) in addition to
+       * being written to the log file. Intended for forwarding the agent's
+       * output stream to external observability systems. Errors thrown by the
+       * callback are swallowed.
        */
       readonly onAgentStreamEvent?: (event: AgentStreamEvent) => void;
     }

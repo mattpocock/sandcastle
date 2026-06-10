@@ -1131,7 +1131,7 @@ describe("Orchestrator tool call display integration", () => {
 });
 
 describe("Orchestrator agent stream emitter", () => {
-  it("emits text and toolCall events with iteration index and timestamps", async () => {
+  it("emits provider-observable stream events with iteration index and timestamps", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "orch-stream-"));
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
@@ -1199,6 +1199,8 @@ describe("Orchestrator agent stream emitter", () => {
 
     const textEvents = events.filter((e) => e.type === "text");
     const toolCallEvents = events.filter((e) => e.type === "toolCall");
+    const resultEvents = events.filter((e) => e.type === "result");
+    const sessionEvents = events.filter((e) => e.type === "sessionId");
 
     expect(textEvents.length).toBeGreaterThan(0);
     expect(textEvents[0]!.message).toContain("Working now");
@@ -1213,6 +1215,19 @@ describe("Orchestrator agent stream emitter", () => {
       iteration: 1,
     });
     expect(toolCallEvents[0]!.timestamp).toBeInstanceOf(Date);
+
+    expect(resultEvents).toHaveLength(1);
+    expect(resultEvents[0]).toMatchObject({
+      type: "result",
+      result: "<promise>COMPLETE</promise>",
+      iteration: 1,
+    });
+    expect(resultEvents[0]!.timestamp).toBeInstanceOf(Date);
+
+    // Some mock setups in this suite do not preserve the init/session event all
+    // the way through to IterationResult, so sessionId emission is asserted in
+    // the dedicated session-capture integration test below.
+    expect(sessionEvents.length).toBeGreaterThanOrEqual(0);
   });
 
   it("swallows errors thrown by the callback", async () => {
@@ -3243,6 +3258,68 @@ describe("Session capture integration", () => {
     const secondEntry = JSON.parse(lines[1]!) as { cwd: string; text: string };
     expect(secondEntry.cwd).toBe(hostDir);
     expect(secondEntry.text).toBe("hello");
+  });
+
+  it("emits a sessionId agent stream event when the provider exposes one", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-stream-session-host-"));
+    const hostProjectsDir = await mkdtemp(
+      join(tmpdir(), "orch-stream-session-projects-"),
+    );
+    const sandboxProjectsDir = await mkdtemp(
+      join(tmpdir(), "orch-stream-session-sb-projects-"),
+    );
+    const provider = claudeCode("test-model", {
+      sessionStorage: { hostProjectsDir, sandboxProjectsDir },
+    });
+    const mockSessionId = "stream-session-123";
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const events: AgentStreamEvent[] = [];
+    const emitterLayer = agentStreamEmitterLayer((event) => {
+      events.push(event);
+    });
+
+    const { factoryLayer } = makeSessionCaptureFactory(
+      hostDir,
+      async (repoDir) => {
+        const encoded = encodeProjectPath(repoDir);
+        const sessionsDir = join(sandboxProjectsDir, encoded);
+        await mkdir(sessionsDir, { recursive: true });
+        await writeFile(
+          join(sessionsDir, `${mockSessionId}.jsonl`),
+          [
+            JSON.stringify({ type: "system", cwd: repoDir }),
+            JSON.stringify({ type: "message", cwd: repoDir, text: "hello" }),
+          ].join("\n"),
+        );
+        return "Done. <promise>COMPLETE</promise>";
+      },
+      mockSessionId,
+    );
+
+    await Effect.runPromise(
+      orchestrate({
+        provider,
+        hostRepoDir: hostDir,
+        iterations: 1,
+        prompt: "do some work",
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(factoryLayer, testDisplayLayer, emitterLayer),
+        ),
+      ),
+    );
+
+    const sessionEvents = events.filter((e) => e.type === "sessionId");
+    expect(sessionEvents).toHaveLength(1);
+    expect(sessionEvents[0]).toMatchObject({
+      type: "sessionId",
+      sessionId: mockSessionId,
+      iteration: 1,
+    });
+    expect(sessionEvents[0]!.timestamp).toBeInstanceOf(Date);
   });
 
   it("skips capture for non-Claude agents (captureSessions: false)", async () => {
