@@ -179,6 +179,9 @@ export const buildContextWindowLines = (
  * Use `"file"` (log-to-file mode) to write to a log file on disk, or
  * `"stdout"` (terminal mode) to render an interactive UI in the terminal.
  */
+export type { RunAbortMetadata } from "./AbortMetadata.js";
+export { getAbortMetadata } from "./AbortMetadata.js";
+
 export type LoggingOption =
   /** Write progress and agent output to a log file at the given path (log-to-file mode). */
   | {

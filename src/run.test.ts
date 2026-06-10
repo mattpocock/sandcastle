@@ -12,6 +12,8 @@ import {
   printFileDisplayStartup,
   run,
   sanitizeBranchForFilename,
+  getAbortMetadata,
+  type RunAbortMetadata,
   type RunOptions,
   type RunResult,
 } from "./run.js";
@@ -146,6 +148,21 @@ describe("buildCompletionMessage", () => {
   it("reflects the correct iteration count for 1 iteration", () => {
     const result = buildCompletionMessage("<promise>COMPLETE</promise>", 1);
     expect(result.message).toContain("1 iteration(s)");
+  });
+});
+
+describe("RunAbortMetadata", () => {
+  it("is exported from run.ts", () => {
+    const metadata: RunAbortMetadata = {
+      iterations: [{ sessionId: "abc-123" }],
+    };
+
+    expect(metadata.iterations[0]!.sessionId).toBe("abc-123");
+  });
+
+  it("returns undefined for errors without Sandcastle abort metadata", () => {
+    expect(getAbortMetadata(new Error("no metadata"))).toBeUndefined();
+    expect(getAbortMetadata("cancelled")).toBeUndefined();
   });
 });
 
