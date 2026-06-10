@@ -29,6 +29,8 @@ const invokeAgent = (
   completionSignals: readonly string[],
   onText: (text: string) => void,
   onToolCall: (name: string, formattedArgs: string) => void,
+  onResult: (result: string) => void,
+  onSessionId: (sessionId: string) => void,
   onIdleWarning: (minutes: number) => void,
   onCompletionTimeout: (timeoutMs: number) => void,
   idleWarningIntervalMs: number = IDLE_WARNING_INTERVAL_MS,
@@ -152,10 +154,12 @@ const invokeAgent = (
             } else if (parsed.type === "result") {
               resultText = parsed.result;
               accumulatedOutput += parsed.result;
+              onResult(parsed.result);
             } else if (parsed.type === "tool_call") {
               onToolCall(parsed.name, parsed.args);
             } else if (parsed.type === "session_id") {
               sessionId = parsed.sessionId;
+              onSessionId(parsed.sessionId);
             } else if (parsed.type === "usage") {
               usage = parsed.usage;
             }
@@ -430,6 +434,29 @@ export const orchestrate = (
                     }),
                   );
                 };
+                const onResult = (result: string) => {
+                  textBuffer.flush();
+                  Effect.runPromise(
+                    streamEmitter.emit({
+                      type: "result",
+                      result,
+                      iteration: i,
+                      timestamp: new Date(),
+                    }),
+                  );
+                };
+                let emittedSessionId = false;
+                const onSessionId = (sessionId: string) => {
+                  emittedSessionId = true;
+                  Effect.runPromise(
+                    streamEmitter.emit({
+                      type: "sessionId",
+                      sessionId,
+                      iteration: i,
+                      timestamp: new Date(),
+                    }),
+                  );
+                };
                 const onIdleWarning = (minutes: number) => {
                   const msg =
                     minutes === 1
@@ -461,6 +488,8 @@ export const orchestrate = (
                   completionSignals,
                   onText,
                   onToolCall,
+                  onResult,
+                  onSessionId,
                   onIdleWarning,
                   onCompletionTimeout,
                   options._idleWarningIntervalMs,
@@ -471,6 +500,15 @@ export const orchestrate = (
 
                 // Flush any remaining buffered text deltas
                 textBuffer.dispose();
+
+                if (sessionId && !emittedSessionId) {
+                  yield* streamEmitter.emit({
+                    type: "sessionId",
+                    sessionId,
+                    iteration: i,
+                    timestamp: new Date(),
+                  });
+                }
 
                 yield* display.status(label("Agent stopped"), "info");
 

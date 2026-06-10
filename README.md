@@ -217,15 +217,20 @@ const result = await run({
   logging: {
     type: "file",
     path: ".sandcastle/logs/my-run.log",
-    // Optional: forward the agent's output stream to your own observability system.
-    // Fires for each text chunk and tool call the agent produces. Errors thrown
-    // by the callback are swallowed so a broken forwarder cannot kill the run.
+    // Optional: forward provider-observable agent stream events to your own
+    // observability system. Currently emits `text`, `toolCall`, `result`, and
+    // `sessionId` events. Errors thrown by the callback are swallowed so a
+    // broken forwarder cannot kill the run.
     onAgentStreamEvent: (event) => {
-      // event is { type: "text" | "toolCall", iteration, timestamp, ... }
+      // event carries { type, iteration, timestamp, ... }
       myLogger.info(event);
     },
   },
   // logging: { type: "stdout" }, // OR render an interactive UI in the terminal
+
+  // Note: emitted event types are limited to what current providers expose
+  // reliably today. `result` may duplicate final assistant text, and `sessionId`
+  // is only emitted when the provider exposes a session identifier.
 
   // String (or array of strings) the agent emits to end the iteration loop early.
   // Default: "<promise>COMPLETE</promise>"
