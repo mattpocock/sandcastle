@@ -266,7 +266,7 @@ export interface RunOptions<A extends AgentProvider = AgentProvider> {
   /** Branch strategy — controls how the agent's changes relate to branches.
    * Defaults to { type: "head" } for bind-mount providers and { type: "merge-to-head" } for isolated providers. */
   readonly branchStrategy?: BranchStrategy;
-  /** Resume a prior Claude Code session by ID. The session JSONL must exist on the host. Incompatible with maxIterations > 1. */
+  /** Resume a prior Claude Code/Codex/Pi session by ID. The session JSONL must exist on the host. On multi-iteration runs, later iterations resume from the most recently captured session when supported. */
   readonly resumeSession?: string;
   /**
    * When true alongside `resumeSession`, fork the session instead of mutating

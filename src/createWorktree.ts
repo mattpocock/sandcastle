@@ -140,7 +140,7 @@ export interface WorktreeRunOptions {
   readonly hooks?: SandboxHooks;
   /** Environment variables to inject into the sandbox. */
   readonly env?: Record<string, string>;
-  /** Resume a prior Claude Code session by ID. The session JSONL must exist on the host. Incompatible with maxIterations > 1. */
+  /** Resume a prior Claude Code/Codex/Pi session by ID. The session JSONL must exist on the host. On multi-iteration runs, later iterations resume from the most recently captured session when supported. */
   readonly resumeSession?: string;
   /**
    * An `AbortSignal` that cancels the run when aborted.
