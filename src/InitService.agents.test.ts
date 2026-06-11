@@ -95,4 +95,19 @@ describe("Agent registry", () => {
     expect(agent!.dockerfileTemplate).toContain("FROM");
     expect(agent!.dockerfileTemplate).toContain("@github/copilot");
   });
+
+  it("listAgents includes minimax", () => {
+    const agents = listAgents();
+    expect(agents.some((a) => a.name === "minimax")).toBe(true);
+  });
+
+  it("getAgent returns minimax entry with expected fields", () => {
+    const agent = getAgent("minimax");
+    expect(agent).toBeDefined();
+    expect(agent!.name).toBe("minimax");
+    expect(agent!.factoryImport).toBe("minimax");
+    expect(agent!.dockerfileTemplate).toContain("FROM");
+    expect(agent!.dockerfileTemplate).toContain("minimax");
+    expect(agent!.defaultModel).toBe("MiniMax-3.0");
+  });
 });
