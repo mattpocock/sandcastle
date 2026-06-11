@@ -276,6 +276,51 @@ describe("claudeCode factory", () => {
     });
     expect(args).not.toContain("--dangerously-skip-permissions");
   });
+
+  // --- permissionMode option ---
+
+  it("buildPrintCommand emits --permission-mode when permissionMode is set", () => {
+    const provider = claudeCode("claude-opus-4-7", { permissionMode: "auto" });
+    const { command } = provider.buildPrintCommand(opts("test"));
+    expect(command).toContain("--permission-mode auto");
+  });
+
+  it("buildPrintCommand omits --dangerously-skip-permissions when permissionMode is set", () => {
+    // Sandcastle's AFK call sites pass dangerouslySkipPermissions: true. When the
+    // user opts into a specific permission mode on the provider, that mode takes
+    // precedence over the default bypass — they are mutually exclusive on claude's CLI.
+    const provider = claudeCode("claude-opus-4-7", { permissionMode: "auto" });
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+    });
+    expect(command).not.toContain("--dangerously-skip-permissions");
+  });
+
+  it("buildPrintCommand omits --permission-mode when permissionMode is not set", () => {
+    const provider = claudeCode("claude-opus-4-7");
+    const { command } = provider.buildPrintCommand(opts("test"));
+    expect(command).not.toContain("--permission-mode");
+  });
+
+  it("buildInteractiveArgs emits --permission-mode when permissionMode is set", () => {
+    const provider = claudeCode("claude-opus-4-7", { permissionMode: "plan" });
+    const args = provider.buildInteractiveArgs!({
+      prompt: "test",
+      dangerouslySkipPermissions: false,
+    });
+    expect(args).toContain("--permission-mode");
+    expect(args).toContain("plan");
+  });
+
+  it("buildInteractiveArgs omits --dangerously-skip-permissions when permissionMode is set", () => {
+    const provider = claudeCode("claude-opus-4-7", { permissionMode: "auto" });
+    const args = provider.buildInteractiveArgs!({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+    });
+    expect(args).not.toContain("--dangerously-skip-permissions");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -709,6 +754,49 @@ describe("codex factory", () => {
         `model_reasoning_effort="${effort}"`,
       );
     }
+  });
+
+  // --- approvalsReviewer option ---
+
+  it("buildPrintCommand sets approvals_reviewer config when approvalsReviewer is 'auto_review'", () => {
+    const provider = codex("gpt-5.4-mini", {
+      approvalsReviewer: "auto_review",
+    });
+    const { command } = provider.buildPrintCommand(opts("test"));
+    expect(command).toContain(`-c 'approvals_reviewer="auto_review"'`);
+  });
+
+  it("buildPrintCommand drops --dangerously-bypass-approvals-and-sandbox when approvalsReviewer is 'auto_review'", () => {
+    // auto_review only applies to interactive approvals — the bypass flag would
+    // silence them entirely, defeating the reviewer agent.
+    const provider = codex("gpt-5.4-mini", {
+      approvalsReviewer: "auto_review",
+    });
+    const { command } = provider.buildPrintCommand(opts("test"));
+    expect(command).not.toContain("--dangerously-bypass-approvals-and-sandbox");
+  });
+
+  it("buildPrintCommand emits -a on-request and -s danger-full-access when approvalsReviewer is 'auto_review'", () => {
+    // Approvals must be interactive for the reviewer to have anything to evaluate;
+    // codex's own filesystem sandbox is disabled because the safety boundary is the reviewer.
+    const provider = codex("gpt-5.4-mini", {
+      approvalsReviewer: "auto_review",
+    });
+    const { command } = provider.buildPrintCommand(opts("test"));
+    expect(command).toContain("-a on-request");
+    expect(command).toContain("-s danger-full-access");
+  });
+
+  it("buildPrintCommand keeps --dangerously-bypass-approvals-and-sandbox when approvalsReviewer is unset", () => {
+    const provider = codex("gpt-5.4-mini");
+    const { command } = provider.buildPrintCommand(opts("test"));
+    expect(command).toContain("--dangerously-bypass-approvals-and-sandbox");
+  });
+
+  it("buildPrintCommand omits approvals_reviewer config when approvalsReviewer is unset", () => {
+    const provider = codex("gpt-5.4-mini");
+    const { command } = provider.buildPrintCommand(opts("test"));
+    expect(command).not.toContain("approvals_reviewer");
   });
 
   it("parseStreamLine extracts session id from thread.started", () => {
@@ -1238,7 +1326,7 @@ describe("opencode factory", () => {
       "opencode/big-pickle",
       "--agent",
       "build",
-      "-p",
+      "--prompt",
       "do something",
     ]);
   });

@@ -46,7 +46,7 @@ describe("Agent registry", () => {
     const agent = getAgent("codex");
     expect(agent).toBeDefined();
     expect(agent!.name).toBe("codex");
-    expect(agent!.defaultModel).toBe("gpt-5.4-mini");
+    expect(agent!.defaultModel).toBe("gpt-5.4");
     expect(agent!.factoryImport).toBe("codex");
     expect(agent!.dockerfileTemplate).toContain("FROM");
     expect(agent!.dockerfileTemplate).toContain("@openai/codex");

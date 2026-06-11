@@ -1,5 +1,20 @@
 # @ai-hero/sandcastle
 
+## 0.8.0
+
+### Minor Changes
+
+- cf92a17: Add `permissionMode` to `claudeCode()` and `approvalsReviewer` to `codex()` — provider-level options for AI-mediated per-tool approval, an alternative to full bypass for AFK host runs (`noSandbox()` + `run()`).
+
+  `claudeCode({ permissionMode: "auto" })` emits `--permission-mode auto` instead of `--dangerously-skip-permissions`. Accepts any of Claude's permission modes: `default`, `acceptEdits`, `plan`, `auto`, `dontAsk`, `bypassPermissions`.
+
+  `codex({ approvalsReviewer: "auto_review" })` swaps `--dangerously-bypass-approvals-and-sandbox` for `-a on-request -s danger-full-access -c approvals_reviewer="auto_review"` so Codex's reviewer agent evaluates each approval prompt.
+
+### Patch Changes
+
+- 932302b: Bump the Codex default model from `gpt-5.4-mini` to `gpt-5.4` in `sandcastle init` scaffolding and the interactive agent picker. The previous default was underpowered for implementation work.
+- c6c3026: Fix `opencode()` interactive sessions (and the `init` scaffold's opencode `setupCommand`) seeding the prompt with `-p`, which is the `opencode run`/`attach` basic-auth password flag, not a prompt seed. Use `--prompt` (the TUI's long-form-only seed flag) instead. The TUI pre-fills the textbox but does not auto-submit (see [sst/opencode#3937](https://github.com/sst/opencode/issues/3937)).
+
 ## 0.7.0
 
 ### Minor Changes

@@ -431,7 +431,7 @@ ANTHROPIC_API_KEY=`,
   {
     name: "codex",
     label: "Codex",
-    defaultModel: "gpt-5.4-mini",
+    defaultModel: "gpt-5.4",
     factoryImport: "codex",
     dockerfileTemplate: CODEX_DOCKERFILE,
     envExample: `# OpenAI API key
@@ -457,7 +457,7 @@ CURSOR_API_KEY=`,
     dockerfileTemplate: OPENCODE_DOCKERFILE,
     envExample: `# OpenCode API key
 OPENCODE_API_KEY=`,
-    setupCommand: `opencode -p "$(cat ${SETUP_ISSUE_TRACKER_PATH})"`,
+    setupCommand: `opencode --prompt "$(cat ${SETUP_ISSUE_TRACKER_PATH})"`,
   },
   {
     name: "copilot",

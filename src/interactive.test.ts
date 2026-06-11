@@ -59,18 +59,20 @@ describe("buildInteractiveArgs with prompts", () => {
     expect(args).not.toContain("");
   });
 
-  it("opencode passes prompt via -p flag", () => {
+  it("opencode passes prompt via --prompt flag", () => {
     const provider = opencode("opencode/big-pickle");
     const args = provider.buildInteractiveArgs!(interactiveOpts("fix the bug"));
     expect(args[0]).toBe("opencode");
-    const pIdx = args.indexOf("-p");
+    const pIdx = args.indexOf("--prompt");
     expect(pIdx).toBeGreaterThan(-1);
     expect(args[pIdx + 1]).toBe("fix the bug");
+    expect(args).not.toContain("-p");
   });
 
-  it("opencode omits -p flag when prompt is empty", () => {
+  it("opencode omits --prompt flag when prompt is empty", () => {
     const provider = opencode("opencode/big-pickle");
     const args = provider.buildInteractiveArgs!(interactiveOpts(""));
+    expect(args).not.toContain("--prompt");
     expect(args).not.toContain("-p");
   });
 });

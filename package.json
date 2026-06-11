@@ -1,6 +1,6 @@
 {
   "name": "@ai-hero/sandcastle",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "CLI for orchestrating AI agents in isolated sandbox environments",
   "type": "module",
   "main": "./dist/index.js",

@@ -780,7 +780,7 @@ Removes the Podman image.
 
 | Option                     | Type               | Default                       | Description                                                                                                                                                                                                                  |
 | -------------------------- | ------------------ | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agent`                    | AgentProvider      | —                             | **Required.** Agent provider (e.g. `claudeCode("claude-opus-4-7")`, `pi("claude-sonnet-4-6")`, `codex("gpt-5.4-mini")`, `cursor("composer-2")`, `opencode("opencode/big-pickle")`, `copilot("claude-sonnet-4.5")`)           |
+| `agent`                    | AgentProvider      | —                             | **Required.** Agent provider (e.g. `claudeCode("claude-opus-4-7")`, `pi("claude-sonnet-4-6")`, `codex("gpt-5.4")`, `cursor("composer-2")`, `opencode("opencode/big-pickle")`, `copilot("claude-sonnet-4.5")`)                |
 | `sandbox`                  | SandboxProvider    | —                             | **Required.** Sandbox provider (e.g. `docker()`, `podman()`, `docker({ imageName: "sandcastle:local" })`)                                                                                                                    |
 | `cwd`                      | string             | `process.cwd()`               | Host repo directory — anchor for `.sandcastle/` artifacts and git operations. Relative paths resolve against `process.cwd()`.                                                                                                |
 | `prompt`                   | string             | —                             | Inline prompt (mutually exclusive with `promptFile`)                                                                                                                                                                         |
@@ -852,7 +852,7 @@ You can also continue the last captured session from a result:
 
 ```typescript
 const first = await run({
-  agent: codex("gpt-5.4-mini"),
+  agent: codex("gpt-5.4"),
   sandbox: docker(),
   prompt: "Draft a plan",
 });
@@ -931,11 +931,12 @@ The `claudeCode()` factory accepts an optional second argument for provider-spec
 agent: claudeCode("claude-opus-4-7", { effort: "high" });
 ```
 
-| Option            | Type                                                      | Default | Description                                               |
-| ----------------- | --------------------------------------------------------- | ------- | --------------------------------------------------------- |
-| `effort`          | `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` \| `"max"` | —       | Claude Code reasoning effort level (`max` is Opus only)   |
-| `env`             | `Record<string, string>`                                  | `{}`    | Environment variables injected by this agent provider     |
-| `captureSessions` | `boolean`                                                 | `true`  | Capture agent session JSONL to host for `claude --resume` |
+| Option            | Type                                                                                           | Default | Description                                                                                                                                                                                         |
+| ----------------- | ---------------------------------------------------------------------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `effort`          | `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` \| `"max"`                                      | —       | Claude Code reasoning effort level (`max` is Opus only)                                                                                                                                             |
+| `env`             | `Record<string, string>`                                                                       | `{}`    | Environment variables injected by this agent provider                                                                                                                                               |
+| `captureSessions` | `boolean`                                                                                      | `true`  | Capture agent session JSONL to host for `claude --resume`                                                                                                                                           |
+| `permissionMode`  | `"default"` \| `"acceptEdits"` \| `"plan"` \| `"auto"` \| `"dontAsk"` \| `"bypassPermissions"` | —       | Maps to Claude's `--permission-mode` flag. When set, replaces Sandcastle's default `--dangerously-skip-permissions` on AFK runs. Use `"auto"` for AI-mediated per-tool approve/deny without bypass. |
 
 ### `CodexOptions`
 
@@ -945,11 +946,12 @@ The `codex()` factory accepts an optional second argument for provider-specific 
 agent: codex("gpt-5.4", { effort: "high" });
 ```
 
-| Option            | Type                                           | Default | Description                                               |
-| ----------------- | ---------------------------------------------- | ------- | --------------------------------------------------------- |
-| `effort`          | `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` | —       | Codex reasoning effort level via `model_reasoning_effort` |
-| `env`             | `Record<string, string>`                       | `{}`    | Environment variables injected by this agent provider     |
-| `captureSessions` | `boolean`                                      | `true`  | Capture Codex rollout JSONL to host for resume            |
+| Option              | Type                                           | Default | Description                                                                                                                                                                                                           |
+| ------------------- | ---------------------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `effort`            | `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` | —       | Codex reasoning effort level via `model_reasoning_effort`                                                                                                                                                             |
+| `env`               | `Record<string, string>`                       | `{}`    | Environment variables injected by this agent provider                                                                                                                                                                 |
+| `captureSessions`   | `boolean`                                      | `true`  | Capture Codex rollout JSONL to host for resume                                                                                                                                                                        |
+| `approvalsReviewer` | `"user"` \| `"auto_review"`                    | —       | Maps to Codex's `approvals_reviewer` config. When `"auto_review"`, swaps `--dangerously-bypass-approvals-and-sandbox` for `-a on-request -s danger-full-access` so the reviewer agent evaluates each approval prompt. |
 
 ### `PiOptions`
 

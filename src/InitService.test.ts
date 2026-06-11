@@ -1376,7 +1376,7 @@ describe("InitService scaffold", () => {
       { name: "pi", command: `pi "$(cat .sandcastle/SETUP_ISSUE_TRACKER.md)"` },
       {
         name: "opencode",
-        command: `opencode -p "$(cat .sandcastle/SETUP_ISSUE_TRACKER.md)"`,
+        command: `opencode --prompt "$(cat .sandcastle/SETUP_ISSUE_TRACKER.md)"`,
       },
       {
         name: "copilot",
