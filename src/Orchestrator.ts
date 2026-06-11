@@ -14,6 +14,7 @@ import { withSandboxLifecycle, type SandboxHooks } from "./SandboxLifecycle.js";
 import type { AgentProvider, IterationUsage } from "./AgentProvider.js";
 import type { Timeouts } from "./run.js";
 import { TextDeltaBuffer } from "./TextDeltaBuffer.js";
+import { attachAbortMetadata } from "./AbortMetadata.js";
 
 export type { ParsedStreamEvent, IterationUsage } from "./AgentProvider.js";
 
@@ -29,12 +30,15 @@ const invokeAgent = (
   completionSignals: readonly string[],
   onText: (text: string) => void,
   onToolCall: (name: string, formattedArgs: string) => void,
+  onResult: (result: string) => void,
+  onSessionId: (sessionId: string) => void,
   onIdleWarning: (minutes: number) => void,
   onCompletionTimeout: (timeoutMs: number) => void,
   idleWarningIntervalMs: number = IDLE_WARNING_INTERVAL_MS,
   resumeSession?: string,
   forkSession?: boolean,
   signal?: AbortSignal,
+  onObservedSessionId?: (sessionId: string) => void,
 ): Effect.Effect<
   { result: string; sessionId?: string; usage?: IterationUsage },
   SandboxError
@@ -152,10 +156,13 @@ const invokeAgent = (
             } else if (parsed.type === "result") {
               resultText = parsed.result;
               accumulatedOutput += parsed.result;
+              onResult(parsed.result);
             } else if (parsed.type === "tool_call") {
               onToolCall(parsed.name, parsed.args);
             } else if (parsed.type === "session_id") {
               sessionId = parsed.sessionId;
+              onSessionId(parsed.sessionId);
+              onObservedSessionId?.(parsed.sessionId);
             } else if (parsed.type === "usage") {
               usage = parsed.usage;
             }
@@ -234,6 +241,13 @@ const invokeAgent = (
 
 const DEFAULT_COMPLETION_SIGNAL = "<promise>COMPLETE</promise>";
 const DEFAULT_IDLE_TIMEOUT_SECONDS = 10 * 60; // 600 seconds
+
+const enrichAbortReason = (
+  reason: unknown,
+  iterations: IterationResult[],
+): void => {
+  attachAbortMetadata(reason, { iterations });
+};
 const DEFAULT_COMPLETION_TIMEOUT_SECONDS = 60;
 
 export interface OrchestrateOptions {
@@ -333,6 +347,7 @@ export const orchestrate = (
     let allStdout = "";
     let resolvedBranch = "";
     let iterationPreservedPath: string | undefined;
+    let resumeSessionId = options.resumeSession;
 
     // Helper: check abort signal and bail via defect so run() can
     // re-throw the signal's reason verbatim (no Sandcastle wrapping).
@@ -362,9 +377,10 @@ export const orchestrate = (
             sandbox,
             (ctx) =>
               Effect.gen(function* () {
-                // Resume session: transfer JSONL from host to sandbox before iteration 1
-                const iterationResumeSession =
-                  i === 1 ? options.resumeSession : undefined;
+                // Resume session: transfer JSONL from host to sandbox before each
+                // iteration when a prior captured session is available. Forking
+                // remains a first-iteration-only behavior.
+                const iterationResumeSession = resumeSessionId;
                 const iterationForkSession =
                   i === 1 ? options.forkSession : undefined;
                 if (
@@ -401,6 +417,71 @@ export const orchestrate = (
 
                 yield* display.status(label("Agent started"), "success");
 
+                const captureSession = (
+                  sessionId: string,
+                  bestEffort: boolean,
+                  streamUsage?: IterationUsage,
+                ): Effect.Effect<
+                  {
+                    sessionFilePath: string | undefined;
+                    usage: IterationUsage | undefined;
+                  },
+                  SessionCaptureError
+                > =>
+                  Effect.gen(function* () {
+                    let sessionFilePath: string | undefined;
+                    let usage: IterationUsage | undefined = streamUsage;
+
+                    if (
+                      !provider.captureSessions ||
+                      !provider.sessionStorage ||
+                      !bindMountHandle
+                    ) {
+                      return { sessionFilePath, usage };
+                    }
+
+                    if (!bestEffort) {
+                      yield* display.status(label("Capturing session"), "info");
+                    }
+
+                    yield* Effect.tryPromise({
+                      try: () =>
+                        provider.sessionStorage!.captureToHost({
+                          hostCwd: hostRepoDir,
+                          sandboxCwd: ctx.sandboxRepoDir,
+                          sessionId,
+                          handle: bindMountHandle,
+                        }),
+                      catch: (e) =>
+                        new SessionCaptureError({
+                          message: `Session capture failed: ${e instanceof Error ? e.message : String(e)}`,
+                          sessionId,
+                        }),
+                    });
+                    sessionFilePath =
+                      provider.sessionStorage.hostSessionFilePath(
+                        hostRepoDir,
+                        sessionId,
+                      );
+
+                    if (provider.parseSessionUsage) {
+                      const content = yield* Effect.promise(() =>
+                        provider
+                          .sessionStorage!.readHostSession(
+                            hostRepoDir,
+                            sessionId,
+                          )
+                          .catch(() => undefined as string | undefined),
+                      );
+                      if (content) {
+                        const parsedUsage = provider.parseSessionUsage(content);
+                        if (parsedUsage) usage = parsedUsage;
+                      }
+                    }
+
+                    return { sessionFilePath, usage };
+                  });
+
                 // Invoke the agent — buffer text deltas so Pi's single-token
                 // chunks are displayed as readable multi-word lines.
                 const textBuffer = new TextDeltaBuffer((chunk) => {
@@ -430,6 +511,30 @@ export const orchestrate = (
                     }),
                   );
                 };
+                const onResult = (result: string) => {
+                  textBuffer.flush();
+                  Effect.runPromise(
+                    streamEmitter.emit({
+                      type: "result",
+                      result,
+                      iteration: i,
+                      timestamp: new Date(),
+                    }),
+                  );
+                };
+                let observedSessionId: string | undefined;
+                let emittedSessionId = false;
+                const onSessionId = (sessionId: string) => {
+                  emittedSessionId = true;
+                  Effect.runPromise(
+                    streamEmitter.emit({
+                      type: "sessionId",
+                      sessionId,
+                      iteration: i,
+                      timestamp: new Date(),
+                    }),
+                  );
+                };
                 const onIdleWarning = (minutes: number) => {
                   const msg =
                     minutes === 1
@@ -447,89 +552,97 @@ export const orchestrate = (
                     ),
                   );
                 };
-                const {
-                  result: agentOutput,
-                  sessionId,
-                  usage: streamUsage,
-                } = yield* invokeAgent(
-                  ctx.sandbox,
-                  ctx.sandboxRepoDir,
-                  fullPrompt,
-                  provider,
-                  idleTimeoutMs,
-                  completionTimeoutMs,
-                  completionSignals,
-                  onText,
-                  onToolCall,
-                  onIdleWarning,
-                  onCompletionTimeout,
-                  options._idleWarningIntervalMs,
-                  iterationResumeSession,
-                  iterationForkSession,
-                  options.signal,
-                );
-
-                // Flush any remaining buffered text deltas
-                textBuffer.dispose();
-
-                yield* display.status(label("Agent stopped"), "info");
-
-                // Capture session while sandbox is still alive. Usage from the
-                // stream (e.g. Codex's turn.completed) is the baseline; a
-                // session-parsed value below overrides it when available.
-                let sessionFilePath: string | undefined;
-                let usage: IterationUsage | undefined = streamUsage;
-                if (
-                  provider.captureSessions &&
-                  provider.sessionStorage &&
-                  sessionId &&
-                  bindMountHandle
-                ) {
-                  yield* display.status(label("Capturing session"), "info");
-                  yield* Effect.tryPromise({
-                    try: () =>
-                      provider.sessionStorage!.captureToHost({
-                        hostCwd: hostRepoDir,
-                        sandboxCwd: ctx.sandboxRepoDir,
-                        sessionId,
-                        handle: bindMountHandle,
-                      }),
-                    catch: (e) =>
-                      new SessionCaptureError({
-                        message: `Session capture failed: ${e instanceof Error ? e.message : String(e)}`,
-                        sessionId,
-                      }),
-                  });
-                  sessionFilePath = provider.sessionStorage.hostSessionFilePath(
-                    hostRepoDir,
+                const invokeAndCapture = Effect.gen(function* () {
+                  const {
+                    result: agentOutput,
                     sessionId,
+                    usage: streamUsage,
+                  } = yield* invokeAgent(
+                    ctx.sandbox,
+                    ctx.sandboxRepoDir,
+                    fullPrompt,
+                    provider,
+                    idleTimeoutMs,
+                    completionTimeoutMs,
+                    completionSignals,
+                    onText,
+                    onToolCall,
+                    onResult,
+                    onSessionId,
+                    onIdleWarning,
+                    onCompletionTimeout,
+                    options._idleWarningIntervalMs,
+                    iterationResumeSession,
+                    iterationForkSession,
+                    options.signal,
+                    (sessionId) => {
+                      observedSessionId = sessionId;
+                    },
                   );
 
-                  // Parse token usage from the captured session JSONL
-                  if (provider.parseSessionUsage) {
-                    const content = yield* Effect.promise(() =>
-                      provider
-                        .sessionStorage!.readHostSession(hostRepoDir, sessionId)
-                        .catch(() => undefined as string | undefined),
-                    );
-                    if (content) {
-                      const parsedUsage = provider.parseSessionUsage(content);
-                      if (parsedUsage) usage = parsedUsage;
-                    }
-                  }
-                }
+                  // Flush any remaining buffered text deltas
+                  textBuffer.dispose();
 
-                // Check completion signal
-                const matchedSignal = completionSignals.find((sig) =>
-                  agentOutput.includes(sig),
+                  if (sessionId && !emittedSessionId) {
+                    yield* streamEmitter.emit({
+                      type: "sessionId",
+                      sessionId,
+                      iteration: i,
+                      timestamp: new Date(),
+                    });
+                  }
+
+                  yield* display.status(label("Agent stopped"), "info");
+
+                  const { sessionFilePath, usage } = sessionId
+                    ? yield* captureSession(sessionId, false, streamUsage)
+                    : { sessionFilePath: undefined, usage: streamUsage };
+
+                  // Check completion signal
+                  const matchedSignal = completionSignals.find((sig) =>
+                    agentOutput.includes(sig),
+                  );
+                  return {
+                    completionSignal: matchedSignal,
+                    stdout: agentOutput,
+                    sessionId,
+                    sessionFilePath,
+                    usage,
+                  } as const;
+                }).pipe(
+                  Effect.catchAllCause((cause) =>
+                    Effect.gen(function* () {
+                      textBuffer.dispose();
+                      if (options.signal?.aborted) {
+                        const partialSessionId = observedSessionId;
+                        const partialCapture = partialSessionId
+                          ? yield* captureSession(partialSessionId, true).pipe(
+                              Effect.catchAll(() =>
+                                Effect.succeed({
+                                  sessionFilePath: undefined,
+                                  usage: undefined,
+                                }),
+                              ),
+                            )
+                          : {
+                              sessionFilePath: undefined,
+                              usage: undefined,
+                            };
+                        enrichAbortReason(options.signal.reason, [
+                          ...allIterations,
+                          {
+                            sessionId: partialSessionId,
+                            sessionFilePath: partialCapture.sessionFilePath,
+                            usage: partialCapture.usage,
+                          },
+                        ]);
+                      }
+                      return yield* Effect.failCause(cause);
+                    }),
+                  ),
                 );
-                return {
-                  completionSignal: matchedSignal,
-                  stdout: agentOutput,
-                  sessionId,
-                  sessionFilePath,
-                  usage,
-                } as const;
+
+                return yield* invokeAndCapture;
               }),
           ),
       );
@@ -546,6 +659,10 @@ export const orchestrate = (
         sessionFilePath: lifecycleResult.result.sessionFilePath,
         usage: lifecycleResult.result.usage,
       });
+
+      if (lifecycleResult.result.sessionId) {
+        resumeSessionId = lifecycleResult.result.sessionId;
+      }
 
       if (lifecycleResult.result.completionSignal !== undefined) {
         yield* display.status(

@@ -2,6 +2,7 @@ import { Effect, Option } from "effect";
 import { FileSystem } from "@effect/platform";
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { WorktreeError, WorktreeTimeoutError, withTimeout } from "./errors.js";
 
@@ -335,8 +336,14 @@ export const create = (
       const existing = yield* listWorktrees(repoDir);
       const collision = findCollidingWorktree(existing, branch, worktreePath);
       if (collision) {
-        // Only reuse worktrees managed by sandcastle (under .sandcastle/worktrees/)
-        if (isManagedWorktreePath(collision.path, worktreesDir)) {
+        // Only reuse worktrees managed by sandcastle (under .sandcastle/worktrees/).
+        // Compare canonical paths so macOS /var ↔ /private/var aliases still match.
+        const canonicalCollisionPath = realpathSync.native(collision.path);
+        const canonicalWorktreesDir = realpathSync.native(worktreesDir);
+        const isManagedWorktree = canonicalCollisionPath.startsWith(
+          canonicalWorktreesDir,
+        );
+        if (isManagedWorktree) {
           const dirty = yield* hasUncommittedChanges(collision.path);
           if (dirty) {
             console.warn(
@@ -345,9 +352,9 @@ export const create = (
           } else {
             yield* fastForwardFromOrigin(collision.path, branch);
           }
-          // git reports forward slashes even on Windows; return a
-          // platform-native path so downstream join/fs calls stay consistent.
-          return { path: normalize(collision.path), branch };
+          // Preserve the originally requested path shape so callers see the
+          // same worktree path on initial create and on reuse.
+          return { path: worktreePath, branch };
         }
         // Branch is checked out in the main working tree or external worktree
         yield* Effect.fail(

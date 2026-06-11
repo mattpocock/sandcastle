@@ -179,16 +179,20 @@ export const buildContextWindowLines = (
  * Use `"file"` (log-to-file mode) to write to a log file on disk, or
  * `"stdout"` (terminal mode) to render an interactive UI in the terminal.
  */
+export type { RunAbortMetadata } from "./AbortMetadata.js";
+export { getAbortMetadata } from "./AbortMetadata.js";
+
 export type LoggingOption =
   /** Write progress and agent output to a log file at the given path (log-to-file mode). */
   | {
       readonly type: "file";
       readonly path: string;
       /**
-       * Optional callback invoked for each agent stream event (text chunk or
-       * tool call) in addition to being written to the log file. Intended for
-       * forwarding the agent's output stream to external observability
-       * systems. Errors thrown by the callback are swallowed.
+       * Optional callback invoked for each provider-observable agent stream
+       * event (`text`, `toolCall`, `result`, or `sessionId`) in addition to
+       * being written to the log file. Intended for forwarding the agent's
+       * output stream to external observability systems. Errors thrown by the
+       * callback are swallowed.
        */
       readonly onAgentStreamEvent?: (event: AgentStreamEvent) => void;
     }
@@ -262,7 +266,7 @@ export interface RunOptions<A extends AgentProvider = AgentProvider> {
   /** Branch strategy — controls how the agent's changes relate to branches.
    * Defaults to { type: "head" } for bind-mount providers and { type: "merge-to-head" } for isolated providers. */
   readonly branchStrategy?: BranchStrategy;
-  /** Resume a prior Claude Code session by ID. The session JSONL must exist on the host. Incompatible with maxIterations > 1. */
+  /** Resume a prior Claude Code/Codex/Pi session by ID. The session JSONL must exist on the host. On multi-iteration runs, later iterations resume from the most recently captured session when supported. */
   readonly resumeSession?: string;
   /**
    * When true alongside `resumeSession`, fork the session instead of mutating
@@ -406,14 +410,6 @@ export async function run(
     throw new Error(
       "copyToWorktree is not supported with head branch strategy. " +
         "In head mode the host working directory is bind-mounted directly.",
-    );
-  }
-
-  // Validate: resumeSession + maxIterations > 1 is not allowed
-  if (options.resumeSession && maxIterations > 1) {
-    throw new Error(
-      "resumeSession cannot be combined with maxIterations > 1. " +
-        "Resume applies to iteration 1 only; multi-iteration resume semantics are not supported.",
     );
   }
 

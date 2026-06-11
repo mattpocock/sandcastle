@@ -912,6 +912,32 @@ describe("worktree.run()", () => {
       signal: new AbortController().signal,
     };
   });
+
+  it("allows resumeSession with maxIterations > 1 and continues to session-file validation", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-run-resume-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const ws = await createWorktree({
+      branchStrategy: { type: "branch", branch: "resume-validation-test" },
+      cwd: hostDir,
+    });
+
+    try {
+      await expect(
+        ws.run({
+          agent: claudeCode("claude-opus-4-7"),
+          sandbox: testSandbox,
+          prompt: "test",
+          resumeSession: "abc-123",
+          maxIterations: 2,
+        }),
+      ).rejects.toThrow('resumeSession "abc-123" not found');
+    } finally {
+      await ws.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
 });
 
 /** Dummy sandbox provider used to satisfy the required `sandbox` field in test mode. */

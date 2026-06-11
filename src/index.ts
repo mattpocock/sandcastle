@@ -6,7 +6,9 @@ export type {
   IterationResult,
   IterationUsage,
   Timeouts,
+  RunAbortMetadata,
 } from "./run.js";
+export { getAbortMetadata } from "./run.js";
 export { interactive } from "./interactive.js";
 export type { InteractiveOptions, InteractiveResult } from "./interactive.js";
 export { createSandbox } from "./createSandbox.js";
