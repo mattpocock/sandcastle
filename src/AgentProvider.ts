@@ -901,7 +901,7 @@ export const opencode = (
   buildInteractiveArgs({ prompt }: AgentCommandOptions): string[] {
     const args = ["opencode", "--model", model];
     if (options?.agent) args.push("--agent", options.agent);
-    if (prompt) args.push("-p", prompt);
+    if (prompt) args.push("--prompt", prompt);
     return args;
   },
 
