@@ -7,6 +7,7 @@ import {
   codex,
   copilot,
   cursor,
+  minimax,
   opencode,
   pi,
 } from "./AgentProvider.js";
@@ -1954,6 +1955,145 @@ describe("copilot factory", () => {
     expect(provider1.buildPrintCommand(opts("test")).command).not.toContain(
       "model-b",
     );
+  });
+});
+
+describe("minimax factory", () => {
+  it("returns a provider with name 'minimax'", () => {
+    const provider = minimax("MiniMax-3.0");
+    expect(provider.name).toBe("minimax");
+  });
+
+  it("buildPrintCommand uses minimax -p and includes the model", () => {
+    const provider = minimax("MiniMax-3.0");
+    const { command, stdin } = provider.buildPrintCommand(opts("do something"));
+    expect(command).toContain("minimax");
+    expect(command).toContain("--model");
+    expect(command).toContain("MiniMax-3.0");
+    expect(command).toContain("-p");
+    expect(stdin).toBe("do something");
+  });
+
+  it("buildPrintCommand shell-escapes the model", () => {
+    const provider = minimax("MiniMax-M2.7");
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).toContain("'MiniMax-M2.7'");
+  });
+
+  it("buildPrintCommand delivers prompt via stdin", () => {
+    const provider = minimax("MiniMax-3.0");
+    const { command, stdin } = provider.buildPrintCommand(opts("hello world"));
+    expect(command).not.toContain("hello world");
+    expect(stdin).toBe("hello world");
+  });
+
+  it("parseStreamLine extracts text event", () => {
+    const provider = minimax("MiniMax-3.0");
+    const line = JSON.stringify({ type: "text", text: "Hello world" });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "text", text: "Hello world" },
+    ]);
+  });
+
+  it("parseStreamLine extracts result event", () => {
+    const provider = minimax("MiniMax-3.0");
+    const line = JSON.stringify({
+      type: "result",
+      result: "Final answer <promise>COMPLETE</promise>",
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      {
+        type: "result",
+        result: "Final answer <promise>COMPLETE</promise>",
+      },
+    ]);
+  });
+
+  it("parseStreamLine extracts tool_call event", () => {
+    const provider = minimax("MiniMax-3.0");
+    const line = JSON.stringify({
+      type: "tool_call",
+      name: "Bash",
+      args: "ls -la",
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "tool_call", name: "Bash", args: "ls -la" },
+    ]);
+  });
+
+  it("parseStreamLine extracts session_id event", () => {
+    const provider = minimax("MiniMax-3.0");
+    const line = JSON.stringify({
+      type: "session_id",
+      sessionId: "minimax-session-123",
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "session_id", sessionId: "minimax-session-123" },
+    ]);
+  });
+
+  it("parseStreamLine extracts usage event", () => {
+    const provider = minimax("MiniMax-3.0");
+    const line = JSON.stringify({
+      type: "usage",
+      usage: {
+        inputTokens: 1000,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 500,
+        outputTokens: 200,
+      },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      {
+        type: "usage",
+        usage: {
+          inputTokens: 1000,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 500,
+          outputTokens: 200,
+        },
+      },
+    ]);
+  });
+
+  it("parseStreamLine ignores non-JSON lines", () => {
+    const provider = minimax("MiniMax-3.0");
+    expect(provider.parseStreamLine("not json")).toEqual([]);
+    expect(provider.parseStreamLine("")).toEqual([]);
+    expect(provider.parseStreamLine("  plain text line")).toEqual([]);
+  });
+
+  it("parseStreamLine ignores incomplete usage (missing fields)", () => {
+    const provider = minimax("MiniMax-3.0");
+    const line = JSON.stringify({
+      type: "usage",
+      usage: { inputTokens: 1000 },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([]);
+  });
+
+  it("captureSessions defaults to false", () => {
+    const provider = minimax("MiniMax-3.0");
+    expect(provider.captureSessions).toBe(false);
+  });
+
+  it("buildInteractiveArgs includes --model flag", () => {
+    const provider = minimax("MiniMax-3.0");
+    const args = provider.buildInteractiveArgs!({
+      prompt: "hello",
+      dangerouslySkipPermissions: true,
+    });
+    expect(args).toContain("--model");
+    expect(args).toContain("MiniMax-3.0");
+  });
+
+  it("buildInteractiveArgs passes prompt as positional arg", () => {
+    const provider = minimax("MiniMax-3.0");
+    const args = provider.buildInteractiveArgs!({
+      prompt: "hello",
+      dangerouslySkipPermissions: true,
+    });
+    expect(args[args.length - 1]).toBe("hello");
   });
 });
 

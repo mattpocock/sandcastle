@@ -1083,6 +1083,96 @@ export const copilot = (
 });
 
 // ---------------------------------------------------------------------------
+// MiniMax agent provider
+// ---------------------------------------------------------------------------
+
+/** Options for the MiniMax agent provider. */
+export interface MiniMaxOptions {
+  /** Environment variables injected by this agent provider. */
+  readonly env?: Record<string, string>;
+  /** When false, session capture is disabled. Default: false (no session storage yet). */
+  readonly captureSessions?: boolean;
+}
+
+const parseMiniMaxStreamLine = (line: string): ParsedStreamEvent[] => {
+  if (!line.startsWith("{")) return [];
+  try {
+    const obj = JSON.parse(line);
+
+    if (obj.type === "text" && typeof obj.text === "string") {
+      return [{ type: "text", text: obj.text }];
+    }
+    if (obj.type === "result" && typeof obj.result === "string") {
+      return [{ type: "result", result: obj.result }];
+    }
+    if (
+      obj.type === "tool_call" &&
+      typeof obj.name === "string" &&
+      typeof obj.args === "string"
+    ) {
+      return [{ type: "tool_call", name: obj.name, args: obj.args }];
+    }
+    if (obj.type === "session_id" && typeof obj.sessionId === "string") {
+      return [{ type: "session_id", sessionId: obj.sessionId }];
+    }
+    if (obj.type === "usage" && obj.usage) {
+      const u = obj.usage as Record<string, unknown>;
+      const inputTokens = u["inputTokens"];
+      const cacheCreationInputTokens = u["cacheCreationInputTokens"];
+      const cacheReadInputTokens = u["cacheReadInputTokens"];
+      const outputTokens = u["outputTokens"];
+      if (
+        typeof inputTokens === "number" &&
+        typeof cacheCreationInputTokens === "number" &&
+        typeof cacheReadInputTokens === "number" &&
+        typeof outputTokens === "number"
+      ) {
+        return [
+          {
+            type: "usage",
+            usage: {
+              inputTokens,
+              cacheCreationInputTokens,
+              cacheReadInputTokens,
+              outputTokens,
+            },
+          },
+        ];
+      }
+    }
+  } catch {
+    // Not valid JSON — skip
+  }
+  return [];
+};
+
+export const minimax = (
+  model: string,
+  options?: MiniMaxOptions,
+): AgentProvider => ({
+  name: "minimax",
+  env: options?.env ?? {},
+  captureSessions: options?.captureSessions ?? false,
+
+  buildPrintCommand({ prompt }: AgentCommandOptions): PrintCommand {
+    return {
+      command: `minimax -p --model ${shellEscape(model)}`,
+      stdin: prompt,
+    };
+  },
+
+  buildInteractiveArgs({ prompt }: AgentCommandOptions): string[] {
+    const args = ["minimax", "--model", model];
+    if (prompt) args.push(prompt);
+    return args;
+  },
+
+  parseStreamLine(line: string): ParsedStreamEvent[] {
+    return parseMiniMaxStreamLine(line);
+  },
+});
+
+// ---------------------------------------------------------------------------
 // Claude Code agent provider
 // ---------------------------------------------------------------------------
 
