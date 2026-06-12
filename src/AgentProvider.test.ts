@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   claudeCode,
   codex,
@@ -2349,6 +2349,243 @@ describe("sessionStorage", () => {
       const content = await readFile(captured!, "utf-8");
       expect(JSON.parse(content).payload.cwd).toBe("/host/repo");
     } finally {
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  // (a) No subagents dir — only the main session is copied.
+  it("claudeCode captureToHost with no subagents dir copies only the main session", async () => {
+    const hostDir = await mkdtemp(
+      join(tmpdir(), "sandcastle-claude-sub-a-host-"),
+    );
+    const sandboxDir = await mkdtemp(
+      join(tmpdir(), "sandcastle-claude-sub-a-sbx-"),
+    );
+    try {
+      const id = "cap-sub-1";
+      const sandboxCwd = "/sandbox/repo";
+      const hostCwd = "/host/repo";
+      const sandboxMainDir = join(sandboxDir, "-sandbox-repo");
+      await mkdir(sandboxMainDir, { recursive: true });
+      await writeFile(
+        join(sandboxMainDir, `${id}.jsonl`),
+        JSON.stringify({ type: "user", cwd: sandboxCwd, sessionId: id }),
+      );
+
+      const provider = claudeCode("claude-opus-4-7", {
+        sessionStorage: {
+          hostProjectsDir: hostDir,
+          sandboxProjectsDir: sandboxDir,
+        },
+      });
+      await provider.sessionStorage!.captureToHost({
+        hostCwd,
+        sandboxCwd,
+        sessionId: id,
+        handle: fsBindMountHandle(),
+      });
+
+      const mainContent = await readFile(
+        join(hostDir, "-host-repo", `${id}.jsonl`),
+        "utf-8",
+      );
+      expect(JSON.parse(mainContent).cwd).toBe(hostCwd);
+
+      // No subagents dir should exist on the host.
+      const { access: fsAccess } = await import("node:fs/promises");
+      await expect(
+        fsAccess(join(hostDir, "-host-repo", id, "subagents")),
+      ).rejects.toThrow();
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  // (b) Two subagents are copied with cwd rewritten; non-matching files are ignored.
+  it("claudeCode captureToHost copies subagent logs with cwd rewritten and skips non-agent files", async () => {
+    const hostDir = await mkdtemp(
+      join(tmpdir(), "sandcastle-claude-sub-b-host-"),
+    );
+    const sandboxDir = await mkdtemp(
+      join(tmpdir(), "sandcastle-claude-sub-b-sbx-"),
+    );
+    try {
+      const id = "cap-sub-2";
+      const sandboxCwd = "/sandbox/repo";
+      const hostCwd = "/host/repo";
+      const sandboxMainDir = join(sandboxDir, "-sandbox-repo");
+      const sandboxSubagentsDir = join(sandboxMainDir, id, "subagents");
+      await mkdir(sandboxMainDir, { recursive: true });
+      await mkdir(sandboxSubagentsDir, { recursive: true });
+
+      await writeFile(
+        join(sandboxMainDir, `${id}.jsonl`),
+        JSON.stringify({ type: "user", cwd: sandboxCwd, sessionId: id }),
+      );
+
+      const subagentLines = (name: string) =>
+        [
+          JSON.stringify({ type: "user", cwd: sandboxCwd, sessionId: name }),
+          JSON.stringify({
+            type: "assistant",
+            cwd: sandboxCwd,
+            sessionId: name,
+          }),
+        ].join("\n");
+
+      await writeFile(
+        join(sandboxSubagentsDir, "agent-aaa.jsonl"),
+        subagentLines("agent-aaa"),
+      );
+      await writeFile(
+        join(sandboxSubagentsDir, "agent-bbb.jsonl"),
+        subagentLines("agent-bbb"),
+      );
+      await writeFile(
+        join(sandboxSubagentsDir, "notes.txt"),
+        "should not be copied",
+      );
+
+      const provider = claudeCode("claude-opus-4-7", {
+        sessionStorage: {
+          hostProjectsDir: hostDir,
+          sandboxProjectsDir: sandboxDir,
+        },
+      });
+      await provider.sessionStorage!.captureToHost({
+        hostCwd,
+        sandboxCwd,
+        sessionId: id,
+        handle: fsBindMountHandle(),
+      });
+
+      const hostSubagentsDir = join(hostDir, "-host-repo", id, "subagents");
+
+      // Both subagent logs landed with cwd rewritten on every line.
+      for (const name of ["agent-aaa.jsonl", "agent-bbb.jsonl"]) {
+        const content = await readFile(join(hostSubagentsDir, name), "utf-8");
+        for (const line of content.split("\n")) {
+          expect(JSON.parse(line).cwd).toBe(hostCwd);
+        }
+      }
+
+      // Non-matching file was not copied.
+      const { access: fsAccess } = await import("node:fs/promises");
+      await expect(
+        fsAccess(join(hostSubagentsDir, "notes.txt")),
+      ).rejects.toThrow();
+
+      // Main session also landed.
+      const mainContent = await readFile(
+        join(hostDir, "-host-repo", `${id}.jsonl`),
+        "utf-8",
+      );
+      expect(JSON.parse(mainContent).cwd).toBe(hostCwd);
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  // (c) One corrupt/unreadable subagent does not abort siblings or the main capture.
+  it("claudeCode captureToHost continues when one subagent copyFileOut throws, emitting a console.error", async () => {
+    const hostDir = await mkdtemp(
+      join(tmpdir(), "sandcastle-claude-sub-c-host-"),
+    );
+    const sandboxDir = await mkdtemp(
+      join(tmpdir(), "sandcastle-claude-sub-c-sbx-"),
+    );
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const id = "cap-sub-3";
+      const sandboxCwd = "/sandbox/repo";
+      const hostCwd = "/host/repo";
+      const sandboxMainDir = join(sandboxDir, "-sandbox-repo");
+      const sandboxSubagentsDir = join(sandboxMainDir, id, "subagents");
+      await mkdir(sandboxMainDir, { recursive: true });
+      await mkdir(sandboxSubagentsDir, { recursive: true });
+
+      await writeFile(
+        join(sandboxMainDir, `${id}.jsonl`),
+        JSON.stringify({ type: "user", cwd: sandboxCwd, sessionId: id }),
+      );
+      await writeFile(
+        join(sandboxSubagentsDir, "agent-good.jsonl"),
+        JSON.stringify({
+          type: "user",
+          cwd: sandboxCwd,
+          sessionId: "agent-good",
+        }),
+      );
+      await writeFile(
+        join(sandboxSubagentsDir, "agent-bad.jsonl"),
+        JSON.stringify({
+          type: "user",
+          cwd: sandboxCwd,
+          sessionId: "agent-bad",
+        }),
+      );
+
+      // Handle that delegates to fsBindMountHandle but throws for agent-bad.jsonl.
+      const base = fsBindMountHandle();
+      const handle: BindMountSandboxHandle = {
+        ...base,
+        copyFileOut: async (sandboxPath, hostPath) => {
+          if (sandboxPath.includes("agent-bad.jsonl")) {
+            throw new Error("simulated unreadable subagent");
+          }
+          return base.copyFileOut(sandboxPath, hostPath);
+        },
+      };
+
+      const provider = claudeCode("claude-opus-4-7", {
+        sessionStorage: {
+          hostProjectsDir: hostDir,
+          sandboxProjectsDir: sandboxDir,
+        },
+      });
+
+      // Must resolve despite the bad subagent.
+      await expect(
+        provider.sessionStorage!.captureToHost({
+          hostCwd,
+          sandboxCwd,
+          sessionId: id,
+          handle,
+        }),
+      ).resolves.toBeUndefined();
+
+      // Main session was captured.
+      const mainContent = await readFile(
+        join(hostDir, "-host-repo", `${id}.jsonl`),
+        "utf-8",
+      );
+      expect(JSON.parse(mainContent).cwd).toBe(hostCwd);
+
+      // Good sibling was captured.
+      const goodContent = await readFile(
+        join(hostDir, "-host-repo", id, "subagents", "agent-good.jsonl"),
+        "utf-8",
+      );
+      expect(JSON.parse(goodContent).cwd).toBe(hostCwd);
+
+      // Bad subagent was NOT copied.
+      const { access: fsAccess } = await import("node:fs/promises");
+      await expect(
+        fsAccess(
+          join(hostDir, "-host-repo", id, "subagents", "agent-bad.jsonl"),
+        ),
+      ).rejects.toThrow();
+
+      // console.error was called with a message referencing the failing path.
+      const errorMessages = errSpy.mock.calls.map((c) => String(c[0]));
+      expect(errorMessages.some((m) => m.includes("agent-bad.jsonl"))).toBe(
+        true,
+      );
+    } finally {
+      errSpy.mockRestore();
       await rm(hostDir, { recursive: true, force: true });
       await rm(sandboxDir, { recursive: true, force: true });
     }

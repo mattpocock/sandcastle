@@ -828,6 +828,8 @@ Removes the Podman image.
 
 After each resumable provider iteration, Sandcastle automatically captures the agent's session file from the sandbox to the host. Claude Code sessions are stored under `~/.claude/projects/<encoded-path>/<session-id>.jsonl`; Codex sessions are stored under `~/.codex/sessions/YYYY/MM/DD/rollout-*-<session-id>.jsonl`; Pi sessions are stored under `~/.pi/agent/sessions/--<encoded-cwd>--/<timestamp>_<session-id>.jsonl`. Any provider-specific `cwd` fields are rewritten to match the host repo root, so the provider's native resume command works.
 
+For Claude Code, transcripts written by `Agent`-tool subagents and `Workflow` runs (under `<encoded-path>/<session-id>/subagents/agent-*.jsonl`) are captured alongside the main session with the same `cwd` rewrite. Capture of these sub-session logs is best-effort: a corrupt or unreadable one is skipped with a warning rather than failing the run.
+
 Session capture is enabled by default for `claudeCode()`, `codex()`, and `pi()` and can be opted out via `captureSessions: false`. Providers without `sessionStorage` do not attempt capture. Capture failure fails the run.
 
 ### Session resume
