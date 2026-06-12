@@ -70,6 +70,48 @@ export const claudeSandboxSessionPath = (
   projectsDir: string,
 ): string => posix.join(projectsDir, encodeProjectPath(cwd), `${id}.jsonl`);
 
+/** Sandbox-side path to the subagents directory for a Claude session (always POSIX separators). */
+export const claudeSubagentsDirInSandbox = (
+  cwd: string,
+  sessionId: string,
+  projectsDir: string,
+): string =>
+  posix.join(projectsDir, encodeProjectPath(cwd), sessionId, "subagents");
+
+/** Host path to the subagents directory for a Claude session. */
+export const claudeSubagentsDirOnHost = (
+  cwd: string,
+  sessionId: string,
+  projectsDir?: string,
+): string => {
+  const base =
+    projectsDir ?? join(process.env.HOME ?? "~", ".claude", "projects");
+  return join(base, encodeProjectPath(cwd), sessionId, "subagents");
+};
+
+/**
+ * List all subagent session JSONL paths under a session's `subagents/` directory
+ * in the sandbox. Absent dir, empty stdout, and non-zero exit all return `[]` —
+ * a missing `subagents/` directory is the normal case for plain (non-workflow) sessions.
+ */
+export const listClaudeSubagentSessionsInSandbox = async (
+  cwd: string,
+  sessionId: string,
+  handle: Pick<BindMountSandboxHandle, "exec">,
+  sandboxProjectsDir: string,
+): Promise<string[]> => {
+  const dir = claudeSubagentsDirInSandbox(cwd, sessionId, sandboxProjectsDir);
+  const result = await handle.exec(
+    `find ${JSON.stringify(dir)} -type f -name ${JSON.stringify("agent-*.jsonl")} 2>/dev/null`,
+  );
+  if (result.exitCode !== 0 || !result.stdout.trim()) return [];
+  return result.stdout
+    .trim()
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l !== "");
+};
+
 /**
  * Locate a Claude Code session JSONL on the host by its unique id, scanning each
  * `~/.claude/projects/<encoded-cwd>/` directory rather than reconstructing the
@@ -107,20 +149,24 @@ const rewriteSessionCwd = (
     .split("\n")
     .map((line) => {
       if (line === "") return line;
-      const entry = JSON.parse(line) as Record<string, unknown>;
-      if (typeof entry.cwd === "string" && entry.cwd === fromCwd) {
-        entry.cwd = toCwd;
+      try {
+        const entry = JSON.parse(line) as Record<string, unknown>;
+        if (typeof entry.cwd === "string" && entry.cwd === fromCwd) {
+          entry.cwd = toCwd;
+        }
+        if (
+          entry.type === "session_meta" &&
+          typeof entry.payload === "object" &&
+          entry.payload !== null &&
+          typeof (entry.payload as { cwd?: unknown }).cwd === "string" &&
+          (entry.payload as { cwd: string }).cwd === fromCwd
+        ) {
+          (entry.payload as { cwd: string }).cwd = toCwd;
+        }
+        return JSON.stringify(entry);
+      } catch {
+        return line;
       }
-      if (
-        entry.type === "session_meta" &&
-        typeof entry.payload === "object" &&
-        entry.payload !== null &&
-        typeof (entry.payload as { cwd?: unknown }).cwd === "string" &&
-        (entry.payload as { cwd: string }).cwd === fromCwd
-      ) {
-        (entry.payload as { cwd: string }).cwd = toCwd;
-      }
-      return JSON.stringify(entry);
     })
     .join("\n");
 };

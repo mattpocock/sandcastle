@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  claudeSubagentsDirInSandbox,
+  claudeSubagentsDirOnHost,
   encodePiSessionDir,
   encodeProjectPath,
   findClaudeSessionOnHost,
   findCodexSessionOnHost,
   findPiSessionOnHost,
+  listClaudeSubagentSessionsInSandbox,
   locateCodexHostSession,
   locatePiHostSession,
   piSessionDirPath,
@@ -12,9 +15,13 @@ import {
   transferCodexSession,
   transferPiSession,
 } from "./SessionStore.js";
+import { exec as cpExec } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, posix } from "node:path";
+import { promisify } from "node:util";
+
+const execAsync = promisify(cpExec);
 
 // ---------------------------------------------------------------------------
 // encodeProjectPath
@@ -128,6 +135,24 @@ describe("transferClaudeSession", () => {
     const lines = out.split("\n");
     expect(JSON.parse(lines[0]!).cwd).toBe("/host/repo");
     expect(JSON.parse(lines[1]!).cwd).toBe("/other/path");
+  });
+
+  it("tolerates malformed lines by preserving them verbatim", () => {
+    const badLine = '{"type":"broken"';
+    const jsonl = [
+      JSON.stringify({ type: "system", cwd: "/sandbox/worktree" }),
+      JSON.stringify({ type: "message", content: "hello" }),
+      badLine,
+    ].join("\n");
+
+    const out = transferClaudeSession(jsonl, "/sandbox/worktree", "/host/repo");
+    const lines = out.split("\n");
+    expect(JSON.parse(lines[0]!).cwd).toBe("/host/repo");
+    expect(JSON.parse(lines[1]!)).toEqual({
+      type: "message",
+      content: "hello",
+    });
+    expect(lines[2]).toBe(badLine);
   });
 });
 
@@ -445,6 +470,122 @@ describe("locatePiHostSession", () => {
       await expect(locatePiHostSession("missing", dir)).rejects.toThrow(
         `session missing not found in ${dir}`,
       );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// claudeSubagentsDirInSandbox
+// ---------------------------------------------------------------------------
+
+describe("claudeSubagentsDirInSandbox", () => {
+  it("builds <projectsDir>/<encoded-cwd>/<sessionId>/subagents with POSIX separators", () => {
+    expect(
+      claudeSubagentsDirInSandbox(
+        "/sandbox/repo",
+        "sess-1",
+        "/home/agent/.claude/projects",
+      ),
+    ).toBe("/home/agent/.claude/projects/-sandbox-repo/sess-1/subagents");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// claudeSubagentsDirOnHost
+// ---------------------------------------------------------------------------
+
+describe("claudeSubagentsDirOnHost", () => {
+  it("builds the host equivalent using node:path join", () => {
+    const projectsDir = "/tmp/claude-projects";
+    expect(claudeSubagentsDirOnHost("/host/repo", "sess-1", projectsDir)).toBe(
+      join(projectsDir, "-host-repo", "sess-1", "subagents"),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listClaudeSubagentSessionsInSandbox
+// ---------------------------------------------------------------------------
+
+/** Minimal real-fs exec handle for sandbox find tests. */
+const makeFsHandle = () => ({
+  exec: async (
+    command: string,
+  ): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
+    try {
+      const { stdout, stderr } = await execAsync(command);
+      return { stdout, stderr, exitCode: 0 };
+    } catch (err: unknown) {
+      const e = err as { stdout?: string; stderr?: string; code?: number };
+      return {
+        stdout: e.stdout ?? "",
+        stderr: e.stderr ?? "",
+        exitCode: e.code ?? 1,
+      };
+    }
+  },
+});
+
+describe("listClaudeSubagentSessionsInSandbox", () => {
+  it("returns [] when the subagents dir does not exist", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "sandcastle-subagents-"));
+    try {
+      const result = await listClaudeSubagentSessionsInSandbox(
+        "/sandbox/repo",
+        "sess-missing",
+        makeFsHandle(),
+        dir,
+      );
+      expect(result).toEqual([]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns absolute paths of agent-*.jsonl files and excludes non-matching files", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "sandcastle-subagents-"));
+    try {
+      const encodedCwd = encodeProjectPath("/sandbox/repo");
+      const subagentsDir = join(dir, encodedCwd, "sess-1", "subagents");
+      await mkdir(subagentsDir, { recursive: true });
+      await writeFile(join(subagentsDir, "agent-abc.jsonl"), "{}");
+      await writeFile(join(subagentsDir, "agent-def.jsonl"), "{}");
+      await writeFile(join(subagentsDir, "notes.txt"), "ignored");
+      await writeFile(join(subagentsDir, "main.jsonl"), "ignored");
+
+      const result = await listClaudeSubagentSessionsInSandbox(
+        "/sandbox/repo",
+        "sess-1",
+        makeFsHandle(),
+        dir,
+      );
+
+      expect(result.sort()).toEqual(
+        [
+          join(subagentsDir, "agent-abc.jsonl"),
+          join(subagentsDir, "agent-def.jsonl"),
+        ].sort(),
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns [] (not a throw) when the encoded-cwd dir exists but has no subagents/ subdir", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "sandcastle-subagents-"));
+    try {
+      const encodedCwd = encodeProjectPath("/sandbox/repo");
+      await mkdir(join(dir, encodedCwd, "sess-1"), { recursive: true });
+
+      const result = await listClaudeSubagentSessionsInSandbox(
+        "/sandbox/repo",
+        "sess-1",
+        makeFsHandle(),
+        dir,
+      );
+      expect(result).toEqual([]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
