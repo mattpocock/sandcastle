@@ -14,7 +14,7 @@ A TypeScript library for orchestrating AI coding agents in isolated sandboxes:
 2. Sandcastle handles sandboxing the agent with a configurable branch strategy.
 3. The commits made on the branches get merged back.
 
-Sandcastle is provider-agnostic — it ships with built-in providers for Docker, Podman, and Vercel, and you can create your own. Great for parallelizing multiple AFK agents, creating review pipelines, or even just orchestrating your own agents.
+Sandcastle is provider-agnostic — it ships with built-in providers for Docker, Podman, Vercel, and Coder, and you can create your own. Great for parallelizing multiple AFK agents, creating review pipelines, or even just orchestrating your own agents.
 
 ## Prerequisites
 
@@ -23,6 +23,7 @@ Sandcastle is provider-agnostic — it ships with built-in providers for Docker,
   - [Docker Desktop](https://www.docker.com/) — most common for local development
   - [Podman](https://podman.io/) — rootless alternative to Docker
   - [Vercel](https://vercel.com/) — cloud-based Firecracker microVMs via `@vercel/sandbox`
+  - [Coder](https://coder.com/) — remote Coder workspaces via the `coder` CLI
   - Or [create your own](#custom-sandbox-providers) using `createBindMountSandboxProvider` or `createIsolatedSandboxProvider`
 
 ## Quick start
@@ -58,7 +59,7 @@ import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 
 await run({
   agent: claudeCode("claude-opus-4-7"),
-  sandbox: docker(), // or podman(), vercel(), or your own provider
+  sandbox: docker(), // or podman(), vercel(), coder(), or your own provider
   promptFile: ".sandcastle/prompt.md",
 });
 ```
@@ -72,6 +73,7 @@ Sandcastle uses a `SandboxProvider` to create isolated environments. The `sandbo
 | Docker     | `@ai-hero/sandcastle/sandboxes/docker`     | Bind-mount | `run()`, `createSandbox()`, `interactive()` |
 | Podman     | `@ai-hero/sandcastle/sandboxes/podman`     | Bind-mount | `run()`, `createSandbox()`, `interactive()` |
 | Vercel     | `@ai-hero/sandcastle/sandboxes/vercel`     | Isolated   | `run()`, `createSandbox()`, `interactive()` |
+| Coder      | `@ai-hero/sandcastle/sandboxes/coder`      | Isolated   | `run()`, `createSandbox()`, `interactive()` |
 | No-sandbox | `@ai-hero/sandcastle/sandboxes/no-sandbox` | None       | `run()`, `createSandbox()`, `interactive()` |
 
 Worktree methods (`wt.run()`, `wt.interactive()`, `wt.createSandbox()`) accept the same providers as their top-level counterparts. `wt.interactive()` defaults to `noSandbox()` when no sandbox is specified.
@@ -80,9 +82,10 @@ Worktree methods (`wt.run()`, `wt.interactive()`, `wt.createSandbox()`) accept t
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { podman } from "@ai-hero/sandcastle/sandboxes/podman";
 import { vercel } from "@ai-hero/sandcastle/sandboxes/vercel";
+import { coder } from "@ai-hero/sandcastle/sandboxes/coder";
 import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
 
-// Docker, Podman, and Vercel are interchangeable in run() and createSandbox():
+// Docker, Podman, Vercel, and Coder are interchangeable in run() and createSandbox():
 await run({
   agent: claudeCode("claude-opus-4-7"),
   sandbox: docker(),
@@ -98,6 +101,49 @@ await interactive({
   cwd: "/path/to/other-repo", // optional — defaults to process.cwd()
 });
 ```
+
+### Coder
+
+The Coder provider runs Sandcastle inside a Coder workspace through the `coder` CLI. Install the CLI, authenticate it, and verify access before running Sandcastle:
+
+```bash
+coder version
+coder whoami -o json
+```
+
+Create a fresh Coder workspace from a template:
+
+```typescript
+import { run, claudeCode } from "@ai-hero/sandcastle";
+import { coder } from "@ai-hero/sandcastle/sandboxes/coder";
+
+await run({
+  agent: claudeCode("claude-opus-4-7"),
+  sandbox: coder({
+    template: "node",
+    parameters: { region: "us" },
+    preset: "small",
+    useParameterDefaults: true, // optional — accept template parameter defaults non-interactively
+    onClose: "delete",
+  }),
+  prompt: "Fix the failing tests.",
+});
+```
+
+Attach to an existing Coder workspace:
+
+```typescript
+await run({
+  agent: claudeCode("claude-opus-4-7"),
+  sandbox: coder({
+    workspace: "my-dev-workspace",
+    onClose: "leave",
+  }),
+  prompt: "Review this branch.",
+});
+```
+
+`onClose` is required because Coder workspaces are persistent: use `"delete"` to destroy the Coder workspace, `"stop"` to keep it but stop compute, or `"leave"` to keep it running. If a Coder workspace has multiple Coder workspace agents, pass `workspaceAgent` to select one; otherwise the provider throws and lists the available Coder workspace agent names. By default, files are synced under `<agent.directory>/.sandcastle/worktree`, falling back to `$HOME/.sandcastle/worktree`; pass an absolute `workdir` to override it. Active `coder ssh` exec sessions keep Coder's `last_used_at` fresh while commands run, but v1 does not send a heartbeat between exec calls.
 
 You can also [create your own provider](#custom-sandbox-providers) using `createBindMountSandboxProvider` or `createIsolatedSandboxProvider`.
 
