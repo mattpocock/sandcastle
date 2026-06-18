@@ -140,7 +140,7 @@ export interface WorktreeRunOptions {
   readonly hooks?: SandboxHooks;
   /** Environment variables to inject into the sandbox. */
   readonly env?: Record<string, string>;
-  /** Resume a prior Claude Code session by ID. The session JSONL must exist on the host. Incompatible with maxIterations > 1. */
+  /** Resume a prior Claude Code/Codex/Pi session by ID. The session JSONL must exist on the host. On multi-iteration runs, later iterations resume from the most recently captured session when supported. */
   readonly resumeSession?: string;
   /**
    * An `AbortSignal` that cancels the run when aborted.
@@ -480,13 +480,6 @@ export const createWorktree = async (
     const { prompt, promptFile, hooks, agent: provider } = opts;
     const sandboxProvider = opts.sandbox;
     const maxIterations = opts.maxIterations ?? 1;
-
-    if (opts.resumeSession && maxIterations > 1) {
-      throw new Error(
-        "resumeSession cannot be combined with maxIterations > 1. " +
-          "Resume applies to iteration 1 only; multi-iteration resume semantics are not supported.",
-      );
-    }
 
     if (opts.resumeSession) {
       await assertResumeSessionExists({

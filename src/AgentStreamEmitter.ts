@@ -1,8 +1,8 @@
 import { Context, Effect, Layer } from "effect";
 
 /**
- * A single event in the agent's output stream, surfaced to callers of `run()`
- * so they can forward it to their own observability system.
+ * A single provider-observable event in the agent's output stream, surfaced to
+ * callers of `run()` so they can forward it to their own observability system.
  *
  * Emitted only in log-to-file mode when an `onAgentStreamEvent` callback is
  * provided via `logging`. See `run()`.
@@ -18,6 +18,18 @@ export type AgentStreamEvent =
       readonly type: "toolCall";
       readonly name: string;
       readonly formattedArgs: string;
+      readonly iteration: number;
+      readonly timestamp: Date;
+    }
+  | {
+      readonly type: "result";
+      readonly result: string;
+      readonly iteration: number;
+      readonly timestamp: Date;
+    }
+  | {
+      readonly type: "sessionId";
+      readonly sessionId: string;
       readonly iteration: number;
       readonly timestamp: Date;
     };

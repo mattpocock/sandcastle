@@ -34,6 +34,7 @@ import {
   agentStreamEmitterLayer,
   type AgentStreamEvent,
 } from "./AgentStreamEmitter.js";
+import { getAbortMetadata } from "./AbortMetadata.js";
 import type { BindMountSandboxHandle } from "./SandboxProvider.js";
 
 const noopAgentStreamEmitterLayer = agentStreamEmitterLayer();
@@ -1130,7 +1131,7 @@ describe("Orchestrator tool call display integration", () => {
 });
 
 describe("Orchestrator agent stream emitter", () => {
-  it("emits text and toolCall events with iteration index and timestamps", async () => {
+  it("emits provider-observable stream events with iteration index and timestamps", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "orch-stream-"));
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
@@ -1198,6 +1199,8 @@ describe("Orchestrator agent stream emitter", () => {
 
     const textEvents = events.filter((e) => e.type === "text");
     const toolCallEvents = events.filter((e) => e.type === "toolCall");
+    const resultEvents = events.filter((e) => e.type === "result");
+    const sessionEvents = events.filter((e) => e.type === "sessionId");
 
     expect(textEvents.length).toBeGreaterThan(0);
     expect(textEvents[0]!.message).toContain("Working now");
@@ -1212,6 +1215,19 @@ describe("Orchestrator agent stream emitter", () => {
       iteration: 1,
     });
     expect(toolCallEvents[0]!.timestamp).toBeInstanceOf(Date);
+
+    expect(resultEvents).toHaveLength(1);
+    expect(resultEvents[0]).toMatchObject({
+      type: "result",
+      result: "<promise>COMPLETE</promise>",
+      iteration: 1,
+    });
+    expect(resultEvents[0]!.timestamp).toBeInstanceOf(Date);
+
+    // Some mock setups in this suite do not preserve the init/session event all
+    // the way through to IterationResult, so sessionId emission is asserted in
+    // the dedicated session-capture integration test below.
+    expect(sessionEvents.length).toBeGreaterThanOrEqual(0);
   });
 
   it("swallows errors thrown by the callback", async () => {
@@ -3057,8 +3073,15 @@ describe("Session capture integration", () => {
    */
   const makeSessionCaptureFactory = (
     hostRepoDir: string,
-    mockAgentBehavior: (sandboxRepoDir: string) => Promise<string>,
-    sessionId: string,
+    mockAgentBehavior: (
+      sandboxRepoDir: string,
+      command: string,
+      iterationIndex: number,
+    ) => Promise<string>,
+    sessionId: string | ((iterationIndex: number) => string),
+    factoryOptions?: {
+      emitInitBeforeBehavior?: boolean;
+    },
   ): { factoryLayer: Layer.Layer<SandboxFactory> } => {
     const sandboxBaseDir = join(tmpdir(), `orch-session-${randomUUID()}`);
     let branchCounter = 0;
@@ -3108,10 +3131,29 @@ describe("Session capture integration", () => {
                   const onLine = options.onLine;
                   return Effect.gen(function* () {
                     const cwd = options?.cwd ?? sandboxBaseDir;
+                    const iterationIndex = branchCounter - 1;
+                    const effectiveSessionId =
+                      typeof sessionId === "function"
+                        ? sessionId(iterationIndex)
+                        : sessionId;
+                    if (factoryOptions?.emitInitBeforeBehavior) {
+                      onLine(
+                        JSON.stringify({
+                          type: "system",
+                          subtype: "init",
+                          session_id: effectiveSessionId,
+                        }),
+                      );
+                    }
                     const output = yield* Effect.promise(() =>
-                      mockAgentBehavior(cwd),
+                      mockAgentBehavior(cwd, command, iterationIndex),
                     );
-                    const streamOutput = toStreamJson(output, sessionId);
+                    const streamOutput = toStreamJson(
+                      output,
+                      factoryOptions?.emitInitBeforeBehavior
+                        ? undefined
+                        : effectiveSessionId,
+                    );
                     for (const line of streamOutput.split("\n")) {
                       onLine(line);
                     }
@@ -3216,6 +3258,68 @@ describe("Session capture integration", () => {
     const secondEntry = JSON.parse(lines[1]!) as { cwd: string; text: string };
     expect(secondEntry.cwd).toBe(hostDir);
     expect(secondEntry.text).toBe("hello");
+  });
+
+  it("emits a sessionId agent stream event when the provider exposes one", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-stream-session-host-"));
+    const hostProjectsDir = await mkdtemp(
+      join(tmpdir(), "orch-stream-session-projects-"),
+    );
+    const sandboxProjectsDir = await mkdtemp(
+      join(tmpdir(), "orch-stream-session-sb-projects-"),
+    );
+    const provider = claudeCode("test-model", {
+      sessionStorage: { hostProjectsDir, sandboxProjectsDir },
+    });
+    const mockSessionId = "stream-session-123";
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const events: AgentStreamEvent[] = [];
+    const emitterLayer = agentStreamEmitterLayer((event) => {
+      events.push(event);
+    });
+
+    const { factoryLayer } = makeSessionCaptureFactory(
+      hostDir,
+      async (repoDir) => {
+        const encoded = encodeProjectPath(repoDir);
+        const sessionsDir = join(sandboxProjectsDir, encoded);
+        await mkdir(sessionsDir, { recursive: true });
+        await writeFile(
+          join(sessionsDir, `${mockSessionId}.jsonl`),
+          [
+            JSON.stringify({ type: "system", cwd: repoDir }),
+            JSON.stringify({ type: "message", cwd: repoDir, text: "hello" }),
+          ].join("\n"),
+        );
+        return "Done. <promise>COMPLETE</promise>";
+      },
+      mockSessionId,
+    );
+
+    await Effect.runPromise(
+      orchestrate({
+        provider,
+        hostRepoDir: hostDir,
+        iterations: 1,
+        prompt: "do some work",
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(factoryLayer, testDisplayLayer, emitterLayer),
+        ),
+      ),
+    );
+
+    const sessionEvents = events.filter((e) => e.type === "sessionId");
+    expect(sessionEvents).toHaveLength(1);
+    expect(sessionEvents[0]).toMatchObject({
+      type: "sessionId",
+      sessionId: mockSessionId,
+      iteration: 1,
+    });
+    expect(sessionEvents[0]!.timestamp).toBeInstanceOf(Date);
   });
 
   it("skips capture for non-Claude agents (captureSessions: false)", async () => {
@@ -3359,6 +3463,88 @@ describe("Session capture integration", () => {
     const capturedLines = capturedContent.split("\n");
     const entry = JSON.parse(capturedLines[0]!) as { cwd: string };
     expect(entry.cwd).toBe(hostDir);
+  });
+
+  it("carries forward the captured sessionId across iterations when the provider supports sessions", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-carry-host-"));
+    const hostProjectsDir = await mkdtemp(
+      join(tmpdir(), "orch-carry-projects-"),
+    );
+    const sandboxProjectsDir = await mkdtemp(
+      join(tmpdir(), "orch-carry-sb-projects-"),
+    );
+    const provider = claudeCode("test-model", {
+      sessionStorage: { hostProjectsDir, sandboxProjectsDir },
+    });
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const sessionIds = ["iter-1-session", "iter-2-session"] as const;
+    const seenResumeArgs: string[] = [];
+    let iteration = 0;
+
+    const { factoryLayer } = makeSessionCaptureFactory(
+      hostDir,
+      async (repoDir, command) => {
+        const expectedResume = iteration === 0 ? undefined : sessionIds[0];
+        const actualResume = command
+          .match(/--resume\s+([^\s]+)/)?.[1]
+          ?.replace(/^['"]|['"]$/g, "");
+        seenResumeArgs.push(actualResume ?? "");
+        expect(actualResume).toBe(expectedResume);
+
+        if (iteration > 0) {
+          const sbEncoded = encodeProjectPath(repoDir);
+          const resumedPath = join(
+            sandboxProjectsDir,
+            sbEncoded,
+            `${sessionIds[0]}.jsonl`,
+          );
+          const resumed = await readFile(resumedPath, "utf-8");
+          expect(resumed).toContain("first iteration work");
+        }
+
+        const sbEncoded = encodeProjectPath(repoDir);
+        const sessionsDir = join(sandboxProjectsDir, sbEncoded);
+        await mkdir(sessionsDir, { recursive: true });
+        const currentSessionId = sessionIds[iteration]!;
+        await writeFile(
+          join(sessionsDir, `${currentSessionId}.jsonl`),
+          [
+            JSON.stringify({ type: "system", cwd: repoDir }),
+            JSON.stringify({
+              type: "message",
+              cwd: repoDir,
+              text:
+                iteration === 0
+                  ? "first iteration work"
+                  : "second iteration work",
+            }),
+          ].join("\n"),
+        );
+
+        iteration++;
+        return iteration === 2
+          ? "Done. <promise>COMPLETE</promise>"
+          : "Keep going.";
+      },
+      (iterationIndex) => sessionIds[iterationIndex]!,
+    );
+
+    const result = await Effect.runPromise(
+      orchestrate({
+        provider,
+        hostRepoDir: hostDir,
+        iterations: 2,
+        prompt: "continue working",
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+    );
+
+    expect(result.iterations).toHaveLength(2);
+    expect(result.iterations[0]!.sessionId).toBe(sessionIds[0]);
+    expect(result.iterations[1]!.sessionId).toBe(sessionIds[1]);
+    expect(seenResumeArgs).toEqual(["", sessionIds[0]]);
   });
 
   it("forks a session: passes --fork-session alongside --resume to claude", async () => {
@@ -3619,6 +3805,72 @@ describe("Session capture integration", () => {
     );
 
     expect(result.iterations[0]!.usage).toBeUndefined();
+  });
+
+  it("preserves partial session metadata when aborted after the session ID is observed", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-abort-session-host-"));
+    const hostProjectsDir = await mkdtemp(
+      join(tmpdir(), "orch-abort-session-projects-"),
+    );
+    const sandboxProjectsDir = await mkdtemp(
+      join(tmpdir(), "orch-abort-session-sb-projects-"),
+    );
+    const provider = claudeCode("test-model", {
+      sessionStorage: { hostProjectsDir, sandboxProjectsDir },
+    });
+    const mockSessionId = "abort-session-123";
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const reason = new DOMException("cancelled mid-iteration", "AbortError");
+    const ac = new AbortController();
+
+    const { factoryLayer } = makeSessionCaptureFactory(
+      hostDir,
+      async (repoDir) => {
+        const encoded = encodeProjectPath(repoDir);
+        const sessionsDir = join(sandboxProjectsDir, encoded);
+        await mkdir(sessionsDir, { recursive: true });
+        await writeFile(
+          join(sessionsDir, `${mockSessionId}.jsonl`),
+          [
+            JSON.stringify({ type: "system", cwd: repoDir }),
+            JSON.stringify({ type: "message", cwd: repoDir, text: "hello" }),
+          ].join("\n"),
+        );
+        ac.abort(reason);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return "Done.";
+      },
+      mockSessionId,
+      { emitInitBeforeBehavior: true },
+    );
+
+    await expect(
+      Effect.runPromise(
+        orchestrate({
+          provider,
+          hostRepoDir: hostDir,
+          iterations: 1,
+          prompt: "do some work",
+          signal: ac.signal,
+        }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      ),
+    ).rejects.toThrow("cancelled mid-iteration");
+
+    expect(ac.signal.reason).toBe(reason);
+    const metadata = getAbortMetadata(reason);
+    expect(metadata?.iterations).toHaveLength(1);
+    expect(metadata?.iterations[0]!.sessionId).toBe(mockSessionId);
+    expect(metadata?.iterations[0]!.sessionFilePath).toBeDefined();
+
+    const capturedPath = metadata?.iterations[0]!.sessionFilePath!;
+    const capturedContent = await readFile(capturedPath, "utf-8");
+    const firstEntry = JSON.parse(capturedContent.split("\n")[0]!) as {
+      cwd: string;
+    };
+    expect(firstEntry.cwd).toBe(hostDir);
   });
 });
 

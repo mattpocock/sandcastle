@@ -213,5 +213,5 @@ The display mode where Sandcastle renders an interactive UI in the terminal with
 _Avoid_: "stdout mode", "interactive mode", "CLI mode" (ambiguous with the CLI itself)
 
 **Agent stream event**:
-A single item in the **agent**'s output stream -- either a `text` chunk or a `toolCall` -- surfaced to the caller of `run()` so the stream can be forwarded to an external observability system. Available only in **log-to-file mode** via the `onAgentStreamEvent` callback on the `logging` option. Each event carries its `iteration` number and a `timestamp`.
+A single provider-observable item in the **agent**'s output stream -- currently `text`, `toolCall`, `result`, or `sessionId` -- surfaced to the caller of `run()` so the stream can be forwarded to an external observability system. Available only in **log-to-file mode** via the `onAgentStreamEvent` callback on the `logging` option. Each event carries its `iteration` number and a `timestamp`.
 _Avoid_: "log event" (the log file contains more than just agent output), "display entry" (internal UI type)

@@ -217,15 +217,20 @@ const result = await run({
   logging: {
     type: "file",
     path: ".sandcastle/logs/my-run.log",
-    // Optional: forward the agent's output stream to your own observability system.
-    // Fires for each text chunk and tool call the agent produces. Errors thrown
-    // by the callback are swallowed so a broken forwarder cannot kill the run.
+    // Optional: forward provider-observable agent stream events to your own
+    // observability system. Currently emits `text`, `toolCall`, `result`, and
+    // `sessionId` events. Errors thrown by the callback are swallowed so a
+    // broken forwarder cannot kill the run.
     onAgentStreamEvent: (event) => {
-      // event is { type: "text" | "toolCall", iteration, timestamp, ... }
+      // event carries { type, iteration, timestamp, ... }
       myLogger.info(event);
     },
   },
   // logging: { type: "stdout" }, // OR render an interactive UI in the terminal
+
+  // Note: emitted event types are limited to what current providers expose
+  // reliably today. `result` may duplicate final assistant text, and `sessionId`
+  // is only emitted when the provider exposes a session identifier.
 
   // String (or array of strings) the agent emits to end the iteration loop early.
   // Default: "<promise>COMPLETE</promise>"
@@ -466,23 +471,23 @@ await sandbox.close();
 
 #### `WorktreeRunOptions`
 
-| Option                     | Type                   | Default | Description                                                                                                                          |
-| -------------------------- | ---------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `agent`                    | AgentProvider          | —       | **Required.** Agent provider                                                                                                         |
-| `sandbox`                  | SandboxProvider        | —       | **Required.** Sandbox provider (AFK agents must be sandboxed)                                                                        |
-| `prompt`                   | string                 | —       | Inline prompt (mutually exclusive with `promptFile`)                                                                                 |
-| `promptFile`               | string                 | —       | Path to prompt file                                                                                                                  |
-| `maxIterations`            | number                 | 1       | Maximum iterations to run                                                                                                            |
-| `completionSignal`         | string \| string[]     | —       | Substring(s) to stop the iteration loop early                                                                                        |
-| `idleTimeoutSeconds`       | number                 | 600     | Idle timeout in seconds                                                                                                              |
-| `completionTimeoutSeconds` | number                 | 60      | Grace window after completion signal is seen but agent process hasn't exited                                                         |
-| `name`                     | string                 | —       | Optional run name                                                                                                                    |
-| `logging`                  | LoggingOption          | file    | Logging mode                                                                                                                         |
-| `hooks`                    | SandboxHooks           | —       | Lifecycle hooks (`host.*`, `sandbox.*`)                                                                                              |
-| `promptArgs`               | PromptArgs             | —       | Key-value map for `{{KEY}}` placeholder substitution                                                                                 |
-| `env`                      | Record<string, string> | —       | Environment variables to inject into the sandbox                                                                                     |
-| `resumeSession`            | string                 | —       | Resume a prior session by ID for agents that support resume. Incompatible with `maxIterations > 1`. Session file must exist on host. |
-| `signal`                   | AbortSignal            | —       | Cancel the run when aborted. Kills the in-flight agent subprocess; the worktree is preserved on disk. Rejects with `signal.reason`.  |
+| Option                     | Type                   | Default | Description                                                                                                                                                                                            |
+| -------------------------- | ---------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `agent`                    | AgentProvider          | —       | **Required.** Agent provider                                                                                                                                                                           |
+| `sandbox`                  | SandboxProvider        | —       | **Required.** Sandbox provider (AFK agents must be sandboxed)                                                                                                                                          |
+| `prompt`                   | string                 | —       | Inline prompt (mutually exclusive with `promptFile`)                                                                                                                                                   |
+| `promptFile`               | string                 | —       | Path to prompt file                                                                                                                                                                                    |
+| `maxIterations`            | number                 | 1       | Maximum iterations to run                                                                                                                                                                              |
+| `completionSignal`         | string \| string[]     | —       | Substring(s) to stop the iteration loop early                                                                                                                                                          |
+| `idleTimeoutSeconds`       | number                 | 600     | Idle timeout in seconds                                                                                                                                                                                |
+| `completionTimeoutSeconds` | number                 | 60      | Grace window after completion signal is seen but agent process hasn't exited                                                                                                                           |
+| `name`                     | string                 | —       | Optional run name                                                                                                                                                                                      |
+| `logging`                  | LoggingOption          | file    | Logging mode                                                                                                                                                                                           |
+| `hooks`                    | SandboxHooks           | —       | Lifecycle hooks (`host.*`, `sandbox.*`)                                                                                                                                                                |
+| `promptArgs`               | PromptArgs             | —       | Key-value map for `{{KEY}}` placeholder substitution                                                                                                                                                   |
+| `env`                      | Record<string, string> | —       | Environment variables to inject into the sandbox                                                                                                                                                       |
+| `resumeSession`            | string                 | —       | Resume a prior session by ID for agents that support resume. Session file must exist on host. On multi-iteration runs, later iterations resume from the most recently captured session when supported. |
+| `signal`                   | AbortSignal            | —       | Cancel the run when aborted. Kills the in-flight agent subprocess; the worktree is preserved on disk. Rejects with `signal.reason`.                                                                    |
 
 #### `WorktreeRunResult`
 
@@ -790,7 +795,7 @@ Removes the Podman image.
 | `completionSignal`         | string \| string[] | `<promise>COMPLETE</promise>` | String or array of strings the agent emits to stop the iteration loop early                                                                                                                                                  |
 | `idleTimeoutSeconds`       | number             | `600`                         | Idle timeout in seconds — resets on each agent output event                                                                                                                                                                  |
 | `completionTimeoutSeconds` | number             | `60`                          | Grace window in seconds after the completion signal is observed but the agent process has not exited (hanging process). See [Hanging processes after the completion signal](#hanging-processes-after-the-completion-signal). |
-| `resumeSession`            | string             | —                             | Resume a prior session by ID for agents that support resume. Incompatible with `maxIterations > 1`. Session file must exist on host.                                                                                         |
+| `resumeSession`            | string             | —                             | Resume a prior session by ID for agents that support resume. Session file must exist on host. On multi-iteration runs, later iterations resume from the most recently captured session when supported.                       |
 | `signal`                   | AbortSignal        | —                             | Cancel the run when aborted. Kills the in-flight agent subprocess and cancels lifecycle hooks; the worktree is preserved on disk. Rejects with `signal.reason`.                                                              |
 | `timeouts`                 | Timeouts           | —                             | Override default timeouts for built-in lifecycle steps: `copyToWorktreeMs` (60 000), `gitSetupMs` (10 000), `commitCollectionMs` (30 000), `mergeToHostMs` (30 000).                                                         |
 | `output`                   | OutputDefinition   | —                             | Structured output definition (`Output.object(…)` or `Output.string(…)`). Requires `maxIterations === 1`. See [Structured output](#structured-output).                                                                        |
@@ -861,12 +866,37 @@ const second = await first.resume?.("Now implement the plan");
 
 Before the sandbox starts, Sandcastle validates that the session file exists on the host and transfers it into the sandbox with `cwd` fields rewritten to match the sandbox-side path. Claude Code receives `--resume <id>`; Codex receives `codex exec resume <id>` with the prompt piped over stdin; Pi receives `--session <id>`.
 
+On multi-iteration runs, Sandcastle captures the session produced by each iteration and feeds the latest captured session ID into the next iteration when the provider supports resume. This means an initial `resumeSession` seeds iteration 1, then later iterations continue from the most recently captured session instead of starting fresh.
+
 Constraints:
 
-- `resumeSession` is incompatible with `maxIterations > 1` (throws before sandbox creation).
 - The provider's host session file must exist (throws before sandbox creation).
-- Only iteration 1 receives the resume flag; subsequent iterations (if any) start fresh.
 - Providers without resume support reject `resumeSession`.
+
+### Abort metadata on cancelled runs
+
+If a run is cancelled after Sandcastle has already observed a provider session ID, the thrown abort reason is preserved exactly as `signal.reason`, but Sandcastle now attaches non-enumerable metadata describing any completed iterations plus the partial cancelled iteration.
+
+Use `getAbortMetadata(error)` to recover that information:
+
+```typescript
+import { getAbortMetadata } from "@ai-hero/sandcastle";
+
+try {
+  await run({
+    agent: claudeCode("claude-opus-4-7"),
+    sandbox: docker(),
+    prompt: "Do work",
+    signal,
+  });
+} catch (error) {
+  const metadata = getAbortMetadata(error);
+  console.log(metadata?.iterations.at(-1)?.sessionId);
+  console.log(metadata?.iterations.at(-1)?.sessionFilePath);
+}
+```
+
+This is best-effort: metadata is attached only when `signal.reason` is object-like, and partial session capture during abort is attempted but not guaranteed.
 
 ### Session fork
 
