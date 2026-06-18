@@ -1197,15 +1197,19 @@ export const devin = (
     dangerouslySkipPermissions,
   }: AgentCommandOptions): PrintCommand {
     const bypassFlag = dangerouslySkipPermissions
-      ? " --permission-mode bypass"
+      ? " --permission-mode dangerous"
       : "";
-    // Write credentials.toml from DEVIN_API_KEY before each invocation.
-    // Devin authenticates via this file; no interactive login is required.
+    // Write credentials.toml from DEVIN_SESSION_TOKEN before each invocation.
+    // DEVIN_SESSION_TOKEN is the windsurf_api_key value from the host's
+    // ~/.local/share/devin/credentials.toml — the CLI uses OAuth session tokens,
+    // not API keys. No interactive login is required inside the sandbox.
+    // Note: \\n in the printf format string must be 4 backslashes in TS source so
+    // the template literal emits the two-character sequence \n that printf interprets.
     const setupCredentials =
       `mkdir -p ~/.local/share/devin && ` +
-      `printf 'windsurf_api_key = "%s"\\napi_server_url = "https://server.codeium.com"\\ndevin_webapp_host = "app.devin.ai"\\ndevin_api_url = "https://api.devin.ai"\\n' "$DEVIN_API_KEY" > ~/.local/share/devin/credentials.toml`;
+      `printf 'windsurf_api_key = "%s"\\napi_server_url = "https://server.codeium.com"\\ndevin_webapp_host = "app.devin.ai"\\ndevin_api_url = "https://api.devin.ai"\\n' "$DEVIN_SESSION_TOKEN" > ~/.local/share/devin/credentials.toml`;
     return {
-      command: `${setupCredentials} && devin -p --model ${shellEscape(model)}${bypassFlag} -- ${shellEscape(prompt)}`,
+      command: `${setupCredentials} && devin -p ${shellEscape(prompt)} --model ${shellEscape(model)}${bypassFlag}`,
     };
   },
 

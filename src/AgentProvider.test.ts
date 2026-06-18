@@ -1997,17 +1997,18 @@ describe("devin factory", () => {
     expect(command).toContain("--model 'swe-1-6-fast'");
   });
 
-  it("buildPrintCommand delivers prompt after -- separator", () => {
+  it("buildPrintCommand delivers prompt as inline -p argument", () => {
     const { command } = devin("swe-1-6-fast").buildPrintCommand(
       opts("do something"),
     );
-    expect(command).toContain("-- 'do something'");
+    expect(command).toContain("-p 'do something'");
+    expect(command).not.toContain("-- 'do something'");
   });
 
   it("buildPrintCommand includes credentials.toml setup from DEVIN_API_KEY", () => {
     const { command } = devin("swe-1-6-fast").buildPrintCommand(opts("hello"));
     expect(command).toContain("credentials.toml");
-    expect(command).toContain("DEVIN_API_KEY");
+    expect(command).toContain("DEVIN_SESSION_TOKEN");
     expect(command).toContain("~/.local/share/devin");
   });
 
@@ -2016,7 +2017,7 @@ describe("devin factory", () => {
       prompt: "test",
       dangerouslySkipPermissions: true,
     });
-    expect(command).toContain("--permission-mode bypass");
+    expect(command).toContain("--permission-mode dangerous");
   });
 
   it("buildPrintCommand omits --permission-mode bypass when not set", () => {
@@ -2024,7 +2025,7 @@ describe("devin factory", () => {
       prompt: "test",
       dangerouslySkipPermissions: false,
     });
-    expect(command).not.toContain("--permission-mode bypass");
+    expect(command).not.toContain("--permission-mode dangerous");
   });
 
   it("parseStreamLine returns text event for non-empty line", () => {

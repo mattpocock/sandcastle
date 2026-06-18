@@ -519,8 +519,8 @@ GITHUB_TOKEN=`,
     defaultModel: "adaptive",
     factoryImport: "devin",
     dockerfileTemplate: DEVIN_DOCKERFILE,
-    envExample: `# Devin service-user API key (starts with cog_)
-DEVIN_API_KEY=`,
+    envExample: `# Devin session token — the windsurf_api_key value from ~/.local/share/devin/credentials.toml on your host
+DEVIN_SESSION_TOKEN=`,
     setupCommand: `devin -p -- "$(cat ${SETUP_ISSUE_TRACKER_PATH})"`,
   },
 ];
