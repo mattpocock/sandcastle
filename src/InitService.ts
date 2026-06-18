@@ -406,6 +406,46 @@ WORKDIR /home/agent
 ENTRYPOINT ["sleep", "infinity"]
 `;
 
+const DEVIN_DOCKERFILE = `FROM debian:bookworm-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+  git \
+  curl \
+  jq \
+  ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+{{ISSUE_TRACKER_TOOLS}}
+
+# Build-args for UID/GID alignment: sandcastle docker build-image
+# defaults these to the host user's UID/GID so image-built files
+# and bind-mounted files share an owner without runtime chown.
+ARG AGENT_UID=1000
+ARG AGENT_GID=1000
+
+RUN groupadd -g $AGENT_GID agent && \
+    useradd -u $AGENT_UID -g $AGENT_GID -m -d /home/agent agent
+
+# Install the Devin CLI binary directly from the release tarball.
+# We bypass the install script (which ends with an interactive \`devin setup\`
+# wizard) by fetching the tarball and extracting only the binary.
+# Auth is handled at runtime via credentials.toml written from DEVIN_API_KEY.
+RUN MANIFEST=\$(curl -fsSL https://static.devin.ai/cli/current/manifest.json) && \\
+    BUNDLE_URL=\$(echo "\$MANIFEST" | jq -r '.platforms["x86_64-unknown-linux"].url') && \\
+    curl -fsSL "\$BUNDLE_URL" | tar xz -C /usr/local && \\
+    chmod +x /usr/local/bin/devin
+
+USER \${AGENT_UID}:\${AGENT_GID}
+
+WORKDIR /home/agent
+
+# In worktree sandbox mode, Sandcastle bind-mounts the git worktree at \${SANDBOX_REPO_DIR}
+# and overrides the working directory to \${SANDBOX_REPO_DIR} at container start.
+# Structure your Dockerfile so that \${SANDBOX_REPO_DIR} can serve as the project root.
+ENTRYPOINT ["sleep", "infinity"]
+`;
+
 const AGENT_REGISTRY: AgentEntry[] = [
   {
     name: "claude-code",
@@ -472,6 +512,16 @@ OPENCODE_API_KEY=`,
 # COPILOT_GITHUB_TOKEN takes precedence over GH_TOKEN and GITHUB_TOKEN.
 GITHUB_TOKEN=`,
     setupCommand: `copilot -i "$(cat ${SETUP_ISSUE_TRACKER_PATH})"`,
+  },
+  {
+    name: "devin",
+    label: "Devin",
+    defaultModel: "adaptive",
+    factoryImport: "devin",
+    dockerfileTemplate: DEVIN_DOCKERFILE,
+    envExample: `# Devin service-user API key (starts with cog_)
+DEVIN_API_KEY=`,
+    setupCommand: `devin -p -- "$(cat ${SETUP_ISSUE_TRACKER_PATH})"`,
   },
 ];
 

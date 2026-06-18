@@ -7,6 +7,7 @@ import {
   codex,
   copilot,
   cursor,
+  devin,
   opencode,
   pi,
 } from "./AgentProvider.js";
@@ -1954,6 +1955,112 @@ describe("copilot factory", () => {
     expect(provider1.buildPrintCommand(opts("test")).command).not.toContain(
       "model-b",
     );
+  });
+});
+
+describe("devin factory", () => {
+  const opts = (prompt: string): AgentCommandOptions => ({
+    prompt,
+    dangerouslySkipPermissions: false,
+  });
+
+  it("returns a provider with name 'devin'", () => {
+    expect(devin("swe-1-6-fast").name).toBe("devin");
+  });
+
+  it("captureSessions is false", () => {
+    expect(devin("swe-1-6-fast").captureSessions).toBe(false);
+  });
+
+  it("defaults env to empty object", () => {
+    expect(devin("swe-1-6-fast").env).toEqual({});
+  });
+
+  it("accepts env option and exposes it", () => {
+    expect(
+      devin("swe-1-6-fast", { env: { DEVIN_API_KEY: "cog_test" } }).env,
+    ).toEqual({ DEVIN_API_KEY: "cog_test" });
+  });
+
+  it("buildPrintCommand includes -p flag", () => {
+    const { command } = devin("swe-1-6-fast").buildPrintCommand(opts("hello"));
+    expect(command).toContain("-p");
+  });
+
+  it("buildPrintCommand includes the model", () => {
+    const { command } = devin("swe-1-6-fast").buildPrintCommand(opts("hello"));
+    expect(command).toContain("swe-1-6-fast");
+  });
+
+  it("buildPrintCommand shell-escapes the model", () => {
+    const { command } = devin("swe-1-6-fast").buildPrintCommand(opts("hello"));
+    expect(command).toContain("--model 'swe-1-6-fast'");
+  });
+
+  it("buildPrintCommand delivers prompt after -- separator", () => {
+    const { command } = devin("swe-1-6-fast").buildPrintCommand(
+      opts("do something"),
+    );
+    expect(command).toContain("-- 'do something'");
+  });
+
+  it("buildPrintCommand includes credentials.toml setup from DEVIN_API_KEY", () => {
+    const { command } = devin("swe-1-6-fast").buildPrintCommand(opts("hello"));
+    expect(command).toContain("credentials.toml");
+    expect(command).toContain("DEVIN_API_KEY");
+    expect(command).toContain("~/.local/share/devin");
+  });
+
+  it("buildPrintCommand includes --permission-mode bypass when dangerouslySkipPermissions", () => {
+    const { command } = devin("swe-1-6-fast").buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+    });
+    expect(command).toContain("--permission-mode bypass");
+  });
+
+  it("buildPrintCommand omits --permission-mode bypass when not set", () => {
+    const { command } = devin("swe-1-6-fast").buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: false,
+    });
+    expect(command).not.toContain("--permission-mode bypass");
+  });
+
+  it("parseStreamLine returns text event for non-empty line", () => {
+    expect(devin("swe-1-6-fast").parseStreamLine("Hello world")).toEqual([
+      { type: "text", text: "Hello world" },
+    ]);
+  });
+
+  it("parseStreamLine returns empty array for blank line", () => {
+    expect(devin("swe-1-6-fast").parseStreamLine("")).toEqual([]);
+  });
+
+  it("parseStreamLine returns empty array for whitespace-only line", () => {
+    expect(devin("swe-1-6-fast").parseStreamLine("   ")).toEqual([]);
+  });
+
+  it("buildInteractiveArgs includes binary, model, and prompt", () => {
+    expect(
+      devin("swe-1-6-fast").buildInteractiveArgs!({
+        prompt: "do something",
+        dangerouslySkipPermissions: true,
+      }),
+    ).toEqual(["devin", "--model", "swe-1-6-fast", "--", "do something"]);
+  });
+
+  it("buildInteractiveArgs omits -- and prompt when prompt is empty", () => {
+    expect(
+      devin("swe-1-6-fast").buildInteractiveArgs!({
+        prompt: "",
+        dangerouslySkipPermissions: false,
+      }),
+    ).toEqual(["devin", "--model", "swe-1-6-fast"]);
+  });
+
+  it("has no sessionStorage", () => {
+    expect(devin("swe-1-6-fast").sessionStorage).toBeUndefined();
   });
 });
 
