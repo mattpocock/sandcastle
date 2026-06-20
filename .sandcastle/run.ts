@@ -1,8 +1,33 @@
+import { execFile as execFileCb } from "node:child_process";
+import { promisify } from "node:util";
+
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 
+const execFile = promisify(execFileCb);
+
 const MAX_ITERATIONS = 10;
 const MAX_PARALLEL = 4;
+
+// True if `branch` has commits not yet on `main`. We ask git directly rather
+// than relying on the implementer's `commits.length` from this iteration —
+// a branch may already be ahead from a previous iteration whose merger
+// never picked it up, in which case the next iteration's implementer finds
+// the fix already in place, produces zero new commits, and (without this
+// check) the branch silently drops out of the merger's input forever.
+async function branchIsAheadOfMain(branch: string): Promise<boolean> {
+  try {
+    const { stdout } = await execFile("git", [
+      "rev-list",
+      "--count",
+      `main..${branch}`,
+    ]);
+    return parseInt(stdout.trim(), 10) > 0;
+  } catch (err) {
+    console.warn(`  ⚠ couldn't check ${branch} ahead-of-main: ${err}`);
+    return false;
+  }
+}
 
 for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   console.log(`\n=== Iteration ${iteration}/${MAX_ITERATIONS} ===\n`);
@@ -108,33 +133,26 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     }
   }
 
-  const completedIssues = settled
+  const fulfilledIssues = settled
     .map((outcome, i) => ({ outcome, issue: issues[i] }))
-    .filter(
-      (
-        entry,
-      ): entry is {
-        outcome: PromiseFulfilledResult<
-          Awaited<ReturnType<typeof sandcastle.run>>
-        >;
-        issue: (typeof issues)[number];
-      } =>
-        entry.outcome.status === "fulfilled" &&
-        entry.outcome.value.commits.length > 0,
-    )
+    .filter((entry) => entry.outcome.status === "fulfilled")
     .map((entry) => entry.issue);
 
+  const aheadFlags = await Promise.all(
+    fulfilledIssues.map((issue) => branchIsAheadOfMain(issue.branch)),
+  );
+  const completedIssues = fulfilledIssues.filter((_, i) => aheadFlags[i]);
   const completedBranches = completedIssues.map((i) => i.branch);
 
   console.log(
-    `\nExecution complete. ${completedBranches.length} branch(es) with commits:`,
+    `\nExecution complete. ${completedBranches.length} branch(es) ahead of main:`,
   );
   for (const branch of completedBranches) {
     console.log(`  ${branch}`);
   }
 
   if (completedBranches.length === 0) {
-    console.log("No commits produced. Nothing to merge.");
+    console.log("No branches ahead of main. Nothing to merge.");
     continue;
   }
 
