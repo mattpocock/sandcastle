@@ -3,7 +3,7 @@
  *
  * Usage:
  *   import { noSandbox } from "sandcastle/sandboxes/no-sandbox";
- *   await interactive({ agent: claudeCode("claude-opus-4-7"), sandbox: noSandbox() });
+ *   await interactive({ agent: claudeCode("claude-opus-4-8"), sandbox: noSandbox() });
  *
  * Accepted by `run()`, `interactive()`, and `createSandbox()`. Skips
  * container isolation entirely — the agent executes on the host. Does not

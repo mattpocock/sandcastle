@@ -146,7 +146,7 @@ describe("createWorktree() Windows mount patching", () => {
 
     try {
       await ws.interactive({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox: provider,
         prompt: "test",
       });
@@ -178,7 +178,7 @@ describe("createWorktree() Windows mount patching", () => {
 
     try {
       await ws.run({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox: provider,
         prompt: "test",
         logging: { type: "stdout" },

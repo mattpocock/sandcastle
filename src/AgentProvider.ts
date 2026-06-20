@@ -276,7 +276,7 @@ export interface AgentProvider {
   parseSessionUsage?(content: string): IterationUsage | undefined;
 }
 
-export const DEFAULT_MODEL = "claude-opus-4-7";
+export const DEFAULT_MODEL = "claude-opus-4-8";
 
 // ---------------------------------------------------------------------------
 // Session storage helpers — file I/O lives here so callers (Orchestrator,

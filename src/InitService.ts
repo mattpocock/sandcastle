@@ -410,7 +410,7 @@ const AGENT_REGISTRY: AgentEntry[] = [
   {
     name: "claude-code",
     label: "Claude Code",
-    defaultModel: "claude-opus-4-7",
+    defaultModel: "claude-opus-4-8",
     factoryImport: "claudeCode",
     dockerfileTemplate: CLAUDE_CODE_DOCKERFILE,
     envExample: `# Claude Code OAuth token — get one by running \`claude setup-token\` on your host.

@@ -133,7 +133,7 @@ export interface ResumeSandboxRunResultOptions {
 }
 
 export interface SandboxRunOptions extends ResumeSandboxRunResultOptions {
-  /** Agent provider to use (e.g. claudeCode("claude-opus-4-7")). */
+  /** Agent provider to use (e.g. claudeCode("claude-opus-4-8")). */
   readonly agent: AgentProvider;
   /** Inline prompt string (mutually exclusive with promptFile). */
   readonly prompt?: string;
@@ -189,7 +189,7 @@ export interface SandboxRunResult {
 }
 
 export interface SandboxInteractiveOptions {
-  /** Agent provider to use (e.g. claudeCode("claude-opus-4-7")). */
+  /** Agent provider to use (e.g. claudeCode("claude-opus-4-8")). */
   readonly agent: AgentProvider;
   /** Inline prompt string (mutually exclusive with promptFile). */
   readonly prompt?: string;

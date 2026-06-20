@@ -347,7 +347,7 @@ describe("worktree.interactive()", () => {
 
     try {
       const result = await ws.interactive({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox: provider,
         prompt: "test prompt",
       });
@@ -380,7 +380,7 @@ describe("worktree.interactive()", () => {
 
     try {
       const result = await ws.interactive({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox: provider,
         prompt: "fix the bug",
       });
@@ -414,7 +414,7 @@ describe("worktree.interactive()", () => {
 
     try {
       await ws.interactive({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox: provider,
         prompt: "add a file",
       });
@@ -455,7 +455,7 @@ describe("worktree.interactive()", () => {
 
       await expect(
         ws.interactive({
-          agent: claudeCode("claude-opus-4-7"),
+          agent: claudeCode("claude-opus-4-8"),
           sandbox: provider,
           prompt: "test prompt",
           signal: ac.signal,
@@ -488,7 +488,7 @@ describe("worktree.interactive()", () => {
       // First call: aborted
       await expect(
         ws.interactive({
-          agent: claudeCode("claude-opus-4-7"),
+          agent: claudeCode("claude-opus-4-8"),
           sandbox: provider,
           prompt: "test",
           signal: ac.signal,
@@ -500,7 +500,7 @@ describe("worktree.interactive()", () => {
 
       // Handle still usable
       const result = await ws.interactive({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox: provider,
         prompt: "test again",
       });
@@ -513,7 +513,7 @@ describe("worktree.interactive()", () => {
 
   it("signal option has correct type on WorktreeInteractiveOptions", () => {
     const _options: WorktreeInteractiveOptions = {
-      agent: claudeCode("claude-opus-4-7"),
+      agent: claudeCode("claude-opus-4-8"),
       prompt: "test",
       signal: new AbortController().signal,
     };
@@ -539,7 +539,7 @@ describe("worktree.interactive()", () => {
 
     try {
       const result = await ws.interactive({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox: provider,
         prompt: "test",
       });
@@ -668,7 +668,7 @@ describe("worktree.run()", () => {
 
     try {
       const result = await ws.run({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox,
         prompt: "do something",
         maxIterations: 1,
@@ -757,7 +757,7 @@ describe("worktree.run()", () => {
                   JSON.stringify({
                     type: "assistant",
                     message: {
-                      model: "claude-opus-4-7",
+                      model: "claude-opus-4-8",
                       usage: {
                         input_tokens: 50000,
                         cache_creation_input_tokens: 0,
@@ -873,7 +873,7 @@ describe("worktree.run()", () => {
 
     try {
       await ws.run({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox,
         prompt: "create a file",
         maxIterations: 1,
@@ -912,7 +912,7 @@ describe("worktree.run()", () => {
 
     try {
       const result = await ws.run({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox,
         prompt: "create a file",
         maxIterations: 1,
@@ -950,7 +950,7 @@ describe("worktree.run()", () => {
 
     try {
       const result = await ws.run({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox,
         prompt: "create a file",
         maxIterations: 1,
@@ -1007,7 +1007,7 @@ describe("worktree.run()", () => {
 
     try {
       await ws.run({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox,
         prompt: "first",
         maxIterations: 1,
@@ -1016,7 +1016,7 @@ describe("worktree.run()", () => {
       // Second run() reuses the same worktree handle — the source branch must
       // still exist on disk for the iteration to find HEAD inside the sandbox.
       await ws.run({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox,
         prompt: "second",
         maxIterations: 1,
@@ -1036,7 +1036,7 @@ describe("worktree.run()", () => {
   it("sandbox is required (type error if omitted)", () => {
     // This test validates at the type level — sandbox is required in WorktreeRunOptions
     const _options = {
-      agent: claudeCode("claude-opus-4-7"),
+      agent: claudeCode("claude-opus-4-8"),
       prompt: "test",
       // @ts-expect-error — sandbox is required
     } satisfies WorktreeRunOptions;
@@ -1064,7 +1064,7 @@ describe("worktree.run()", () => {
 
       await expect(
         ws.run({
-          agent: claudeCode("claude-opus-4-7"),
+          agent: claudeCode("claude-opus-4-8"),
           sandbox,
           prompt: "do something",
           signal: ac.signal,
@@ -1099,7 +1099,7 @@ describe("worktree.run()", () => {
     try {
       await expect(
         ws.run({
-          agent: claudeCode("claude-opus-4-7"),
+          agent: claudeCode("claude-opus-4-8"),
           sandbox,
           prompt: "do something",
           signal: ac.signal,
@@ -1133,7 +1133,7 @@ describe("worktree.run()", () => {
       // First call: aborted
       await expect(
         ws.run({
-          agent: claudeCode("claude-opus-4-7"),
+          agent: claudeCode("claude-opus-4-8"),
           sandbox,
           prompt: "do something",
           signal: ac.signal,
@@ -1142,7 +1142,7 @@ describe("worktree.run()", () => {
 
       // Second call: should succeed without signal
       const result = await ws.run({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox,
         prompt: "do something else",
       });
@@ -1157,7 +1157,7 @@ describe("worktree.run()", () => {
 
   it("signal option has the correct type on WorktreeRunOptions", () => {
     const _options: WorktreeRunOptions = {
-      agent: claudeCode("claude-opus-4-7"),
+      agent: claudeCode("claude-opus-4-8"),
       sandbox: testSandbox,
       prompt: "test",
       signal: new AbortController().signal,

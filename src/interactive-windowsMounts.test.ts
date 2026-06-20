@@ -96,7 +96,7 @@ describe("interactive() Windows mount patching", () => {
     const provider = makeInteractiveProvider();
 
     await interactive({
-      agent: claudeCode("claude-opus-4-7"),
+      agent: claudeCode("claude-opus-4-8"),
       sandbox: provider,
       prompt: "test",
       cwd: hostDir,
@@ -121,7 +121,7 @@ describe("interactive() Windows mount patching", () => {
     const provider = makeInteractiveProvider();
 
     await interactive({
-      agent: claudeCode("claude-opus-4-7"),
+      agent: claudeCode("claude-opus-4-8"),
       sandbox: provider,
       prompt: "test",
       cwd: hostDir,

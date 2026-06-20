@@ -3,7 +3,7 @@
  *
  * Usage:
  *   import { docker } from "sandcastle/sandboxes/docker";
- *   await run({ agent: claudeCode("claude-opus-4-7"), sandbox: docker() });
+ *   await run({ agent: claudeCode("claude-opus-4-8"), sandbox: docker() });
  */
 
 import {

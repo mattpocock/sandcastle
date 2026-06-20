@@ -268,14 +268,14 @@ describe("RunOptions", () => {
   it("requires sandbox field typed as SandboxProvider", () => {
     // @ts-expect-error sandbox is required
     const _opts: RunOptions = {
-      agent: claudeCode("claude-opus-4-7"),
+      agent: claudeCode("claude-opus-4-8"),
       prompt: "test",
     };
   });
 
   it("allows idleTimeoutSeconds to be specified", () => {
     const opts: RunOptions = {
-      agent: claudeCode("claude-opus-4-7"),
+      agent: claudeCode("claude-opus-4-8"),
       sandbox: testSandbox,
       prompt: "test",
       idleTimeoutSeconds: 120,
@@ -285,7 +285,7 @@ describe("RunOptions", () => {
 
   it("allows idleTimeoutSeconds to be omitted (uses default)", () => {
     const opts: RunOptions = {
-      agent: claudeCode("claude-opus-4-7"),
+      agent: claudeCode("claude-opus-4-8"),
       sandbox: testSandbox,
       prompt: "test",
     };
@@ -294,7 +294,7 @@ describe("RunOptions", () => {
 
   it("allows name to be specified", () => {
     const opts: RunOptions = {
-      agent: claudeCode("claude-opus-4-7"),
+      agent: claudeCode("claude-opus-4-8"),
       sandbox: testSandbox,
       prompt: "test",
       name: "my-run",
@@ -304,7 +304,7 @@ describe("RunOptions", () => {
 
   it("allows name to be omitted", () => {
     const opts: RunOptions = {
-      agent: claudeCode("claude-opus-4-7"),
+      agent: claudeCode("claude-opus-4-8"),
       sandbox: testSandbox,
       prompt: "test",
     };
@@ -313,7 +313,7 @@ describe("RunOptions", () => {
 
   it("does not accept a worktree field", () => {
     const opts: RunOptions = {
-      agent: claudeCode("claude-opus-4-7"),
+      agent: claudeCode("claude-opus-4-8"),
       sandbox: testSandbox,
       prompt: "test",
     };
@@ -323,7 +323,7 @@ describe("RunOptions", () => {
 
   it("allows cwd to be specified", () => {
     const opts: RunOptions = {
-      agent: claudeCode("claude-opus-4-7"),
+      agent: claudeCode("claude-opus-4-8"),
       sandbox: testSandbox,
       prompt: "test",
       cwd: "/some/repo",
@@ -333,7 +333,7 @@ describe("RunOptions", () => {
 
   it("allows cwd to be omitted (defaults to process.cwd())", () => {
     const opts: RunOptions = {
-      agent: claudeCode("claude-opus-4-7"),
+      agent: claudeCode("claude-opus-4-8"),
       sandbox: testSandbox,
       prompt: "test",
     };
@@ -342,7 +342,7 @@ describe("RunOptions", () => {
 
   it("does not accept a top-level branch field", () => {
     const opts: RunOptions = {
-      agent: claudeCode("claude-opus-4-7"),
+      agent: claudeCode("claude-opus-4-8"),
       sandbox: testSandbox,
       prompt: "test",
     };
@@ -352,7 +352,7 @@ describe("RunOptions", () => {
 
   it("does not accept a top-level imageName field", () => {
     const opts: RunOptions = {
-      agent: claudeCode("claude-opus-4-7"),
+      agent: claudeCode("claude-opus-4-8"),
       sandbox: testSandbox,
       prompt: "test",
     };
@@ -365,7 +365,7 @@ describe("signal (AbortSignal)", () => {
   it("allows signal to be specified on RunOptions", () => {
     const ac = new AbortController();
     const opts: RunOptions = {
-      agent: claudeCode("claude-opus-4-7"),
+      agent: claudeCode("claude-opus-4-8"),
       sandbox: testSandbox,
       prompt: "test",
       signal: ac.signal,
@@ -375,7 +375,7 @@ describe("signal (AbortSignal)", () => {
 
   it("allows signal to be omitted", () => {
     const opts: RunOptions = {
-      agent: claudeCode("claude-opus-4-7"),
+      agent: claudeCode("claude-opus-4-8"),
       sandbox: testSandbox,
       prompt: "test",
     };
@@ -387,7 +387,7 @@ describe("signal (AbortSignal)", () => {
     ac.abort("cancelled before start");
     await expect(
       run({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox: testSandbox,
         prompt: "test",
         branchStrategy: { type: "head" },
@@ -402,7 +402,7 @@ describe("signal (AbortSignal)", () => {
     ac.abort(reason);
     try {
       await run({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox: testSandbox,
         prompt: "test",
         branchStrategy: { type: "head" },
@@ -419,7 +419,7 @@ describe("resumeSession validation", () => {
   it("throws when resumeSession is set with maxIterations > 1", async () => {
     await expect(
       run({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox: testSandbox,
         prompt: "test",
         branchStrategy: { type: "head" },
@@ -434,7 +434,7 @@ describe("resumeSession validation", () => {
   it("throws when resumeSession file does not exist on host", async () => {
     await expect(
       run({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox: testSandbox,
         prompt: "test",
         branchStrategy: { type: "head" },
@@ -448,7 +448,7 @@ describe("resumeSession validation", () => {
     // not the maxIterations validation
     await expect(
       run({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox: testSandbox,
         prompt: "test",
         branchStrategy: { type: "head" },
@@ -462,7 +462,7 @@ describe("forkSession validation", () => {
   it("throws when forkSession is set without resumeSession", async () => {
     await expect(
       run({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox: testSandbox,
         prompt: "test",
         branchStrategy: { type: "head" },
@@ -479,7 +479,7 @@ describe("copyToWorktree with head branch strategy", () => {
   it("throws a runtime error when copyToWorktree is provided with head strategy", async () => {
     await expect(
       run({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox: testSandbox,
         prompt: "test",
         branchStrategy: { type: "head" },
@@ -506,7 +506,7 @@ describe("branchStrategy on RunOptions", () => {
 
     await expect(
       run({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox: isolatedSandbox,
         prompt: "test",
         branchStrategy: { type: "head" },
@@ -679,7 +679,7 @@ describe("promptFile resolution with cwd", () => {
 
     await expect(
       run({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox: testSandbox,
         promptFile: relativePromptFile,
         branchStrategy: { type: "head" },
@@ -693,7 +693,7 @@ describe("inline prompt passthrough", () => {
   it("errors when promptArgs is passed alongside an inline prompt", async () => {
     await expect(
       run({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox: testSandbox,
         prompt: "do the work",
         branchStrategy: { type: "head" },
@@ -710,7 +710,7 @@ describe("inline prompt passthrough", () => {
     // The run still fails (fake sandbox can't actually run the agent) but the
     // failure must not be a prompt-substitution error.
     const promise = run({
-      agent: claudeCode("claude-opus-4-7"),
+      agent: claudeCode("claude-opus-4-8"),
       sandbox: testSandbox,
       prompt: "Issue body mentions {{BRANCH}} in its content.",
       branchStrategy: { type: "head" },
@@ -727,7 +727,7 @@ describe("inline prompt passthrough", () => {
     // pattern. An empty args object is semantically the same as "not provided"
     // and must not trigger the inline-prompt guard.
     const promise = run({
-      agent: claudeCode("claude-opus-4-7"),
+      agent: claudeCode("claude-opus-4-8"),
       sandbox: testSandbox,
       prompt: "do the work",
       branchStrategy: { type: "head" },
@@ -760,7 +760,7 @@ describe("run() error logging to file", () => {
 
     await expect(
       run({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox: testSandbox,
         promptFile,
         branchStrategy: { type: "head" },
@@ -782,7 +782,7 @@ describe("run() error logging to file", () => {
 
     await expect(
       run({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox: testSandbox,
         promptFile,
         branchStrategy: { type: "head" },
@@ -967,7 +967,7 @@ describe("structured output entry-time validation", () => {
   it("throws when output is set with maxIterations !== 1", async () => {
     await expect(
       run({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox: testSandbox,
         prompt: "emit <result>...</result>",
         branchStrategy: { type: "head" },
@@ -981,7 +981,7 @@ describe("structured output entry-time validation", () => {
     // Should pass maxIterations check and fail later for a different reason
     await expect(
       run({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox: testSandbox,
         prompt: "emit <result>...</result>",
         branchStrategy: { type: "head" },
@@ -993,7 +993,7 @@ describe("structured output entry-time validation", () => {
   it("throws when output tag is not in the resolved prompt", async () => {
     await expect(
       run({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox: testSandbox,
         prompt: "do some work",
         branchStrategy: { type: "head" },
@@ -1007,7 +1007,7 @@ describe("structured output entry-time validation", () => {
     // (the mock sandbox produces empty stdout, so extraction fails — but not the prompt check)
     await expect(
       run({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox: testSandbox,
         prompt: "emit your answer inside <result> tags",
         branchStrategy: { type: "head" },
@@ -1019,7 +1019,7 @@ describe("structured output entry-time validation", () => {
   it("validates tag presence for Output.string as well", async () => {
     await expect(
       run({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox: testSandbox,
         prompt: "do some work",
         branchStrategy: { type: "head" },
@@ -1035,7 +1035,7 @@ describe("structured output entry-time validation", () => {
 
     await expect(
       run({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox: testSandbox,
         promptFile,
         branchStrategy: { type: "head" },
@@ -1088,7 +1088,7 @@ describe("structured output error carries the failed session id", () => {
     // attempting to transfer a (nonexistent) session file off the sandbox.
     try {
       await run({
-        agent: claudeCode("claude-opus-4-7", { captureSessions: false }),
+        agent: claudeCode("claude-opus-4-8", { captureSessions: false }),
         sandbox: sessionEmittingSandbox,
         prompt: "emit your answer inside <result> tags",
         branchStrategy: { type: "head" },
@@ -1107,7 +1107,7 @@ describe("structured output error carries the failed session id", () => {
 describe("RunOptions with output", () => {
   it("allows output field on RunOptions", () => {
     const opts: RunOptions = {
-      agent: claudeCode("claude-opus-4-7"),
+      agent: claudeCode("claude-opus-4-8"),
       sandbox: testSandbox,
       prompt: "emit <result>...</result>",
       output: Output.object({ tag: "result", schema: mockSchema() }),
@@ -1117,7 +1117,7 @@ describe("RunOptions with output", () => {
 
   it("allows output to be omitted", () => {
     const opts: RunOptions = {
-      agent: claudeCode("claude-opus-4-7"),
+      agent: claudeCode("claude-opus-4-8"),
       sandbox: testSandbox,
       prompt: "test",
     };
@@ -1128,7 +1128,7 @@ describe("RunOptions with output", () => {
 describe("output type-level exclusion", () => {
   it("InteractiveOptions does not accept output", () => {
     const opts: InteractiveOptions = {
-      agent: claudeCode("claude-opus-4-7"),
+      agent: claudeCode("claude-opus-4-8"),
       prompt: "test",
     };
     // @ts-expect-error output is not a field on InteractiveOptions
@@ -1137,7 +1137,7 @@ describe("output type-level exclusion", () => {
 
   it("WorktreeInteractiveOptions does not accept output", () => {
     const opts: WorktreeInteractiveOptions = {
-      agent: claudeCode("claude-opus-4-7"),
+      agent: claudeCode("claude-opus-4-8"),
       prompt: "test",
     };
     // @ts-expect-error output is not a field on WorktreeInteractiveOptions
@@ -1228,7 +1228,7 @@ describe("output.maxRetries entry-time validation", () => {
   it("throws when maxRetries is negative", async () => {
     await expect(
       run({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox: testSandbox,
         prompt: "emit your answer inside <result> tags",
         branchStrategy: { type: "head" },
@@ -1244,7 +1244,7 @@ describe("output.maxRetries entry-time validation", () => {
   it("throws when maxRetries is not an integer", async () => {
     await expect(
       run({
-        agent: claudeCode("claude-opus-4-7"),
+        agent: claudeCode("claude-opus-4-8"),
         sandbox: testSandbox,
         prompt: "emit your answer inside <result> tags",
         branchStrategy: { type: "head" },
@@ -1423,7 +1423,7 @@ describe("output.maxRetries end-to-end", () => {
 
     try {
       const result = await run({
-        agent: claudeCode("claude-opus-4-7", {
+        agent: claudeCode("claude-opus-4-8", {
           captureSessions: false,
           sessionStorage: { hostProjectsDir },
         }),
@@ -1456,7 +1456,7 @@ describe("output.maxRetries end-to-end", () => {
 
     try {
       await run({
-        agent: claudeCode("claude-opus-4-7", {
+        agent: claudeCode("claude-opus-4-8", {
           captureSessions: false,
           sessionStorage: { hostProjectsDir },
         }),
@@ -1494,7 +1494,7 @@ describe("output.maxRetries end-to-end", () => {
 
     await expect(
       run({
-        agent: claudeCode("claude-opus-4-7", { captureSessions: false }),
+        agent: claudeCode("claude-opus-4-8", { captureSessions: false }),
         sandbox,
         prompt: "emit your answer inside <result> tags",
         branchStrategy: { type: "head" },

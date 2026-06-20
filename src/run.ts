@@ -330,7 +330,7 @@ export interface Timeouts {
 }
 
 export interface RunOptions<A extends AgentProvider = AgentProvider> {
-  /** Agent provider to use (e.g. claudeCode("claude-opus-4-7")) */
+  /** Agent provider to use (e.g. claudeCode("claude-opus-4-8")) */
   readonly agent: A;
   /** Sandbox provider (e.g. docker({ imageName: "sandcastle:myrepo" })). */
   readonly sandbox: SandboxProvider;

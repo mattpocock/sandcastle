@@ -11,7 +11,7 @@ describe("Agent registry", () => {
     const agent = getAgent("claude-code");
     expect(agent).toBeDefined();
     expect(agent!.name).toBe("claude-code");
-    expect(agent!.defaultModel).toBe("claude-opus-4-7");
+    expect(agent!.defaultModel).toBe("claude-opus-4-8");
     expect(agent!.factoryImport).toBe("claudeCode");
     expect(agent!.dockerfileTemplate).toContain("FROM");
   });

@@ -53,7 +53,7 @@ export const writeText = (filename: string, value: string): void => {
 };
 
 export const claudeAgent = () =>
-  sandcastle.claudeCode("claude-opus-4-7", {
+  sandcastle.claudeCode("claude-opus-4-8", {
     env: {
       CLAUDE_CODE_OAUTH_TOKEN: required("CLAUDE_CODE_OAUTH_TOKEN"),
     },

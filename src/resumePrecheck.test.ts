@@ -30,7 +30,7 @@ describe("assertResumeSessionExists", () => {
       await mkdir(misEncodedDir, { recursive: true });
       await writeFile(join(misEncodedDir, `${SESSION_ID}.jsonl`), "{}");
 
-      const provider = claudeCode("claude-opus-4-7", {
+      const provider = claudeCode("claude-opus-4-8", {
         sessionStorage: { hostProjectsDir: projectsDir },
       });
 
@@ -45,7 +45,7 @@ describe("assertResumeSessionExists", () => {
     });
 
     it("throws an error naming the searched root when the session is absent", async () => {
-      const provider = claudeCode("claude-opus-4-7", {
+      const provider = claudeCode("claude-opus-4-8", {
         sessionStorage: { hostProjectsDir: projectsDir },
       });
 
@@ -174,7 +174,7 @@ describe("assertResumeSessionExists", () => {
 
   describe("sandboxed (bind-mount / isolated)", () => {
     it("checks the exact host-repo-dir encoded location and names the expected file path on a miss", async () => {
-      const provider = claudeCode("claude-opus-4-7", {
+      const provider = claudeCode("claude-opus-4-8", {
         sessionStorage: { hostProjectsDir: projectsDir },
       });
 
@@ -191,7 +191,7 @@ describe("assertResumeSessionExists", () => {
     });
 
     it("passes when the session exists at the host-repo-dir encoded location", async () => {
-      const provider = claudeCode("claude-opus-4-7", {
+      const provider = claudeCode("claude-opus-4-8", {
         sessionStorage: { hostProjectsDir: projectsDir },
       });
       const hostRepoDir = "/some/host/repo";

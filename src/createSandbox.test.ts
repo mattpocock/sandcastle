@@ -402,7 +402,7 @@ describe("createSandbox", () => {
                     JSON.stringify({
                       type: "assistant",
                       message: {
-                        model: "claude-opus-4-7",
+                        model: "claude-opus-4-8",
                         usage: {
                           input_tokens: 50000,
                           cache_creation_input_tokens: 0,
@@ -577,7 +577,7 @@ describe("createSandbox", () => {
                     JSON.stringify({
                       type: "assistant",
                       message: {
-                        model: "claude-opus-4-7",
+                        model: "claude-opus-4-8",
                         usage: {
                           input_tokens: 100,
                           cache_creation_input_tokens: 0,

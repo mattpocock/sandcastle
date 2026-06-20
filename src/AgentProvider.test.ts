@@ -21,12 +21,12 @@ const opts = (prompt: string): AgentCommandOptions => ({
 
 describe("claudeCode factory", () => {
   it("returns a provider with name 'claude-code'", () => {
-    const provider = claudeCode("claude-opus-4-7");
+    const provider = claudeCode("claude-opus-4-8");
     expect(provider.name).toBe("claude-code");
   });
 
   it("does not expose envManifest or dockerfileTemplate", () => {
-    const provider = claudeCode("claude-opus-4-7");
+    const provider = claudeCode("claude-opus-4-8");
     expect(provider).not.toHaveProperty("envManifest");
     expect(provider).not.toHaveProperty("dockerfileTemplate");
   });
@@ -40,7 +40,7 @@ describe("claudeCode factory", () => {
   });
 
   it("buildPrintCommand delivers prompt via stdin, not argv", () => {
-    const provider = claudeCode("claude-opus-4-7");
+    const provider = claudeCode("claude-opus-4-8");
     const { command, stdin } = provider.buildPrintCommand(opts("do something"));
     expect(command).toContain("-p -");
     expect(command).not.toContain("'do something'");
@@ -48,13 +48,13 @@ describe("claudeCode factory", () => {
   });
 
   it("buildPrintCommand shell-escapes the model", () => {
-    const provider = claudeCode("claude-opus-4-7");
+    const provider = claudeCode("claude-opus-4-8");
     const { command } = provider.buildPrintCommand(opts("do something"));
-    expect(command).toContain("--model 'claude-opus-4-7'");
+    expect(command).toContain("--model 'claude-opus-4-8'");
   });
 
   it("parseStreamLine extracts text from assistant message", () => {
-    const provider = claudeCode("claude-opus-4-7");
+    const provider = claudeCode("claude-opus-4-8");
     const line = JSON.stringify({
       type: "assistant",
       message: { content: [{ type: "text", text: "Hello world" }] },
@@ -65,7 +65,7 @@ describe("claudeCode factory", () => {
   });
 
   it("parseStreamLine extracts result from result message", () => {
-    const provider = claudeCode("claude-opus-4-7");
+    const provider = claudeCode("claude-opus-4-8");
     const line = JSON.stringify({
       type: "result",
       result: "Final answer <promise>COMPLETE</promise>",
@@ -79,13 +79,13 @@ describe("claudeCode factory", () => {
   });
 
   it("parseStreamLine returns empty array for non-JSON lines", () => {
-    const provider = claudeCode("claude-opus-4-7");
+    const provider = claudeCode("claude-opus-4-8");
     expect(provider.parseStreamLine("not json")).toEqual([]);
     expect(provider.parseStreamLine("")).toEqual([]);
   });
 
   it("parseStreamLine extracts tool_use block (Bash → command arg)", () => {
-    const provider = claudeCode("claude-opus-4-7");
+    const provider = claudeCode("claude-opus-4-8");
     const line = JSON.stringify({
       type: "assistant",
       message: {
@@ -114,26 +114,26 @@ describe("claudeCode factory", () => {
   });
 
   it("buildPrintCommand includes --effort when specified", () => {
-    const provider = claudeCode("claude-opus-4-7", { effort: "high" });
+    const provider = claudeCode("claude-opus-4-8", { effort: "high" });
     const { command } = provider.buildPrintCommand(opts("do something"));
     expect(command).toContain("--effort high");
   });
 
   it("buildPrintCommand omits --effort when not specified", () => {
-    const provider = claudeCode("claude-opus-4-7");
+    const provider = claudeCode("claude-opus-4-8");
     const { command } = provider.buildPrintCommand(opts("do something"));
     expect(command).not.toContain("--effort");
   });
 
   it("buildPrintCommand omits --effort when options is empty", () => {
-    const provider = claudeCode("claude-opus-4-7", {});
+    const provider = claudeCode("claude-opus-4-8", {});
     const { command } = provider.buildPrintCommand(opts("do something"));
     expect(command).not.toContain("--effort");
   });
 
   it("supports all effort levels", () => {
     for (const effort of ["low", "medium", "high", "xhigh", "max"] as const) {
-      const provider = claudeCode("claude-opus-4-7", { effort });
+      const provider = claudeCode("claude-opus-4-8", { effort });
       expect(provider.buildPrintCommand(opts("test")).command).toContain(
         `--effort ${effort}`,
       );
@@ -141,21 +141,21 @@ describe("claudeCode factory", () => {
   });
 
   it("accepts an env option and exposes it on the provider", () => {
-    const provider = claudeCode("claude-opus-4-7", {
+    const provider = claudeCode("claude-opus-4-8", {
       env: { ANTHROPIC_API_KEY: "sk-test" },
     });
     expect(provider.env).toEqual({ ANTHROPIC_API_KEY: "sk-test" });
   });
 
   it("defaults env to empty object when not provided", () => {
-    const provider = claudeCode("claude-opus-4-7");
+    const provider = claudeCode("claude-opus-4-8");
     expect(provider.env).toEqual({});
   });
 
   // --- dangerouslySkipPermissions conditional tests ---
 
   it("buildPrintCommand includes --dangerously-skip-permissions when true", () => {
-    const provider = claudeCode("claude-opus-4-7");
+    const provider = claudeCode("claude-opus-4-8");
     const { command } = provider.buildPrintCommand({
       prompt: "test",
       dangerouslySkipPermissions: true,
@@ -164,7 +164,7 @@ describe("claudeCode factory", () => {
   });
 
   it("parseStreamLine emits session_id from Claude Code init line", () => {
-    const provider = claudeCode("claude-opus-4-7");
+    const provider = claudeCode("claude-opus-4-8");
     const line = JSON.stringify({
       type: "system",
       subtype: "init",
@@ -176,7 +176,7 @@ describe("claudeCode factory", () => {
   });
 
   it("parseStreamLine ignores system events without subtype init", () => {
-    const provider = claudeCode("claude-opus-4-7");
+    const provider = claudeCode("claude-opus-4-8");
     const line = JSON.stringify({
       type: "system",
       subtype: "other",
@@ -186,7 +186,7 @@ describe("claudeCode factory", () => {
   });
 
   it("parseStreamLine ignores system init without session_id", () => {
-    const provider = claudeCode("claude-opus-4-7");
+    const provider = claudeCode("claude-opus-4-8");
     const line = JSON.stringify({
       type: "system",
       subtype: "init",
@@ -195,7 +195,7 @@ describe("claudeCode factory", () => {
   });
 
   it("buildPrintCommand includes --resume when resumeSession is set", () => {
-    const provider = claudeCode("claude-opus-4-7");
+    const provider = claudeCode("claude-opus-4-8");
     const { command } = provider.buildPrintCommand({
       prompt: "test",
       dangerouslySkipPermissions: true,
@@ -205,7 +205,7 @@ describe("claudeCode factory", () => {
   });
 
   it("buildPrintCommand omits --resume when resumeSession is not set", () => {
-    const provider = claudeCode("claude-opus-4-7");
+    const provider = claudeCode("claude-opus-4-8");
     const { command } = provider.buildPrintCommand({
       prompt: "test",
       dangerouslySkipPermissions: true,
@@ -214,7 +214,7 @@ describe("claudeCode factory", () => {
   });
 
   it("buildPrintCommand appends --fork-session when resumeSession + forkSession are set", () => {
-    const provider = claudeCode("claude-opus-4-7");
+    const provider = claudeCode("claude-opus-4-8");
     const { command } = provider.buildPrintCommand({
       prompt: "test",
       dangerouslySkipPermissions: true,
@@ -228,7 +228,7 @@ describe("claudeCode factory", () => {
   it("buildPrintCommand omits --fork-session when forkSession is set without resumeSession", () => {
     // RunOptions validation rejects this combination, but buildPrintCommand
     // is permissive and should simply not emit a meaningless flag.
-    const provider = claudeCode("claude-opus-4-7");
+    const provider = claudeCode("claude-opus-4-8");
     const { command } = provider.buildPrintCommand({
       prompt: "test",
       dangerouslySkipPermissions: true,
@@ -239,7 +239,7 @@ describe("claudeCode factory", () => {
   });
 
   it("buildPrintCommand omits --fork-session when forkSession is false", () => {
-    const provider = claudeCode("claude-opus-4-7");
+    const provider = claudeCode("claude-opus-4-8");
     const { command } = provider.buildPrintCommand({
       prompt: "test",
       dangerouslySkipPermissions: true,
@@ -251,7 +251,7 @@ describe("claudeCode factory", () => {
   });
 
   it("buildPrintCommand omits --dangerously-skip-permissions when false", () => {
-    const provider = claudeCode("claude-opus-4-7");
+    const provider = claudeCode("claude-opus-4-8");
     const { command } = provider.buildPrintCommand({
       prompt: "test",
       dangerouslySkipPermissions: false,
@@ -260,7 +260,7 @@ describe("claudeCode factory", () => {
   });
 
   it("buildInteractiveArgs includes --dangerously-skip-permissions when true", () => {
-    const provider = claudeCode("claude-opus-4-7");
+    const provider = claudeCode("claude-opus-4-8");
     const args = provider.buildInteractiveArgs!({
       prompt: "test",
       dangerouslySkipPermissions: true,
@@ -269,7 +269,7 @@ describe("claudeCode factory", () => {
   });
 
   it("buildInteractiveArgs omits --dangerously-skip-permissions when false", () => {
-    const provider = claudeCode("claude-opus-4-7");
+    const provider = claudeCode("claude-opus-4-8");
     const args = provider.buildInteractiveArgs!({
       prompt: "test",
       dangerouslySkipPermissions: false,
@@ -280,7 +280,7 @@ describe("claudeCode factory", () => {
   // --- permissionMode option ---
 
   it("buildPrintCommand emits --permission-mode when permissionMode is set", () => {
-    const provider = claudeCode("claude-opus-4-7", { permissionMode: "auto" });
+    const provider = claudeCode("claude-opus-4-8", { permissionMode: "auto" });
     const { command } = provider.buildPrintCommand(opts("test"));
     expect(command).toContain("--permission-mode auto");
   });
@@ -289,7 +289,7 @@ describe("claudeCode factory", () => {
     // Sandcastle's AFK call sites pass dangerouslySkipPermissions: true. When the
     // user opts into a specific permission mode on the provider, that mode takes
     // precedence over the default bypass — they are mutually exclusive on claude's CLI.
-    const provider = claudeCode("claude-opus-4-7", { permissionMode: "auto" });
+    const provider = claudeCode("claude-opus-4-8", { permissionMode: "auto" });
     const { command } = provider.buildPrintCommand({
       prompt: "test",
       dangerouslySkipPermissions: true,
@@ -298,13 +298,13 @@ describe("claudeCode factory", () => {
   });
 
   it("buildPrintCommand omits --permission-mode when permissionMode is not set", () => {
-    const provider = claudeCode("claude-opus-4-7");
+    const provider = claudeCode("claude-opus-4-8");
     const { command } = provider.buildPrintCommand(opts("test"));
     expect(command).not.toContain("--permission-mode");
   });
 
   it("buildInteractiveArgs emits --permission-mode when permissionMode is set", () => {
-    const provider = claudeCode("claude-opus-4-7", { permissionMode: "plan" });
+    const provider = claudeCode("claude-opus-4-8", { permissionMode: "plan" });
     const args = provider.buildInteractiveArgs!({
       prompt: "test",
       dangerouslySkipPermissions: false,
@@ -314,7 +314,7 @@ describe("claudeCode factory", () => {
   });
 
   it("buildInteractiveArgs omits --dangerously-skip-permissions when permissionMode is set", () => {
-    const provider = claudeCode("claude-opus-4-7", { permissionMode: "auto" });
+    const provider = claudeCode("claude-opus-4-8", { permissionMode: "auto" });
     const args = provider.buildInteractiveArgs!({
       prompt: "test",
       dangerouslySkipPermissions: true,
@@ -1958,14 +1958,14 @@ describe("copilot factory", () => {
 });
 
 describe("parseSessionUsage (Claude Code)", () => {
-  const provider = claudeCode("claude-opus-4-7");
+  const provider = claudeCode("claude-opus-4-8");
 
   it("extracts usage from the last assistant message in a JSONL string", () => {
     const content = [
       JSON.stringify({
         type: "assistant",
         message: {
-          model: "claude-opus-4-7",
+          model: "claude-opus-4-8",
           usage: {
             input_tokens: 100,
             cache_creation_input_tokens: 200,
@@ -1977,7 +1977,7 @@ describe("parseSessionUsage (Claude Code)", () => {
       JSON.stringify({
         type: "assistant",
         message: {
-          model: "claude-opus-4-7",
+          model: "claude-opus-4-8",
           usage: {
             input_tokens: 3,
             cache_creation_input_tokens: 9294,
@@ -2012,7 +2012,7 @@ describe("parseSessionUsage (Claude Code)", () => {
     const content = JSON.stringify({
       type: "assistant",
       message: {
-        model: "claude-opus-4-7",
+        model: "claude-opus-4-8",
         content: [{ type: "text", text: "hi" }],
       },
     });
@@ -2030,7 +2030,7 @@ describe("parseSessionUsage (Claude Code)", () => {
       JSON.stringify({
         type: "assistant",
         message: {
-          model: "claude-opus-4-7",
+          model: "claude-opus-4-8",
           usage: {
             input_tokens: 10,
             cache_creation_input_tokens: 20,
@@ -2068,12 +2068,12 @@ describe("parseSessionUsage (Claude Code)", () => {
 
 describe("captureSessions flag", () => {
   it("claudeCode defaults captureSessions to true", () => {
-    expect(claudeCode("claude-opus-4-7").captureSessions).toBe(true);
+    expect(claudeCode("claude-opus-4-8").captureSessions).toBe(true);
   });
 
   it("claudeCode allows opting out of captureSessions", () => {
     expect(
-      claudeCode("claude-opus-4-7", { captureSessions: false }).captureSessions,
+      claudeCode("claude-opus-4-8", { captureSessions: false }).captureSessions,
     ).toBe(false);
   });
 
@@ -2140,7 +2140,7 @@ describe("sessionStorage", () => {
   it("claudeCode hostSessionFilePath is derivable without capture", async () => {
     const dir = await mkdtemp(join(tmpdir(), "sandcastle-claude-hostpath-"));
     try {
-      const provider = claudeCode("claude-opus-4-7", {
+      const provider = claudeCode("claude-opus-4-8", {
         sessionStorage: { hostProjectsDir: dir },
       });
       // Path is purely a function of (cwd, id) — available before any capture.
@@ -2373,7 +2373,7 @@ describe("sessionStorage", () => {
         JSON.stringify({ type: "system", cwd: sandboxCwd }),
       );
 
-      const provider = claudeCode("claude-opus-4-7", {
+      const provider = claudeCode("claude-opus-4-8", {
         sessionStorage: {
           hostProjectsDir: hostDir,
           sandboxProjectsDir: sandboxDir,
@@ -2435,7 +2435,7 @@ describe("sessionStorage", () => {
       // A non-matching sibling — must NOT be copied to the host.
       await writeFile(join(sandboxSubagentsDir, "notes.txt"), "ignore me");
 
-      const provider = claudeCode("claude-opus-4-7", {
+      const provider = claudeCode("claude-opus-4-8", {
         sessionStorage: {
           hostProjectsDir: hostDir,
           sandboxProjectsDir: sandboxDir,
@@ -2540,7 +2540,7 @@ describe("sessionStorage", () => {
         };
 
         // Main capture must succeed; the bad subagent must not abort the run.
-        const provider = claudeCode("claude-opus-4-7", {
+        const provider = claudeCode("claude-opus-4-8", {
           sessionStorage: {
             hostProjectsDir: hostDir,
             sandboxProjectsDir: sandboxDir,
