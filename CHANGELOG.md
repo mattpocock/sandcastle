@@ -1,5 +1,12 @@
 # @ai-hero/sandcastle
 
+## 0.12.0
+
+### Minor Changes
+
+- 1e15922: Bump default Claude Code model from `claude-opus-4-7` to `claude-opus-4-8`. The new default applies to the `DEFAULT_MODEL` constant, the `claude-code` agent entry surfaced by `sandcastle init`, and the scaffolded templates (`blank`, `parallel-planner`, `parallel-planner-with-review`). Passing an explicit model to `claudeCode(...)` is unaffected.
+- 0f577a4: Add `sandbox.exec(command, options?)` to the `Sandbox` handle returned by `createSandbox()` (and by `worktree.createSandbox()`). The method delegates to the provider handle's `exec()` and returns the full `ExecResult` — non-zero `exitCode` is surfaced, not thrown — so harnesses can run shell commands (tests, lints, custom verification gates) directly in the same warm sandbox between `run()` calls without reaching for the underlying provider handle. `cwd` defaults to the sandbox repo path so behavior is consistent across providers; pass `cwd` to override.
+
 ## 0.11.0
 
 ### Minor Changes
