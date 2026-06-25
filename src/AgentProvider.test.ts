@@ -2002,7 +2002,9 @@ describe("devin factory", () => {
       opts("do something"),
     );
     expect(result.stdin).toBe("do something");
+    expect(result.command).toContain("mktemp");
     expect(result.command).toContain("--prompt-file");
+    expect(result.command).toContain("trap");
     expect(result.command).not.toContain("do something");
   });
 

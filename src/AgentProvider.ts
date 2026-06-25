@@ -1214,12 +1214,17 @@ export const devin = (
     const setupCredentials =
       `mkdir -p ~/.local/share/devin && ` +
       `printf 'windsurf_api_key = "%s"\\napi_server_url = "https://server.codeium.com"\\ndevin_webapp_host = "app.devin.ai"\\ndevin_api_url = "https://api.devin.ai"\\n' "$DEVIN_SESSION_TOKEN" > ~/.local/share/devin/credentials.toml`;
-    // Write the prompt to a temp file via stdin to avoid the Linux ARG_MAX
-    // limit (E2BIG) that fires when a large prompt is inlined as a shell
-    // argument. `cat` reads stdin into the file; devin-wrapper then reads the
-    // prompt from the file via --prompt-file instead of from argv.
+    // Write the prompt to a unique temp file via stdin to avoid the Linux
+    // ARG_MAX limit (E2BIG) when a large prompt is inlined as a shell argument.
+    // mktemp gives each concurrent run its own file; the trap cleans it up even
+    // on failure. devin -p panics when given no inline prompt and stdin is not a
+    // tty, so --prompt-file is the only supported path for non-argv delivery.
     return {
-      command: `${setupCredentials} && cat > /tmp/sandcastle-devin-prompt && devin-wrapper -p --prompt-file /tmp/sandcastle-devin-prompt --model ${shellEscape(model)}${bypassFlag}`,
+      command:
+        `${setupCredentials} && ` +
+        `PROMPT_FILE=$(mktemp) && trap 'rm -f "$PROMPT_FILE"' EXIT && ` +
+        `cat > "$PROMPT_FILE" && ` +
+        `devin-wrapper -p --prompt-file "$PROMPT_FILE" --model ${shellEscape(model)}${bypassFlag}`,
       stdin: prompt,
     };
   },
