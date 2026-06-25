@@ -1156,12 +1156,18 @@ export const copilot = (
  * Devin's `-p` mode emits plain text to stdout; there is no structured JSON
  * stream. Every non-empty line is surfaced as a `text` event for live display.
  * Tool calls and session IDs are not available in the stdout stream.
+ *
+ * Lines prefixed with "[log] " are forwarded by devin-wrapper from the Devin
+ * log file to keep the idle timer alive during silent tool-use phases. They
+ * are surfaced as `tool_call` events (so they appear in the display but are
+ * not included in the final text output) rather than `text` events.
  */
 const parseDevinStreamLine = (line: string): ParsedStreamEvent[] => {
-  if (line.trim()) {
-    return [{ type: "text", text: line }];
+  if (!line.trim()) return [];
+  if (line.startsWith("[log] ")) {
+    return [{ type: "tool_call", name: "log", args: line.slice(6) }];
   }
-  return [];
+  return [{ type: "text", text: line }];
 };
 
 /** Options for the Devin agent provider. */
@@ -1208,8 +1214,13 @@ export const devin = (
     const setupCredentials =
       `mkdir -p ~/.local/share/devin && ` +
       `printf 'windsurf_api_key = "%s"\\napi_server_url = "https://server.codeium.com"\\ndevin_webapp_host = "app.devin.ai"\\ndevin_api_url = "https://api.devin.ai"\\n' "$DEVIN_SESSION_TOKEN" > ~/.local/share/devin/credentials.toml`;
+    // Write the prompt to a temp file via stdin to avoid the Linux ARG_MAX
+    // limit (E2BIG) that fires when a large prompt is inlined as a shell
+    // argument. `cat` reads stdin into the file; devin-wrapper then reads the
+    // prompt from the file via --prompt-file instead of from argv.
     return {
-      command: `${setupCredentials} && devin -p ${shellEscape(prompt)} --model ${shellEscape(model)}${bypassFlag}`,
+      command: `${setupCredentials} && cat > /tmp/sandcastle-devin-prompt && devin-wrapper -p --prompt-file /tmp/sandcastle-devin-prompt --model ${shellEscape(model)}${bypassFlag}`,
+      stdin: prompt,
     };
   },
 

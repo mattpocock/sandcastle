@@ -1997,12 +1997,13 @@ describe("devin factory", () => {
     expect(command).toContain("--model 'swe-1-6-fast'");
   });
 
-  it("buildPrintCommand delivers prompt as inline -p argument", () => {
-    const { command } = devin("swe-1-6-fast").buildPrintCommand(
+  it("buildPrintCommand delivers prompt via stdin and --prompt-file (not inline argv)", () => {
+    const result = devin("swe-1-6-fast").buildPrintCommand(
       opts("do something"),
     );
-    expect(command).toContain("-p 'do something'");
-    expect(command).not.toContain("-- 'do something'");
+    expect(result.stdin).toBe("do something");
+    expect(result.command).toContain("--prompt-file");
+    expect(result.command).not.toContain("do something");
   });
 
   it("buildPrintCommand includes credentials.toml setup from DEVIN_API_KEY", () => {

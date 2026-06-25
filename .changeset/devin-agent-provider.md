@@ -7,3 +7,5 @@ Add Devin agent provider.
 Exports a `devin(model, options?)` factory that runs the Devin CLI (`devin -p`) inside a sandbox container. Follows the cursor/copilot pattern: `captureSessions: false`, plain-text stdout streaming, no session storage.
 
 The accompanying Dockerfile installs the Devin CLI binary directly from the release tarball (bypassing the interactive install script) and writes `credentials.toml` from `DEVIN_API_KEY` at runtime before each invocation.
+
+Fix: the prompt is now delivered via stdin and `--prompt-file` instead of as an inline shell argument, preventing `E2BIG` ("argument list too long") crashes when the prompt exceeds the OS ARG_MAX limit.
