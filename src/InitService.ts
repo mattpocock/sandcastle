@@ -406,6 +406,92 @@ WORKDIR /home/agent
 ENTRYPOINT ["sleep", "infinity"]
 `;
 
+const DEVIN_DOCKERFILE = `FROM node:22-bookworm
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+  git \
+  curl \
+  jq \
+  ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+{{ISSUE_TRACKER_TOOLS}}
+
+# Build-args for UID/GID alignment: sandcastle docker build-image
+# defaults these to the host user's UID/GID so image-built files
+# and bind-mounted files share an owner without runtime chown.
+ARG AGENT_UID=1000
+ARG AGENT_GID=1000
+
+# Rename the base image's "node" user to "agent" and align UID/GID.
+RUN groupmod -o -g $AGENT_GID node && usermod -o -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+
+# Install the Devin CLI binary directly from the release tarball.
+# We bypass the install script (which ends with an interactive \`devin setup\`
+# wizard) by fetching the tarball and extracting only the binary.
+# Auth is handled at runtime via credentials.toml written from DEVIN_API_KEY.
+RUN MANIFEST=\$(curl -fsSL https://static.devin.ai/cli/current/manifest.json) && \\
+    BUNDLE_URL=\$(echo "\$MANIFEST" | jq -r '.platforms["x86_64-unknown-linux"].url') && \\
+    curl -fsSL "\$BUNDLE_URL" | tar xz -C /usr/local && \\
+    chmod +x /usr/local/bin/devin
+
+# Install the devin-wrapper that runs devin in the background and forwards the
+# Devin log file to stdout as "[log] ..." lines. This keeps Sandcastle's idle
+# timer alive during silent tool-use phases.
+RUN cat <<'WRAPPER' > /usr/local/bin/devin-wrapper
+#!/usr/bin/env bash
+set -uo pipefail
+
+mkdir -p "\${HOME}/.local/share/devin/cli/logs"
+
+devin "\$@" &
+devin_pid=$!
+
+log_dir="\${HOME}/.local/share/devin/cli/logs"
+log_file=""
+max_wait=50
+
+for _ in \$(seq 1 \${max_wait}); do
+  log_file=\$(ls -t "\${log_dir}"/devin_*_"\${devin_pid}".log 2>/dev/null | head -n 1 || true)
+  if [[ -n "\${log_file}" && -f "\${log_file}" ]]; then
+    break
+  fi
+  sleep 0.1
+done
+
+if [[ -z "\${log_file}" ]]; then
+  log_file=\$(ls -t "\${log_dir}"/devin_*.log 2>/dev/null | head -n 1 || true)
+fi
+
+if [[ -n "\${log_file}" && -f "\${log_file}" ]]; then
+  tail -f -s 0.1 -n +1 --pid="\${devin_pid}" "\${log_file}" | sed -u 's/^/[log] /' &
+  log_tail_pid=$!
+else
+  log_tail_pid=""
+fi
+
+wait "\${devin_pid}"
+exit_code=$?
+
+if [[ -n "\${log_tail_pid}" ]]; then
+  wait "\${log_tail_pid}" 2>/dev/null || true
+fi
+
+exit "\${exit_code}"
+WRAPPER
+RUN chmod +x /usr/local/bin/devin-wrapper
+
+USER \${AGENT_UID}:\${AGENT_GID}
+
+WORKDIR /home/agent
+
+# In worktree sandbox mode, Sandcastle bind-mounts the git worktree at \${SANDBOX_REPO_DIR}
+# and overrides the working directory to \${SANDBOX_REPO_DIR} at container start.
+# Structure your Dockerfile so that \${SANDBOX_REPO_DIR} can serve as the project root.
+ENTRYPOINT ["sleep", "infinity"]
+`;
+
 const AGENT_REGISTRY: AgentEntry[] = [
   {
     name: "claude-code",
@@ -472,6 +558,16 @@ OPENCODE_API_KEY=`,
 # COPILOT_GITHUB_TOKEN takes precedence over GH_TOKEN and GITHUB_TOKEN.
 GITHUB_TOKEN=`,
     setupCommand: `copilot -i "$(cat ${SETUP_ISSUE_TRACKER_PATH})"`,
+  },
+  {
+    name: "devin",
+    label: "Devin",
+    defaultModel: "adaptive",
+    factoryImport: "devin",
+    dockerfileTemplate: DEVIN_DOCKERFILE,
+    envExample: `# Devin session token — the windsurf_api_key value from ~/.local/share/devin/credentials.toml on your host
+DEVIN_SESSION_TOKEN=`,
+    setupCommand: `devin -p -- "$(cat ${SETUP_ISSUE_TRACKER_PATH})"`,
   },
 ];
 
