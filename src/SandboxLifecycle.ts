@@ -81,6 +81,69 @@ const execOkWithGitTimeout = (
     }),
   );
 
+/**
+ * Run a git read under the git-setup timeout, without the transient-retry of
+ * `execOkWithGitTimeout`. Non-zero exits (e.g. `--get-all` exits 1 when the key
+ * is unset) come back as a normal `ExecResult` rather than a failure; only a
+ * genuine exec failure or a timeout lands in the error channel.
+ */
+const execReadWithGitTimeout = (
+  sandbox: SandboxService,
+  command: string,
+  gitSetupTimeoutMs: number,
+): Effect.Effect<ExecResult, ExecError | GitSetupTimeoutError> =>
+  sandbox.exec(command).pipe(
+    withTimeout(
+      gitSetupTimeoutMs,
+      () =>
+        new GitSetupTimeoutError({
+          message: `Git command timed out after ${gitSetupTimeoutMs}ms: ${command}`,
+          timeoutMs: gitSetupTimeoutMs,
+          command,
+        }),
+    ),
+  );
+
+/** Empty entry list, used when the existing-entries read can't be completed. */
+const NO_SAFE_DIRECTORY_ENTRIES: ExecResult = {
+  stdout: "",
+  stderr: "",
+  exitCode: 1,
+};
+
+/**
+ * Idempotently register `dir` as a git `safe.directory` in the global git
+ * config: read the current entries first and only append with `--add` when
+ * `dir` is absent.
+ *
+ * A bare `git config --global --add safe.directory` appends unconditionally on
+ * every run with no dedup. The global config is long-lived — for the no-sandbox
+ * provider it is the developer's real `~/.gitconfig` — so without this guard the
+ * same entry piles up on each run (#846).
+ *
+ * `getExisting` runs the read (`--get-all`); `addEntry` runs the write. Both are
+ * supplied by the caller so each call site keeps its own timeout / retry policy.
+ * The read is best-effort: if it can't be completed we fall back to the original
+ * unconditional add (so behavior never regresses below "ensure the entry
+ * exists"); the add still surfaces real errors.
+ */
+export const ensureSafeDirectory = <EGet, EAdd>(
+  dir: string,
+  getExisting: (command: string) => Effect.Effect<ExecResult, EGet>,
+  addEntry: (command: string) => Effect.Effect<ExecResult, EAdd>,
+): Effect.Effect<void, EAdd> =>
+  Effect.gen(function* () {
+    const existing = yield* getExisting(
+      "git config --global --get-all safe.directory",
+    ).pipe(Effect.catchAll(() => Effect.succeed(NO_SAFE_DIRECTORY_ENTRIES)));
+    const alreadyRegistered = existing.stdout
+      .split("\n")
+      .map((line) => line.trim())
+      .includes(dir);
+    if (alreadyRegistered) return;
+    yield* addEntry(`git config --global --add safe.directory "${dir}"`);
+  });
+
 const execAsync = promisify(exec);
 
 export type SandboxHooks = {
@@ -231,11 +294,14 @@ export const withSandboxLifecycle = <A>(
       Effect.gen(function* () {
         // The bind-mounted worktree may be owned by a different UID (host user
         // vs sandbox user). Mark it safe so git doesn't reject it with
-        // "dubious ownership".
-        yield* execOkWithGitTimeout(
-          sandbox,
-          `git config --global --add safe.directory "${sandboxRepoDir}"`,
-          gitSetupTimeoutMs,
+        // "dubious ownership". Idempotent so repeated runs don't pile up
+        // duplicate entries in a persistent global config (#846).
+        yield* ensureSafeDirectory(
+          sandboxRepoDir,
+          (command) =>
+            execReadWithGitTimeout(sandbox, command, gitSetupTimeoutMs),
+          (command) =>
+            execOkWithGitTimeout(sandbox, command, gitSetupTimeoutMs),
         );
 
         // Propagate host git identity into the sandbox so commits are attributed
