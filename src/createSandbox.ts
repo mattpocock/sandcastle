@@ -33,6 +33,7 @@ import {
 import {
   withSandboxLifecycle,
   runHostHooks,
+  ensureSafeDirectory,
   type SandboxHooks,
 } from "./SandboxLifecycle.js";
 import {
@@ -832,8 +833,12 @@ export const createSandboxFromWorktree = async (
   if (sandboxOnReady?.length || hostOnReady?.length) {
     await Effect.runPromise(
       Effect.gen(function* () {
-        yield* sandbox.exec(
-          `git config --global --add safe.directory "${sandboxRepoDir}"`,
+        // Idempotent so repeated runs don't pile up duplicate entries in a
+        // persistent global config (#846).
+        yield* ensureSafeDirectory(
+          sandboxRepoDir,
+          (command) => sandbox.exec(command),
+          (command) => sandbox.exec(command),
         );
         const sandboxEffects = (sandboxOnReady ?? []).map((hook) =>
           sandbox.exec(hook.command, {
@@ -1020,8 +1025,12 @@ export const createSandbox = async (
 
           if (sandboxOnReady?.length || hostOnReady?.length) {
             yield* Effect.gen(function* () {
-              yield* sandbox.exec(
-                `git config --global --add safe.directory "${sandboxRepoDir}"`,
+              // Idempotent so repeated runs don't pile up duplicate entries in
+              // a persistent global config (#846).
+              yield* ensureSafeDirectory(
+                sandboxRepoDir,
+                (command) => sandbox.exec(command),
+                (command) => sandbox.exec(command),
               );
               const sandboxEffects = (sandboxOnReady ?? []).map((hook) =>
                 sandbox.exec(hook.command, {
