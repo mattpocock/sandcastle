@@ -8,6 +8,31 @@ import { WorktreeError, WorktreeTimeoutError, withTimeout } from "./errors.js";
 const WORKTREE_TIMEOUT_MS = 30_000;
 
 /**
+ * Process-wide read/write lock coordinating worktree creation against the
+ * destructive prune sweep, modelled as a counting semaphore.
+ *
+ * `pruneStale` deletes any directory under `.sandcastle/worktrees/` that is
+ * absent from its `git worktree list` snapshot. While another run is mid-
+ * `git worktree add`, the new worktree's directory can already exist on disk
+ * before git has registered it, so a concurrent prune sweeps it — leaving a
+ * dangling `.git` link and the `fatal: not a git repository: .git/worktrees/…`
+ * errors reported in issue #849. This bites the parallel-planner template,
+ * which fires N concurrent in-process `run()` calls on distinct branches, each
+ * running `pruneStale` then `create`.
+ *
+ * `create` takes a single permit (a reader): concurrent creates on different
+ * branches still run in parallel. `pruneStale` takes every permit (a writer):
+ * its sweep is exclusive of all in-flight creates, so it can never delete a
+ * worktree another run is currently adding.
+ *
+ * This is in-process only. Two separate `sandcastle` processes racing the same
+ * repo are out of scope here; ADR 0007's file lock remains the cross-process
+ * follow-up.
+ */
+const PRUNE_PERMITS = 1_000_000;
+const worktreeLock = Effect.runSync(Effect.makeSemaphore(PRUNE_PERMITS));
+
+/**
  * Git global flags that prevent `git worktree add -b` from writing upstream
  * tracking config to `.git/config`. Without these, a user's global
  * `branch.autoSetupMerge` or `push.autoSetupRemote` can cause a config write
@@ -425,6 +450,9 @@ export const create = (
           operation: "create",
         }),
     ),
+    // Reader: concurrent creates on different branches still run in parallel,
+    // but none can overlap the destructive prune sweep (see `worktreeLock`).
+    worktreeLock.withPermits(1),
   );
 
 /**
@@ -535,4 +563,7 @@ export const pruneStale = (
           operation: "prune",
         }),
     ),
+    // Writer: takes every permit so the destructive sweep is exclusive of all
+    // in-flight creates and can never delete a worktree being added (#849).
+    worktreeLock.withPermits(PRUNE_PERMITS),
   );
