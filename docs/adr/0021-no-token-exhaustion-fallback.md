@@ -57,7 +57,7 @@ string-matching the error message, and string-matching is unacceptable here:
   fallback that fires for some providers and not others is a trap, not a
   feature.
 
-## Considered options
+## Considered Options
 
 - **Parse provider error messages / stderr to classify exhaustion.** Rejected —
   unversioned, breaks on patch releases, and only ever covers some providers.
