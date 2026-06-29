@@ -2396,6 +2396,65 @@ describe("sessionStorage", () => {
     }
   });
 
+  it("claudeCode captureToHost locates the session by id when the sandbox dir name does not match encodeProjectPath (Claude collapses '.' → '-')", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-claude-locate-"));
+    const sandboxDir = await mkdtemp(
+      join(tmpdir(), "sandcastle-claude-locate-sbx-"),
+    );
+    try {
+      const id = "session-dotted-cwd";
+      const hostCwd = "/host/repo";
+      // A cwd with a dot segment. encodeProjectPath() keeps the dot
+      // ("-sandbox-.work-repo"), but Claude Code writes the project dir with the
+      // dot collapsed to a dash. Capture must follow Claude's real dir, not the
+      // reconstructed one — otherwise `find`/`docker cp` misses the file.
+      const sandboxCwd = "/sandbox/.work/repo";
+      const claudeActualDir = join(sandboxDir, "-sandbox--work-repo");
+      await mkdir(claudeActualDir, { recursive: true });
+      const sandboxSubagentsDir = join(claudeActualDir, id, "subagents");
+      await mkdir(sandboxSubagentsDir, { recursive: true });
+      await writeFile(
+        join(claudeActualDir, `${id}.jsonl`),
+        JSON.stringify({ type: "system", cwd: sandboxCwd }),
+      );
+      await writeFile(
+        join(sandboxSubagentsDir, "agent-alpha.jsonl"),
+        JSON.stringify({ type: "system", cwd: sandboxCwd, agent: "alpha" }),
+      );
+
+      const provider = claudeCode("claude-opus-4-7", {
+        sessionStorage: {
+          hostProjectsDir: hostDir,
+          sandboxProjectsDir: sandboxDir,
+        },
+      });
+
+      await provider.sessionStorage!.captureToHost({
+        hostCwd,
+        sandboxCwd,
+        sessionId: id,
+        handle: fsBindMountHandle(),
+      });
+
+      // Main session captured with cwd rewritten, despite the dir mismatch.
+      const main = await readFile(
+        join(hostDir, "-host-repo", `${id}.jsonl`),
+        "utf-8",
+      );
+      expect(JSON.parse(main).cwd).toBe(hostCwd);
+
+      // Subagent transcript, derived from the located dir, also captured.
+      const alpha = await readFile(
+        join(hostDir, "-host-repo", id, "subagents", "agent-alpha.jsonl"),
+        "utf-8",
+      );
+      expect(JSON.parse(alpha).cwd).toBe(hostCwd);
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
   it("claudeCode captureToHost copies subagent/workflow logs alongside the main session with cwd rewritten", async () => {
     const hostDir = await mkdtemp(
       join(tmpdir(), "sandcastle-claude-sub-many-"),
