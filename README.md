@@ -48,7 +48,7 @@ cp .sandcastle/.env.example .sandcastle/.env
 4. Run the `.sandcastle/main.ts` (or `main.mts`) file with `npx tsx`
 
 ```bash
-npx tsx .sandcastle/main.ts
+npx tsx .sandcastle/main.mts
 ```
 
 ```typescript
