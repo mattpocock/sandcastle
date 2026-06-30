@@ -205,7 +205,6 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // uses to know which branches to merge and which issues to close.
   // -------------------------------------------------------------------------
   await sandcastle.run({
-    hooks,
     sandbox: docker(),
     name: "merger",
     maxIterations: 1,
