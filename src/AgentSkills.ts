@@ -1,6 +1,7 @@
 import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, posix, resolve } from "node:path";
+import { SHELL_BLOCK_MARKER } from "./PromptPreprocessor.js";
 
 export type SkillTarget =
   | "auto"
@@ -61,6 +62,9 @@ const assertSafeSkillName = (name: string): void => {
   }
 };
 
+const stripPromptPreprocessorMarkers = (value: string): string =>
+  value.replaceAll(SHELL_BLOCK_MARKER, "");
+
 export const resolveSkills = ({
   skills,
   cwd,
@@ -98,7 +102,11 @@ export const buildSkillsPromptPreamble = (
   if (skills.length === 0) return "";
 
   const entries = skills
-    .map((skill) => `- ${skill.name}: ${skill.sandboxPath}/SKILL.md`)
+    .map((skill) => {
+      const name = stripPromptPreprocessorMarkers(skill.name);
+      const sandboxPath = stripPromptPreprocessorMarkers(skill.sandboxPath);
+      return `- ${name}: ${sandboxPath}/SKILL.md`;
+    })
     .join("\n");
 
   return `# Available Skills

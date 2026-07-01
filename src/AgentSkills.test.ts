@@ -9,6 +9,7 @@ import {
   prependSkillsPrompt,
   resolveSkills,
 } from "./AgentSkills.js";
+import { SHELL_BLOCK_MARKER } from "./PromptPreprocessor.js";
 
 const tempDirs: string[] = [];
 
@@ -163,6 +164,20 @@ describe("AgentSkills", () => {
   describe("buildSkillsPromptPreamble", () => {
     it("returns an empty preamble when no skills are configured", () => {
       expect(buildSkillsPromptPreamble([])).toBe("");
+    });
+
+    it("strips prompt preprocessor markers from generated skill entries", () => {
+      const preamble = buildSkillsPromptPreamble([
+        {
+          name: "marker-skill",
+          hostPath: "/host/unused",
+          sandboxPath: `/host/!${SHELL_BLOCK_MARKER}\`x\`-path`,
+          readonly: true,
+        },
+      ]);
+
+      expect(preamble).toContain("/host/!`x`-path/SKILL.md");
+      expect(preamble).not.toContain(SHELL_BLOCK_MARKER);
     });
 
     it("builds deterministic prompt text listing skill entrypoints", () => {

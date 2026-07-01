@@ -875,6 +875,40 @@ describe("run() skills prompt injection", () => {
     }
   });
 
+  it("does not execute marked shell syntax introduced by no-sandbox skill host paths", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sandcastle-skills-run-"));
+    try {
+      const skillDir = makeSkillDirSync(
+        join(dir, `host-!${SHELL_BLOCK_MARKER}\`x\`-path`),
+        "skill",
+      );
+      const promptFile = join(dir, "prompt.md");
+      writeFileSync(promptFile, "Task: !`printf expanded`");
+      const prompts: string[] = [];
+      const commands: string[] = [];
+
+      await run({
+        agent: capturePromptAgent(prompts),
+        sandbox: recordingNoSandbox(commands),
+        promptFile,
+        skills: [{ source: skillDir, name: "marked-host-path-skill" }],
+        branchStrategy: { type: "head" },
+        logging: { type: "file", path: join(dir, "run.log") },
+      });
+
+      const captured = prompts[0]!;
+      expect(captured).toContain(
+        `${skillDir.replaceAll(SHELL_BLOCK_MARKER, "")}/SKILL.md`,
+      );
+      expect(captured).toContain("Task: expanded");
+      expect(captured).not.toContain(SHELL_BLOCK_MARKER);
+      expect(commands).toContain("printf expanded");
+      expect(commands).not.toContain("x");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("prepends skill instructions to inline prompts without shell expansion", async () => {
     const dir = mkdtempSync(join(tmpdir(), "sandcastle-skills-run-"));
     try {
