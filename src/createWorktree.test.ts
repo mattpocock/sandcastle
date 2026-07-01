@@ -19,7 +19,7 @@ import type {
   WorktreeInteractiveOptions,
   WorktreeCreateSandboxOptions,
 } from "./createWorktree.js";
-import { claudeCode, codex } from "./AgentProvider.js";
+import { claudeCode, codex, type AgentProvider } from "./AgentProvider.js";
 import {
   createBindMountSandboxProvider,
   type BindMountSandboxHandle,
@@ -56,6 +56,32 @@ const makeSkill = async (root: string, name: string) => {
   await writeFile(join(dir, "SKILL.md"), `# ${name}\n`);
   return dir;
 };
+
+const makePromptCaptureAgent = (capturePath: string): AgentProvider => ({
+  name: "prompt-capture",
+  env: {},
+  captureSessions: false,
+  buildPrintCommand: ({ prompt }) => ({
+    command: `node -e ${JSON.stringify(
+      `const fs = require("node:fs"); ` +
+        `const prompt = fs.readFileSync(0, "utf8"); ` +
+        `fs.writeFileSync(${JSON.stringify(capturePath)}, prompt); ` +
+        `console.log(JSON.stringify({ type: "result", result: "captured" }));`,
+    )}`,
+    stdin: prompt,
+  }),
+  parseStreamLine: (line) => {
+    try {
+      const parsed = JSON.parse(line) as { type?: string; result?: unknown };
+      if (parsed.type === "result" && typeof parsed.result === "string") {
+        return [{ type: "result", result: parsed.result }];
+      }
+    } catch {
+      // Ignore non-JSON output.
+    }
+    return [];
+  },
+});
 
 describe("createWorktree", () => {
   it("creates a worktree with 'branch' strategy", async () => {
@@ -1213,6 +1239,62 @@ describe("worktree.createSandbox()", () => {
     } finally {
       await ws.close();
       await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("sandbox.run() prepends stable skill paths for worktree-created sandboxes on every reusable run", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-sandbox-"));
+    const skillRoot = await mkdtemp(join(tmpdir(), "ws-skill-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    const skillDir = await makeSkill(skillRoot, "worktree-reusable-skill");
+    const firstCapturePath = join(hostDir, "captured-first.txt");
+    const secondCapturePath = join(hostDir, "captured-second.txt");
+
+    const ws = await createWorktree({
+      branchStrategy: { type: "branch", branch: "ws-reusable-skills" },
+      cwd: hostDir,
+    });
+
+    try {
+      const sandbox = await ws.createSandbox({
+        sandbox: testSandbox,
+        skills: [{ source: skillDir }],
+        _test: { buildSandbox: makeLocalSandbox },
+      });
+
+      try {
+        await sandbox.run({
+          agent: makePromptCaptureAgent(firstCapturePath),
+          prompt: "First worktree reusable task.",
+          maxIterations: 1,
+          logging: { type: "file", path: join(hostDir, "first.log") },
+        });
+        await sandbox.run({
+          agent: makePromptCaptureAgent(secondCapturePath),
+          prompt: "Second worktree reusable task.",
+          maxIterations: 1,
+          logging: { type: "file", path: join(hostDir, "second.log") },
+        });
+
+        const firstPrompt = await readFile(firstCapturePath, "utf-8");
+        const secondPrompt = await readFile(secondCapturePath, "utf-8");
+        for (const prompt of [firstPrompt, secondPrompt]) {
+          expect(prompt).toContain("# Available Skills");
+          expect(prompt).toContain(
+            "/home/agent/.sandcastle/skills/worktree-reusable-skill/SKILL.md",
+          );
+          expect(prompt).not.toContain(skillDir);
+        }
+        expect(firstPrompt).toContain("First worktree reusable task.");
+        expect(secondPrompt).toContain("Second worktree reusable task.");
+      } finally {
+        await sandbox.close();
+      }
+    } finally {
+      await ws.close();
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(skillRoot, { recursive: true, force: true });
     }
   });
 
