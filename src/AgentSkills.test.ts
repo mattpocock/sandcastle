@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_SANDBOX_SKILLS_DIR,
   buildSkillsPromptPreamble,
@@ -34,6 +34,7 @@ describe("AgentSkills", () => {
       tempDirs.map((d) => rm(d, { recursive: true, force: true })),
     );
     tempDirs.length = 0;
+    vi.unstubAllEnvs();
   });
 
   describe("resolveSkills", () => {
@@ -66,6 +67,23 @@ describe("AgentSkills", () => {
       expect(skill?.hostPath).toBe(source);
       expect(skill?.sandboxPath).toBe(
         `${DEFAULT_SANDBOX_SKILLS_DIR}/relative-skill`,
+      );
+    });
+
+    it("expands tilde sources using the current home directory", async () => {
+      const root = await makeTempDir();
+      vi.stubEnv("HOME", root);
+      vi.stubEnv("USERPROFILE", root);
+      const source = await makeSkill(root, "home-skill");
+
+      const [skill] = resolveSkills({
+        cwd: "/unused/cwd",
+        skills: [{ source: "~/home-skill" }],
+      });
+
+      expect(skill?.hostPath).toBe(source);
+      expect(skill?.sandboxPath).toBe(
+        `${DEFAULT_SANDBOX_SKILLS_DIR}/home-skill`,
       );
     });
 
@@ -119,6 +137,15 @@ describe("AgentSkills", () => {
         resolveSkills({ cwd: root, skills: [{ source, name: "../bad" }] }),
       ).toThrow("Invalid skill name");
     });
+
+    it("fails on unsafe names derived from the source directory", async () => {
+      const root = await makeTempDir();
+      await makeSkill(root, "bad name");
+
+      expect(() =>
+        resolveSkills({ cwd: root, skills: [{ source: "bad name" }] }),
+      ).toThrow("Invalid skill name");
+    });
   });
 
   describe("buildSkillsPromptPreamble", () => {
@@ -126,7 +153,7 @@ describe("AgentSkills", () => {
       expect(buildSkillsPromptPreamble([])).toBe("");
     });
 
-    it("builds a prompt preamble listing skill entrypoints", () => {
+    it("builds deterministic prompt text listing skill entrypoints", () => {
       const preamble = buildSkillsPromptPreamble([
         {
           name: "tdd",
@@ -134,11 +161,22 @@ describe("AgentSkills", () => {
           sandboxPath: `${DEFAULT_SANDBOX_SKILLS_DIR}/tdd`,
           readonly: true,
         },
+        {
+          name: "review",
+          hostPath: "/host/review",
+          sandboxPath: `${DEFAULT_SANDBOX_SKILLS_DIR}/review`,
+          readonly: true,
+        },
       ]);
 
-      expect(preamble).toContain("# Available Skills");
-      expect(preamble).toContain(`${DEFAULT_SANDBOX_SKILLS_DIR}/tdd/SKILL.md`);
-      expect(preamble).toContain("Do not modify or commit skill files");
+      expect(preamble).toBe(`# Available Skills
+
+The host provided these skills. Before using a skill, read its SKILL.md file inside the sandbox.
+
+- tdd: ${DEFAULT_SANDBOX_SKILLS_DIR}/tdd/SKILL.md
+- review: ${DEFAULT_SANDBOX_SKILLS_DIR}/review/SKILL.md
+
+Only use these skills when relevant to the task. Do not modify or commit skill files.`);
     });
   });
 
@@ -155,6 +193,10 @@ describe("AgentSkills", () => {
 
       expect(prompt).toContain("# Available Skills");
       expect(prompt).toContain("---\n\nDo the work.");
+    });
+
+    it("returns the original prompt when no skills are configured", () => {
+      expect(prependSkillsPrompt("Do the work.", [])).toBe("Do the work.");
     });
   });
 

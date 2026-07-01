@@ -619,6 +619,7 @@ export async function run(
   );
   const rawPrompt = resolved.text;
   const isInlinePrompt = resolved.source === "inline";
+  const promptTemplate = prependSkillsPrompt(rawPrompt, promptSkills);
 
   // Validate: output tag must appear in the resolved prompt
   if (options.output) {
@@ -736,7 +737,7 @@ export async function run(
     let resolvedPrompt: string;
     if (isInlinePrompt) {
       yield* validateNoArgsWithInlinePrompt(userArgs);
-      resolvedPrompt = rawPrompt;
+      resolvedPrompt = promptTemplate;
     } else {
       yield* validateNoBuiltInArgOverride(userArgs);
       const effectiveArgs = {
@@ -746,7 +747,7 @@ export async function run(
       };
       const builtInArgKeysSet = new Set<string>(BUILT_IN_PROMPT_ARG_KEYS);
       resolvedPrompt = yield* substitutePromptArgs(
-        rawPrompt,
+        promptTemplate,
         effectiveArgs,
         builtInArgKeysSet,
       );
@@ -761,7 +762,7 @@ export async function run(
       hostRepoDir,
       iterations: maxIterations,
       hooks,
-      prompt: prependSkillsPrompt(resolvedPrompt, promptSkills),
+      prompt: resolvedPrompt,
       branch: orchestrateBranch,
       provider,
       completionSignal: options.completionSignal,

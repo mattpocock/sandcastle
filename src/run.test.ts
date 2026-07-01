@@ -22,7 +22,12 @@ import {
   type RunOptions,
   type RunResult,
 } from "./run.js";
-import { claudeCode, cursor, opencode } from "./AgentProvider.js";
+import {
+  claudeCode,
+  cursor,
+  opencode,
+  type AgentProvider,
+} from "./AgentProvider.js";
 import { Output, StructuredOutputError } from "./Output.js";
 import { claudeHostSessionPath } from "./SessionStore.js";
 import type { InteractiveOptions } from "./interactive.js";
@@ -31,8 +36,43 @@ import { defaultImageName } from "./sandboxes/docker.js";
 import * as sandcastle from "./SandboxProvider.js";
 import { createBindMountSandboxProvider } from "./SandboxProvider.js";
 import { testStubProvider } from "./sandboxes/test-shared.js";
+import { SHELL_BLOCK_MARKER } from "./PromptPreprocessor.js";
 
 const testSandbox = testStubProvider({ name: "test" }).provider;
+
+const makeSkillDirSync = (root: string, name: string) => {
+  const dir = join(root, name);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "SKILL.md"), `# ${name}\n`);
+  return dir;
+};
+
+const capturePromptAgent = (prompts: string[]): AgentProvider => ({
+  name: "prompt-capture",
+  env: {},
+  captureSessions: false,
+  buildPrintCommand: ({ prompt }) => {
+    prompts.push(prompt);
+    return { command: "true" };
+  },
+  parseStreamLine: () => [],
+});
+
+const promptExpansionSandbox = () =>
+  createBindMountSandboxProvider({
+    name: "prompt-expansion",
+    create: async () => ({
+      worktreePath: "/home/agent/workspace",
+      exec: async (command) => ({
+        stdout: command === "printf expanded" ? "expanded\n" : "",
+        stderr: "",
+        exitCode: 0,
+      }),
+      copyFileIn: async () => {},
+      copyFileOut: async () => {},
+      close: async () => {},
+    }),
+  });
 
 describe("printFileDisplayStartup", () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
@@ -739,6 +779,77 @@ describe("inline prompt passthrough", () => {
         "promptArgs is only supported with promptFile",
       );
     });
+  });
+});
+
+describe("run() skills prompt injection", () => {
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    consoleSpy.mockRestore();
+  });
+
+  it("prepends skill instructions before prompt-file argument and shell expansion", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sandcastle-skills-run-"));
+    try {
+      const skillDir = makeSkillDirSync(dir, "prompt-skill");
+      const promptFile = join(dir, "prompt.md");
+      writeFileSync(promptFile, "Task: {{TASK}}\nShell: !`printf expanded`");
+      const prompts: string[] = [];
+
+      await run({
+        agent: capturePromptAgent(prompts),
+        sandbox: promptExpansionSandbox(),
+        promptFile,
+        promptArgs: { TASK: "substituted" },
+        skills: [{ source: skillDir }],
+        branchStrategy: { type: "head" },
+        logging: { type: "file", path: join(dir, "run.log") },
+      });
+
+      const captured = prompts[0]!;
+      expect(captured).toMatch(/^# Available Skills\n/);
+      expect(captured).toContain(
+        "/home/agent/.sandcastle/skills/prompt-skill/SKILL.md",
+      );
+      expect(captured).toContain("---\n\nTask: substituted\nShell: expanded");
+      expect(captured).not.toContain("{{TASK}}");
+      expect(captured).not.toContain("!`printf expanded`");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("prepends skill instructions to inline prompts without shell expansion", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sandcastle-skills-run-"));
+    try {
+      const skillDir = makeSkillDirSync(dir, "inline-skill");
+      const inlinePrompt = `Literal {{TASK}}\nShell: !${SHELL_BLOCK_MARKER}\`printf expanded\``;
+      const prompts: string[] = [];
+
+      await run({
+        agent: capturePromptAgent(prompts),
+        sandbox: promptExpansionSandbox(),
+        prompt: inlinePrompt,
+        skills: [{ source: skillDir }],
+        branchStrategy: { type: "head" },
+        logging: { type: "file", path: join(dir, "run.log") },
+      });
+
+      const captured = prompts[0]!;
+      expect(captured).toMatch(/^# Available Skills\n/);
+      expect(captured).toContain(
+        "/home/agent/.sandcastle/skills/inline-skill/SKILL.md",
+      );
+      expect(captured.endsWith(inlinePrompt)).toBe(true);
+      expect(captured).toContain("{{TASK}}");
+      expect(captured).not.toContain("Shell: expanded");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
