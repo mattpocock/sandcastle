@@ -204,6 +204,10 @@ const result = await run({
   // Not supported with branchStrategy: { type: "head" }.
   copyToWorktree: [".env"],
 
+  // Skill directories to expose inside sandboxed agents at stable paths.
+  // Each source must be a directory containing SKILL.md.
+  skills: [{ name: "tdd", source: "/absolute/path/to/tdd-skill" }],
+
   // Override default timeouts for built-in lifecycle steps.
   // Unset keys keep their defaults.
   timeouts: {
@@ -257,6 +261,58 @@ console.log(result.completionSignal); // matched signal string, or undefined if 
 console.log(result.commits); // array of { sha } for commits created
 console.log(result.branch); // target branch name
 ```
+
+### Skills
+
+Use `skills` to make explicit local skill directories available to an agent. Each skill `source` must be a host directory containing `SKILL.md`; `source` may be absolute, `~`-expanded, or relative to `cwd`. `name` is optional and defaults to the source directory basename.
+
+For sandboxed providers, Sandcastle exposes each skill at a stable path:
+
+```text
+/home/agent/.sandcastle/skills/<skill-name>/SKILL.md
+```
+
+Sandcastle also prepends an `Available Skills` block to the agent prompt telling it to read those `SKILL.md` files when relevant. That is the MVP guarantee: Sandcastle makes explicit skill directories available at stable paths and tells the agent where to read them. It does **not** promise that every agent CLI natively auto-loads or auto-discovers skills.
+
+```typescript
+import {
+  claudeCode,
+  createSandbox,
+  createWorktree,
+  run,
+} from "@ai-hero/sandcastle";
+import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+
+await run({
+  agent: claudeCode("claude-opus-4-8"),
+  sandbox: docker(),
+  promptFile: ".sandcastle/prompt.md",
+  skills: [{ name: "tdd", source: "/absolute/path/to/tdd-skill" }],
+});
+
+await using sandbox = await createSandbox({
+  branch: "agent/fix-42",
+  sandbox: docker(),
+  skills: [{ name: "tdd", source: "/absolute/path/to/tdd-skill" }],
+});
+
+await using wt = await createWorktree({
+  branchStrategy: { type: "branch", branch: "agent/fix-42" },
+});
+
+await using sandboxFromWorktree = await wt.createSandbox({
+  sandbox: docker(),
+  skills: [{ name: "tdd", source: "/absolute/path/to/tdd-skill" }],
+});
+```
+
+Security notes:
+
+- Only explicit local host directories are supported; Sandcastle does not fetch remote skills or scan credential/session directories for skills.
+- `SKILL.md` is required so Sandcastle exposes deliberate skill directories, not arbitrary folders.
+- Bind-mount providers mount skills read-only by default (`readonly` defaults to `true`). Isolated providers copy the skill directories into the same sandbox path before the agent starts.
+- Skills are exposed outside `/home/agent/workspace`, so they are not copied into the git worktree and should not be committed by the worker.
+- Do not pass credential or session directories as skills: for example `~/.ssh`, `~/.claude`, `~/.codex`, `.env` directories, package-manager auth caches, or anything containing tokens.
 
 ### `createSandbox()` — reusable sandbox
 
@@ -367,6 +423,7 @@ if (closeResult.preservedWorktreePath) {
 | `cwd`            | string          | `process.cwd()` | Host repo directory — relative paths resolve against `process.cwd()`                                                |
 | `hooks`          | SandboxHooks    | —               | Lifecycle hooks (`host.*`, `sandbox.*`) — run once at creation time                                                 |
 | `copyToWorktree` | string[]        | —               | Host-relative file paths to copy into the sandbox at creation time                                                  |
+| `skills`         | SkillSpec[]     | —               | Skill directories exposed at `/home/agent/.sandcastle/skills/<name>` and announced in prompts                       |
 | `timeouts`       | Timeouts        | —               | Override built-in lifecycle step timeouts (`copyToWorktreeMs`, `gitSetupMs`, `commitCollectionMs`, `mergeToHostMs`) |
 
 #### `Sandbox`
@@ -447,6 +504,7 @@ const result = await wt.run({
   agent: claudeCode("claude-opus-4-8"),
   sandbox: docker({ imageName: "sandcastle:myrepo" }),
   prompt: "Fix issue #42.",
+  skills: [{ name: "tdd", source: "/absolute/path/to/tdd-skill" }],
   maxIterations: 3,
 });
 console.log(result.commits); // commits made during the run
@@ -456,6 +514,7 @@ import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 
 await using sandbox = await wt.createSandbox({
   sandbox: docker(),
+  skills: [{ name: "tdd", source: "/absolute/path/to/tdd-skill" }],
   hooks: { sandbox: { onSandboxReady: [{ command: "npm install" }] } },
 });
 
@@ -502,6 +561,7 @@ With `branchStrategy: { type: "merge-to-head" }`, each `wt.run()` / `wt.interact
 | `name`       | string                 | —             | Optional session name                                                                             |
 | `hooks`      | SandboxHooks           | —             | Lifecycle hooks (`host.*`, `sandbox.*`)                                                           |
 | `promptArgs` | PromptArgs             | —             | Key-value map for `{{KEY}}` placeholder substitution                                              |
+| `skills`     | SkillSpec[]            | —             | Skill directories exposed to the sandboxed agent and announced in the prompt                      |
 | `env`        | Record<string, string> | —             | Environment variables to inject into the sandbox                                                  |
 | `signal`     | AbortSignal            | —             | Cancel the session when aborted. The worktree is preserved on disk. Rejects with `signal.reason`. |
 
@@ -521,6 +581,7 @@ With `branchStrategy: { type: "merge-to-head" }`, each `wt.run()` / `wt.interact
 | `logging`                  | LoggingOption          | file    | Logging mode                                                                                                                         |
 | `hooks`                    | SandboxHooks           | —       | Lifecycle hooks (`host.*`, `sandbox.*`)                                                                                              |
 | `promptArgs`               | PromptArgs             | —       | Key-value map for `{{KEY}}` placeholder substitution                                                                                 |
+| `skills`                   | SkillSpec[]            | —       | Skill directories exposed to the sandboxed agent and announced in the prompt                                                         |
 | `env`                      | Record<string, string> | —       | Environment variables to inject into the sandbox                                                                                     |
 | `resumeSession`            | string                 | —       | Resume a prior session by ID for agents that support resume. Incompatible with `maxIterations > 1`. Session file must exist on host. |
 | `signal`                   | AbortSignal            | —       | Cancel the run when aborted. Kills the in-flight agent subprocess; the worktree is preserved on disk. Rejects with `signal.reason`.  |
@@ -543,6 +604,7 @@ With `branchStrategy: { type: "merge-to-head" }`, each `wt.run()` / `wt.interact
 | `sandbox`        | SandboxProvider | —       | **Required.** Sandbox provider (e.g. `docker()`)                                                                    |
 | `hooks`          | SandboxHooks    | —       | Lifecycle hooks (`host.*`, `sandbox.*`)                                                                             |
 | `copyToWorktree` | string[]        | —       | Host-relative file paths to copy into the worktree at creation time                                                 |
+| `skills`         | SkillSpec[]     | —       | Skill directories exposed at `/home/agent/.sandcastle/skills/<name>` and announced in prompts                       |
 | `timeouts`       | Timeouts        | —       | Override built-in lifecycle step timeouts (`copyToWorktreeMs`, `gitSetupMs`, `commitCollectionMs`, `mergeToHostMs`) |
 
 ## How it works
@@ -844,6 +906,7 @@ Removes the Podman image.
 | `promptArgs`               | PromptArgs         | —                             | Key-value map for `{{KEY}}` placeholder substitution                                                                                                                                                                         |
 | `branchStrategy`           | BranchStrategy     | per-provider default          | Branch strategy: `{ type: 'head' }`, `{ type: 'merge-to-head' }`, or `{ type: 'branch', branch: '…' }`                                                                                                                       |
 | `copyToWorktree`           | string[]           | —                             | Host-relative file paths to copy into the sandbox before start (not supported with `branchStrategy: { type: 'head' }`)                                                                                                       |
+| `skills`                   | SkillSpec[]        | —                             | Skill directories exposed at `/home/agent/.sandcastle/skills/<name>` and announced in prompts                                                                                                                                |
 | `logging`                  | object             | file (auto-generated)         | `{ type: 'file', path }` or `{ type: 'stdout' }`                                                                                                                                                                             |
 | `completionSignal`         | string \| string[] | `<promise>COMPLETE</promise>` | String or array of strings the agent emits to stop the iteration loop early                                                                                                                                                  |
 | `idleTimeoutSeconds`       | number             | `600`                         | Idle timeout in seconds — resets on each agent output event                                                                                                                                                                  |
