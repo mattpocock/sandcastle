@@ -138,6 +138,18 @@ describe("AgentSkills", () => {
       ).toThrow("Invalid skill name");
     });
 
+    it.each([".", ".."])(
+      "fails on dot-only path traversal skill name %s",
+      async (name) => {
+        const root = await makeTempDir();
+        const source = await makeSkill(root, "safe-source");
+
+        expect(() =>
+          resolveSkills({ cwd: root, skills: [{ source, name }] }),
+        ).toThrow("Invalid skill name");
+      },
+    );
+
     it("fails on unsafe names derived from the source directory", async () => {
       const root = await makeTempDir();
       await makeSkill(root, "bad name");

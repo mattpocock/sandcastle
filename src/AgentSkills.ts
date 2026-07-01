@@ -49,6 +49,11 @@ const resolveHostPath = (source: string, cwd: string): string => {
 };
 
 const assertSafeSkillName = (name: string): void => {
+  if (name === "." || name === "..") {
+    throw new Error(
+      `Invalid skill name "${name}". Use only letters, numbers, dot, underscore, and hyphen.`,
+    );
+  }
   if (!/^[A-Za-z0-9._-]+$/.test(name)) {
     throw new Error(
       `Invalid skill name "${name}". Use only letters, numbers, dot, underscore, and hyphen.`,

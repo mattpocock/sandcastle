@@ -619,7 +619,6 @@ export async function run(
   );
   const rawPrompt = resolved.text;
   const isInlinePrompt = resolved.source === "inline";
-  const promptTemplate = prependSkillsPrompt(rawPrompt, promptSkills);
 
   // Validate: output tag must appear in the resolved prompt
   if (options.output) {
@@ -737,7 +736,7 @@ export async function run(
     let resolvedPrompt: string;
     if (isInlinePrompt) {
       yield* validateNoArgsWithInlinePrompt(userArgs);
-      resolvedPrompt = promptTemplate;
+      resolvedPrompt = prependSkillsPrompt(rawPrompt, promptSkills);
     } else {
       yield* validateNoBuiltInArgOverride(userArgs);
       const effectiveArgs = {
@@ -746,11 +745,12 @@ export async function run(
         ...userArgs,
       };
       const builtInArgKeysSet = new Set<string>(BUILT_IN_PROMPT_ARG_KEYS);
-      resolvedPrompt = yield* substitutePromptArgs(
-        promptTemplate,
+      const substitutedPrompt = yield* substitutePromptArgs(
+        rawPrompt,
         effectiveArgs,
         builtInArgKeysSet,
       );
+      resolvedPrompt = prependSkillsPrompt(substitutedPrompt, promptSkills);
     }
 
     // In head mode, pass the host branch so SandboxLifecycle skips the merge step.

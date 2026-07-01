@@ -34,7 +34,10 @@ import type { InteractiveOptions } from "./interactive.js";
 import type { WorktreeInteractiveOptions } from "./createWorktree.js";
 import { defaultImageName } from "./sandboxes/docker.js";
 import * as sandcastle from "./SandboxProvider.js";
-import { createBindMountSandboxProvider } from "./SandboxProvider.js";
+import {
+  createBindMountSandboxProvider,
+  type NoSandboxProvider,
+} from "./SandboxProvider.js";
 import { testStubProvider } from "./sandboxes/test-shared.js";
 import { SHELL_BLOCK_MARKER } from "./PromptPreprocessor.js";
 
@@ -73,6 +76,27 @@ const promptExpansionSandbox = () =>
       close: async () => {},
     }),
   });
+
+const recordingNoSandbox = (commands: string[]): NoSandboxProvider => ({
+  tag: "none",
+  name: "recording-no-sandbox",
+  env: {},
+  create: async ({ worktreePath }) => ({
+    worktreePath,
+    exec: async (command) => {
+      commands.push(command);
+      if (command === "printf expanded") {
+        return { stdout: "expanded\n", stderr: "", exitCode: 0 };
+      }
+      if (command === "git rev-parse --abbrev-ref HEAD") {
+        return { stdout: "main\n", stderr: "", exitCode: 0 };
+      }
+      return { stdout: "", stderr: "", exitCode: 0 };
+    },
+    interactiveExec: async () => ({ exitCode: 0 }),
+    close: async () => {},
+  }),
+});
 
 describe("printFileDisplayStartup", () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
@@ -818,6 +842,34 @@ describe("run() skills prompt injection", () => {
       expect(captured).toContain("---\n\nTask: substituted\nShell: expanded");
       expect(captured).not.toContain("{{TASK}}");
       expect(captured).not.toContain("!`printf expanded`");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not execute shell syntax introduced by no-sandbox skill host paths", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sandcastle-skills-run-"));
+    try {
+      const skillDir = makeSkillDirSync(join(dir, "host-!`x`-path"), "skill");
+      const promptFile = join(dir, "prompt.md");
+      writeFileSync(promptFile, "Task: !`printf expanded`");
+      const prompts: string[] = [];
+      const commands: string[] = [];
+
+      await run({
+        agent: capturePromptAgent(prompts),
+        sandbox: recordingNoSandbox(commands),
+        promptFile,
+        skills: [{ source: skillDir, name: "host-path-skill" }],
+        branchStrategy: { type: "head" },
+        logging: { type: "file", path: join(dir, "run.log") },
+      });
+
+      const captured = prompts[0]!;
+      expect(captured).toContain(`${skillDir}/SKILL.md`);
+      expect(captured).toContain("Task: expanded");
+      expect(commands).toContain("printf expanded");
+      expect(commands).not.toContain("x");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
