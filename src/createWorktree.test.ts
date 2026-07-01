@@ -29,6 +29,7 @@ import {
 } from "./SandboxProvider.js";
 import { encodeProjectPath } from "./SessionStore.js";
 import { makeLocalSandbox } from "./testSandbox.js";
+import { DEFAULT_SANDBOX_SKILLS_DIR } from "./AgentSkills.js";
 
 const execAsync = promisify(exec);
 
@@ -47,6 +48,13 @@ const commitFile = async (
   await writeFile(join(dir, name), content);
   await execAsync(`git add "${name}"`, { cwd: dir });
   await execAsync(`git commit -m "${message}"`, { cwd: dir });
+};
+
+const makeSkill = async (root: string, name: string) => {
+  const dir = join(root, name);
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "SKILL.md"), `# ${name}\n`);
+  return dir;
 };
 
 describe("createWorktree", () => {
@@ -1205,6 +1213,61 @@ describe("worktree.createSandbox()", () => {
     } finally {
       await ws.close();
       await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("passes skills to the sandbox provider outside the worktree", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-sandbox-"));
+    const skillRoot = await mkdtemp(join(tmpdir(), "ws-skill-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    const skillDir = await makeSkill(skillRoot, "worktree-skill");
+    const createCalls: any[] = [];
+    const provider = createBindMountSandboxProvider({
+      name: "recording-bind",
+      create: async (options) => {
+        createCalls.push(options);
+        return {
+          worktreePath: options.worktreePath,
+          exec: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
+          copyFileIn: async () => {},
+          copyFileOut: async () => {},
+          close: async () => {},
+        };
+      },
+    });
+
+    const ws = await createWorktree({
+      branchStrategy: { type: "branch", branch: "ws-skills" },
+      cwd: hostDir,
+    });
+    let sandbox: { close(): Promise<unknown> } | undefined;
+
+    try {
+      sandbox = await ws.createSandbox({
+        sandbox: provider,
+        skills: [{ source: skillDir }],
+      });
+
+      const skillSandboxPath = `${DEFAULT_SANDBOX_SKILLS_DIR}/worktree-skill`;
+      const skillMount = createCalls[0].mounts.find(
+        (mount: { hostPath: string }) => mount.hostPath === skillDir,
+      );
+      expect(skillMount).toEqual({
+        hostPath: skillDir,
+        sandboxPath: skillSandboxPath,
+        readonly: true,
+      });
+      expect(
+        existsSync(
+          join(ws.worktreePath, ".sandcastle", "skills", "worktree-skill"),
+        ),
+      ).toBe(false);
+    } finally {
+      await sandbox?.close();
+      await ws.close();
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(skillRoot, { recursive: true, force: true });
     }
   });
 

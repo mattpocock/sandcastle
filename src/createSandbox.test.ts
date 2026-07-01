@@ -13,7 +13,7 @@ import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
-import { claudeCode, codex, pi } from "./AgentProvider.js";
+import { claudeCode, codex, pi, type AgentProvider } from "./AgentProvider.js";
 import { createSandbox, type CreateSandboxOptions } from "./createSandbox.js";
 import type { SandboxService } from "./SandboxFactory.js";
 import {
@@ -23,6 +23,7 @@ import {
 } from "./SandboxProvider.js";
 import { encodeProjectPath } from "./SessionStore.js";
 import { testIsolated } from "./sandboxes/test-isolated.js";
+import { noSandbox } from "./sandboxes/no-sandbox.js";
 import { makeLocalSandbox } from "./testSandbox.js";
 
 /** Dummy sandbox provider used to satisfy the required `sandbox` field in test mode. */
@@ -55,6 +56,39 @@ const commitFile = async (
   await execAsync(`git add "${name}"`, { cwd: dir });
   await execAsync(`git commit -m "${message}"`, { cwd: dir });
 };
+
+const makeSkill = async (root: string, name: string) => {
+  const dir = join(root, name);
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "SKILL.md"), `# ${name}\n`);
+  return dir;
+};
+
+const makePromptCaptureAgent = (capturePath: string): AgentProvider => ({
+  name: "prompt-capture",
+  env: {},
+  captureSessions: false,
+  buildPrintCommand: ({ prompt }) => ({
+    command: `node -e ${JSON.stringify(
+      `const fs = require("node:fs"); ` +
+        `const prompt = fs.readFileSync(0, "utf8"); ` +
+        `fs.writeFileSync(${JSON.stringify(capturePath)}, prompt); ` +
+        `console.log(JSON.stringify({ type: "result", result: "captured" }));`,
+    )}`,
+    stdin: prompt,
+  }),
+  parseStreamLine: (line) => {
+    try {
+      const parsed = JSON.parse(line) as { type?: string; result?: unknown };
+      if (parsed.type === "result" && typeof parsed.result === "string") {
+        return [{ type: "result", result: parsed.result }];
+      }
+    } catch {
+      // Ignore non-JSON output.
+    }
+    return [];
+  },
+});
 
 /** Format a mock agent result as stream-json lines (mimicking Claude's output) */
 const toStreamJson = (output: string): string => {
@@ -298,6 +332,91 @@ describe("createSandbox", () => {
     } finally {
       await sandbox.close();
       await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("sandbox.run() prepends stable skill paths on every reusable run", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
+    const skillRoot = await mkdtemp(join(tmpdir(), "sandbox-skill-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    const skillDir = await makeSkill(skillRoot, "reusable-skill");
+    const firstCapturePath = join(hostDir, "captured-first.txt");
+    const secondCapturePath = join(hostDir, "captured-second.txt");
+
+    const sandbox = await createSandbox({
+      branch: "reusable-skills",
+      sandbox: testSandbox,
+      cwd: hostDir,
+      skills: [{ source: skillDir }],
+      _test: { buildSandbox: makeLocalSandbox },
+    });
+
+    try {
+      await sandbox.run({
+        agent: makePromptCaptureAgent(firstCapturePath),
+        prompt: "First reusable task.",
+        maxIterations: 1,
+        logging: { type: "file", path: join(hostDir, "first.log") },
+      });
+      await sandbox.run({
+        agent: makePromptCaptureAgent(secondCapturePath),
+        prompt: "Second reusable task.",
+        maxIterations: 1,
+        logging: { type: "file", path: join(hostDir, "second.log") },
+      });
+
+      const firstPrompt = await readFile(firstCapturePath, "utf-8");
+      const secondPrompt = await readFile(secondCapturePath, "utf-8");
+      for (const prompt of [firstPrompt, secondPrompt]) {
+        expect(prompt).toContain("# Available Skills");
+        expect(prompt).toContain(
+          "/home/agent/.sandcastle/skills/reusable-skill/SKILL.md",
+        );
+        expect(prompt).not.toContain(skillDir);
+      }
+      expect(firstPrompt).toContain("First reusable task.");
+      expect(secondPrompt).toContain("Second reusable task.");
+    } finally {
+      await sandbox.close();
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(skillRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("no-sandbox prompts point skills at host paths", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
+    const skillRoot = await mkdtemp(join(tmpdir(), "sandbox-skill-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    const skillDir = await makeSkill(skillRoot, "host-only-skill");
+    const capturePath = join(hostDir, "captured-prompt.txt");
+    let sandbox: Awaited<ReturnType<typeof createSandbox>> | undefined;
+
+    try {
+      sandbox = await createSandbox({
+        branch: "no-sandbox-skills",
+        sandbox: noSandbox(),
+        cwd: hostDir,
+        skills: [{ source: skillDir }],
+      });
+
+      await sandbox.run({
+        agent: makePromptCaptureAgent(capturePath),
+        prompt: "Use the skill.",
+        maxIterations: 1,
+        logging: { type: "file", path: join(hostDir, "run.log") },
+      });
+
+      const capturedPrompt = await readFile(capturePath, "utf-8");
+      expect(capturedPrompt).toContain(`${skillDir}/SKILL.md`);
+      expect(capturedPrompt).not.toContain(
+        "/home/agent/.sandcastle/skills/host-only-skill/SKILL.md",
+      );
+    } finally {
+      await sandbox?.close();
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(skillRoot, { recursive: true, force: true });
     }
   });
 

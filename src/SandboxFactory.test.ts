@@ -19,6 +19,7 @@ import {
 import { testIsolated } from "./sandboxes/test-isolated.js";
 import { testStubProvider } from "./sandboxes/test-shared.js";
 import { noSandbox } from "./sandboxes/no-sandbox.js";
+import { DEFAULT_SANDBOX_SKILLS_DIR } from "./AgentSkills.js";
 
 import {
   SandboxFactory,
@@ -44,6 +45,13 @@ const commitFile = async (
   await writeFile(join(dir, name), content);
   await execAsync(`git add "${name}"`, { cwd: dir });
   await execAsync(`git commit -m "${message}"`, { cwd: dir });
+};
+
+const makeSkill = async (root: string, name: string) => {
+  const dir = join(root, name);
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "SKILL.md"), `# ${name}\n`);
+  return dir;
 };
 
 /** Initialize a real git repo with an initial commit so WorktreeManager.create succeeds. */
@@ -226,6 +234,56 @@ describe("WorktreeDockerSandboxFactory", () => {
       hostPath: `${hostRepoDir}/.git`,
       sandboxPath: `${hostRepoDir}/.git`,
     });
+  });
+
+  it("passes readonly skill mounts outside the sandbox worktree", async () => {
+    const skillRoot = await mkdtemp(join(tmpdir(), "sandcastle-skill-"));
+    tempDirs.push(skillRoot);
+    const skillDir = await makeSkill(skillRoot, "factory-skill");
+    const skillSandboxPath = `${DEFAULT_SANDBOX_SKILLS_DIR}/factory-skill`;
+
+    const layer = Layer.provide(
+      WorktreeDockerSandboxFactory.layer,
+      Layer.mergeAll(
+        Layer.succeed(SandboxConfig, {
+          env: { FOO: "bar" },
+          hostRepoDir,
+          sandboxProvider: mockProvider.provider,
+          branchStrategy: { type: "merge-to-head" },
+          skills: [
+            {
+              name: "factory-skill",
+              hostPath: skillDir,
+              sandboxPath: skillSandboxPath,
+              readonly: true,
+            },
+          ],
+        }),
+        NodeFileSystem.layer,
+        SilentDisplay.layer(Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([])),
+      ),
+    );
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const factory = yield* SandboxFactory;
+        yield* factory.withSandbox(() => Effect.void);
+      }).pipe(Effect.provide(layer)),
+    );
+
+    expect(mockProvider.createCalls).toHaveLength(1);
+    const opts = mockProvider.createCalls[0];
+    const skillMount = opts.mounts.find(
+      (mount: { hostPath: string }) => mount.hostPath === skillDir,
+    );
+    expect(skillMount).toEqual({
+      hostPath: skillDir,
+      sandboxPath: skillSandboxPath,
+      readonly: true,
+    });
+    expect(skillMount.sandboxPath.startsWith(`${SANDBOX_REPO_DIR}/`)).toBe(
+      false,
+    );
   });
 
   it("removes the worktree after the effect completes (clean state)", async () => {
