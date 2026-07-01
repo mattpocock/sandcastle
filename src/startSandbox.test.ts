@@ -299,6 +299,60 @@ describe("startSandbox", () => {
       }
     });
 
+    it("closes the isolated handle when skill copy fails", async () => {
+      const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
+      tempDirs.push(hostDir);
+      const skillRoot = await mkdtemp(join(tmpdir(), "sandcastle-skill-"));
+      tempDirs.push(skillRoot);
+      await initRepo(hostDir);
+      await commitFile(hostDir, "hello.txt", "hello", "initial");
+      const skillDir = await makeSkill(skillRoot, "review-skill");
+      const skillSandboxPath = `${DEFAULT_SANDBOX_SKILLS_DIR}/review-skill`;
+      let closeCalls = 0;
+
+      const realProvider = testIsolated();
+      const provider = createIsolatedSandboxProvider({
+        name: "failing-skill-copy",
+        create: async (options) => {
+          const handle = await realProvider.create(options);
+          return {
+            ...handle,
+            copyIn: async (hostPath: string, sandboxPath: string) => {
+              if (hostPath === skillDir) {
+                throw new Error("skill copy failed");
+              }
+              await handle.copyIn(hostPath, sandboxPath);
+            },
+            close: async () => {
+              closeCalls++;
+              await handle.close();
+            },
+          };
+        },
+      });
+
+      await expect(
+        Effect.runPromise(
+          startSandbox({
+            provider,
+            hostRepoDir: hostDir,
+            env: {},
+            skills: [
+              {
+                name: "review-skill",
+                hostPath: skillDir,
+                sandboxPath: skillSandboxPath,
+                readonly: true,
+              },
+            ],
+          }),
+        ),
+      ).rejects.toThrow(
+        "Failed to copy skill review-skill into sandbox: skill copy failed",
+      );
+      expect(closeCalls).toBe(1);
+    });
+
     it("times out when copyIn hangs", async () => {
       const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
       tempDirs.push(hostDir);

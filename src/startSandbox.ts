@@ -184,6 +184,12 @@ const startBindMountSandbox = (
     ),
   );
 
+const closeIsolatedHandle = (handle: IsolatedSandboxHandle) =>
+  Effect.tryPromise({
+    try: () => handle.close(),
+    catch: () => undefined,
+  }).pipe(Effect.catchAll(() => Effect.void));
+
 const startIsolatedSandbox = (
   options: StartSandboxIsolatedOptions,
 ): Effect.Effect<
@@ -195,8 +201,8 @@ const startIsolatedSandbox = (
   | SyncInTimeoutError
   | CopyToWorktreeTimeoutError
 > =>
-  Effect.gen(function* () {
-    const handle = yield* Effect.tryPromise({
+  Effect.acquireUseRelease(
+    Effect.tryPromise({
       try: () => options.provider.create({ env: options.env }),
       catch: (e) =>
         new WorktreeError({
@@ -211,79 +217,87 @@ const startIsolatedSandbox = (
             timeoutMs: CONTAINER_START_TIMEOUT_MS,
           }),
       ),
-    );
-
-    yield* syncIn(options.hostRepoDir, handle).pipe(
-      withTimeout(
-        SYNC_IN_TIMEOUT_MS,
-        () =>
-          new SyncInTimeoutError({
-            message: `Sync-in timed out after ${SYNC_IN_TIMEOUT_MS}ms`,
-            timeoutMs: SYNC_IN_TIMEOUT_MS,
-          }),
-      ),
-    );
-
-    if (options.copyPaths && options.copyPaths.length > 0) {
-      const pathsToCopy = options.copyPaths;
-      yield* Effect.gen(function* () {
-        for (const relativePath of pathsToCopy) {
-          const hostPath = join(options.hostRepoDir, relativePath);
-          if (!existsSync(hostPath)) {
-            continue;
-          }
-          // Sandbox-side path: Linux container, must use POSIX separators
-          // regardless of host platform.
-          const sandboxPath = posix.join(handle.worktreePath, relativePath);
-          yield* Effect.tryPromise({
-            try: () => handle.copyIn(hostPath, sandboxPath),
-            catch: (e) =>
-              new WorktreeError({
-                message: `Failed to copy ${relativePath} into sandbox: ${e instanceof Error ? e.message : String(e)}`,
+    ),
+    (handle) =>
+      Effect.gen(function* () {
+        yield* syncIn(options.hostRepoDir, handle).pipe(
+          withTimeout(
+            SYNC_IN_TIMEOUT_MS,
+            () =>
+              new SyncInTimeoutError({
+                message: `Sync-in timed out after ${SYNC_IN_TIMEOUT_MS}ms`,
+                timeoutMs: SYNC_IN_TIMEOUT_MS,
               }),
-          });
-        }
-      }).pipe(
-        withTimeout(
-          COPY_PATHS_TIMEOUT_MS,
-          () =>
-            new CopyToWorktreeTimeoutError({
-              message: `Copying paths to worktree timed out after ${COPY_PATHS_TIMEOUT_MS}ms`,
-              timeoutMs: COPY_PATHS_TIMEOUT_MS,
-              paths: pathsToCopy,
-            }),
-        ),
-      );
-    }
+          ),
+        );
 
-    if (options.skills && options.skills.length > 0) {
-      const skillsToCopy = options.skills;
-      yield* Effect.gen(function* () {
-        for (const skill of skillsToCopy) {
-          yield* Effect.tryPromise({
-            try: () => handle.copyIn(skill.hostPath, skill.sandboxPath),
-            catch: (e) =>
-              new WorktreeError({
-                message: `Failed to copy skill ${skill.name} into sandbox: ${e instanceof Error ? e.message : String(e)}`,
-              }),
-          });
+        if (options.copyPaths && options.copyPaths.length > 0) {
+          const pathsToCopy = options.copyPaths;
+          yield* Effect.gen(function* () {
+            for (const relativePath of pathsToCopy) {
+              const hostPath = join(options.hostRepoDir, relativePath);
+              if (!existsSync(hostPath)) {
+                continue;
+              }
+              // Sandbox-side path: Linux container, must use POSIX separators
+              // regardless of host platform.
+              const sandboxPath = posix.join(handle.worktreePath, relativePath);
+              yield* Effect.tryPromise({
+                try: () => handle.copyIn(hostPath, sandboxPath),
+                catch: (e) =>
+                  new WorktreeError({
+                    message: `Failed to copy ${relativePath} into sandbox: ${e instanceof Error ? e.message : String(e)}`,
+                  }),
+              });
+            }
+          }).pipe(
+            withTimeout(
+              COPY_PATHS_TIMEOUT_MS,
+              () =>
+                new CopyToWorktreeTimeoutError({
+                  message: `Copying paths to worktree timed out after ${COPY_PATHS_TIMEOUT_MS}ms`,
+                  timeoutMs: COPY_PATHS_TIMEOUT_MS,
+                  paths: pathsToCopy,
+                }),
+            ),
+          );
         }
-      }).pipe(
-        withTimeout(
-          COPY_PATHS_TIMEOUT_MS,
-          () =>
-            new CopyToWorktreeTimeoutError({
-              message: `Copying skills into sandbox timed out after ${COPY_PATHS_TIMEOUT_MS}ms`,
-              timeoutMs: COPY_PATHS_TIMEOUT_MS,
-              paths: skillsToCopy.map((skill) => skill.name),
-            }),
-        ),
-      );
-    }
 
-    return {
-      handle,
-      sandbox: makeSandboxFromHandle(handle),
-      worktreePath: handle.worktreePath,
-    };
-  });
+        if (options.skills && options.skills.length > 0) {
+          const skillsToCopy = options.skills;
+          yield* Effect.gen(function* () {
+            for (const skill of skillsToCopy) {
+              yield* Effect.tryPromise({
+                try: () => handle.copyIn(skill.hostPath, skill.sandboxPath),
+                catch: (e) =>
+                  new WorktreeError({
+                    message: `Failed to copy skill ${skill.name} into sandbox: ${e instanceof Error ? e.message : String(e)}`,
+                  }),
+              });
+            }
+          }).pipe(
+            withTimeout(
+              COPY_PATHS_TIMEOUT_MS,
+              () =>
+                new CopyToWorktreeTimeoutError({
+                  message: `Copying skills into sandbox timed out after ${COPY_PATHS_TIMEOUT_MS}ms`,
+                  timeoutMs: COPY_PATHS_TIMEOUT_MS,
+                  paths: skillsToCopy.map((skill) => skill.name),
+                }),
+            ),
+          );
+        }
+
+        return {
+          handle,
+          sandbox: makeSandboxFromHandle(handle),
+          worktreePath: handle.worktreePath,
+        };
+      }),
+    (handle, exit) => {
+      if (exit._tag === "Success") {
+        return Effect.void;
+      }
+      return closeIsolatedHandle(handle);
+    },
+  );
