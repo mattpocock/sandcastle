@@ -32,6 +32,19 @@ export type {
   WorktreeCreateSandboxOptions,
 } from "./createWorktree.js";
 export type { PromptArgs } from "./PromptArgumentSubstitution.js";
+export type {
+  SkillSpec,
+  SkillTarget,
+  ResolvedSkill,
+  ResolveSkillsOptions,
+} from "./AgentSkills.js";
+export {
+  DEFAULT_SANDBOX_SKILLS_DIR,
+  buildSkillsPromptPreamble,
+  exposeSkillsViaHostPaths,
+  prependSkillsPrompt,
+  resolveSkills,
+} from "./AgentSkills.js";
 export type { AgentStreamEvent } from "./AgentStreamEmitter.js";
 export {
   transferClaudeSession,

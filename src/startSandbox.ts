@@ -25,6 +25,7 @@ import {
   makeSandboxFromHandle,
   SANDBOX_REPO_DIR,
 } from "./SandboxFactory.js";
+import type { ResolvedSkill } from "./AgentSkills.js";
 import { syncIn } from "./syncIn.js";
 import { normalizeMounts } from "./mountUtils.js";
 
@@ -36,6 +37,7 @@ export interface StartSandboxBindMountOptions {
   gitMounts: MountEntry[];
   repoDir: string;
   copyPaths?: undefined;
+  skills?: readonly ResolvedSkill[];
 }
 
 export interface StartSandboxIsolatedOptions {
@@ -46,6 +48,7 @@ export interface StartSandboxIsolatedOptions {
   gitMounts?: undefined;
   repoDir?: undefined;
   copyPaths?: string[];
+  skills?: readonly ResolvedSkill[];
 }
 
 export interface StartSandboxNoSandboxOptions {
@@ -57,6 +60,7 @@ export interface StartSandboxNoSandboxOptions {
   gitMounts?: undefined;
   repoDir?: undefined;
   copyPaths?: undefined;
+  skills?: readonly ResolvedSkill[];
 }
 
 export type StartSandboxOptions =
@@ -138,6 +142,11 @@ const startBindMountSandbox = (
           sandboxPath: options.repoDir,
         },
         ...options.gitMounts,
+        ...(options.skills ?? []).map((skill) => ({
+          hostPath: skill.hostPath,
+          sandboxPath: skill.sandboxPath,
+          readonly: skill.readonly,
+        })),
       ];
       const mounts = normalizeMounts(
         rawMounts,
@@ -242,6 +251,31 @@ const startIsolatedSandbox = (
               message: `Copying paths to worktree timed out after ${COPY_PATHS_TIMEOUT_MS}ms`,
               timeoutMs: COPY_PATHS_TIMEOUT_MS,
               paths: pathsToCopy,
+            }),
+        ),
+      );
+    }
+
+    if (options.skills && options.skills.length > 0) {
+      const skillsToCopy = options.skills;
+      yield* Effect.gen(function* () {
+        for (const skill of skillsToCopy) {
+          yield* Effect.tryPromise({
+            try: () => handle.copyIn(skill.hostPath, skill.sandboxPath),
+            catch: (e) =>
+              new WorktreeError({
+                message: `Failed to copy skill ${skill.name} into sandbox: ${e instanceof Error ? e.message : String(e)}`,
+              }),
+          });
+        }
+      }).pipe(
+        withTimeout(
+          COPY_PATHS_TIMEOUT_MS,
+          () =>
+            new CopyToWorktreeTimeoutError({
+              message: `Copying skills into sandbox timed out after ${COPY_PATHS_TIMEOUT_MS}ms`,
+              timeoutMs: COPY_PATHS_TIMEOUT_MS,
+              paths: skillsToCopy.map((skill) => skill.name),
             }),
         ),
       );

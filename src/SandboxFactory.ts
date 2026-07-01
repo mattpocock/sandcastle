@@ -28,6 +28,7 @@ import { runHostHooks, type SandboxHooks } from "./SandboxLifecycle.js";
 import { startSandbox } from "./startSandbox.js";
 import { syncOut } from "./syncOut.js";
 import { patchGitMountsForWindows } from "./mountUtils.js";
+import type { ResolvedSkill } from "./AgentSkills.js";
 
 export interface ExecResult {
   readonly stdout: string;
@@ -181,6 +182,8 @@ export class SandboxConfig extends Context.Tag("SandboxConfig")<
     readonly signal?: AbortSignal;
     /** Override default timeouts for built-in lifecycle steps. */
     readonly timeouts?: Timeouts;
+    /** Resolved skill directories to expose inside sandboxed agents. */
+    readonly skills?: readonly ResolvedSkill[];
   }
 >() {}
 
@@ -301,6 +304,7 @@ export const WorktreeDockerSandboxFactory = {
         hooks,
         signal,
         timeouts,
+        skills,
       } = yield* SandboxConfig;
 
       const isHeadMode = branchStrategy.type === "head";
@@ -361,6 +365,7 @@ export const WorktreeDockerSandboxFactory = {
                       hostRepoDir,
                       env,
                       worktreeOrRepoPath: hostRepoDir,
+                      skills,
                     }),
                     ({ sandbox, worktreePath }) =>
                       makeEffect(
@@ -420,6 +425,7 @@ export const WorktreeDockerSandboxFactory = {
                         hostRepoDir,
                         env,
                         worktreeOrRepoPath: worktreeInfo.path,
+                        skills,
                       }),
                       ({ sandbox, worktreePath }) =>
                         makeEffect(
@@ -481,6 +487,7 @@ export const WorktreeDockerSandboxFactory = {
                         hostRepoDir: worktreeInfo.path,
                         env,
                         copyPaths,
+                        skills,
                       }),
                       ({ sandbox, worktreePath, handle }) =>
                         makeEffect(
@@ -555,6 +562,7 @@ export const WorktreeDockerSandboxFactory = {
                     worktreeOrRepoPath: hostRepoDir,
                     gitMounts,
                     repoDir: SANDBOX_REPO_DIR,
+                    skills,
                   }),
                   // Use
                   ({ sandbox, worktreePath, handle }) =>
@@ -648,6 +656,7 @@ export const WorktreeDockerSandboxFactory = {
                       worktreeOrRepoPath: worktreeInfo.path,
                       gitMounts,
                       repoDir: SANDBOX_REPO_DIR,
+                      skills,
                     }),
                     ({ sandbox, worktreePath, handle }) =>
                       makeEffect(

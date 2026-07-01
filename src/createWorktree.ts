@@ -57,6 +57,12 @@ import {
 import { noSandbox } from "./sandboxes/no-sandbox.js";
 import { raceAbortSignal } from "./raceAbortSignal.js";
 import type { Timeouts } from "./run.js";
+import {
+  exposeSkillsViaHostPaths,
+  prependSkillsPrompt,
+  resolveSkills,
+  type SkillSpec,
+} from "./AgentSkills.js";
 
 /** Branch strategies valid for createWorktree — head is excluded. */
 export type WorktreeBranchStrategy =
@@ -100,6 +106,8 @@ export interface WorktreeInteractiveOptions {
   readonly hooks?: SandboxHooks;
   /** Key-value map for {{KEY}} placeholder substitution in prompts */
   readonly promptArgs?: PromptArgs;
+  /** Skill directories to expose to the sandboxed agent and announce in the prompt. */
+  readonly skills?: readonly SkillSpec[];
   /** Environment variables to inject into the sandbox. */
   readonly env?: Record<string, string>;
   /**
@@ -126,6 +134,8 @@ export interface WorktreeRunOptions {
   readonly promptFile?: string;
   /** Key-value map for {{KEY}} placeholder substitution in prompts */
   readonly promptArgs?: PromptArgs;
+  /** Skill directories to expose to the sandboxed agent and announce in the prompt. */
+  readonly skills?: readonly SkillSpec[];
   /** Maximum iterations to run (default: 1). */
   readonly maxIterations?: number;
   /** Substring(s) the agent emits to stop the iteration loop early. */
@@ -178,6 +188,8 @@ export interface WorktreeCreateSandboxOptions {
   readonly hooks?: SandboxHooks;
   /** Paths relative to the host repo root to copy into the worktree at creation time. */
   readonly copyToWorktree?: string[];
+  /** Skill directories to expose to the sandboxed agent and announce in prompts. */
+  readonly skills?: readonly SkillSpec[];
   /** Override default timeouts for built-in lifecycle steps. Unset keys keep their defaults. */
   readonly timeouts?: Timeouts;
   /** @internal Test-only overrides to bypass the sandbox provider. */
@@ -313,6 +325,16 @@ export const createWorktree = async (
         sandboxProviderEnv: resolvedSandbox.env,
       });
       const effectiveEnv = { ...env, ...(opts.env ?? {}) };
+      const resolvedSkills = resolveSkills({
+        cwd: hostRepoDir,
+        skills: opts.skills,
+      });
+      const promptSkills =
+        resolvedSandbox.tag === "none"
+          ? exposeSkillsViaHostPaths(resolvedSkills)
+          : resolvedSkills;
+      const sandboxSkills =
+        resolvedSandbox.tag === "none" ? [] : resolvedSkills;
 
       // 3. Prompt args substitution (skip when no prompt, or when inline passthrough)
       let substitutedPrompt = rawPrompt;
@@ -362,6 +384,7 @@ export const createWorktree = async (
             provider: resolvedSandbox,
             hostRepoDir: worktreeInfo.path,
             env: effectiveEnv,
+            skills: sandboxSkills,
           }),
         );
         handle = startResult.handle;
@@ -381,6 +404,7 @@ export const createWorktree = async (
             worktreeOrRepoPath: worktreeInfo.path,
             gitMounts,
             repoDir: SANDBOX_REPO_DIR,
+            skills: sandboxSkills,
           }),
         );
         handle = startResult.handle;
@@ -420,11 +444,15 @@ export const createWorktree = async (
           sandbox,
           (ctx) =>
             Effect.gen(function* () {
+              const promptWithSkills = prependSkillsPrompt(
+                substitutedPrompt,
+                promptSkills,
+              );
               const fullPrompt =
                 !hasPromptSource || isInlinePrompt
-                  ? substitutedPrompt
+                  ? promptWithSkills
                   : yield* preprocessPrompt(
-                      substitutedPrompt,
+                      promptWithSkills,
                       ctx.sandbox,
                       ctx.sandboxRepoDir,
                     );
@@ -528,6 +556,16 @@ export const createWorktree = async (
         sandboxProviderEnv: sandboxProvider.env,
       });
       const effectiveEnv = { ...env, ...(opts.env ?? {}) };
+      const resolvedSkills = resolveSkills({
+        cwd: hostRepoDir,
+        skills: opts.skills,
+      });
+      const promptSkills =
+        sandboxProvider.tag === "none"
+          ? exposeSkillsViaHostPaths(resolvedSkills)
+          : resolvedSkills;
+      const sandboxSkills =
+        sandboxProvider.tag === "none" ? [] : resolvedSkills;
 
       // 3. Prompt args substitution (skipped for inline prompts — passthrough)
       const userArgs = opts.promptArgs ?? {};
@@ -562,6 +600,7 @@ export const createWorktree = async (
           provider: sandboxProvider,
           hostRepoDir: worktreeInfo.path,
           env: effectiveEnv,
+          skills: sandboxSkills,
         });
         handle = startResult.handle;
         sandboxRepoDir = startResult.worktreePath;
@@ -571,6 +610,7 @@ export const createWorktree = async (
           hostRepoDir,
           env: effectiveEnv,
           worktreeOrRepoPath: worktreeInfo.path,
+          skills: sandboxSkills,
         });
         handle = startResult.handle;
         sandboxRepoDir = startResult.worktreePath;
@@ -589,6 +629,7 @@ export const createWorktree = async (
           worktreeOrRepoPath: worktreeInfo.path,
           gitMounts,
           repoDir: SANDBOX_REPO_DIR,
+          skills: sandboxSkills,
         });
         handle = startResult.handle;
         sandboxRepoDir = startResult.worktreePath;
@@ -672,7 +713,7 @@ export const createWorktree = async (
           hostRepoDir,
           iterations: maxIterations,
           hooks,
-          prompt: resolvedPrompt,
+          prompt: prependSkillsPrompt(resolvedPrompt, promptSkills),
           // merge-to-head: pass `undefined` so the lifecycle records the host's
           // current branch and routes through the merge step. branch strategy:
           // pin to the worktree's branch so commits stay there.
@@ -744,6 +785,7 @@ export const createWorktree = async (
       sandbox: opts.sandbox,
       hooks: opts.hooks,
       copyToWorktree: opts.copyToWorktree,
+      skills: opts.skills,
       timeouts: opts.timeouts,
       branchStrategy: options.branchStrategy,
       _test: opts._test,

@@ -48,6 +48,12 @@ import type {
 } from "./Output.js";
 import { StructuredOutputError } from "./Output.js";
 import { extractStructuredOutput } from "./extractStructuredOutput.js";
+import {
+  exposeSkillsViaHostPaths,
+  prependSkillsPrompt,
+  resolveSkills,
+  type SkillSpec,
+} from "./AgentSkills.js";
 
 /**
  * Build the token-efficient feedback prompt sent to the agent when retrying
@@ -381,6 +387,8 @@ export interface RunOptions<A extends AgentProvider = AgentProvider> {
   readonly name?: string;
   /** Paths relative to the host repo root to copy into the worktree before sandbox start. */
   readonly copyToWorktree?: string[];
+  /** Skill directories to expose to the sandboxed agent and announce in the prompt. */
+  readonly skills?: readonly SkillSpec[];
   /** Branch strategy — controls how the agent's changes relate to branches.
    * Defaults to { type: "head" } for bind-mount providers and { type: "merge-to-head" } for isolated providers. */
   readonly branchStrategy?: BranchStrategy;
@@ -583,6 +591,16 @@ export async function run(
     resolveCwd(options.cwd).pipe(Effect.provide(NodeContext.layer)),
   );
 
+  const resolvedSkills = resolveSkills({
+    cwd: hostRepoDir,
+    skills: options.skills,
+  });
+  const promptSkills =
+    options.sandbox.tag === "none"
+      ? exposeSkillsViaHostPaths(resolvedSkills)
+      : resolvedSkills;
+  const sandboxSkills = options.sandbox.tag === "none" ? [] : resolvedSkills;
+
   // Validate: resumeSession file must exist on the host
   if (options.resumeSession) {
     await assertResumeSessionExists({
@@ -682,6 +700,7 @@ export async function run(
         hooks,
         signal: options.signal,
         timeouts: options.timeouts,
+        skills: sandboxSkills,
       }),
       NodeFileSystem.layer,
       displayLayer,
@@ -742,7 +761,7 @@ export async function run(
       hostRepoDir,
       iterations: maxIterations,
       hooks,
-      prompt: resolvedPrompt,
+      prompt: prependSkillsPrompt(resolvedPrompt, promptSkills),
       branch: orchestrateBranch,
       provider,
       completionSignal: options.completionSignal,
