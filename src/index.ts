@@ -64,6 +64,7 @@ export type {
   OutputObjectDefinition,
   OutputStringDefinition,
 } from "./Output.js";
+export * from "./workflows/index.js";
 export { CwdError } from "./CwdError.js";
 export {
   claudeCode,
