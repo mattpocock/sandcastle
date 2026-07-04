@@ -14,7 +14,7 @@ export type WorkflowSandboxName =
   | "podman"
   | "vercel"
   | "daytona"
-  | "none"
+  | "no-sandbox"
   | (string & {});
 
 export interface WorkflowMeta {
