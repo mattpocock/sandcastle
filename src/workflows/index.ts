@@ -16,3 +16,5 @@ export type {
   JsonSchemaIssue,
   JsonSchemaValidationResult,
 } from "./JsonSchemaStandardSchema.js";
+export { validateWorkflowSource } from "./validateWorkflowSource.js";
+export type { ValidateWorkflowSourceOptions } from "./validateWorkflowSource.js";
