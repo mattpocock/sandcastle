@@ -19,6 +19,7 @@ import type {
   WorkflowValidator,
 } from "./types.js";
 import { validateJsonSchemaValue } from "./JsonSchemaStandardSchema.js";
+import { createWorkflowQualityHelpers } from "./quality.js";
 import type { WorkflowAgentRunner } from "./WorkflowAgentRunner.js";
 import { WorkflowRunStore } from "./WorkflowRunStore.js";
 import { WorkflowScheduler } from "./WorkflowScheduler.js";
@@ -148,6 +149,7 @@ export function createWorkflowPrimitives<Args>(
 
   const agent = runAgent as WorkflowAgentInvoker;
   agent.run = runAgent;
+  const quality = createWorkflowQualityHelpers({ agent, logger: log });
 
   const parallel = (async <T>(
     tasks: readonly WorkflowTask<T>[],
@@ -248,6 +250,7 @@ export function createWorkflowPrimitives<Args>(
     phase,
     log,
     validate,
+    quality,
     workflow,
     budget,
   };
@@ -355,7 +358,9 @@ function getLocalConcurrency(
     !Number.isInteger(options.concurrency) ||
     options.concurrency < 1
   ) {
-    throw new TypeError("Workflow parallel concurrency must be a positive finite integer.");
+    throw new TypeError(
+      "Workflow parallel concurrency must be a positive finite integer.",
+    );
   }
 
   return Math.min(options.concurrency, taskCount);

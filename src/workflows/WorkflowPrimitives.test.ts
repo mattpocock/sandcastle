@@ -113,13 +113,47 @@ function primitives<Args>(
 ) {
   return createWorkflowPrimitives({
     scheduler:
-      options.scheduler ?? new WorkflowScheduler({ concurrency: 3, maxAgents: 5 }),
+      options.scheduler ??
+      new WorkflowScheduler({ concurrency: 3, maxAgents: 5 }),
     agentRunner: options.agentRunner ?? fakeAgentRunner(),
     ...options,
   });
 }
 
 describe("createWorkflowPrimitives", () => {
+  it("exposes quality helpers bound to the workflow agent and logger", async () => {
+    await withRun(async ({ cwd, store, state }) => {
+      const runner = fakeAgentRunner(() =>
+        agentResult({ output: { verdict: "valid" } }),
+      );
+      const ctx = primitives({
+        args: {},
+        runId: state.id,
+        cwd,
+        store,
+        initialState: state,
+        agentRunner: runner,
+      });
+
+      await expect(ctx.quality.verify("Check this")).resolves.toMatchObject({
+        output: { verdict: "valid" },
+      });
+
+      expect(runner.runMock).toHaveBeenCalledWith(
+        expect.stringContaining("Finding to verify:\nCheck this"),
+        { label: "Verify finding", schema: undefined },
+      );
+      expect(await store.readEvents(state.id)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "quality_verify_requested",
+            message: "Verify finding",
+          }),
+        ]),
+      );
+    });
+  });
+
   it("phase updates current phase, emits phase_started, and persists state", async () => {
     await withRun(async ({ cwd, store, state }) => {
       const ctx = primitives({
@@ -413,7 +447,10 @@ describe("createWorkflowPrimitives", () => {
   });
 
   it("parallel.agents preserves order and schedules agent calls", async () => {
-    const gates = new Map<string, ReturnType<typeof deferred<WorkflowAgentResult>>>();
+    const gates = new Map<
+      string,
+      ReturnType<typeof deferred<WorkflowAgentResult>>
+    >();
     const runner = fakeAgentRunner((prompt) => {
       const gate = deferred<WorkflowAgentResult>();
       gates.set(prompt, gate);

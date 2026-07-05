@@ -879,6 +879,8 @@ sandcastle workflow run ./workflow.ts --args '{"issue":123}' --json
 
 Host runtime defaults can be overridden with `--provider`, `--model`, `--sandbox`, `--concurrency`, `--max-agents`, and `--branch-prefix`; the workflow file remains the source of truth and no separate workflow config file is used.
 
+Dynamic workflow contexts include `ctx.quality`, a small helper stdlib for local retries, dry loops, verification agents, judge panels, completeness checks, and non-interactive checkpoints.
+
 ### `sandcastle docker build-image`
 
 Rebuilds the Docker image from an existing `.sandcastle/` directory. Use this after modifying the Dockerfile. On Linux/macOS, the build automatically passes `--build-arg AGENT_UID=$(id -u)` and `AGENT_GID=$(id -g)` so the image's `agent` user matches the host UID — this prevents permission errors on image-built files without runtime chown.
