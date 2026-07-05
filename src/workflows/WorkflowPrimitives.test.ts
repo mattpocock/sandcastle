@@ -347,6 +347,32 @@ describe("createWorkflowPrimitives", () => {
     await expect(resultsPromise).resolves.toEqual([10, 21, 32]);
   });
 
+  it("parallel supports nested calls when scheduler concurrency is 1", async () => {
+    const ctx = primitives({
+      args: {},
+      runId: "run-1",
+      cwd: "/repo",
+      scheduler: new WorkflowScheduler({ concurrency: 1, maxAgents: 5 }),
+    });
+
+    const results = await ctx.parallel([
+      async () => {
+        const inner = await ctx.parallel([
+          async () => "inner-first",
+          async () => "inner-second",
+        ]);
+
+        return ["outer-first", ...inner].join(":");
+      },
+      async () => "outer-second",
+    ]);
+
+    expect(results).toEqual([
+      "outer-first:inner-first:inner-second",
+      "outer-second",
+    ]);
+  });
+
   it("parallel.agents preserves order and schedules agent calls", async () => {
     const gates = new Map<string, ReturnType<typeof deferred<WorkflowAgentResult>>>();
     const runner = fakeAgentRunner((prompt) => {

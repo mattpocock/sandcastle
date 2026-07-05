@@ -157,7 +157,7 @@ export function createWorkflowPrimitives<Args>(
     return runWithLocalConcurrency(
       tasks,
       getLocalConcurrency(tasks.length, parallelOptions),
-      (task) => options.scheduler.schedule(task),
+      (task) => Promise.resolve().then(task),
     );
   }) as WorkflowParallelRunner;
   parallel.agents = async <Output = unknown>(
