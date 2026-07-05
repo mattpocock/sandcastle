@@ -121,8 +121,7 @@ export function createWorkflowPrimitives<Args>(
         );
 
         await emit({
-          type:
-            result.status === "failed" ? "agent_failed" : "agent_succeeded",
+          type: agentResultEventType(result.status),
           message: label,
           details: {
             label,
@@ -323,6 +322,20 @@ async function runWithLocalConcurrency<T>(
 
     launch();
   });
+}
+
+function agentResultEventType(
+  status: WorkflowAgentResult["status"],
+): "agent_failed" | "agent_replayed" | "agent_succeeded" {
+  if (status === "failed") {
+    return "agent_failed";
+  }
+
+  if (status === "skipped") {
+    return "agent_replayed";
+  }
+
+  return "agent_succeeded";
 }
 
 function getLocalConcurrency(

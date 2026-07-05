@@ -230,6 +230,75 @@ describe("runWorkflow", () => {
     });
   });
 
+  it("resumes a workflow run by replaying matching successful agent journal entries", async () => {
+    await withTempDir(async (cwd) => {
+      const run = fakeAgentRun((options) =>
+        runResult(options, {
+          stdout: "stored output",
+          commits: [{ sha: "abc123" }],
+        }),
+      );
+      const source = workflowSource(`
+        const agentResult = await ctx.agent("Return the same answer", {
+          label: "Answer Agent",
+        });
+        return {
+          output: agentResult.output,
+          status: agentResult.status,
+          branch: agentResult.branch,
+        };
+      `);
+
+      await runWorkflow({
+        cwd,
+        source,
+        runId: "first-run",
+        runsRoot: "runs",
+        defaultAgent: testAgent(),
+        defaultSandbox: testSandbox(),
+        agentRun: run,
+      });
+      const result = await runWorkflow({
+        cwd,
+        source,
+        runId: "second-run",
+        runsRoot: "runs",
+        resume: { fromRunId: "first-run" },
+        defaultAgent: testAgent(),
+        defaultSandbox: testSandbox(),
+        agentRun: run,
+      });
+
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(result).toMatchObject({
+        status: "succeeded",
+        result: {
+          output: "stored output",
+          status: "skipped",
+          branch: "sandcastle/workflow/first-run/001-answer-agent",
+        },
+      });
+      expect(
+        await readJson(
+          join(result.runDir, "agents", "001-answer-agent", "result.json"),
+        ),
+      ).toMatchObject({
+        status: "skipped",
+        reason: "replayed",
+        replayedFrom: {
+          runId: "first-run",
+          callId: "001-answer-agent",
+        },
+        output: "stored output",
+      });
+      const events = await readFile(
+        join(result.runDir, "events.jsonl"),
+        "utf8",
+      );
+      expect(events).toContain('"type":"agent_replayed"');
+    });
+  });
+
   it("resolves workflow defaults for provider, model, sandbox, and skills", async () => {
     await withTempDir(async (cwd) => {
       const run = fakeAgentRun();

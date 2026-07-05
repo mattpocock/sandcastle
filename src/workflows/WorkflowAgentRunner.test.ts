@@ -560,6 +560,326 @@ describe("WorkflowAgentRunner", () => {
     }
   });
 
+  it("replays a matching succeeded journal entry without invoking run", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "workflow-agent-runner-"));
+    try {
+      const store = new WorkflowRunStore({ cwd: dir });
+      await store.createRun({
+        meta: { name: "Agent Runner Test" },
+        runId: "run-1",
+      });
+      const firstRun = fakeRun(async (options) =>
+        runResult(options, {
+          stdout: "stored output",
+          commits: [{ sha: "abc123" }],
+          iterations: [{ sessionId: "session-1" }],
+        }),
+      );
+      const firstRunner = new WorkflowAgentRunner({
+        cwd: dir,
+        runId: "run-1",
+        branchPrefix: "wf",
+        sourceHash: "source-a",
+        defaultAgent: agent("agent"),
+        defaultSandbox: sandbox("sandbox"),
+        store,
+        getPhase: () => "Build",
+        run: firstRun,
+      });
+
+      await firstRunner.run("Reuse this", { label: "Reusable" });
+      const resumeJournal = await store.readJournal("run-1");
+
+      await store.createRun({
+        meta: { name: "Agent Runner Test" },
+        runId: "run-2",
+      });
+      const secondRun = fakeRun();
+      const secondRunner = new WorkflowAgentRunner({
+        cwd: dir,
+        runId: "run-2",
+        branchPrefix: "wf",
+        sourceHash: "source-a",
+        defaultAgent: agent("agent"),
+        defaultSandbox: sandbox("sandbox"),
+        store,
+        resumeFromRunId: "run-1",
+        resumeJournal,
+        getPhase: () => "Build",
+        run: secondRun,
+      });
+
+      const result = await secondRunner.run("Reuse this", {
+        label: "Reusable",
+      });
+      const journal = await store.readJournal("run-2");
+      const resultPath = result.artifacts.find(
+        (artifact) => artifact.name === "result",
+      )?.path;
+
+      expect(secondRun).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        output: "stored output",
+        branch: "wf/run-1/001-reusable",
+        commits: [{ sha: "abc123" }],
+        sessionId: "session-1",
+        status: "skipped",
+      });
+      expect(journal[0]).toMatchObject({
+        callId: "001-reusable",
+        status: "skipped",
+        output: "stored output",
+        replayedFromRunId: "run-1",
+        replayedFromCallId: "001-reusable",
+      });
+      expect(JSON.parse(await readFile(resultPath!, "utf8"))).toMatchObject({
+        status: "skipped",
+        reason: "replayed",
+        replayedFrom: {
+          runId: "run-1",
+          callId: "001-reusable",
+        },
+        output: "stored output",
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not replay when the prompt changes", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "workflow-agent-runner-"));
+    try {
+      const store = new WorkflowRunStore({ cwd: dir });
+      await store.createRun({
+        meta: { name: "Agent Runner Test" },
+        runId: "run-1",
+      });
+      const firstRunner = new WorkflowAgentRunner({
+        cwd: dir,
+        runId: "run-1",
+        branchPrefix: "wf",
+        sourceHash: "source-a",
+        defaultAgent: agent("agent"),
+        defaultSandbox: sandbox("sandbox"),
+        store,
+        run: fakeRun(async (options) =>
+          runResult(options, { stdout: "old output" }),
+        ),
+      });
+
+      await firstRunner.run("Old prompt", { label: "Worker" });
+      const resumeJournal = await store.readJournal("run-1");
+
+      await store.createRun({
+        meta: { name: "Agent Runner Test" },
+        runId: "run-2",
+      });
+      const secondRun = fakeRun(async (options) =>
+        runResult(options, { stdout: "new output" }),
+      );
+      const secondRunner = new WorkflowAgentRunner({
+        cwd: dir,
+        runId: "run-2",
+        branchPrefix: "wf",
+        sourceHash: "source-a",
+        defaultAgent: agent("agent"),
+        defaultSandbox: sandbox("sandbox"),
+        store,
+        resumeFromRunId: "run-1",
+        resumeJournal,
+        run: secondRun,
+      });
+
+      const result = await secondRunner.run("New prompt", { label: "Worker" });
+
+      expect(secondRun).toHaveBeenCalledTimes(1);
+      expect(result).toMatchObject({
+        output: "new output",
+        status: "succeeded",
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not replay when agent options change", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "workflow-agent-runner-"));
+    try {
+      const store = new WorkflowRunStore({ cwd: dir });
+      await store.createRun({
+        meta: { name: "Agent Runner Test" },
+        runId: "run-1",
+      });
+      const firstRunner = new WorkflowAgentRunner({
+        cwd: dir,
+        runId: "run-1",
+        branchPrefix: "wf",
+        sourceHash: "source-a",
+        defaultAgent: agent("agent"),
+        defaultSandbox: sandbox("sandbox"),
+        store,
+        run: fakeRun(async (options) =>
+          runResult(options, { stdout: "old output" }),
+        ),
+      });
+
+      await firstRunner.run("Same prompt", {
+        label: "Worker",
+        timeoutMs: 1_000,
+      });
+      const resumeJournal = await store.readJournal("run-1");
+
+      await store.createRun({
+        meta: { name: "Agent Runner Test" },
+        runId: "run-2",
+      });
+      const secondRun = fakeRun(async (options) =>
+        runResult(options, { stdout: "new output" }),
+      );
+      const secondRunner = new WorkflowAgentRunner({
+        cwd: dir,
+        runId: "run-2",
+        branchPrefix: "wf",
+        sourceHash: "source-a",
+        defaultAgent: agent("agent"),
+        defaultSandbox: sandbox("sandbox"),
+        store,
+        resumeFromRunId: "run-1",
+        resumeJournal,
+        run: secondRun,
+      });
+
+      const result = await secondRunner.run("Same prompt", {
+        label: "Worker",
+        timeoutMs: 2_000,
+      });
+
+      expect(secondRun).toHaveBeenCalledTimes(1);
+      expect(result).toMatchObject({
+        output: "new output",
+        status: "succeeded",
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not replay when the source hash changes", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "workflow-agent-runner-"));
+    try {
+      const store = new WorkflowRunStore({ cwd: dir });
+      await store.createRun({
+        meta: { name: "Agent Runner Test" },
+        runId: "run-1",
+      });
+      const firstRunner = new WorkflowAgentRunner({
+        cwd: dir,
+        runId: "run-1",
+        branchPrefix: "wf",
+        sourceHash: "source-a",
+        defaultAgent: agent("agent"),
+        defaultSandbox: sandbox("sandbox"),
+        store,
+        run: fakeRun(async (options) =>
+          runResult(options, { stdout: "old output" }),
+        ),
+      });
+
+      await firstRunner.run("Same prompt", { label: "Worker" });
+      const resumeJournal = await store.readJournal("run-1");
+
+      await store.createRun({
+        meta: { name: "Agent Runner Test" },
+        runId: "run-2",
+      });
+      const secondRun = fakeRun(async (options) =>
+        runResult(options, { stdout: "new output" }),
+      );
+      const secondRunner = new WorkflowAgentRunner({
+        cwd: dir,
+        runId: "run-2",
+        branchPrefix: "wf",
+        sourceHash: "source-b",
+        defaultAgent: agent("agent"),
+        defaultSandbox: sandbox("sandbox"),
+        store,
+        resumeFromRunId: "run-1",
+        resumeJournal,
+        run: secondRun,
+      });
+
+      const result = await secondRunner.run("Same prompt", {
+        label: "Worker",
+      });
+
+      expect(secondRun).toHaveBeenCalledTimes(1);
+      expect(result).toMatchObject({
+        output: "new output",
+        status: "succeeded",
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not replay failed journal entries as success", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "workflow-agent-runner-"));
+    try {
+      const store = new WorkflowRunStore({ cwd: dir });
+      await store.createRun({
+        meta: { name: "Agent Runner Test" },
+        runId: "run-1",
+      });
+      const firstRunner = new WorkflowAgentRunner({
+        cwd: dir,
+        runId: "run-1",
+        branchPrefix: "wf",
+        sourceHash: "source-a",
+        defaultAgent: agent("agent"),
+        defaultSandbox: sandbox("sandbox"),
+        store,
+        run: fakeRun(async () => {
+          throw new Error("agent failed");
+        }),
+      });
+
+      await firstRunner.run("Same prompt", { label: "Worker" });
+      const resumeJournal = await store.readJournal("run-1");
+
+      await store.createRun({
+        meta: { name: "Agent Runner Test" },
+        runId: "run-2",
+      });
+      const secondRun = fakeRun(async (options) =>
+        runResult(options, { stdout: "recovered output" }),
+      );
+      const secondRunner = new WorkflowAgentRunner({
+        cwd: dir,
+        runId: "run-2",
+        branchPrefix: "wf",
+        sourceHash: "source-a",
+        defaultAgent: agent("agent"),
+        defaultSandbox: sandbox("sandbox"),
+        store,
+        resumeFromRunId: "run-1",
+        resumeJournal,
+        run: secondRun,
+      });
+
+      const result = await secondRunner.run("Same prompt", {
+        label: "Worker",
+      });
+
+      expect(secondRun).toHaveBeenCalledTimes(1);
+      expect(result).toMatchObject({
+        output: "recovered output",
+        status: "succeeded",
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("fails clearly when a requested skill name is ambiguous", async () => {
     const run = fakeRun();
     const runner = new WorkflowAgentRunner({
