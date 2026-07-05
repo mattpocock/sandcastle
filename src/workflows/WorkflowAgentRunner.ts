@@ -130,6 +130,7 @@ export class WorkflowAgentRunner {
       stableStringify({
         version: 1,
         sourceHash: this.sourceHash,
+        callIndex: resolved.callIndex,
         label: resolved.label,
         phase: resolved.phase,
         taskPromptHash,
