@@ -183,6 +183,9 @@ const workerOutputByName = {
   },
 } as const;
 
+type WorkerOutput =
+  (typeof workerOutputByName)[keyof typeof workerOutputByName];
+
 const createControlledAgentRun = () => {
   const gates = new Map<string, ReturnType<typeof deferred>>();
   const startedNames: string[] = [];
@@ -392,6 +395,9 @@ describe("dynamic workflow integration smoke test", () => {
       const journal = await readJsonl<WorkflowAgentJournalEntry>(
         join(runDir, "journal.jsonl"),
       );
+      const journalByCallIndex = [...journal].sort(
+        (left, right) => left.callIndex - right.callIndex,
+      );
       const journalByLabel = [...journal].sort((left, right) =>
         left.label.localeCompare(right.label),
       );
@@ -455,13 +461,154 @@ describe("dynamic workflow integration smoke test", () => {
         true,
       );
       expect(
-        fakeRunCalls.every((options) =>
-          options.prompt?.includes('"score": {'),
-        ),
+        fakeRunCalls.every((options) => options.prompt?.includes('"score": {')),
       ).toBe(true);
       expect(agent.buildPrintCommand).not.toHaveBeenCalled();
       expect(sandbox.create).not.toHaveBeenCalled();
       expect(controlledRun.maxActiveCount).toBeLessThanOrEqual(2);
+
+      // Replay matching is call-index ordered, so resume with the prior journal order.
+      const replayedOutputsByCallIndex = journalByCallIndex.map(
+        (entry) => entry.output as WorkerOutput,
+      );
+      const replayItems = replayedOutputsByCallIndex.map(
+        (output) => output.item,
+      );
+      const expectedReplaySynthesis = {
+        title: "Integration synthesis",
+        items: replayItems,
+        highlights: replayedOutputsByCallIndex.map(
+          (output) => `${output.item}: ${output.finding}`,
+        ),
+        totalScore: replayedOutputsByCallIndex.reduce(
+          (sum, output) => sum + output.score,
+          0,
+        ),
+        summary: replayedOutputsByCallIndex
+          .map((output) => output.finding)
+          .join(" / "),
+      };
+      const replayOnlyRun = vi.fn(async () => {
+        throw new Error("Resumed workflow should replay all agent calls.");
+      }) as unknown as WorkflowAgentRunFunction;
+      const resumedResult = await runWorkflow({
+        cwd,
+        source: workflowSource,
+        args: { items: replayItems },
+        runId: "integration-smoke-resume-run",
+        runsRoot: "runs",
+        resume: { fromRunId: "integration-smoke-run" },
+        concurrency: 1,
+        maxAgents: 3,
+        defaultAgent: agent,
+        defaultSandbox: sandbox,
+        agentRun: replayOnlyRun,
+      });
+      const resumedRunDir = join(cwd, "runs", "integration-smoke-resume-run");
+
+      expect(replayOnlyRun).not.toHaveBeenCalled();
+      expect(resumedResult).toMatchObject({
+        runId: "integration-smoke-resume-run",
+        status: "succeeded",
+        runDir: resumedRunDir,
+        result: {
+          synthesis: expectedReplaySynthesis,
+          workerStatuses: ["skipped", "skipped", "skipped"],
+          workerArtifactNames: [
+            ["prompt", "result", "run"],
+            ["prompt", "result", "run"],
+            ["prompt", "result", "run"],
+          ],
+        },
+      });
+
+      await expect(
+        readJson(join(resumedRunDir, "state.json")),
+      ).resolves.toMatchObject({
+        id: "integration-smoke-resume-run",
+        status: "succeeded",
+        agentCount: 3,
+        maxAgents: 3,
+        concurrency: 1,
+        currentPhase: "Synthesize",
+        result: resumedResult.result,
+      });
+      await expect(
+        readJson(join(resumedRunDir, "result.json")),
+      ).resolves.toEqual(resumedResult.result);
+
+      const resumedEvents = await readJsonl<WorkflowEvent>(
+        join(resumedRunDir, "events.jsonl"),
+      );
+      expect(
+        resumedEvents
+          .filter((event) => event.type === "agent_replayed")
+          .map((event) => event.message)
+          .sort(),
+      ).toEqual(["Worker Alpha", "Worker Beta", "Worker Gamma"]);
+      expect(
+        resumedEvents.filter((event) => event.type === "agent_succeeded"),
+      ).toHaveLength(0);
+
+      const replayJournal = await readJsonl<WorkflowAgentJournalEntry>(
+        join(resumedRunDir, "journal.jsonl"),
+      );
+      const replayJournalByCallIndex = [...replayJournal].sort(
+        (left, right) => left.callIndex - right.callIndex,
+      );
+      expect(replayJournalByCallIndex).toHaveLength(3);
+
+      for (const [index, replayEntry] of replayJournalByCallIndex.entries()) {
+        const originalEntry = journalByCallIndex[index];
+        expect(originalEntry).toBeDefined();
+        expect(replayEntry).toMatchObject({
+          callId: originalEntry?.callId,
+          callIndex: originalEntry?.callIndex,
+          callHash: originalEntry?.callHash,
+          label: originalEntry?.label,
+          phase: "Analyze",
+          status: "skipped",
+          branch: originalEntry?.branch,
+          commits: originalEntry?.commits,
+          sessionId: originalEntry?.sessionId,
+          usage: originalEntry?.usage,
+          output: originalEntry?.output,
+          replayedFromRunId: "integration-smoke-run",
+          replayedFromCallId: originalEntry?.callId,
+        });
+
+        const agentDir = join(resumedRunDir, "agents", replayEntry.callId);
+        await expect(
+          access(join(agentDir, "prompt.md")),
+        ).resolves.toBeUndefined();
+        await expect(access(join(agentDir, "stdout.txt"))).rejects.toThrow();
+        await expect(readJson(join(agentDir, "result.json"))).resolves.toEqual({
+          status: "skipped",
+          reason: "replayed",
+          replayedFrom: {
+            runId: "integration-smoke-run",
+            callId: originalEntry?.callId,
+            callHash: originalEntry?.callHash,
+          },
+          output: originalEntry?.output,
+        });
+        await expect(
+          readJson(join(agentDir, "run.json")),
+        ).resolves.toMatchObject({
+          branch: originalEntry?.branch,
+          commits: originalEntry?.commits,
+          sessionId: originalEntry?.sessionId,
+          usage: originalEntry?.usage,
+          replayedFrom: {
+            runId: "integration-smoke-run",
+            callId: originalEntry?.callId,
+            callHash: originalEntry?.callHash,
+          },
+        });
+      }
+
+      expect(agent.buildPrintCommand).not.toHaveBeenCalled();
+      expect(sandbox.create).not.toHaveBeenCalled();
     });
   });
 });
