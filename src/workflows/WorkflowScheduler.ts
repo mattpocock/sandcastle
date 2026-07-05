@@ -23,6 +23,7 @@ export class WorkflowScheduler {
   #scheduledCount = 0;
   #stoppedError: WorkflowStoppedError | undefined;
   #queue: QueueEntry[] = [];
+  #settledWaiters: Array<() => void> = [];
   readonly #signal?: AbortSignal;
   readonly #abortHandler: () => void;
   readonly #beforeStart?: () => Promise<void> | void;
@@ -121,6 +122,18 @@ export class WorkflowScheduler {
     for (const entry of queued) {
       entry.reject(this.#stoppedError);
     }
+
+    this.#resolveSettledWaiters();
+  }
+
+  waitForSettled(): Promise<void> {
+    if (this.#activeCount === 0 && this.#queue.length === 0) {
+      return Promise.resolve();
+    }
+
+    return new Promise((resolve) => {
+      this.#settledWaiters.push(resolve);
+    });
   }
 
   #drain(): void {
@@ -148,7 +161,24 @@ export class WorkflowScheduler {
       .finally(() => {
         this.#activeCount--;
         this.#drain();
+        this.#resolveSettledWaiters();
       });
+  }
+
+  #resolveSettledWaiters(): void {
+    if (
+      this.#activeCount !== 0 ||
+      this.#queue.length !== 0 ||
+      this.#settledWaiters.length === 0
+    ) {
+      return;
+    }
+
+    const waiters = this.#settledWaiters;
+    this.#settledWaiters = [];
+    for (const resolve of waiters) {
+      resolve();
+    }
   }
 }
 

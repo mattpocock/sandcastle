@@ -887,7 +887,7 @@ Requests that a running dynamic workflow stop by writing its persisted control f
 sandcastle workflow stop <run-id> --json
 ```
 
-`--json` emits `runId`, current `status`, `control`, `runDir`, and `state`. The running workflow process observes `.sandcastle/runs/<run-id>/control.json`, aborts active agent work when practical, stops queued work, and records `stopped` instead of `succeeded`.
+`--json` emits `runId`, current `status`, `control`, `runDir`, and `state`. Stop requests durably update `state.json` to `stopping` immediately when the run state exists. The running workflow process observes `.sandcastle/runs/<run-id>/control.json`, aborts active agent work when practical, rejects queued work, waits for active scheduled work to settle, and then records terminal `stopped` instead of `succeeded`.
 
 ### `sandcastle workflow pause`
 
@@ -897,7 +897,7 @@ Requests a soft pause for a dynamic workflow:
 sandcastle workflow pause <run-id> --json
 ```
 
-Pause is cooperative: Sandcastle stops scheduling new workflow/agent work after the control request is observed, but it does not claim that already-active work was safely suspended.
+Pause is cooperative: Sandcastle stops scheduling new workflow/agent work after the control request is observed and rejects queued work, but it does not abort already-active work. Terminal `paused` is recorded only after active scheduled work settles.
 
 ### `sandcastle docker build-image`
 

@@ -261,6 +261,7 @@ export class WorkflowRunStore {
     runId: string,
     reason?: string,
   ): Promise<WorkflowControlState> {
+    await this.writeStoppingStateIfPresent(runId);
     return this.updateControl(runId, (control) => ({
       ...control,
       stopRequested: true,
@@ -443,6 +444,19 @@ export class WorkflowRunStore {
       throw error;
     }
   }
+
+  private async writeStoppingStateIfPresent(runId: string): Promise<void> {
+    const statePath = join(this.getRunDir(runId), "state.json");
+    const state = await this.readOptionalJson(statePath);
+    if (!isWorkflowRunState(state) || isTerminalRunStatus(state.status)) {
+      return;
+    }
+
+    await this.writeAtomic(statePath, {
+      ...state,
+      status: "stopping",
+    } satisfies WorkflowRunState);
+  }
 }
 
 function normalizeControlState(value: unknown): WorkflowControlState {
@@ -464,4 +478,22 @@ function normalizeControlState(value: unknown): WorkflowControlState {
       ? { updatedAt: record.updatedAt }
       : {}),
   };
+}
+
+function isWorkflowRunState(value: unknown): value is WorkflowRunState {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { readonly id?: unknown }).id === "string" &&
+    typeof (value as { readonly status?: unknown }).status === "string"
+  );
+}
+
+function isTerminalRunStatus(status: WorkflowRunStatus): boolean {
+  return (
+    status === "failed" ||
+    status === "paused" ||
+    status === "stopped" ||
+    status === "succeeded"
+  );
 }

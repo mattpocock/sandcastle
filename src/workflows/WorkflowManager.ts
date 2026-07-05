@@ -205,6 +205,7 @@ async function runWorkflowInternal(
       const reason = getControlReason(error);
       const eventType =
         controlKind === "stop" ? "workflow_stopped" : "workflow_paused";
+      await scheduler.waitForSettled();
       await store.appendEvent(runId, {
         timestamp: new Date().toISOString(),
         type: eventType,

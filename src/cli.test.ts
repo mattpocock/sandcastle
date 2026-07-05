@@ -404,12 +404,15 @@ describe("sandcastle CLI", () => {
 
     expect(json).toMatchObject({
       runId: "stop-run",
-      status: "running",
+      status: "stopping",
       runDir,
       control: {
         stopRequested: true,
         pauseRequested: false,
         updatedAt: expect.any(String),
+      },
+      state: {
+        status: "stopping",
       },
     });
     await expect(
@@ -417,6 +420,9 @@ describe("sandcastle CLI", () => {
     ).resolves.toMatchObject({
       stopRequested: true,
       pauseRequested: false,
+    });
+    await expect(readJson(join(runDir, "state.json"))).resolves.toMatchObject({
+      status: "stopping",
     });
   });
 
