@@ -1,4 +1,4 @@
-import { Command, Options } from "@effect/cli";
+import { Args, Command, Options } from "@effect/cli";
 import { FileSystem } from "@effect/platform";
 import { Effect, Option } from "effect";
 import * as clack from "@clack/prompts";
@@ -35,6 +35,11 @@ import type {
 } from "./InitService.js";
 import { ConfigDirError, InitError } from "./errors.js";
 import { VERSION } from "./version.js";
+import {
+  runWorkflowCli,
+  validateWorkflowCli,
+  type WorkflowCliRunOptions,
+} from "./WorkflowCli.js";
 
 // --- Shared options ---
 
@@ -679,6 +684,118 @@ const podmanCommand = Command.make("podman", {}, () =>
   Command.withSubcommands([podmanBuildImageCommand, podmanRemoveImageCommand]),
 );
 
+// --- Workflow command ---
+
+const workflowFileArg = Args.file({ name: "FILE" });
+
+const jsonOption = Options.boolean("json").pipe(
+  Options.withDescription("Write machine-readable JSON"),
+);
+
+const workflowArgsOption = Options.text("args").pipe(
+  Options.withDescription("JSON value passed to the workflow as ctx.args"),
+  Options.optional,
+);
+
+const workflowProviderOption = Options.text("provider").pipe(
+  Options.withDescription("Host override for workflow defaults.provider"),
+  Options.optional,
+);
+
+const workflowModelOption = Options.text("model").pipe(
+  Options.withDescription("Host override for workflow defaults.model"),
+  Options.optional,
+);
+
+const workflowSandboxOption = Options.text("sandbox").pipe(
+  Options.withDescription("Host override for workflow defaults.sandbox"),
+  Options.optional,
+);
+
+const workflowConcurrencyOption = Options.integer("concurrency").pipe(
+  Options.withDescription("Host override for workflow defaults.maxConcurrency"),
+  Options.optional,
+);
+
+const workflowMaxAgentsOption = Options.integer("max-agents").pipe(
+  Options.withDescription("Host override for workflow defaults.maxAgents"),
+  Options.optional,
+);
+
+const workflowBranchPrefixOption = Options.text("branch-prefix").pipe(
+  Options.withDescription("Host override for workflow defaults.branchPrefix"),
+  Options.optional,
+);
+
+const optionValue = <A>(option: Option.Option<A>): A | undefined =>
+  option._tag === "Some" ? option.value : undefined;
+
+const workflowValidateCommand = Command.make(
+  "validate",
+  {
+    file: workflowFileArg,
+    json: jsonOption,
+  },
+  ({ file, json }) =>
+    Effect.tryPromise(() =>
+      validateWorkflowCli({
+        file,
+        json,
+        cwd: process.cwd(),
+      }),
+    ),
+);
+
+const workflowRunCommand = Command.make(
+  "run",
+  {
+    file: workflowFileArg,
+    args: workflowArgsOption,
+    json: jsonOption,
+    provider: workflowProviderOption,
+    model: workflowModelOption,
+    sandbox: workflowSandboxOption,
+    concurrency: workflowConcurrencyOption,
+    maxAgents: workflowMaxAgentsOption,
+    branchPrefix: workflowBranchPrefixOption,
+  },
+  ({
+    file,
+    args,
+    json,
+    provider,
+    model,
+    sandbox,
+    concurrency,
+    maxAgents,
+    branchPrefix,
+  }) =>
+    Effect.tryPromise(() =>
+      runWorkflowCli({
+        file,
+        argsJson: optionValue(args),
+        json,
+        cwd: process.cwd(),
+        provider: optionValue(provider),
+        model: optionValue(model),
+        sandbox: optionValue(sandbox),
+        concurrency: optionValue(concurrency),
+        maxAgents: optionValue(maxAgents),
+        branchPrefix: optionValue(branchPrefix),
+      } satisfies WorkflowCliRunOptions),
+    ),
+);
+
+const workflowCommand = Command.make("workflow", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    yield* d.status(
+      "Workflow commands. Use --help to see available subcommands.",
+      "info",
+    );
+  }),
+).pipe(Command.withSubcommands([workflowValidateCommand, workflowRunCommand]));
+
 // --- Root command ---
 
 const rootCommand = Command.make("sandcastle", {}, () =>
@@ -690,7 +807,12 @@ const rootCommand = Command.make("sandcastle", {}, () =>
 );
 
 export const sandcastle = rootCommand.pipe(
-  Command.withSubcommands([initCommand, dockerCommand, podmanCommand]),
+  Command.withSubcommands([
+    initCommand,
+    dockerCommand,
+    podmanCommand,
+    workflowCommand,
+  ]),
 );
 
 export const cli = Command.run(sandcastle, {
