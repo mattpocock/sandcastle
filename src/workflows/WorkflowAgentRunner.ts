@@ -90,6 +90,8 @@ export class WorkflowAgentRunner {
   readonly #run: WorkflowAgentRunFunction;
   #callIndex = 0;
   #resumeDisabled = false;
+  #nextReplayIndex = 0;
+  readonly #replayDecisions = new Map<number, Promise<void>>();
 
   constructor(options: WorkflowAgentRunnerOptions) {
     this.cwd = options.cwd;
@@ -113,6 +115,9 @@ export class WorkflowAgentRunner {
   ): Promise<WorkflowAgentResult<Output>> {
     const startedAt = new Date().toISOString();
     const resolved = this.#resolveOptions(options);
+    const finishReplayDecision = this.#registerReplayDecision(
+      resolved.callIndex,
+    );
     const wrappedPrompt = wrapWorkflowAgentPrompt({
       runId: this.runId,
       callId: resolved.callId,
@@ -154,7 +159,11 @@ export class WorkflowAgentRunner {
       wrappedPrompt,
     );
 
-    const replayEntry = this.#findReplayEntry(resolved.callIndex, callHash);
+    const replayEntry = await this.#findReplayEntry(
+      resolved.callIndex,
+      callHash,
+      finishReplayDecision,
+    );
     if (replayEntry !== undefined) {
       return this.#recordReplay<Output>({
         artifacts,
@@ -356,28 +365,61 @@ export class WorkflowAgentRunner {
     await this.store.appendJournal(this.runId, entry);
   }
 
-  #findReplayEntry(
-    callIndex: number,
-    callHash: string,
-  ): WorkflowAgentJournalEntry | undefined {
-    if (this.#resumeDisabled || this.resumeFromRunId === undefined) {
+  #registerReplayDecision(callIndex: number): (() => void) | undefined {
+    if (this.resumeFromRunId === undefined) {
       return undefined;
     }
 
-    const entry = this.resumeJournal.find(
-      (journalEntry) => journalEntry.callIndex === callIndex,
-    );
+    let finish!: () => void;
+    const decision = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    this.#replayDecisions.set(callIndex, decision);
+    return finish;
+  }
 
-    if (
-      entry !== undefined &&
-      entry.status === "succeeded" &&
-      entry.callHash === callHash
-    ) {
-      return entry;
+  async #findReplayEntry(
+    callIndex: number,
+    callHash: string,
+    finishReplayDecision?: () => void,
+  ): Promise<WorkflowAgentJournalEntry | undefined> {
+    if (this.resumeFromRunId === undefined) {
+      return undefined;
     }
 
-    this.#resumeDisabled = true;
-    return undefined;
+    try {
+      for (let index = 0; index < callIndex; index++) {
+        const previousDecision = this.#replayDecisions.get(index);
+        if (previousDecision === undefined) {
+          this.#resumeDisabled = true;
+          return undefined;
+        }
+        await previousDecision;
+      }
+
+      if (this.#resumeDisabled || callIndex !== this.#nextReplayIndex) {
+        this.#resumeDisabled = true;
+        return undefined;
+      }
+
+      const entry = this.resumeJournal.find(
+        (journalEntry) => journalEntry.callIndex === callIndex,
+      );
+
+      if (
+        entry !== undefined &&
+        entry.status === "succeeded" &&
+        entry.callHash === callHash
+      ) {
+        this.#nextReplayIndex = callIndex + 1;
+        return entry;
+      }
+
+      this.#resumeDisabled = true;
+      return undefined;
+    } finally {
+      finishReplayDecision?.();
+    }
   }
 
   async #recordReplay<Output>(options: {
