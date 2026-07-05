@@ -24,7 +24,7 @@ export default defineConfig({
   clean: true,
   dts: true,
   treeshake: true,
-  external: ["@vercel/sandbox", "@daytona/sdk"],
+  external: ["@vercel/sandbox", "@daytona/sdk", "typescript"],
   define: {
     __SANDCASTLE_VERSION__: JSON.stringify(pkg.version),
   },
