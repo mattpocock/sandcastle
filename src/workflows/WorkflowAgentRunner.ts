@@ -33,10 +33,13 @@ export interface WorkflowAgentRunnerOptions {
   readonly cwd: string;
   readonly runId: string;
   readonly branchPrefix: string;
+  readonly sourceHash?: string;
   readonly defaultAgent?: AgentProvider;
   readonly defaultSandbox?: SandboxProvider;
   readonly skills?: readonly SkillSpec[];
   readonly store?: WorkflowRunStore;
+  readonly resumeFromRunId?: string;
+  readonly resumeJournal?: readonly WorkflowAgentJournalEntry[];
   readonly run?: WorkflowAgentRunFunction;
   readonly getPhase?: () => string | undefined;
   readonly signal?: AbortSignal;
@@ -58,6 +61,8 @@ interface RecordFailureOptions {
   readonly resolved: ResolvedAgentCallOptions;
   readonly callHash: string;
   readonly promptHash: string;
+  readonly taskPromptHash: string;
+  readonly optionsHash: string;
   readonly startedAt: string;
   readonly branch: string;
   readonly commits: readonly WorkflowCommit[];
@@ -72,24 +77,33 @@ export class WorkflowAgentRunner {
   readonly cwd: string;
   readonly runId: string;
   readonly branchPrefix: string;
+  readonly sourceHash: string;
   readonly defaultAgent?: AgentProvider;
   readonly defaultSandbox?: SandboxProvider;
   readonly skills: readonly SkillSpec[];
   readonly store?: WorkflowRunStore;
+  readonly resumeFromRunId?: string;
+  readonly resumeJournal: readonly WorkflowAgentJournalEntry[];
   readonly getPhase?: () => string | undefined;
   readonly signal?: AbortSignal;
 
   readonly #run: WorkflowAgentRunFunction;
   #callIndex = 0;
+  #resumeDisabled = false;
+  #nextReplayIndex = 0;
+  readonly #replayDecisions = new Map<number, Promise<void>>();
 
   constructor(options: WorkflowAgentRunnerOptions) {
     this.cwd = options.cwd;
     this.runId = options.runId;
     this.branchPrefix = trimSlashes(options.branchPrefix);
+    this.sourceHash = options.sourceHash ?? hashString("");
     this.defaultAgent = options.defaultAgent;
     this.defaultSandbox = options.defaultSandbox;
     this.skills = options.skills ?? [];
     this.store = options.store;
+    this.resumeFromRunId = options.resumeFromRunId;
+    this.resumeJournal = options.resumeJournal ?? [];
     this.#run = options.run ?? sandcastleRun;
     this.getPhase = options.getPhase;
     this.signal = options.signal;
@@ -101,6 +115,9 @@ export class WorkflowAgentRunner {
   ): Promise<WorkflowAgentResult<Output>> {
     const startedAt = new Date().toISOString();
     const resolved = this.#resolveOptions(options);
+    const finishReplayDecision = this.#registerReplayDecision(
+      resolved.callIndex,
+    );
     const wrappedPrompt = wrapWorkflowAgentPrompt({
       runId: this.runId,
       callId: resolved.callId,
@@ -110,13 +127,19 @@ export class WorkflowAgentRunner {
       schema: options.schema,
     });
     const promptHash = hashString(wrappedPrompt);
+    const taskPromptHash = hashString(prompt);
+    const optionsHash = hashString(
+      stableStringify(stableAgentOptionsForHash(options, resolved)),
+    );
     const callHash = hashString(
-      JSON.stringify({
-        runId: this.runId,
-        callId: resolved.callId,
+      stableStringify({
+        version: 1,
+        sourceHash: this.sourceHash,
+        callIndex: resolved.callIndex,
         label: resolved.label,
         phase: resolved.phase,
-        promptHash,
+        taskPromptHash,
+        optionsHash,
       }),
     );
     const artifacts: WorkflowArtifact[] = [];
@@ -135,6 +158,24 @@ export class WorkflowAgentRunner {
       "prompt",
       wrappedPrompt,
     );
+
+    const replayEntry = await this.#findReplayEntry(
+      resolved.callIndex,
+      callHash,
+      finishReplayDecision,
+    );
+    if (replayEntry !== undefined) {
+      return this.#recordReplay<Output>({
+        artifacts,
+        resolved,
+        replayEntry,
+        callHash,
+        promptHash,
+        taskPromptHash,
+        optionsHash,
+        startedAt,
+      });
+    }
 
     try {
       const result = await this.#run<Output>({
@@ -179,6 +220,8 @@ export class WorkflowAgentRunner {
             resolved,
             callHash,
             promptHash,
+            taskPromptHash,
+            optionsHash,
             startedAt,
             branch: result.branch,
             commits: result.commits,
@@ -217,6 +260,9 @@ export class WorkflowAgentRunner {
         label: resolved.label,
         phase: resolved.phase,
         promptHash,
+        taskPromptHash,
+        sourceHash: this.sourceHash,
+        optionsHash,
         status: "succeeded",
         startedAt,
         finishedAt: new Date().toISOString(),
@@ -242,6 +288,8 @@ export class WorkflowAgentRunner {
         resolved,
         callHash,
         promptHash,
+        taskPromptHash,
+        optionsHash,
         startedAt,
         branch: getErrorBranch(error) ?? resolved.branch,
         commits: getErrorCommits(error),
@@ -317,6 +365,144 @@ export class WorkflowAgentRunner {
     await this.store.appendJournal(this.runId, entry);
   }
 
+  #registerReplayDecision(callIndex: number): (() => void) | undefined {
+    if (this.resumeFromRunId === undefined) {
+      return undefined;
+    }
+
+    let finish!: () => void;
+    const decision = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    this.#replayDecisions.set(callIndex, decision);
+    return finish;
+  }
+
+  async #findReplayEntry(
+    callIndex: number,
+    callHash: string,
+    finishReplayDecision?: () => void,
+  ): Promise<WorkflowAgentJournalEntry | undefined> {
+    if (this.resumeFromRunId === undefined) {
+      return undefined;
+    }
+
+    try {
+      for (let index = 0; index < callIndex; index++) {
+        const previousDecision = this.#replayDecisions.get(index);
+        if (previousDecision === undefined) {
+          this.#resumeDisabled = true;
+          return undefined;
+        }
+        await previousDecision;
+      }
+
+      if (this.#resumeDisabled || callIndex !== this.#nextReplayIndex) {
+        this.#resumeDisabled = true;
+        return undefined;
+      }
+
+      const entry = this.resumeJournal.find(
+        (journalEntry) => journalEntry.callIndex === callIndex,
+      );
+
+      if (
+        entry !== undefined &&
+        entry.status === "succeeded" &&
+        entry.callHash === callHash
+      ) {
+        this.#nextReplayIndex = callIndex + 1;
+        return entry;
+      }
+
+      this.#resumeDisabled = true;
+      return undefined;
+    } finally {
+      finishReplayDecision?.();
+    }
+  }
+
+  async #recordReplay<Output>(options: {
+    readonly artifacts: WorkflowArtifact[];
+    readonly resolved: ResolvedAgentCallOptions;
+    readonly replayEntry: WorkflowAgentJournalEntry;
+    readonly callHash: string;
+    readonly promptHash: string;
+    readonly taskPromptHash: string;
+    readonly optionsHash: string;
+    readonly startedAt: string;
+  }): Promise<WorkflowAgentResult<Output>> {
+    const replayedFrom = {
+      runId: this.resumeFromRunId,
+      callId: options.replayEntry.callId,
+      callHash: options.replayEntry.callHash,
+    };
+
+    await this.#writeArtifact(
+      options.artifacts,
+      options.resolved.callId,
+      "result",
+      {
+        status: "skipped",
+        reason: "replayed",
+        replayedFrom,
+        output: options.replayEntry.output,
+      },
+    );
+    await this.#writeArtifact(
+      options.artifacts,
+      options.resolved.callId,
+      "run",
+      {
+        branch: options.replayEntry.branch,
+        commits: options.replayEntry.commits,
+        logFilePath: options.replayEntry.logFilePath,
+        sessionId: options.replayEntry.sessionId,
+        usage: options.replayEntry.usage,
+        replayedFrom,
+      },
+    );
+
+    if (options.replayEntry.logFilePath !== undefined) {
+      options.artifacts.push({
+        name: "log",
+        path: options.replayEntry.logFilePath,
+      });
+    }
+
+    await this.#appendJournal({
+      callId: options.resolved.callId,
+      callIndex: options.resolved.callIndex,
+      callHash: options.callHash,
+      label: options.resolved.label,
+      phase: options.resolved.phase,
+      promptHash: options.promptHash,
+      taskPromptHash: options.taskPromptHash,
+      sourceHash: this.sourceHash,
+      optionsHash: options.optionsHash,
+      status: "skipped",
+      startedAt: options.startedAt,
+      finishedAt: new Date().toISOString(),
+      branch: options.replayEntry.branch,
+      commits: options.replayEntry.commits,
+      logFilePath: options.replayEntry.logFilePath,
+      sessionId: options.replayEntry.sessionId,
+      usage: options.replayEntry.usage,
+      output: options.replayEntry.output,
+      replayedFromRunId: this.resumeFromRunId,
+      replayedFromCallId: options.replayEntry.callId,
+    });
+
+    return {
+      output: options.replayEntry.output as Output,
+      branch: options.replayEntry.branch,
+      commits: options.replayEntry.commits,
+      artifacts: options.artifacts,
+      sessionId: options.replayEntry.sessionId,
+      status: "skipped",
+    };
+  }
+
   async #recordFailure<Output>(
     options: RecordFailureOptions,
   ): Promise<WorkflowAgentResult<Output>> {
@@ -364,6 +550,9 @@ export class WorkflowAgentRunner {
       label: options.resolved.label,
       phase: options.resolved.phase,
       promptHash: options.promptHash,
+      taskPromptHash: options.taskPromptHash,
+      sourceHash: this.sourceHash,
+      optionsHash: options.optionsHash,
       status: "failed",
       startedAt: options.startedAt,
       finishedAt: new Date().toISOString(),
@@ -513,6 +702,53 @@ function normalizeCompletionSignal(
   }
 
   return [...completionSignal];
+}
+
+function stableAgentOptionsForHash(
+  options: WorkflowAgentOptions,
+  resolved: ResolvedAgentCallOptions,
+): unknown {
+  return {
+    agent: resolved.agent.name,
+    sandbox: resolved.sandbox.name,
+    tier: options.tier,
+    provider: options.provider,
+    model: options.model,
+    sandboxName: options.sandboxName,
+    isolation: options.isolation,
+    readonly: options.readonly,
+    skills: resolved.skills.map((skill) => ({
+      name: selectableSkillName(skill),
+      source: skill.source,
+    })),
+    timeoutMs: options.timeoutMs,
+    retries: options.retries,
+    schema: options.schema,
+    completionSignal: normalizeCompletionSignal(options.completionSignal),
+  };
+}
+
+function stableStringify(value: unknown): string {
+  return JSON.stringify(sortJsonValue(value));
+}
+
+function sortJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sortJsonValue);
+  }
+
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(value).sort()) {
+    const item = value[key];
+    if (item !== undefined) {
+      sorted[key] = sortJsonValue(item);
+    }
+  }
+  return sorted;
 }
 
 function getLastSessionId(result: RunResult): string | undefined {

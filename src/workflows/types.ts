@@ -78,6 +78,12 @@ export interface WorkflowRunOptions {
   readonly args?: unknown;
   readonly runId?: string;
   readonly runsRoot?: string;
+  /**
+   * Reuse completed deterministic agent calls from a previous workflow run.
+   * Only succeeded journal entries whose stable call hash matches the next
+   * call are replayed; the first mismatch disables replay for later calls.
+   */
+  readonly resume?: WorkflowRunResumeOptions;
   /** Host override for workflow defaults.provider. Resolved by resolveAgentProvider. */
   readonly provider?: WorkflowProviderName;
   /** Host override for workflow defaults.model. Resolved by resolveAgentProvider. */
@@ -100,6 +106,10 @@ export interface WorkflowRunOptions {
   readonly signal?: AbortSignal;
   /** @internal Test seam for running workflow agent calls without launching a real agent process. */
   readonly agentRun?: WorkflowAgentRunFunction;
+}
+
+export interface WorkflowRunResumeOptions {
+  readonly fromRunId: string;
 }
 
 export interface WorkflowAgentOptions {
@@ -161,6 +171,9 @@ export interface WorkflowAgentJournalEntry {
   readonly label: string;
   readonly phase?: string;
   readonly promptHash: string;
+  readonly taskPromptHash?: string;
+  readonly sourceHash?: string;
+  readonly optionsHash?: string;
   readonly status: WorkflowAgentJournalStatus;
   readonly startedAt: string;
   readonly finishedAt?: string;
@@ -171,6 +184,8 @@ export interface WorkflowAgentJournalEntry {
   readonly usage?: unknown;
   readonly output?: unknown;
   readonly error?: unknown;
+  readonly replayedFromRunId?: string;
+  readonly replayedFromCallId?: string;
 }
 
 export type JsonSchema =

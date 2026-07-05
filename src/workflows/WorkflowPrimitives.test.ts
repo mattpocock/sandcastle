@@ -275,6 +275,45 @@ describe("createWorkflowPrimitives", () => {
     });
   });
 
+  it("replayed agents emit agent_replayed", async () => {
+    await withRun(async ({ cwd, store, state }) => {
+      const runner = fakeAgentRunner(() =>
+        agentResult({
+          status: "skipped",
+          output: "stored output",
+          branch: "branch-a",
+        }),
+      );
+      const ctx = primitives({
+        args: {},
+        runId: state.id,
+        cwd,
+        store,
+        initialState: state,
+        agentRunner: runner,
+      });
+
+      const result = await ctx.agent.run("Reuse", { label: "Reusable" });
+
+      expect(result).toMatchObject({
+        status: "skipped",
+        output: "stored output",
+      });
+      expect(await store.readEvents(state.id)).toMatchObject([
+        { type: "agent_started", message: "Reusable" },
+        {
+          type: "agent_replayed",
+          message: "Reusable",
+          details: {
+            label: "Reusable",
+            status: "skipped",
+            branch: "branch-a",
+          },
+        },
+      ]);
+    });
+  });
+
   it("rejected agent runners emit agent_failed and propagate the error", async () => {
     await withRun(async ({ cwd, store, state }) => {
       const error = new Error("runner exploded");

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { WorkflowValidationError } from "./errors.js";
 import type {
@@ -57,6 +58,15 @@ async function runWorkflowInternal(
     runsRoot: options.runsRoot,
   });
   const runId = options.runId ?? store.generateRunId(definition.meta.name);
+  if (options.resume?.fromRunId === runId) {
+    throw new WorkflowValidationError(
+      "Workflow resume requires a different runId from resume.fromRunId.",
+    );
+  }
+  const resumeJournal =
+    options.resume === undefined
+      ? undefined
+      : await store.readJournal(options.resume.fromRunId);
   const initialState = await store.createRun({
     meta: definition.meta,
     cwd,
@@ -79,10 +89,13 @@ async function runWorkflowInternal(
     cwd,
     runId,
     branchPrefix,
+    sourceHash: hashString(loaded.source),
     defaultAgent: options.defaultAgent,
     defaultSandbox: options.defaultSandbox,
     skills: options.skills,
     store,
+    resumeFromRunId: options.resume?.fromRunId,
+    resumeJournal,
     run: options.agentRun,
     getPhase: () => getPhase?.(),
     signal: options.signal,
@@ -339,3 +352,7 @@ function isErrorLike(value: unknown): value is {
 const DEFAULT_CONCURRENCY = 4;
 const DEFAULT_MAX_AGENTS = 50;
 const DEFAULT_BRANCH_PREFIX = "sandcastle/workflow";
+
+function hashString(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
