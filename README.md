@@ -901,6 +901,8 @@ Pause is cooperative: Sandcastle stops scheduling new workflow/agent work after 
 
 Dynamic workflow contexts include `ctx.quality`, a small helper stdlib for local retries, dry loops, verification agents, judge panels, completeness checks, and non-interactive checkpoints.
 
+See [Dynamic Workflows](./docs/dynamic-workflows.md) for the workflow file contract, safety model, run directory layout, resume semantics, and example workflows under `examples/workflows/`.
+
 ### `sandcastle docker build-image`
 
 Rebuilds the Docker image from an existing `.sandcastle/` directory. Use this after modifying the Dockerfile. On Linux/macOS, the build automatically passes `--build-arg AGENT_UID=$(id -u)` and `AGENT_GID=$(id -g)` so the image's `agent` user matches the host UID — this prevents permission errors on image-built files without runtime chown.
