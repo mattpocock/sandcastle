@@ -240,9 +240,10 @@ export class WorkflowRunStore {
 
   async readJournal(runId: string): Promise<WorkflowAgentJournalEntry[]> {
     await this.assertRunExists(runId);
-    return new WorkflowEventLog<WorkflowAgentJournalEntry>(
+    const entries = await new WorkflowEventLog<WorkflowAgentJournalEntry>(
       join(this.getRunDir(runId), "journal.jsonl"),
     ).readAll();
+    return [...entries].sort((a, b) => a.callIndex - b.callIndex);
   }
 
   async writeResult(runId: string, result: unknown): Promise<void> {
