@@ -825,7 +825,9 @@ describe("WorkflowAgentRunner", () => {
 
       releaseFirstPrompt?.();
       const [firstResult, secondResult] = await Promise.all([first, second]);
-      const replayJournal = await store.readJournal("run-2");
+      const replayJournal = [...(await store.readJournal("run-2"))].sort(
+        (left, right) => left.callIndex - right.callIndex,
+      );
 
       expect(secondRun).toHaveBeenCalledTimes(2);
       expect(firstResult).toMatchObject({
