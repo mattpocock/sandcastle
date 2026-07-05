@@ -158,6 +158,10 @@ function preflightWorkflowSource(
       errors.push("require() is not supported in workflow sources.");
     }
 
+    if (isTypeOnlySyntaxBoundary(node)) {
+      return;
+    }
+
     if (ts.isIdentifier(node) && BLOCKED_IDENTIFIERS.has(node.text)) {
       errors.push(
         `Access to ${node.text} is not supported in workflow sources.`,
@@ -177,6 +181,19 @@ function preflightWorkflowSource(
       },
     );
   }
+}
+
+function isTypeOnlySyntaxBoundary(node: ts.Node) {
+  return (
+    (ts.isImportDeclaration(node) && isTypeOnlyImportDeclaration(node)) ||
+    (ts.isImportEqualsDeclaration(node) && node.isTypeOnly) ||
+    (ts.isExportDeclaration(node) && node.isTypeOnly) ||
+    (ts.isImportSpecifier(node) && node.isTypeOnly) ||
+    (ts.isExportSpecifier(node) && node.isTypeOnly) ||
+    ts.isTypeAliasDeclaration(node) ||
+    ts.isInterfaceDeclaration(node) ||
+    ts.isTypeNode(node)
+  );
 }
 
 function isTypeOnlyImportDeclaration(node: ts.ImportDeclaration) {

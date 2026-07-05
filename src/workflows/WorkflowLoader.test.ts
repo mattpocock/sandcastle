@@ -41,6 +41,7 @@ describe("loadWorkflowSource", () => {
   it("allows type-only imports", async () => {
     const result = await loadWorkflowSource({
       source: `
+        import type * as fs from "node:fs";
         import type { WorkflowDefinition } from "@ai-hero/sandcastle";
 
         const workflow: WorkflowDefinition = {
