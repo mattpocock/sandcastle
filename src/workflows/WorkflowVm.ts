@@ -11,6 +11,7 @@ import type {
   WorkflowRuntime,
   WorkflowValidator,
 } from "./types.js";
+import type { WorkflowQualityHelpers } from "./quality.js";
 
 export interface LoadedWorkflowSource<Args = unknown, Result = unknown> {
   readonly definition: WorkflowDefinition<Args, Result>;
@@ -24,6 +25,7 @@ export interface WorkflowVmGlobals<Args = unknown> {
   readonly phase: WorkflowPhaseReporter;
   readonly log: WorkflowLogger;
   readonly validate: WorkflowValidator;
+  readonly quality: WorkflowQualityHelpers;
   readonly workflow: WorkflowRuntime;
   readonly budget: WorkflowBudget;
 }
@@ -41,6 +43,7 @@ export function createRestrictedWorkflowContext<Args>(
     phase: globals.phase,
     log: globals.log,
     validate: globals.validate,
+    quality: globals.quality,
     workflow: globals.workflow,
     budget: globals.budget,
   };

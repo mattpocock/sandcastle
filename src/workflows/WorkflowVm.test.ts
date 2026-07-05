@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { WorkflowValidationError } from "./errors.js";
+import { createWorkflowQualityHelpers } from "./quality.js";
 import {
   createRestrictedWorkflowContext,
   executeWorkflowBody,
@@ -100,6 +101,7 @@ const createGlobals = <Args>(
       event,
     },
     validate,
+    quality: createWorkflowQualityHelpers(),
     workflow: {
       id: "workflow-run",
       cwd: "/repo",
@@ -234,6 +236,7 @@ describe("executeWorkflowBody", () => {
         "parallel",
         "phase",
         "pipeline",
+        "quality",
         "validate",
         "workflow",
       ],

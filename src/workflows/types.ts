@@ -1,6 +1,7 @@
 import type { AgentProvider } from "../AgentProvider.js";
 import type { SkillSpec } from "../AgentSkills.js";
 import type { SandboxProvider } from "../SandboxProvider.js";
+import type { WorkflowQualityHelpers } from "./quality.js";
 import type { WorkflowAgentRunFunction } from "./WorkflowAgentRunner.js";
 
 export type WorkflowProviderName =
@@ -318,6 +319,7 @@ export interface WorkflowContext<Args = unknown> {
   readonly phase: WorkflowPhaseReporter;
   readonly log: WorkflowLogger;
   readonly validate: WorkflowValidator;
+  readonly quality: WorkflowQualityHelpers;
   readonly workflow: WorkflowRuntime;
   readonly budget: WorkflowBudget;
 }

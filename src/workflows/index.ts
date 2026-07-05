@@ -16,6 +16,30 @@ export type {
   JsonSchemaIssue,
   JsonSchemaValidationResult,
 } from "./JsonSchemaStandardSchema.js";
+export {
+  checkpoint,
+  completenessCheck,
+  createWorkflowQualityHelpers,
+  judgePanel,
+  loopUntilDry,
+  retry,
+  verify,
+  WorkflowCheckpointRequiredError,
+} from "./quality.js";
+export type {
+  CheckpointApprovedResult,
+  CheckpointOptions,
+  CheckpointRequiredResult,
+  CheckpointResult,
+  CreateWorkflowQualityHelpersOptions,
+  LoopUntilDryFinder,
+  LoopUntilDryOptions,
+  RetryOptions,
+  RetryThunk,
+  WorkflowQualityAgentOptions,
+  WorkflowQualityHelpers,
+  WorkflowQualityLogger,
+} from "./quality.js";
 export { validateWorkflowSource } from "./validateWorkflowSource.js";
 export type { ValidateWorkflowSourceOptions } from "./validateWorkflowSource.js";
 export { loadWorkflowSource } from "./WorkflowLoader.js";
