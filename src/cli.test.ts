@@ -1,4 +1,4 @@
-import { exec } from "node:child_process";
+import { exec, execFile } from "node:child_process";
 import { mkdtemp, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });
@@ -29,13 +30,45 @@ const cliPath = join(import.meta.dirname, "..", "dist", "main.js");
 const runCli = (args: string, cwd: string) =>
   execAsync(`node ${cliPath} ${args}`, { cwd });
 
+const runCliArgs = (args: string[], cwd: string) =>
+  execFileAsync("node", [cliPath, ...args], {
+    cwd,
+    encoding: "utf8",
+  });
+
+const parseJson = (stdout: string | Buffer) =>
+  JSON.parse(stdout.toString()) as Record<string, any>;
+
+const validWorkflowSource = `
+  export default {
+    meta: { name: "cli-workflow", description: "CLI test workflow" },
+    defaults: {
+      provider: "codex",
+      model: "gpt-5.5",
+      sandbox: "docker",
+      maxConcurrency: 2,
+      maxAgents: 4,
+      branchPrefix: "workflow/default",
+    },
+    run(ctx) {
+      return {
+        args: ctx.args,
+        budget: {
+          concurrency: ctx.budget.concurrency,
+          maxAgents: ctx.budget.maxAgents,
+        },
+      };
+    },
+  };
+`;
+
 describe("sandcastle CLI", () => {
   it("shows help with --help flag", async () => {
     const { stdout } = await runCli("--help", process.cwd());
     expect(stdout).toContain("sandcastle");
     expect(stdout).toContain("docker");
+    expect(stdout).toContain("workflow");
     expect(stdout).toContain("init");
-    expect(stdout).not.toContain("run");
     expect(stdout).not.toContain("interactive");
     // build-image and remove-image are namespaced under docker, not top-level
     expect(stdout).toContain("docker build-image");
@@ -150,6 +183,187 @@ describe("sandcastle CLI", () => {
     const { stdout } = await runCli("podman --help", process.cwd());
     expect(stdout).toContain("build-image");
     expect(stdout).toContain("remove-image");
+  });
+
+  it("workflow --help shows validate and run subcommands", async () => {
+    const { stdout } = await runCli("workflow --help", process.cwd());
+    expect(stdout).toContain("validate");
+    expect(stdout).toContain("run");
+  });
+
+  it("workflow run --help shows args and override flags", async () => {
+    const { stdout } = await runCli("workflow run --help", process.cwd());
+    expect(stdout).toContain("--args");
+    expect(stdout).toContain("--provider");
+    expect(stdout).toContain("--model");
+    expect(stdout).toContain("--sandbox");
+    expect(stdout).toContain("--concurrency");
+    expect(stdout).toContain("--max-agents");
+    expect(stdout).toContain("--branch-prefix");
+    expect(stdout).toContain("--json");
+  });
+
+  it("workflow validate FILE --json emits valid validation JSON", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-workflow-"));
+    const workflowFile = join(hostDir, "workflow.ts");
+    await writeFile(workflowFile, validWorkflowSource);
+
+    const { stdout } = await runCliArgs(
+      ["workflow", "validate", workflowFile, "--json"],
+      hostDir,
+    );
+    const json = parseJson(stdout);
+
+    expect(json).toMatchObject({
+      ok: true,
+      meta: { name: "cli-workflow", description: "CLI test workflow" },
+      warnings: [],
+      errors: [],
+    });
+  });
+
+  it("workflow validate FILE --json emits diagnostics and exits non-zero for invalid workflows", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-workflow-"));
+    const workflowFile = join(hostDir, "workflow.ts");
+    await writeFile(
+      workflowFile,
+      `
+        export default {
+          run() {
+            return "missing meta";
+          },
+        };
+      `,
+    );
+
+    try {
+      await runCliArgs(
+        ["workflow", "validate", workflowFile, "--json"],
+        hostDir,
+      );
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const { stdout } = err as { stdout: string | Buffer };
+      const json = parseJson(stdout);
+
+      expect(json.ok).toBe(false);
+      expect(json.errors).toEqual([
+        expect.objectContaining({
+          code: "workflow_shape_invalid",
+          message: "Workflow definition meta must be an object.",
+        }),
+      ]);
+    }
+  });
+
+  it("workflow run FILE --args JSON --json passes parsed args and emits run JSON", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-workflow-"));
+    const workflowFile = join(hostDir, "workflow.ts");
+    await writeFile(workflowFile, validWorkflowSource);
+
+    const { stdout } = await runCliArgs(
+      [
+        "workflow",
+        "run",
+        workflowFile,
+        "--args",
+        JSON.stringify({ issue: 123, labels: ["bug"] }),
+        "--json",
+      ],
+      hostDir,
+    );
+    const json = parseJson(stdout);
+
+    expect(json).toMatchObject({
+      runId: expect.stringContaining("cli-workflow"),
+      status: "succeeded",
+      runDir: expect.stringContaining(".sandcastle/runs"),
+      result: {
+        args: { issue: 123, labels: ["bug"] },
+        budget: { concurrency: 2, maxAgents: 4 },
+      },
+      state: {
+        status: "succeeded",
+        concurrency: 2,
+        maxAgents: 4,
+        result: {
+          args: { issue: 123, labels: ["bug"] },
+          budget: { concurrency: 2, maxAgents: 4 },
+        },
+      },
+    });
+  });
+
+  it("workflow run --json applies and reports override flags without launching agents", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-workflow-"));
+    const workflowFile = join(hostDir, "workflow.ts");
+    await writeFile(workflowFile, validWorkflowSource);
+
+    const { stdout } = await runCliArgs(
+      [
+        "workflow",
+        "run",
+        workflowFile,
+        "--json",
+        "--provider",
+        "claude-code",
+        "--model",
+        "claude-sonnet-4-6",
+        "--sandbox",
+        "no-sandbox",
+        "--concurrency",
+        "1",
+        "--max-agents",
+        "2",
+        "--branch-prefix",
+        "frontier/workflow",
+      ],
+      hostDir,
+    );
+    const json = parseJson(stdout);
+
+    expect(json).toMatchObject({
+      status: "succeeded",
+      result: {
+        budget: { concurrency: 1, maxAgents: 2 },
+      },
+      state: {
+        concurrency: 1,
+        maxAgents: 2,
+      },
+      hostOverrides: {
+        provider: "claude-code",
+        model: "claude-sonnet-4-6",
+        sandbox: "no-sandbox",
+        concurrency: 1,
+        maxAgents: 2,
+        branchPrefix: "frontier/workflow",
+      },
+    });
+  });
+
+  it("workflow run --args with invalid JSON exits non-zero with a diagnostic", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-workflow-"));
+    const workflowFile = join(hostDir, "workflow.ts");
+    await writeFile(workflowFile, validWorkflowSource);
+
+    try {
+      await runCliArgs(
+        ["workflow", "run", workflowFile, "--args", "{nope", "--json"],
+        hostDir,
+      );
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const { stdout } = err as { stdout: string | Buffer };
+      const json = parseJson(stdout);
+
+      expect(json).toMatchObject({
+        status: "failed",
+        error: {
+          message: expect.stringContaining("Invalid --args JSON"),
+        },
+      });
+    }
   });
 
   it("podman build-image --help shows --containerfile and --image-name flags", async () => {

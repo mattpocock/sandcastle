@@ -857,6 +857,28 @@ Creates the following files:
 
 Errors if `.sandcastle/` already exists to prevent overwriting customizations.
 
+### `sandcastle workflow validate`
+
+Validates a dynamic workflow TypeScript source file without running it. `--json` emits machine-readable diagnostics for automation:
+
+```bash
+sandcastle workflow validate ./workflow.ts --json
+```
+
+The JSON output includes `ok`, `meta`, `warnings`, and `errors`. Invalid workflow sources exit non-zero.
+
+### `sandcastle workflow run`
+
+Runs a dynamic workflow TypeScript source file non-interactively:
+
+```bash
+sandcastle workflow run ./workflow.ts --args '{"issue":123}' --json
+```
+
+`--args` must be a JSON value and is passed to the workflow as `ctx.args`. `--json` emits `runId`, `status`, `runDir`, `result` or `error`, and `state`.
+
+Host runtime defaults can be overridden with `--provider`, `--model`, `--sandbox`, `--concurrency`, `--max-agents`, and `--branch-prefix`; the workflow file remains the source of truth and no separate workflow config file is used.
+
 ### `sandcastle docker build-image`
 
 Rebuilds the Docker image from an existing `.sandcastle/` directory. Use this after modifying the Dockerfile. On Linux/macOS, the build automatically passes `--build-arg AGENT_UID=$(id -u)` and `AGENT_GID=$(id -g)` so the image's `agent` user matches the host UID — this prevents permission errors on image-built files without runtime chown.

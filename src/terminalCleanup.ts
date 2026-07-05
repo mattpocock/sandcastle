@@ -21,7 +21,7 @@ export const SHOW_CURSOR = "\x1b[?25h";
 export const makeTerminalCleanupHandler =
   (
     stdin: { isTTY?: boolean; setRawMode?: (raw: boolean) => void },
-    stdout: { write: (data: string) => boolean },
+    stdout: { isTTY?: boolean; write: (data: string) => boolean },
   ) =>
   (): void => {
     if (stdin.isTTY && stdin.setRawMode) {
@@ -31,7 +31,9 @@ export const makeTerminalCleanupHandler =
         // Best-effort — may fail if stdin is already closed
       }
     }
-    stdout.write(SHOW_CURSOR);
+    if (stdout.isTTY) {
+      stdout.write(SHOW_CURSOR);
+    }
   };
 
 /**
