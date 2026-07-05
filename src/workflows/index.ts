@@ -45,3 +45,5 @@ export type {
 } from "./WorkflowAgentRunner.js";
 export { createWorkflowPrimitives } from "./WorkflowPrimitives.js";
 export type { WorkflowPrimitivesOptions } from "./WorkflowPrimitives.js";
+export { runWorkflow, WorkflowManager } from "./WorkflowManager.js";
+export type { WorkflowRunResult } from "./WorkflowManager.js";

@@ -1,6 +1,7 @@
 import type { AgentProvider } from "../AgentProvider.js";
 import type { SkillSpec } from "../AgentSkills.js";
 import type { SandboxProvider } from "../SandboxProvider.js";
+import type { WorkflowAgentRunFunction } from "./WorkflowAgentRunner.js";
 
 export type WorkflowProviderName =
   | "codex"
@@ -55,6 +56,8 @@ export interface WorkflowRunOptions {
   readonly maxAgents?: number;
   readonly branchPrefix?: string;
   readonly signal?: AbortSignal;
+  /** @internal Test seam for running workflow agent calls without launching a real agent process. */
+  readonly agentRun?: WorkflowAgentRunFunction;
 }
 
 export interface WorkflowAgentOptions {
