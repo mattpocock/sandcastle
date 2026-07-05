@@ -152,6 +152,7 @@ describe("WorkflowScheduler", () => {
     const scheduler = new WorkflowScheduler({ concurrency: 1, maxAgents: 10 });
     const active = deferred<string>();
     const started: string[] = [];
+    let settled = false;
 
     const activePromise = scheduler.schedule(async () => {
       started.push("active");
@@ -166,16 +167,41 @@ describe("WorkflowScheduler", () => {
 
     await flushMicrotasks();
     scheduler.stop("manual stop");
+    const settledPromise = scheduler.waitForSettled().then(() => {
+      settled = true;
+    });
     await flushMicrotasks();
 
     await queuedExpectation;
     expect(started).toEqual(["active"]);
+    expect(settled).toBe(false);
 
     active.resolve("active");
     await expect(activePromise).resolves.toBe("active");
+    await settledPromise;
+    expect(settled).toBe(true);
     await expect(scheduler.schedule(() => "new")).rejects.toBeInstanceOf(
       WorkflowStoppedError,
     );
+  });
+
+  it("runs beforeStart before launching queued tasks", async () => {
+    const scheduler = new WorkflowScheduler({
+      concurrency: 1,
+      maxAgents: 10,
+      beforeStart: () => {
+        throw new WorkflowStoppedError("control stop");
+      },
+    });
+    const started: string[] = [];
+
+    const taskPromise = scheduler.schedule(() => {
+      started.push("task");
+      return "task";
+    });
+
+    await expect(taskPromise).rejects.toBeInstanceOf(WorkflowStoppedError);
+    expect(started).toEqual([]);
   });
 
   it("propagates active task errors", async () => {

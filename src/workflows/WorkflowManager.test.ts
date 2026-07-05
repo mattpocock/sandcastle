@@ -1,4 +1,4 @@
-import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -72,6 +72,50 @@ async function withTempDir<T>(test: (dir: string) => Promise<T>): Promise<T> {
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+}
+
+async function waitForAbort(signal: AbortSignal | undefined): Promise<void> {
+  if (signal?.aborted === true) {
+    return;
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    if (signal === undefined) {
+      reject(new Error("Expected workflow agent signal."));
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      reject(new Error("Timed out waiting for workflow control abort."));
+    }, 1_000);
+    signal.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timeout);
+        resolve();
+      },
+      { once: true },
+    );
+  });
+}
+
+function deferred<T = void>(): {
+  promise: Promise<T>;
+  resolve(value: T | PromiseLike<T>): void;
+  reject(reason?: unknown): void;
+} {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+
+  return { promise, resolve, reject };
+}
+
+async function flushMicrotasks(): Promise<void> {
+  await new Promise((resolve) => setImmediate(resolve));
 }
 
 describe("runWorkflow", () => {
@@ -586,6 +630,173 @@ describe("runWorkflow", () => {
         agentCount: 1,
         maxAgents: 1,
       });
+    });
+  });
+
+  it("stops from control state, aborts active agent work, and prevents queued agents from starting", async () => {
+    await withTempDir(async (cwd) => {
+      const controlPath = join(
+        cwd,
+        "runs",
+        "control-stop-run",
+        "control.json",
+      );
+      let activeSignalAborted = false;
+      let workflowSettled = false;
+      const activeRelease = deferred();
+      const activeAborted = deferred();
+      const run = fakeAgentRun(async (options) => {
+        await writeFile(
+          controlPath,
+          JSON.stringify(
+            {
+              stopRequested: true,
+              pauseRequested: false,
+              stopReason: "test stop",
+            },
+            null,
+            2,
+          ),
+        );
+        await waitForAbort(options.signal);
+        activeSignalAborted = options.signal?.aborted === true;
+        activeAborted.resolve();
+        await activeRelease.promise;
+        throw new Error("agent observed abort");
+      });
+
+      const resultPromise = runWorkflow({
+        cwd,
+        source: workflowSource(`
+          await ctx.parallel.agents([
+            { prompt: "active", options: { label: "Active" } },
+            { prompt: "queued", options: { label: "Queued" } },
+          ]);
+          return "unreachable";
+        `),
+        runId: "control-stop-run",
+        runsRoot: "runs",
+        concurrency: 1,
+        defaultAgent: testAgent(),
+        defaultSandbox: testSandbox(),
+        agentRun: run,
+      }).finally(() => {
+        workflowSettled = true;
+      });
+
+      await activeAborted.promise;
+      await flushMicrotasks();
+
+      expect(workflowSettled).toBe(false);
+      await expect(
+        readJson<{ status: string }>(
+          join(cwd, "runs", "control-stop-run", "state.json"),
+        ),
+      ).resolves.not.toMatchObject({
+        status: "stopped",
+      });
+
+      activeRelease.resolve();
+      const result = await resultPromise;
+
+      expect(result.status).toBe("stopped");
+      expect(activeSignalAborted).toBe(true);
+      expect(vi.mocked(run)).toHaveBeenCalledTimes(1);
+      await expect(
+        readJson(join(result.runDir, "state.json")),
+      ).resolves.toMatchObject({
+        status: "stopped",
+        agentCount: 2,
+        finishedAt: expect.any(String),
+      });
+      const events = await readFile(
+        join(result.runDir, "events.jsonl"),
+        "utf8",
+      );
+      expect(events).toContain('"type":"workflow_stopped"');
+      expect(events).not.toContain('"type":"workflow_succeeded"');
+    });
+  });
+
+  it("pauses from control state only after active agent work settles", async () => {
+    await withTempDir(async (cwd) => {
+      const controlPath = join(
+        cwd,
+        "runs",
+        "control-pause-run",
+        "control.json",
+      );
+      let workflowSettled = false;
+      const activeRelease = deferred();
+      const activeStarted = deferred();
+      const run = fakeAgentRun(async (options) => {
+        await writeFile(
+          controlPath,
+          JSON.stringify(
+            {
+              stopRequested: false,
+              pauseRequested: true,
+              pauseReason: "test pause",
+            },
+            null,
+            2,
+          ),
+        );
+        activeStarted.resolve();
+        await activeRelease.promise;
+        return runResult(options);
+      });
+
+      const resultPromise = runWorkflow({
+        cwd,
+        source: workflowSource(`
+          await ctx.parallel.agents([
+            { prompt: "active", options: { label: "Active" } },
+            { prompt: "queued", options: { label: "Queued" } },
+          ]);
+          return "unreachable";
+        `),
+        runId: "control-pause-run",
+        runsRoot: "runs",
+        concurrency: 1,
+        defaultAgent: testAgent(),
+        defaultSandbox: testSandbox(),
+        agentRun: run,
+      }).finally(() => {
+        workflowSettled = true;
+      });
+
+      await activeStarted.promise;
+      await new Promise((resolve) => setTimeout(resolve, 75));
+      await flushMicrotasks();
+
+      expect(workflowSettled).toBe(false);
+      expect(vi.mocked(run)).toHaveBeenCalledTimes(1);
+      await expect(
+        readJson<{ status: string }>(
+          join(cwd, "runs", "control-pause-run", "state.json"),
+        ),
+      ).resolves.not.toMatchObject({
+        status: "paused",
+      });
+
+      activeRelease.resolve();
+      const result = await resultPromise;
+
+      expect(result.status).toBe("paused");
+      expect(workflowSettled).toBe(true);
+      await expect(
+        readJson(join(result.runDir, "state.json")),
+      ).resolves.toMatchObject({
+        status: "paused",
+        finishedAt: expect.any(String),
+      });
+      const events = await readFile(
+        join(result.runDir, "events.jsonl"),
+        "utf8",
+      );
+      expect(events).toContain('"type":"workflow_paused"');
+      expect(events).not.toContain('"type":"workflow_succeeded"');
     });
   });
 

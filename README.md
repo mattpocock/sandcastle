@@ -879,6 +879,26 @@ sandcastle workflow run ./workflow.ts --args '{"issue":123}' --json
 
 Host runtime defaults can be overridden with `--provider`, `--model`, `--sandbox`, `--concurrency`, `--max-agents`, and `--branch-prefix`; the workflow file remains the source of truth and no separate workflow config file is used.
 
+### `sandcastle workflow stop`
+
+Requests that a running dynamic workflow stop by writing its persisted control file:
+
+```bash
+sandcastle workflow stop <run-id> --json
+```
+
+`--json` emits `runId`, current `status`, `control`, `runDir`, and `state`. Stop requests durably update `state.json` to `stopping` immediately when the run state exists. The running workflow process observes `.sandcastle/runs/<run-id>/control.json`, aborts active agent work when practical, rejects queued work, waits for active scheduled work to settle, and then records terminal `stopped` instead of `succeeded`.
+
+### `sandcastle workflow pause`
+
+Requests a soft pause for a dynamic workflow:
+
+```bash
+sandcastle workflow pause <run-id> --json
+```
+
+Pause is cooperative: Sandcastle stops scheduling new workflow/agent work after the control request is observed and rejects queued work, but it does not abort already-active work. Terminal `paused` is recorded only after active scheduled work settles.
+
 ### `sandcastle docker build-image`
 
 Rebuilds the Docker image from an existing `.sandcastle/` directory. Use this after modifying the Dockerfile. On Linux/macOS, the build automatically passes `--build-arg AGENT_UID=$(id -u)` and `AGENT_GID=$(id -g)` so the image's `agent` user matches the host UID — this prevents permission errors on image-built files without runtime chown.

@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
-import { WorkflowValidationError } from "./errors.js";
+import { WorkflowStoppedError, WorkflowValidationError } from "./errors.js";
 import type {
   WorkflowAgentOptions,
   WorkflowAgentResult,
+  WorkflowControlState,
   WorkflowRunOptions,
   WorkflowRunState,
+  WorkflowRunStatus,
 } from "./types.js";
 import { validateWorkflowSource } from "./validateWorkflowSource.js";
 import { WorkflowAgentRunner } from "./WorkflowAgentRunner.js";
@@ -15,7 +17,10 @@ import { WorkflowScheduler } from "./WorkflowScheduler.js";
 
 export interface WorkflowRunResult {
   readonly runId: string;
-  readonly status: "succeeded" | "failed";
+  readonly status: Extract<
+    WorkflowRunStatus,
+    "succeeded" | "failed" | "paused" | "stopped"
+  >;
   readonly result?: unknown;
   readonly error?: unknown;
   readonly runDir: string;
@@ -79,10 +84,37 @@ async function runWorkflowInternal(
     concurrency,
   });
   const runDir = store.getRunDir(runId);
-  const scheduler = new WorkflowScheduler({
+  const controlAbortController = new AbortController();
+  const workflowSignal = createLinkedAbortSignal(
+    options.signal,
+    controlAbortController.signal,
+  );
+  let scheduler: WorkflowScheduler;
+  let controlError: WorkflowStoppedError | undefined;
+  const observeControlState = async (): Promise<void> => {
+    if (controlError !== undefined) {
+      throw controlError;
+    }
+
+    const control = await store.readControl(runId);
+    const requestedError = createControlError(control);
+    if (requestedError === undefined) {
+      return;
+    }
+
+    controlError = requestedError;
+    if (getControlKind(requestedError) === "stop") {
+      controlAbortController.abort(requestedError);
+    }
+    scheduler.stop(requestedError);
+    throw requestedError;
+  };
+
+  scheduler = new WorkflowScheduler({
     concurrency,
     maxAgents,
-    signal: options.signal,
+    signal: workflowSignal.signal,
+    beforeStart: observeControlState,
   });
   let getPhase: (() => string | undefined) | undefined;
   const agentRunner = new WorkflowAgentRunner({
@@ -98,14 +130,15 @@ async function runWorkflowInternal(
     resumeJournal,
     run: options.agentRun,
     getPhase: () => getPhase?.(),
-    signal: options.signal,
+    signal: workflowSignal.signal,
   });
   const resolvingAgentRunner = {
     run: async <Output = unknown>(
       prompt: string,
       agentOptions?: WorkflowAgentOptions,
     ): Promise<WorkflowAgentResult<Output>> => {
-      return agentRunner.run<Output>(
+      await observeControlState();
+      const result = await agentRunner.run<Output>(
         prompt,
         await resolveWorkflowAgentOptions({
           options: agentOptions,
@@ -118,6 +151,8 @@ async function runWorkflowInternal(
           resolveSandbox: options.resolveSandbox,
         }),
       );
+      await observeControlState();
+      return result;
     },
   };
   const ctx = createWorkflowPrimitives({
@@ -131,9 +166,15 @@ async function runWorkflowInternal(
     initialState,
   });
   getPhase = ctx.phase.current;
+  const controlPoll = setInterval(() => {
+    void observeControlState().catch(() => {});
+  }, CONTROL_POLL_INTERVAL_MS);
+  controlPoll.unref?.();
 
   try {
+    await observeControlState();
     const result = await definition.run(ctx);
+    await observeControlState();
     if (result !== undefined) {
       await store.writeResult(runId, result);
     }
@@ -158,6 +199,34 @@ async function runWorkflowInternal(
       state,
     };
   } catch (error) {
+    const controlKind = getControlKind(error);
+    if (controlKind !== undefined) {
+      const status = controlKind === "stop" ? "stopped" : "paused";
+      const reason = getControlReason(error);
+      const eventType =
+        controlKind === "stop" ? "workflow_stopped" : "workflow_paused";
+      await scheduler.waitForSettled();
+      await store.appendEvent(runId, {
+        timestamp: new Date().toISOString(),
+        type: eventType,
+        message: reason,
+        details: { reason },
+      });
+      const state: WorkflowRunState = {
+        ...ctx.workflow.state(),
+        status,
+        finishedAt: new Date().toISOString(),
+      };
+      await store.writeState(runId, state);
+
+      return {
+        runId,
+        status,
+        runDir,
+        state,
+      };
+    }
+
     const serializedError = serializeError(error);
     await store.writeError(runId, serializedError);
     await store.appendEvent(runId, {
@@ -180,6 +249,9 @@ async function runWorkflowInternal(
       runDir,
       state,
     };
+  } finally {
+    clearInterval(controlPoll);
+    workflowSignal.dispose();
   }
 }
 
@@ -349,9 +421,97 @@ function isErrorLike(value: unknown): value is {
   );
 }
 
+function createControlError(
+  control: WorkflowControlState,
+): WorkflowStoppedError | undefined {
+  if (control.stopRequested) {
+    return new WorkflowStoppedError("Workflow stop requested.", {
+      details: {
+        control: "stop",
+        reason: control.stopReason,
+      },
+    });
+  }
+
+  if (control.pauseRequested) {
+    return new WorkflowStoppedError("Workflow pause requested.", {
+      details: {
+        control: "pause",
+        reason: control.pauseReason,
+      },
+    });
+  }
+
+  return undefined;
+}
+
+function getControlKind(error: unknown): "pause" | "stop" | undefined {
+  if (!(error instanceof WorkflowStoppedError)) {
+    return undefined;
+  }
+
+  const details = error.details;
+  if (typeof details !== "object" || details === null) {
+    return undefined;
+  }
+
+  const control = (details as { readonly control?: unknown }).control;
+  return control === "stop" || control === "pause" ? control : undefined;
+}
+
+function getControlReason(error: unknown): string | undefined {
+  if (!(error instanceof WorkflowStoppedError)) {
+    return undefined;
+  }
+
+  const details = error.details;
+  if (typeof details !== "object" || details === null) {
+    return undefined;
+  }
+
+  const reason = (details as { readonly reason?: unknown }).reason;
+  return typeof reason === "string" ? reason : undefined;
+}
+
+function createLinkedAbortSignal(
+  externalSignal: AbortSignal | undefined,
+  controlSignal: AbortSignal,
+): { readonly signal: AbortSignal; readonly dispose: () => void } {
+  if (externalSignal === undefined) {
+    return { signal: controlSignal, dispose: () => {} };
+  }
+
+  const sourceSignal = externalSignal;
+  const controller = new AbortController();
+  const abortFrom = (signal: AbortSignal) => {
+    if (!controller.signal.aborted) {
+      controller.abort(signal.reason);
+    }
+    cleanup();
+  };
+  const onExternalAbort = () => abortFrom(sourceSignal);
+  const onControlAbort = () => abortFrom(controlSignal);
+  function cleanup() {
+    sourceSignal.removeEventListener("abort", onExternalAbort);
+    controlSignal.removeEventListener("abort", onControlAbort);
+  }
+
+  if (sourceSignal.aborted) {
+    abortFrom(sourceSignal);
+  } else if (controlSignal.aborted) {
+    abortFrom(controlSignal);
+  } else {
+    sourceSignal.addEventListener("abort", onExternalAbort, { once: true });
+    controlSignal.addEventListener("abort", onControlAbort, { once: true });
+  }
+
+  return { signal: controller.signal, dispose: cleanup };
+}
+
 const DEFAULT_CONCURRENCY = 4;
 const DEFAULT_MAX_AGENTS = 50;
 const DEFAULT_BRANCH_PREFIX = "sandcastle/workflow";
+const CONTROL_POLL_INTERVAL_MS = 25;
 
 function hashString(value: string): string {
   return createHash("sha256").update(value).digest("hex");

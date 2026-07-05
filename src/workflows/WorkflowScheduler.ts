@@ -4,6 +4,7 @@ export interface WorkflowSchedulerOptions {
   readonly concurrency: number;
   readonly maxAgents: number;
   readonly signal?: AbortSignal;
+  readonly beforeStart?: () => Promise<void> | void;
 }
 
 type WorkflowTask<T> = () => Promise<T> | T;
@@ -22,8 +23,10 @@ export class WorkflowScheduler {
   #scheduledCount = 0;
   #stoppedError: WorkflowStoppedError | undefined;
   #queue: QueueEntry[] = [];
+  #settledWaiters: Array<() => void> = [];
   readonly #signal?: AbortSignal;
   readonly #abortHandler: () => void;
+  readonly #beforeStart?: () => Promise<void> | void;
 
   constructor(options: WorkflowSchedulerOptions) {
     this.concurrency = validatePositiveInteger(
@@ -32,6 +35,7 @@ export class WorkflowScheduler {
     );
     this.maxAgents = validatePositiveInteger(options.maxAgents, "maxAgents");
     this.#signal = options.signal;
+    this.#beforeStart = options.beforeStart;
     this.#abortHandler = () => {
       this.stop(this.#signal?.reason);
     };
@@ -118,6 +122,18 @@ export class WorkflowScheduler {
     for (const entry of queued) {
       entry.reject(this.#stoppedError);
     }
+
+    this.#resolveSettledWaiters();
+  }
+
+  waitForSettled(): Promise<void> {
+    if (this.#activeCount === 0 && this.#queue.length === 0) {
+      return Promise.resolve();
+    }
+
+    return new Promise((resolve) => {
+      this.#settledWaiters.push(resolve);
+    });
   }
 
   #drain(): void {
@@ -140,11 +156,29 @@ export class WorkflowScheduler {
     this.#activeCount++;
 
     Promise.resolve()
-      .then(entry.run)
+      .then(() => this.#beforeStart?.())
+      .then(() => entry.run(), entry.reject)
       .finally(() => {
         this.#activeCount--;
         this.#drain();
+        this.#resolveSettledWaiters();
       });
+  }
+
+  #resolveSettledWaiters(): void {
+    if (
+      this.#activeCount !== 0 ||
+      this.#queue.length !== 0 ||
+      this.#settledWaiters.length === 0
+    ) {
+      return;
+    }
+
+    const waiters = this.#settledWaiters;
+    this.#settledWaiters = [];
+    for (const resolve of waiters) {
+      resolve();
+    }
   }
 }
 
