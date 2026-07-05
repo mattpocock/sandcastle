@@ -348,7 +348,15 @@ describe("WorkflowAgentRunner", () => {
       const error = Object.assign(new Error("agent failed"), {
         branch: "wf/run-1/001-fail",
         commits: [{ sha: "badc0de" }],
+        logFilePath: join(dir, ".sandcastle", "logs", "failed-agent.log"),
         sessionId: "session-failed",
+        stdout: "failure stdout",
+        usage: {
+          inputTokens: 20,
+          cacheCreationInputTokens: 1,
+          cacheReadInputTokens: 2,
+          outputTokens: 3,
+        },
       });
       const run = fakeRun(async () => {
         throw error;
@@ -367,7 +375,6 @@ describe("WorkflowAgentRunner", () => {
       const journal = await store.readJournal("run-1");
 
       expect(result).toMatchObject({
-        output: undefined,
         branch: "wf/run-1/001-fail",
         commits: [{ sha: "badc0de" }],
         sessionId: "session-failed",
@@ -377,11 +384,59 @@ describe("WorkflowAgentRunner", () => {
           message: "agent failed",
         },
       });
+      expect(result).not.toHaveProperty("output");
+      expect(result.artifacts.map((artifact) => artifact.name)).toEqual([
+        "prompt",
+        "stdout",
+        "result",
+        "run",
+        "log",
+      ]);
+      const stdoutPath = result.artifacts.find(
+        (artifact) => artifact.name === "stdout",
+      )?.path;
+      const resultPath = result.artifacts.find(
+        (artifact) => artifact.name === "result",
+      )?.path;
+      const runPath = result.artifacts.find(
+        (artifact) => artifact.name === "run",
+      )?.path;
+
+      expect(stdoutPath).toBeDefined();
+      expect(resultPath).toBeDefined();
+      expect(runPath).toBeDefined();
+      expect(await readFile(stdoutPath!, "utf8")).toBe("failure stdout");
+      expect(JSON.parse(await readFile(resultPath!, "utf8"))).toMatchObject({
+        status: "failed",
+        error: {
+          name: "Error",
+          message: "agent failed",
+        },
+      });
+      expect(JSON.parse(await readFile(runPath!, "utf8"))).toMatchObject({
+        branch: "wf/run-1/001-fail",
+        commits: [{ sha: "badc0de" }],
+        logFilePath: join(dir, ".sandcastle", "logs", "failed-agent.log"),
+        sessionId: "session-failed",
+        usage: {
+          inputTokens: 20,
+          cacheCreationInputTokens: 1,
+          cacheReadInputTokens: 2,
+          outputTokens: 3,
+        },
+      });
       expect(journal[0]).toMatchObject({
         status: "failed",
         branch: "wf/run-1/001-fail",
         commits: [{ sha: "badc0de" }],
+        logFilePath: join(dir, ".sandcastle", "logs", "failed-agent.log"),
         sessionId: "session-failed",
+        usage: {
+          inputTokens: 20,
+          cacheCreationInputTokens: 1,
+          cacheReadInputTokens: 2,
+          outputTokens: 3,
+        },
         error: {
           name: "Error",
           message: "agent failed",
@@ -390,6 +445,30 @@ describe("WorkflowAgentRunner", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  it("fails clearly when a requested skill name is ambiguous", async () => {
+    const run = fakeRun();
+    const runner = new WorkflowAgentRunner({
+      cwd: "/repo",
+      runId: "run-1",
+      branchPrefix: "wf",
+      defaultAgent: agent("agent"),
+      defaultSandbox: sandbox("sandbox"),
+      skills: [
+        { name: "review", source: "./skills/review-a" },
+        { name: "review", source: "./skills/review-b" },
+      ],
+      run,
+    });
+
+    await expect(
+      runner.run("Use the requested skill", { skills: ["review"] }),
+    ).rejects.toThrow(WorkflowValidationError);
+    await expect(
+      runner.run("Use the requested skill", { skills: ["review"] }),
+    ).rejects.toThrow("requested ambiguous skill: review");
+    expect(run).not.toHaveBeenCalled();
   });
 
   it("fails clearly when agent or sandbox is missing", async () => {

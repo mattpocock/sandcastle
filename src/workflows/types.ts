@@ -267,7 +267,7 @@ export interface WorkflowArtifact {
 }
 
 export interface WorkflowAgentResult<Output = unknown> {
-  readonly output: Output;
+  readonly output?: Output;
   readonly branch: string;
   readonly commits: readonly WorkflowCommit[];
   readonly artifacts: readonly WorkflowArtifact[];

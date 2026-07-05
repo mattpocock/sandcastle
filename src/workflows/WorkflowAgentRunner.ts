@@ -195,11 +195,29 @@ export class WorkflowAgentRunner {
       const branch = getErrorBranch(error) ?? resolved.branch;
       const commits = getErrorCommits(error);
       const sessionId = getErrorSessionId(error);
+      const logFilePath = getErrorLogFilePath(error);
+      const usage = getErrorUsage(error);
+      const stdout = getErrorStdout(error);
+
+      if (stdout !== undefined) {
+        await this.#writeArtifact(artifacts, resolved.callId, "stdout", stdout);
+      }
 
       await this.#writeArtifact(artifacts, resolved.callId, "result", {
         status: "failed",
         error: serializedError,
       });
+      await this.#writeArtifact(artifacts, resolved.callId, "run", {
+        branch,
+        commits,
+        logFilePath,
+        sessionId,
+        usage,
+      });
+
+      if (logFilePath !== undefined) {
+        artifacts.push({ name: "log", path: logFilePath });
+      }
 
       await this.#appendJournal({
         callId: resolved.callId,
@@ -213,13 +231,13 @@ export class WorkflowAgentRunner {
         finishedAt: new Date().toISOString(),
         branch,
         commits,
+        logFilePath,
         sessionId,
-        output: undefined,
+        usage,
         error: serializedError,
       });
 
       return {
-        output: undefined as Output,
         branch,
         commits,
         artifacts,
@@ -351,22 +369,45 @@ function selectSkills(
     return availableSkills;
   }
 
-  const skillsByName = new Map(
-    availableSkills.map((skill) => [
-      skill.name ?? basename(skill.source),
-      skill,
-    ]),
-  );
+  const skillsByName = new Map<string, SkillSpec[]>();
+  for (const skill of availableSkills) {
+    const name = selectableSkillName(skill);
+    const existing = skillsByName.get(name);
+    if (existing === undefined) {
+      skillsByName.set(name, [skill]);
+    } else {
+      existing.push(skill);
+    }
+  }
+
   const selected: SkillSpec[] = [];
   const missing: string[] = [];
+  const ambiguous: string[] = [];
 
   for (const name of requestedNames) {
-    const skill = skillsByName.get(name);
-    if (skill === undefined) {
+    const skills = skillsByName.get(name);
+    if (skills === undefined) {
       missing.push(name);
+    } else if (skills.length > 1) {
+      ambiguous.push(name);
     } else {
-      selected.push(skill);
+      selected.push(skills[0]!);
     }
+  }
+
+  if (ambiguous.length > 0) {
+    throw new WorkflowValidationError(
+      `Workflow agent call requested ambiguous skill${
+        ambiguous.length === 1 ? "" : "s"
+      }: ${ambiguous.join(", ")}.`,
+      {
+        details: {
+          requested: requestedNames,
+          ambiguous,
+          available: Array.from(skillsByName.keys()),
+        },
+      },
+    );
   }
 
   if (missing.length > 0) {
@@ -384,6 +425,10 @@ function selectSkills(
   }
 
   return selected;
+}
+
+function selectableSkillName(skill: SkillSpec): string {
+  return skill.name ?? basename(skill.source);
 }
 
 function normalizeCompletionSignal(
@@ -421,6 +466,37 @@ function getErrorCommits(error: unknown): readonly WorkflowCommit[] {
 function getErrorSessionId(error: unknown): string | undefined {
   if (isRecord(error) && typeof error.sessionId === "string") {
     return error.sessionId;
+  }
+  return undefined;
+}
+
+function getErrorLogFilePath(error: unknown): string | undefined {
+  if (isRecord(error) && typeof error.logFilePath === "string") {
+    return error.logFilePath;
+  }
+  return undefined;
+}
+
+function getErrorUsage(error: unknown): unknown {
+  if (!isRecord(error)) {
+    return undefined;
+  }
+
+  if ("usage" in error) {
+    return error.usage;
+  }
+
+  if (Array.isArray(error.iterations)) {
+    const lastIteration = error.iterations.filter(isRecord).at(-1);
+    return lastIteration?.usage;
+  }
+
+  return undefined;
+}
+
+function getErrorStdout(error: unknown): string | undefined {
+  if (isRecord(error) && typeof error.stdout === "string") {
+    return error.stdout;
   }
   return undefined;
 }
