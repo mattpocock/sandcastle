@@ -8,3 +8,11 @@ export {
   WorkflowValidationError,
 } from "./errors.js";
 export type { WorkflowErrorOptions } from "./errors.js";
+export {
+  jsonSchemaToStandardSchema,
+  validateJsonSchemaValue,
+} from "./JsonSchemaStandardSchema.js";
+export type {
+  JsonSchemaIssue,
+  JsonSchemaValidationResult,
+} from "./JsonSchemaStandardSchema.js";
