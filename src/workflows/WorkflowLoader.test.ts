@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 import { WorkflowLoadError, WorkflowValidationError } from "./errors.js";
 import { loadWorkflowSource } from "./WorkflowLoader.js";
 
+const escapeMarker = "__SANDCASTLE_WORKFLOW_LOADER_ESCAPED__";
+
 describe("loadWorkflowSource", () => {
   it("loads a .workflow.ts default export satisfying WorkflowDefinition", async () => {
     const source = `
@@ -61,6 +63,37 @@ describe("loadWorkflowSource", () => {
       model: "gpt-5.5",
       sandbox: "docker",
     });
+  });
+
+  it.each([
+    [
+      "top-level this constructor",
+      `this.constructor.constructor("return process")()`,
+    ],
+    [
+      "globalThis constructor",
+      `globalThis.constructor.constructor("return process")()`,
+    ],
+    ["object constructor", `({}).constructor.constructor("return process")()`],
+  ])("rejects load-time VM escape via %s", async (_name, expression) => {
+    Reflect.deleteProperty(process, escapeMarker);
+
+    await expect(
+      loadWorkflowSource({
+        source: `
+          ${expression}.${escapeMarker} = true;
+
+          export default {
+            meta: { name: "vm-escape" },
+            run() {
+              return "ok";
+            },
+          };
+        `,
+      }),
+    ).rejects.toThrow(WorkflowLoadError);
+
+    expect(process).not.toHaveProperty(escapeMarker);
   });
 
   it("rejects runtime imports", async () => {

@@ -29,6 +29,12 @@ const BLOCKED_IDENTIFIERS = new Set([
   "require",
   "Buffer",
   "fetch",
+  "globalThis",
+  "Function",
+  "eval",
+  "constructor",
+  "__proto__",
+  "prototype",
   "fs",
   "http",
   "https",
@@ -162,9 +168,11 @@ function preflightWorkflowSource(
       return;
     }
 
-    if (ts.isIdentifier(node) && BLOCKED_IDENTIFIERS.has(node.text)) {
+    const blockedRuntimeName = getBlockedRuntimeName(node);
+
+    if (blockedRuntimeName !== undefined) {
       errors.push(
-        `Access to ${node.text} is not supported in workflow sources.`,
+        `Access to ${blockedRuntimeName} is not supported in workflow sources.`,
       );
     }
 
@@ -181,6 +189,24 @@ function preflightWorkflowSource(
       },
     );
   }
+}
+
+function getBlockedRuntimeName(node: ts.Node) {
+  if (ts.isIdentifier(node) && BLOCKED_IDENTIFIERS.has(node.text)) {
+    return node.text;
+  }
+
+  if (
+    node.parent !== undefined &&
+    ts.isElementAccessExpression(node.parent) &&
+    node.parent.argumentExpression === node &&
+    ts.isStringLiteralLike(node) &&
+    BLOCKED_IDENTIFIERS.has(node.text)
+  ) {
+    return node.text;
+  }
+
+  return undefined;
 }
 
 function isTypeOnlySyntaxBoundary(node: ts.Node) {
@@ -252,15 +278,24 @@ function evaluateWorkflowSource(
 ) {
   const exports: Record<string, unknown> = {};
   const module = { exports };
-  const context = createContext({
-    exports,
-    module,
-  });
+  const sandbox = Object.create(null) as {
+    exports: typeof exports;
+    module: typeof module;
+  };
+  sandbox.exports = exports;
+  sandbox.module = module;
+  const context = createContext(sandbox);
 
   try {
-    const script = new Script(transpiledSource, {
-      filename: sourceFile ?? "workflow.inline.js",
-    });
+    const script = new Script(
+      `"use strict";
+(function (exports, module) {
+${transpiledSource}
+})(exports, module);`,
+      {
+        filename: sourceFile ?? "workflow.inline.js",
+      },
+    );
     script.runInContext(context, { timeout: 1000 });
   } catch (cause) {
     throw new WorkflowLoadError("Failed to evaluate workflow source.", {
