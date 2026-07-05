@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { basename } from "node:path";
+import { extractStructuredOutput } from "../extractStructuredOutput.js";
 import { Output } from "../Output.js";
 import {
   run as sandcastleRun,
@@ -50,6 +51,21 @@ interface ResolvedAgentCallOptions {
   readonly callId: string;
   readonly callIndex: number;
   readonly skills: readonly SkillSpec[];
+}
+
+interface RecordFailureOptions {
+  readonly artifacts: WorkflowArtifact[];
+  readonly resolved: ResolvedAgentCallOptions;
+  readonly callHash: string;
+  readonly promptHash: string;
+  readonly startedAt: string;
+  readonly branch: string;
+  readonly commits: readonly WorkflowCommit[];
+  readonly logFilePath?: string;
+  readonly sessionId?: string;
+  readonly usage?: unknown;
+  readonly stdout?: string;
+  readonly error: unknown;
 }
 
 export class WorkflowAgentRunner {
@@ -104,6 +120,14 @@ export class WorkflowAgentRunner {
       }),
     );
     const artifacts: WorkflowArtifact[] = [];
+    const outputDefinition =
+      options.schema === undefined
+        ? undefined
+        : Output.object({
+            tag: WORKFLOW_AGENT_OUTPUT_TAG,
+            schema: jsonSchemaToStandardSchema(options.schema),
+            maxRetries: options.retries,
+          });
 
     await this.#writeArtifact(
       artifacts,
@@ -127,23 +151,45 @@ export class WorkflowAgentRunner {
           options.timeoutMs === undefined
             ? undefined
             : Math.ceil(options.timeoutMs / 1000),
-        output:
-          options.schema === undefined
-            ? undefined
-            : Output.object({
-                tag: WORKFLOW_AGENT_OUTPUT_TAG,
-                schema: jsonSchemaToStandardSchema(options.schema),
-                maxRetries: options.retries,
-              }),
         signal: this.signal,
       });
 
-      const output =
-        options.schema === undefined
-          ? (result.stdout as Output)
-          : (result.output as Output);
       const sessionId = getLastSessionId(result);
       const usage = getLastUsage(result);
+      let output: Output;
+
+      if (outputDefinition === undefined) {
+        output = result.stdout as Output;
+      } else {
+        try {
+          output = await extractStructuredOutput<Output>(
+            result.stdout,
+            outputDefinition,
+            {
+              commits: result.commits,
+              branch: result.branch,
+              preservedWorktreePath: result.preservedWorktreePath,
+              sessionId,
+              sessionFilePath: getLastSessionFilePath(result),
+            },
+          );
+        } catch (error) {
+          return this.#recordFailure({
+            artifacts,
+            resolved,
+            callHash,
+            promptHash,
+            startedAt,
+            branch: result.branch,
+            commits: result.commits,
+            logFilePath: result.logFilePath,
+            sessionId,
+            usage,
+            stdout: result.stdout,
+            error,
+          });
+        }
+      }
 
       await this.#writeArtifact(
         artifacts,
@@ -191,60 +237,20 @@ export class WorkflowAgentRunner {
         status: "succeeded",
       };
     } catch (error) {
-      const serializedError = serializeError(error);
-      const branch = getErrorBranch(error) ?? resolved.branch;
-      const commits = getErrorCommits(error);
-      const sessionId = getErrorSessionId(error);
-      const logFilePath = getErrorLogFilePath(error);
-      const usage = getErrorUsage(error);
-      const stdout = getErrorStdout(error);
-
-      if (stdout !== undefined) {
-        await this.#writeArtifact(artifacts, resolved.callId, "stdout", stdout);
-      }
-
-      await this.#writeArtifact(artifacts, resolved.callId, "result", {
-        status: "failed",
-        error: serializedError,
-      });
-      await this.#writeArtifact(artifacts, resolved.callId, "run", {
-        branch,
-        commits,
-        logFilePath,
-        sessionId,
-        usage,
-      });
-
-      if (logFilePath !== undefined) {
-        artifacts.push({ name: "log", path: logFilePath });
-      }
-
-      await this.#appendJournal({
-        callId: resolved.callId,
-        callIndex: resolved.callIndex,
-        callHash,
-        label: resolved.label,
-        phase: resolved.phase,
-        promptHash,
-        status: "failed",
-        startedAt,
-        finishedAt: new Date().toISOString(),
-        branch,
-        commits,
-        logFilePath,
-        sessionId,
-        usage,
-        error: serializedError,
-      });
-
-      return {
-        branch,
-        commits,
+      return this.#recordFailure({
         artifacts,
-        sessionId,
-        status: "failed",
-        error: serializedError,
-      };
+        resolved,
+        callHash,
+        promptHash,
+        startedAt,
+        branch: getErrorBranch(error) ?? resolved.branch,
+        commits: getErrorCommits(error),
+        logFilePath: getErrorLogFilePath(error),
+        sessionId: getErrorSessionId(error),
+        usage: getErrorUsage(error),
+        stdout: getErrorStdout(error),
+        error,
+      });
     }
   }
 
@@ -309,6 +315,74 @@ export class WorkflowAgentRunner {
     }
 
     await this.store.appendJournal(this.runId, entry);
+  }
+
+  async #recordFailure<Output>(
+    options: RecordFailureOptions,
+  ): Promise<WorkflowAgentResult<Output>> {
+    const serializedError = serializeError(options.error);
+
+    if (options.stdout !== undefined) {
+      await this.#writeArtifact(
+        options.artifacts,
+        options.resolved.callId,
+        "stdout",
+        options.stdout,
+      );
+    }
+
+    await this.#writeArtifact(
+      options.artifacts,
+      options.resolved.callId,
+      "result",
+      {
+        status: "failed",
+        error: serializedError,
+      },
+    );
+    await this.#writeArtifact(
+      options.artifacts,
+      options.resolved.callId,
+      "run",
+      {
+        branch: options.branch,
+        commits: options.commits,
+        logFilePath: options.logFilePath,
+        sessionId: options.sessionId,
+        usage: options.usage,
+      },
+    );
+
+    if (options.logFilePath !== undefined) {
+      options.artifacts.push({ name: "log", path: options.logFilePath });
+    }
+
+    await this.#appendJournal({
+      callId: options.resolved.callId,
+      callIndex: options.resolved.callIndex,
+      callHash: options.callHash,
+      label: options.resolved.label,
+      phase: options.resolved.phase,
+      promptHash: options.promptHash,
+      status: "failed",
+      startedAt: options.startedAt,
+      finishedAt: new Date().toISOString(),
+      branch: options.branch,
+      commits: options.commits,
+      logFilePath: options.logFilePath,
+      sessionId: options.sessionId,
+      usage: options.usage,
+      error: serializedError,
+    });
+
+    return {
+      branch: options.branch,
+      commits: options.commits,
+      artifacts: options.artifacts,
+      sessionId: options.sessionId,
+      status: "failed",
+      error: serializedError,
+    };
   }
 }
 
@@ -443,6 +517,10 @@ function normalizeCompletionSignal(
 
 function getLastSessionId(result: RunResult): string | undefined {
   return result.iterations.at(-1)?.sessionId;
+}
+
+function getLastSessionFilePath(result: RunResult): string | undefined {
+  return result.iterations.at(-1)?.sessionFilePath;
 }
 
 function getLastUsage(result: RunResult): unknown {

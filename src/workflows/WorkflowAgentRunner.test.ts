@@ -59,7 +59,7 @@ const fakeRun = (
   }) as unknown as WorkflowAgentRunFunction;
 
 describe("WorkflowAgentRunner", () => {
-  it("passes cwd, providers, skills, branch strategy, prompt, completionSignal, output, and signal to run", async () => {
+  it("passes cwd, providers, skills, branch strategy, prompt, completionSignal, and signal to run", async () => {
     const controller = new AbortController();
     const defaultAgent = agent("default-agent");
     const overrideAgent = agent("override-agent");
@@ -70,7 +70,6 @@ describe("WorkflowAgentRunner", () => {
     const run = fakeRun(async (options) =>
       runResult(options, {
         stdout: `<${WORKFLOW_AGENT_OUTPUT_TAG}>{"answer":42}</${WORKFLOW_AGENT_OUTPUT_TAG}>`,
-        output: { answer: 42 },
       }),
     );
     const runner = new WorkflowAgentRunner({
@@ -120,10 +119,7 @@ describe("WorkflowAgentRunner", () => {
     expect(call?.prompt).toContain("Label: Implement Task");
     expect(call?.prompt).toContain("Implement the task");
     expect(call?.prompt).toContain(`<${WORKFLOW_AGENT_OUTPUT_TAG}>`);
-    expect(call?.output).toMatchObject({
-      _tag: "object",
-      tag: WORKFLOW_AGENT_OUTPUT_TAG,
-    });
+    expect(call?.output).toBeUndefined();
     expect(result).toMatchObject({
       output: { answer: 42 },
       branch: "sandcastle/workflows/run-1/001-implement-task",
@@ -188,8 +184,7 @@ describe("WorkflowAgentRunner", () => {
     const structured = { title: "Result" };
     const run = fakeRun(async (options) =>
       runResult(options, {
-        stdout: "ignored stdout",
-        output: structured,
+        stdout: `<${WORKFLOW_AGENT_OUTPUT_TAG}>{"title":"Result"}</${WORKFLOW_AGENT_OUTPUT_TAG}>`,
       }),
     );
     const runner = new WorkflowAgentRunner({
@@ -211,10 +206,7 @@ describe("WorkflowAgentRunner", () => {
     });
 
     expect(result.output).toEqual(structured);
-    expect(vi.mocked(run).mock.calls[0]?.[0].output).toMatchObject({
-      _tag: "object",
-      tag: WORKFLOW_AGENT_OUTPUT_TAG,
-    });
+    expect(vi.mocked(run).mock.calls[0]?.[0].output).toBeUndefined();
   });
 
   it("writes prompt/result artifacts and appends journal metadata when a store is supplied", async () => {
@@ -442,6 +434,127 @@ describe("WorkflowAgentRunner", () => {
           message: "agent failed",
         },
       });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("persists run metadata when post-run structured output extraction fails", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "workflow-agent-runner-"));
+    try {
+      const store = new WorkflowRunStore({ cwd: dir });
+      await store.createRun({
+        meta: { name: "Agent Runner Test" },
+        runId: "run-1",
+      });
+      const logFilePath = join(
+        dir,
+        ".sandcastle",
+        "logs",
+        "structured-agent.log",
+      );
+      const usage = {
+        inputTokens: 30,
+        cacheCreationInputTokens: 4,
+        cacheReadInputTokens: 5,
+        outputTokens: 6,
+      };
+      const run = fakeRun(async (options) =>
+        runResult(options, {
+          stdout: "stdout without the requested tag",
+          commits: [{ sha: "f00dbabe" }],
+          logFilePath,
+          iterations: [
+            {
+              sessionId: "session-structured",
+              sessionFilePath: join(dir, "session.jsonl"),
+              usage,
+            },
+          ],
+        }),
+      );
+      const runner = new WorkflowAgentRunner({
+        cwd: dir,
+        runId: "run-1",
+        branchPrefix: "wf",
+        defaultAgent: agent("agent"),
+        defaultSandbox: sandbox("sandbox"),
+        store,
+        run,
+      });
+
+      const result = await runner.run("Return JSON", {
+        label: "Structured Failure",
+        schema: {
+          type: "object",
+          required: ["title"],
+          properties: { title: { type: "string" } },
+        },
+      });
+      const journal = await store.readJournal("run-1");
+
+      expect(vi.mocked(run).mock.calls[0]?.[0].output).toBeUndefined();
+      expect(result).toMatchObject({
+        branch: "wf/run-1/001-structured-failure",
+        commits: [{ sha: "f00dbabe" }],
+        sessionId: "session-structured",
+        status: "failed",
+        error: {
+          name: "StructuredOutputError",
+          message: `Structured output tag <${WORKFLOW_AGENT_OUTPUT_TAG}> not found in agent output`,
+        },
+      });
+      expect(result).not.toHaveProperty("output");
+      expect(result.artifacts.map((artifact) => artifact.name)).toEqual([
+        "prompt",
+        "stdout",
+        "result",
+        "run",
+        "log",
+      ]);
+      const stdoutPath = result.artifacts.find(
+        (artifact) => artifact.name === "stdout",
+      )?.path;
+      const resultPath = result.artifacts.find(
+        (artifact) => artifact.name === "result",
+      )?.path;
+      const runPath = result.artifacts.find(
+        (artifact) => artifact.name === "run",
+      )?.path;
+
+      expect(stdoutPath).toBeDefined();
+      expect(resultPath).toBeDefined();
+      expect(runPath).toBeDefined();
+      expect(await readFile(stdoutPath!, "utf8")).toBe(
+        "stdout without the requested tag",
+      );
+      expect(JSON.parse(await readFile(resultPath!, "utf8"))).toMatchObject({
+        status: "failed",
+        error: {
+          name: "StructuredOutputError",
+          message: `Structured output tag <${WORKFLOW_AGENT_OUTPUT_TAG}> not found in agent output`,
+        },
+      });
+      expect(JSON.parse(await readFile(runPath!, "utf8"))).toMatchObject({
+        branch: "wf/run-1/001-structured-failure",
+        commits: [{ sha: "f00dbabe" }],
+        logFilePath,
+        sessionId: "session-structured",
+        usage,
+      });
+      expect(journal[0]).toMatchObject({
+        status: "failed",
+        branch: "wf/run-1/001-structured-failure",
+        commits: [{ sha: "f00dbabe" }],
+        logFilePath,
+        sessionId: "session-structured",
+        usage,
+        error: {
+          name: "StructuredOutputError",
+          message: `Structured output tag <${WORKFLOW_AGENT_OUTPUT_TAG}> not found in agent output`,
+        },
+      });
+      expect(journal[0]).not.toHaveProperty("output");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
