@@ -154,6 +154,14 @@ export interface WorkflowRunState {
   readonly error?: unknown;
 }
 
+export interface WorkflowControlState {
+  readonly stopRequested: boolean;
+  readonly pauseRequested: boolean;
+  readonly stopReason?: string;
+  readonly pauseReason?: string;
+  readonly updatedAt?: string;
+}
+
 export interface WorkflowCommit {
   readonly sha: string;
 }

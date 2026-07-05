@@ -36,8 +36,11 @@ import type {
 import { ConfigDirError, InitError } from "./errors.js";
 import { VERSION } from "./version.js";
 import {
+  pauseWorkflowCli,
   runWorkflowCli,
+  stopWorkflowCli,
   validateWorkflowCli,
+  type WorkflowCliControlOptions,
   type WorkflowCliRunOptions,
 } from "./WorkflowCli.js";
 
@@ -687,6 +690,7 @@ const podmanCommand = Command.make("podman", {}, () =>
 // --- Workflow command ---
 
 const workflowFileArg = Args.file({ name: "FILE" });
+const workflowRunIdArg = Args.text({ name: "RUN_ID" });
 
 const jsonOption = Options.boolean("json").pipe(
   Options.withDescription("Write machine-readable JSON"),
@@ -786,6 +790,38 @@ const workflowRunCommand = Command.make(
     ),
 );
 
+const workflowStopCommand = Command.make(
+  "stop",
+  {
+    runId: workflowRunIdArg,
+    json: jsonOption,
+  },
+  ({ runId, json }) =>
+    Effect.tryPromise(() =>
+      stopWorkflowCli({
+        runId,
+        json,
+        cwd: process.cwd(),
+      } satisfies WorkflowCliControlOptions),
+    ),
+);
+
+const workflowPauseCommand = Command.make(
+  "pause",
+  {
+    runId: workflowRunIdArg,
+    json: jsonOption,
+  },
+  ({ runId, json }) =>
+    Effect.tryPromise(() =>
+      pauseWorkflowCli({
+        runId,
+        json,
+        cwd: process.cwd(),
+      } satisfies WorkflowCliControlOptions),
+    ),
+);
+
 const workflowCommand = Command.make("workflow", {}, () =>
   Effect.gen(function* () {
     const d = yield* Display;
@@ -794,7 +830,14 @@ const workflowCommand = Command.make("workflow", {}, () =>
       "info",
     );
   }),
-).pipe(Command.withSubcommands([workflowValidateCommand, workflowRunCommand]));
+).pipe(
+  Command.withSubcommands([
+    workflowValidateCommand,
+    workflowRunCommand,
+    workflowStopCommand,
+    workflowPauseCommand,
+  ]),
+);
 
 // --- Root command ---
 

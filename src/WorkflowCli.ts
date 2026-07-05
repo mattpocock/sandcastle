@@ -16,6 +16,7 @@ import { noSandbox } from "./sandboxes/no-sandbox.js";
 import { podman } from "./sandboxes/podman.js";
 import { vercel } from "./sandboxes/vercel.js";
 import { runWorkflow } from "./workflows/WorkflowManager.js";
+import { WorkflowRunStore } from "./workflows/WorkflowRunStore.js";
 import { validateWorkflowSource } from "./workflows/validateWorkflowSource.js";
 import type {
   WorkflowProviderName,
@@ -59,6 +60,12 @@ export interface WorkflowCliRunOptions {
   readonly branchPrefix?: string;
 }
 
+export interface WorkflowCliControlOptions {
+  readonly runId: string;
+  readonly json: boolean;
+  readonly cwd: string;
+}
+
 export async function validateWorkflowCli(
   options: WorkflowCliValidateOptions,
 ): Promise<void> {
@@ -89,6 +96,18 @@ export async function validateWorkflowCli(
   if (!result.ok) {
     process.exitCode = 1;
   }
+}
+
+export async function stopWorkflowCli(
+  options: WorkflowCliControlOptions,
+): Promise<void> {
+  await requestWorkflowControlCli(options, "stop");
+}
+
+export async function pauseWorkflowCli(
+  options: WorkflowCliControlOptions,
+): Promise<void> {
+  await requestWorkflowControlCli(options, "pause");
 }
 
 export async function runWorkflowCli(
@@ -132,6 +151,43 @@ export async function runWorkflowCli(
   } catch (error) {
     writeRunError({
       message: "Workflow run failed before a run record was created.",
+      json: options.json,
+      error,
+    });
+  }
+}
+
+async function requestWorkflowControlCli(
+  options: WorkflowCliControlOptions,
+  action: "pause" | "stop",
+): Promise<void> {
+  const store = new WorkflowRunStore({ cwd: options.cwd });
+
+  try {
+    const control =
+      action === "stop"
+        ? await store.requestStop(options.runId)
+        : await store.requestPause(options.runId);
+    const state = await store.readState(options.runId);
+    const output = {
+      runId: options.runId,
+      status: state.status,
+      control,
+      runDir: store.getRunDir(options.runId),
+      state,
+    };
+
+    if (options.json) {
+      writeJson(output);
+    } else {
+      process.stdout.write(
+        `Workflow ${action} requested: ${options.runId}\nRun directory: ${output.runDir}\n`,
+      );
+    }
+  } catch (error) {
+    writeControlError({
+      runId: options.runId,
+      action,
       json: options.json,
       error,
     });
@@ -235,6 +291,30 @@ function resolveSandbox({
     default:
       throw new Error(`Unknown workflow sandbox: ${sandbox}`);
   }
+}
+
+function writeControlError(options: {
+  readonly runId: string;
+  readonly action: "pause" | "stop";
+  readonly json: boolean;
+  readonly error: unknown;
+}) {
+  process.exitCode = 1;
+
+  const message = `Workflow ${options.action} request failed.`;
+  if (options.json) {
+    writeJson({
+      runId: options.runId,
+      status: "failed",
+      control: null,
+      runDir: null,
+      error: serializeError(options.error, message),
+    });
+    return;
+  }
+
+  process.stderr.write(`${message}\n`);
+  process.stderr.write(`${getErrorMessage(options.error)}\n`);
 }
 
 function writeRunError(options: {

@@ -4,6 +4,7 @@ export interface WorkflowSchedulerOptions {
   readonly concurrency: number;
   readonly maxAgents: number;
   readonly signal?: AbortSignal;
+  readonly beforeStart?: () => Promise<void> | void;
 }
 
 type WorkflowTask<T> = () => Promise<T> | T;
@@ -24,6 +25,7 @@ export class WorkflowScheduler {
   #queue: QueueEntry[] = [];
   readonly #signal?: AbortSignal;
   readonly #abortHandler: () => void;
+  readonly #beforeStart?: () => Promise<void> | void;
 
   constructor(options: WorkflowSchedulerOptions) {
     this.concurrency = validatePositiveInteger(
@@ -32,6 +34,7 @@ export class WorkflowScheduler {
     );
     this.maxAgents = validatePositiveInteger(options.maxAgents, "maxAgents");
     this.#signal = options.signal;
+    this.#beforeStart = options.beforeStart;
     this.#abortHandler = () => {
       this.stop(this.#signal?.reason);
     };
@@ -140,7 +143,8 @@ export class WorkflowScheduler {
     this.#activeCount++;
 
     Promise.resolve()
-      .then(entry.run)
+      .then(() => this.#beforeStart?.())
+      .then(() => entry.run(), entry.reject)
       .finally(() => {
         this.#activeCount--;
         this.#drain();

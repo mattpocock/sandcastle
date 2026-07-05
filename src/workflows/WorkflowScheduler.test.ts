@@ -178,6 +178,25 @@ describe("WorkflowScheduler", () => {
     );
   });
 
+  it("runs beforeStart before launching queued tasks", async () => {
+    const scheduler = new WorkflowScheduler({
+      concurrency: 1,
+      maxAgents: 10,
+      beforeStart: () => {
+        throw new WorkflowStoppedError("control stop");
+      },
+    });
+    const started: string[] = [];
+
+    const taskPromise = scheduler.schedule(() => {
+      started.push("task");
+      return "task";
+    });
+
+    await expect(taskPromise).rejects.toBeInstanceOf(WorkflowStoppedError);
+    expect(started).toEqual([]);
+  });
+
   it("propagates active task errors", async () => {
     const scheduler = new WorkflowScheduler({ concurrency: 1, maxAgents: 10 });
     const error = new Error("boom");

@@ -14,6 +14,7 @@ import { WorkflowRunNotFoundError } from "./errors.js";
 import { sanitizeWorkflowName } from "./sanitizeWorkflowName.js";
 import type {
   WorkflowAgentJournalEntry,
+  WorkflowControlState,
   WorkflowEvent,
   WorkflowMeta,
   WorkflowRunState,
@@ -125,6 +126,11 @@ const artifactFileName = (name: WorkflowAgentArtifactName): string => {
 const serializeJson = (value: unknown): string =>
   `${JSON.stringify(value, null, 2)}\n`;
 
+const defaultControlState = (): WorkflowControlState => ({
+  stopRequested: false,
+  pauseRequested: false,
+});
+
 const errorText = (error: unknown): string => {
   if (typeof error === "string") return error;
   if (error instanceof Error) return error.stack ?? error.message;
@@ -166,6 +172,7 @@ export class WorkflowRunStore {
     await writeFile(join(runDir, "meta.json"), serializeJson(options.meta));
     await writeFile(join(runDir, "events.jsonl"), "", { flag: "a" });
     await writeFile(join(runDir, "journal.jsonl"), "", { flag: "a" });
+    await this.writeAtomic(join(runDir, "control.json"), defaultControlState());
 
     if (options.source !== undefined || options.sourceFile !== undefined) {
       await this.writeWorkflowSource(runId, options.source, options.sourceFile);
@@ -212,6 +219,74 @@ export class WorkflowRunStore {
     return JSON.parse(
       await readFile(join(this.getRunDir(runId), "state.json"), "utf8"),
     ) as WorkflowRunState;
+  }
+
+  async writeControl(
+    runId: string,
+    control: WorkflowControlState,
+  ): Promise<void> {
+    await this.assertRunExists(runId);
+    await this.writeAtomic(join(this.getRunDir(runId), "control.json"), {
+      stopRequested: control.stopRequested,
+      pauseRequested: control.pauseRequested,
+      ...(control.stopReason === undefined
+        ? {}
+        : { stopReason: control.stopReason }),
+      ...(control.pauseReason === undefined
+        ? {}
+        : { pauseReason: control.pauseReason }),
+      ...(control.updatedAt === undefined
+        ? {}
+        : { updatedAt: control.updatedAt }),
+    } satisfies WorkflowControlState);
+  }
+
+  async readControl(runId: string): Promise<WorkflowControlState> {
+    await this.assertRunExists(runId);
+    return normalizeControlState(
+      await this.readOptionalJson(join(this.getRunDir(runId), "control.json")),
+    );
+  }
+
+  async updateControl(
+    runId: string,
+    update: (control: WorkflowControlState) => WorkflowControlState,
+  ): Promise<WorkflowControlState> {
+    const next = update(await this.readControl(runId));
+    await this.writeControl(runId, next);
+    return next;
+  }
+
+  async requestStop(
+    runId: string,
+    reason?: string,
+  ): Promise<WorkflowControlState> {
+    return this.updateControl(runId, (control) => ({
+      ...control,
+      stopRequested: true,
+      ...(reason === undefined
+        ? {}
+        : {
+            stopReason: reason,
+          }),
+      updatedAt: this.now().toISOString(),
+    }));
+  }
+
+  async requestPause(
+    runId: string,
+    reason?: string,
+  ): Promise<WorkflowControlState> {
+    return this.updateControl(runId, (control) => ({
+      ...control,
+      pauseRequested: true,
+      ...(reason === undefined
+        ? {}
+        : {
+            pauseReason: reason,
+          }),
+      updatedAt: this.now().toISOString(),
+    }));
   }
 
   async appendEvent(runId: string, event: WorkflowEvent): Promise<void> {
@@ -368,4 +443,25 @@ export class WorkflowRunStore {
       throw error;
     }
   }
+}
+
+function normalizeControlState(value: unknown): WorkflowControlState {
+  if (typeof value !== "object" || value === null) {
+    return defaultControlState();
+  }
+
+  const record = value as Record<string, unknown>;
+  return {
+    stopRequested: record.stopRequested === true,
+    pauseRequested: record.pauseRequested === true,
+    ...(typeof record.stopReason === "string"
+      ? { stopReason: record.stopReason }
+      : {}),
+    ...(typeof record.pauseReason === "string"
+      ? { pauseReason: record.pauseReason }
+      : {}),
+    ...(typeof record.updatedAt === "string"
+      ? { updatedAt: record.updatedAt }
+      : {}),
+  };
 }

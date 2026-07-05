@@ -83,6 +83,32 @@ describe("WorkflowRunStore", () => {
     }
   });
 
+  it("writes, reads, and preserves control state updates", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "sandcastle-run-store-"));
+    try {
+      const store = makeStore(dir);
+      const state = await store.createRun({ meta });
+
+      expect(await store.readControl(state.id)).toEqual({
+        stopRequested: false,
+        pauseRequested: false,
+      });
+
+      await store.requestPause(state.id, "hold for review");
+      await store.requestStop(state.id, "user cancelled");
+
+      expect(await store.readControl(state.id)).toEqual({
+        stopRequested: true,
+        pauseRequested: true,
+        stopReason: "user cancelled",
+        pauseReason: "hold for review",
+        updatedAt: "2026-07-04T10:11:12.000Z",
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("appends events in order", async () => {
     const dir = await mkdtemp(join(tmpdir(), "sandcastle-run-store-"));
     try {

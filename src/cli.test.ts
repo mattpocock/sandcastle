@@ -1,5 +1,5 @@
 import { exec, execFile } from "node:child_process";
-import { mkdtemp, readdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -38,6 +38,30 @@ const runCliArgs = (args: string[], cwd: string) =>
 
 const parseJson = (stdout: string | Buffer) =>
   JSON.parse(stdout.toString()) as Record<string, any>;
+
+const readJson = async (path: string) =>
+  JSON.parse(await readFile(path, "utf8")) as Record<string, any>;
+
+const createWorkflowRunRecord = async (dir: string, runId: string) => {
+  const runDir = join(dir, ".sandcastle", "runs", runId);
+  await mkdir(runDir, { recursive: true });
+  await writeFile(
+    join(runDir, "state.json"),
+    JSON.stringify(
+      {
+        id: runId,
+        status: "running",
+        cwd: dir,
+        agentCount: 0,
+        maxAgents: 4,
+        concurrency: 2,
+      },
+      null,
+      2,
+    ),
+  );
+  return runDir;
+};
 
 const validWorkflowSource = `
   export default {
@@ -189,6 +213,8 @@ describe("sandcastle CLI", () => {
     const { stdout } = await runCli("workflow --help", process.cwd());
     expect(stdout).toContain("validate");
     expect(stdout).toContain("run");
+    expect(stdout).toContain("stop");
+    expect(stdout).toContain("pause");
   });
 
   it("workflow run --help shows args and override flags", async () => {
@@ -364,6 +390,62 @@ describe("sandcastle CLI", () => {
         },
       });
     }
+  });
+
+  it("workflow stop RUN_ID --json writes control.json and emits JSON", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-workflow-"));
+    const runDir = await createWorkflowRunRecord(hostDir, "stop-run");
+
+    const { stdout } = await runCliArgs(
+      ["workflow", "stop", "stop-run", "--json"],
+      hostDir,
+    );
+    const json = parseJson(stdout);
+
+    expect(json).toMatchObject({
+      runId: "stop-run",
+      status: "running",
+      runDir,
+      control: {
+        stopRequested: true,
+        pauseRequested: false,
+        updatedAt: expect.any(String),
+      },
+    });
+    await expect(
+      readJson(join(runDir, "control.json")),
+    ).resolves.toMatchObject({
+      stopRequested: true,
+      pauseRequested: false,
+    });
+  });
+
+  it("workflow pause RUN_ID --json writes control.json and emits JSON", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-workflow-"));
+    const runDir = await createWorkflowRunRecord(hostDir, "pause-run");
+
+    const { stdout } = await runCliArgs(
+      ["workflow", "pause", "pause-run", "--json"],
+      hostDir,
+    );
+    const json = parseJson(stdout);
+
+    expect(json).toMatchObject({
+      runId: "pause-run",
+      status: "running",
+      runDir,
+      control: {
+        stopRequested: false,
+        pauseRequested: true,
+        updatedAt: expect.any(String),
+      },
+    });
+    await expect(
+      readJson(join(runDir, "control.json")),
+    ).resolves.toMatchObject({
+      stopRequested: false,
+      pauseRequested: true,
+    });
   });
 
   it("podman build-image --help shows --containerfile and --image-name flags", async () => {
