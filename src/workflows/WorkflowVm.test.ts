@@ -236,6 +236,7 @@ describe("executeWorkflowBody", () => {
         "parallel",
         "phase",
         "pipeline",
+        "quality",
         "validate",
         "workflow",
       ],

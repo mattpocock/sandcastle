@@ -116,6 +116,38 @@ describe("workflow quality helpers", () => {
     expect(cappedFinder).toHaveBeenCalledTimes(2);
   });
 
+  it("loopUntilDry emits JSON-safe diagnostics by default", async () => {
+    const { events, logger } = fakeLogger();
+    const findMore = vi.fn(() => []);
+
+    await expect(loopUntilDry(findMore, { logger })).resolves.toEqual([]);
+
+    const serializedEvents = JSON.parse(JSON.stringify(events)) as typeof events;
+    expect(serializedEvents).toEqual(events);
+    expect(serializedEvents).toEqual([
+      {
+        type: "quality_loop_round_started",
+        message: "loop_until_dry",
+        details: { label: "loop_until_dry", round: 1, maxRounds: 25 },
+      },
+      {
+        type: "quality_loop_round_finished",
+        message: "loop_until_dry",
+        details: {
+          label: "loop_until_dry",
+          round: 1,
+          maxRounds: 25,
+          resultCount: 0,
+        },
+      },
+      {
+        type: "quality_loop_dry",
+        message: "loop_until_dry",
+        details: { label: "loop_until_dry", round: 1, maxRounds: 25 },
+      },
+    ]);
+  });
+
   it("judgePanel calls the judge agent with candidate summaries", async () => {
     const { agent, runMock } = fakeAgent();
 

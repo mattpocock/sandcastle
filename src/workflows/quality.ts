@@ -111,6 +111,8 @@ export interface CreateWorkflowQualityHelpersOptions {
   readonly logger?: WorkflowQualityLogger;
 }
 
+const DEFAULT_LOOP_UNTIL_DRY_MAX_ROUNDS = 25;
+
 export function createWorkflowQualityHelpers(
   defaults: CreateWorkflowQualityHelpersOptions = {},
 ): WorkflowQualityHelpers {
@@ -406,7 +408,7 @@ function resolveDelayMs(delayMs: number | undefined): number {
 
 function resolveMaxRounds(maxRounds: number | undefined): number {
   if (maxRounds === undefined) {
-    return Number.POSITIVE_INFINITY;
+    return DEFAULT_LOOP_UNTIL_DRY_MAX_ROUNDS;
   }
 
   assertIntegerAtLeast(maxRounds, 0, "loopUntilDry maxRounds");
