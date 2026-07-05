@@ -18,3 +18,14 @@ export type {
 } from "./JsonSchemaStandardSchema.js";
 export { validateWorkflowSource } from "./validateWorkflowSource.js";
 export type { ValidateWorkflowSourceOptions } from "./validateWorkflowSource.js";
+export {
+  createWorkflowAgentRunner,
+  WORKFLOW_AGENT_OUTPUT_TAG,
+  WorkflowAgentRunner,
+  wrapWorkflowAgentPrompt,
+} from "./WorkflowAgentRunner.js";
+export type {
+  WorkflowAgentPromptOptions,
+  WorkflowAgentRunFunction,
+  WorkflowAgentRunnerOptions,
+} from "./WorkflowAgentRunner.js";
