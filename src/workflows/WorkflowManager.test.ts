@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentProvider } from "../AgentProvider.js";
+import type { SkillSpec } from "../AgentSkills.js";
 import type { RunOptions, RunResult } from "../run.js";
 import type { SandboxProvider } from "../SandboxProvider.js";
 import { WorkflowValidationError } from "./errors.js";
@@ -226,6 +227,193 @@ describe("runWorkflow", () => {
       expect(journal).toContain('"callId":"001-answer-agent"');
       expect(journal).toContain('"phase":"Build"');
       expect(journal).toContain('"status":"succeeded"');
+    });
+  });
+
+  it("resolves workflow defaults for provider, model, sandbox, and skills", async () => {
+    await withTempDir(async (cwd) => {
+      const run = fakeAgentRun();
+      const tddSkill: SkillSpec = { name: "tdd", source: "./skills/tdd" };
+      const docsSkill: SkillSpec = { name: "docs", source: "./skills/docs" };
+      const resolveAgentProvider = vi.fn(({ provider, model }) =>
+        testAgent(`${provider}:${model}`),
+      );
+      const resolveSandbox = vi.fn(({ sandbox }) => testSandbox(sandbox));
+
+      const result = await runWorkflow({
+        cwd,
+        source: workflowSource(
+          `
+          const agentResult = await ctx.agent("Use defaults", {
+            label: "Defaulted Agent",
+          });
+          return {
+            status: agentResult.status,
+            branch: agentResult.branch,
+          };
+        `,
+          `
+          defaults: {
+            provider: "claude-code",
+            model: "claude-opus-4-8",
+            sandbox: "podman",
+            skills: ["tdd"],
+          },
+        `,
+        ),
+        runId: "default-resolution-run",
+        runsRoot: "runs",
+        skills: [tddSkill, docsSkill],
+        resolveAgentProvider,
+        resolveSandbox,
+        agentRun: run,
+      });
+
+      expect(result.status).toBe("succeeded");
+      expect(resolveAgentProvider).toHaveBeenCalledWith({
+        provider: "claude-code",
+        model: "claude-opus-4-8",
+        cwd,
+        runId: "default-resolution-run",
+      });
+      expect(resolveSandbox).toHaveBeenCalledWith({
+        sandbox: "podman",
+        cwd,
+        runId: "default-resolution-run",
+      });
+      expect(vi.mocked(run).mock.calls[0]?.[0]).toMatchObject({
+        agent: { name: "claude-code:claude-opus-4-8" },
+        sandbox: { name: "podman" },
+        skills: [tddSkill],
+      });
+    });
+  });
+
+  it("lets host run options override workflow defaults", async () => {
+    await withTempDir(async (cwd) => {
+      const run = fakeAgentRun();
+      const tddSkill: SkillSpec = { name: "tdd", source: "./skills/tdd" };
+      const docsSkill: SkillSpec = { name: "docs", source: "./skills/docs" };
+
+      const result = await runWorkflow({
+        cwd,
+        source: workflowSource(
+          `
+          const agentResult = await ctx.agent("Use host overrides", {
+            label: "Overridden Agent",
+          });
+          return agentResult.status;
+        `,
+          `
+          defaults: {
+            provider: "claude-code",
+            model: "claude-opus-4-8",
+            sandbox: "podman",
+            skills: ["tdd"],
+          },
+        `,
+        ),
+        runId: "host-override-run",
+        runsRoot: "runs",
+        provider: "codex",
+        model: "gpt-5.5",
+        sandbox: "no-sandbox",
+        defaultSkillNames: ["docs"],
+        skills: [tddSkill, docsSkill],
+        resolveAgentProvider: ({ provider, model }) =>
+          testAgent(`${provider}:${model}`),
+        resolveSandbox: ({ sandbox }) => testSandbox(sandbox),
+        agentRun: run,
+      });
+
+      expect(result).toMatchObject({
+        status: "succeeded",
+        result: "succeeded",
+      });
+      expect(vi.mocked(run).mock.calls[0]?.[0]).toMatchObject({
+        agent: { name: "codex:gpt-5.5" },
+        sandbox: { name: "no-sandbox" },
+        skills: [docsSkill],
+      });
+    });
+  });
+
+  it("records final failed state, error, and events when an agent run fails", async () => {
+    await withTempDir(async (cwd) => {
+      const run = fakeAgentRun(() => {
+        throw new Error("agent exploded");
+      });
+
+      const result = await runWorkflow({
+        cwd,
+        source: workflowSource(`
+          const agentResult = await ctx.agent("Break", { label: "Breaker" });
+          if (agentResult.status === "failed") {
+            throw new Error(agentResult.error.message);
+          }
+          return "unreachable";
+        `),
+        runId: "agent-failure-run",
+        runsRoot: "runs",
+        defaultAgent: testAgent(),
+        defaultSandbox: testSandbox(),
+        agentRun: run,
+      });
+
+      expect(result.status).toBe("failed");
+      expect(result.error).toMatchObject({
+        name: "Error",
+        message: "agent exploded",
+      });
+      await expect(
+        readJson(join(result.runDir, "state.json")),
+      ).resolves.toMatchObject({
+        status: "failed",
+        error: {
+          name: "Error",
+          message: "agent exploded",
+        },
+        agentCount: 1,
+      });
+      const events = await readFile(
+        join(result.runDir, "events.jsonl"),
+        "utf8",
+      );
+      expect(events).toContain('"type":"agent_failed"');
+      expect(events).toContain('"type":"workflow_failed"');
+      expect(
+        await readFile(join(result.runDir, "journal.jsonl"), "utf8"),
+      ).toContain('"status":"failed"');
+    });
+  });
+
+  it("treats a workflow returning undefined as a successful void result", async () => {
+    await withTempDir(async (cwd) => {
+      const result = await runWorkflow({
+        cwd,
+        source: workflowSource("ctx.log.info('done');"),
+        runId: "void-run",
+        runsRoot: "runs",
+      });
+
+      expect(result.status).toBe("succeeded");
+      expect(result).not.toHaveProperty("result");
+      await expect(
+        access(join(result.runDir, "result.json")),
+      ).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      await expect(
+        readJson(join(result.runDir, "state.json")),
+      ).resolves.toMatchObject({
+        status: "succeeded",
+      });
+      expect(
+        await readJson(join(result.runDir, "state.json")),
+      ).not.toHaveProperty("result");
+      expect(
+        await readFile(join(result.runDir, "events.jsonl"), "utf8"),
+      ).toContain('"type":"workflow_succeeded"');
     });
   });
 
