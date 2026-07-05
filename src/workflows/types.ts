@@ -1,6 +1,7 @@
 import type { AgentProvider } from "../AgentProvider.js";
 import type { SkillSpec } from "../AgentSkills.js";
 import type { SandboxProvider } from "../SandboxProvider.js";
+import type { WorkflowAgentRunFunction } from "./WorkflowAgentRunner.js";
 
 export type WorkflowProviderName =
   | "codex"
@@ -35,6 +36,35 @@ export interface WorkflowDefaults {
   readonly skills?: readonly string[];
 }
 
+/**
+ * Workflow-manager runtime resolution for agent provider names declared by
+ * workflow defaults, run options, or per-agent call options.
+ */
+export interface WorkflowAgentProviderResolution {
+  readonly provider: WorkflowProviderName;
+  readonly model?: string;
+  readonly cwd: string;
+  readonly runId: string;
+}
+
+export type WorkflowAgentProviderResolver = (
+  resolution: WorkflowAgentProviderResolution,
+) => AgentProvider | Promise<AgentProvider>;
+
+/**
+ * Workflow-manager runtime resolution for sandbox names declared by workflow
+ * defaults, run options, or per-agent call options.
+ */
+export interface WorkflowSandboxResolution {
+  readonly sandbox: WorkflowSandboxName;
+  readonly cwd: string;
+  readonly runId: string;
+}
+
+export type WorkflowSandboxResolver = (
+  resolution: WorkflowSandboxResolution,
+) => SandboxProvider | Promise<SandboxProvider>;
+
 export interface WorkflowDefinition<Args = unknown, Result = unknown> {
   readonly meta: WorkflowMeta;
   readonly defaults?: WorkflowDefaults;
@@ -48,13 +78,28 @@ export interface WorkflowRunOptions {
   readonly args?: unknown;
   readonly runId?: string;
   readonly runsRoot?: string;
+  /** Host override for workflow defaults.provider. Resolved by resolveAgentProvider. */
+  readonly provider?: WorkflowProviderName;
+  /** Host override for workflow defaults.model. Resolved by resolveAgentProvider. */
+  readonly model?: string;
+  /** Host override for workflow defaults.sandbox. Resolved by resolveSandbox. */
+  readonly sandbox?: WorkflowSandboxName;
   readonly defaultAgent?: AgentProvider;
   readonly defaultSandbox?: SandboxProvider;
+  /** Runtime resolver for workflow provider/model names. */
+  readonly resolveAgentProvider?: WorkflowAgentProviderResolver;
+  /** Runtime resolver for workflow sandbox names. */
+  readonly resolveSandbox?: WorkflowSandboxResolver;
+  /** Host-provided skill catalog available to workflow agent calls. */
   readonly skills?: readonly SkillSpec[];
+  /** Host override for workflow defaults.skills. */
+  readonly defaultSkillNames?: readonly string[];
   readonly concurrency?: number;
   readonly maxAgents?: number;
   readonly branchPrefix?: string;
   readonly signal?: AbortSignal;
+  /** @internal Test seam for running workflow agent calls without launching a real agent process. */
+  readonly agentRun?: WorkflowAgentRunFunction;
 }
 
 export interface WorkflowAgentOptions {
