@@ -113,6 +113,24 @@ export interface VercelOptions {
   readonly env?: Record<string, string>;
 
   /**
+   * Persistence behavior for the sandbox. Vercel sandboxes are persistent by
+   * default: stopping one snapshots its filesystem, billed as snapshot
+   * storage until expiry (30 days by default). Sandcastle sandboxes are
+   * one-per-run and never resumed, so `persistent: false` is usually the
+   * right call. Defaults to the SDK's behavior when omitted.
+   */
+  readonly persistent?: boolean;
+
+  /**
+   * Custom fetch implementation passed to the SDK for all sandbox API calls.
+   * Useful to work around runtime-specific decoding of the API's compressed
+   * responses — e.g. Bun on GitHub-hosted runners intermittently throws
+   * `BrotliDecompressionError` mid-command; a fetch that sets
+   * `accept-encoding: identity` avoids the brotli path entirely.
+   */
+  readonly fetch?: typeof globalThis.fetch;
+
+  /**
    * Maximum number of characters of streamed `exec` output retained per stream
    * (stdout and stderr) when an `onLine` callback is supplied (default: 64KiB).
    *
@@ -156,6 +174,10 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
       const timeoutValue = options?.timeout ?? options?.timeoutMs;
       if (timeoutValue !== undefined) createParams.timeout = timeoutValue;
 
+      if (options?.persistent !== undefined)
+        createParams.persistent = options.persistent;
+      if (options?.fetch) createParams.fetch = options.fetch;
+
       // Merge provider env with Sandcastle env
       createParams.env = createOptions.env;
 
@@ -180,8 +202,30 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
             onLine?: (line: string) => void;
             cwd?: string;
             sudo?: boolean;
+            stdin?: string;
           },
         ): Promise<ExecResult> => {
+          // stdin contract (see IsolatedSandboxHandle.exec): agent providers
+          // deliver the prompt via stdin to avoid the 128 KB per-arg limit —
+          // claudeCode, codex, etc. all rely on it. The SDK's runCommand has
+          // no stdin parameter, so write the content into the sandbox and
+          // redirect the whole command's stdin from that file.
+          let execCommand = command;
+          let stdinPath: string | undefined;
+          if (opts?.stdin !== undefined) {
+            stdinPath = `/tmp/sandcastle-stdin-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+            await sandbox.writeFiles([
+              { path: stdinPath, content: Buffer.from(opts.stdin, "utf8") },
+            ]);
+            execCommand = `exec < ${JSON.stringify(stdinPath)}; ${command}`;
+          }
+          const cleanupStdin = async () => {
+            if (!stdinPath) return;
+            await sandbox
+              .runCommand({ cmd: "rm", args: ["-f", stdinPath] })
+              .catch(() => {});
+          };
+
           if (opts?.onLine) {
             const onLine = opts.onLine;
             const stdoutTail = new BoundedTail(maxOutputTailChars, "\n");
@@ -218,12 +262,13 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
 
             const result = await sandbox.runCommand({
               cmd: "sh",
-              args: ["-c", command],
+              args: ["-c", execCommand],
               cwd: opts?.cwd ?? VERCEL_REPO_PATH,
               stdout: stdoutWritable,
               stderr: stderrWritable,
               ...(opts?.sudo ? { sudo: true } : {}),
             });
+            await cleanupStdin();
 
             return {
               stdout: stdoutTail.toString(),
@@ -234,13 +279,14 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
 
           const result = await sandbox.runCommand({
             cmd: "sh",
-            args: ["-c", command],
+            args: ["-c", execCommand],
             cwd: opts?.cwd ?? VERCEL_REPO_PATH,
             ...(opts?.sudo ? { sudo: true } : {}),
           });
 
           const stdout = await result.stdout();
           const stderr = await result.stderr();
+          await cleanupStdin();
 
           return {
             stdout,
