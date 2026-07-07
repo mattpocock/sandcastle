@@ -431,7 +431,7 @@ describe("patchGitMountsForWindows", () => {
         ),
       );
 
-      expect(result).toHaveLength(2);
+      expect(result).toHaveLength(3);
       // Parent .git dir remapped to deterministic sandbox path
       expect(result[0]).toEqual({
         hostPath: "C:/Users/project/.git",
@@ -441,6 +441,11 @@ describe("patchGitMountsForWindows", () => {
       expect(result[1]!.sandboxPath).toBe(`${SANDBOX_REPO_DIR}/.git`);
       // The hostPath is a temp file — just verify it exists
       expect(result[1]!.hostPath).toBeTruthy();
+      // Overlay mount for the parent admin back-pointer
+      expect(result[2]!.sandboxPath).toBe(
+        `${PARENT_GIT_SANDBOX_DIR}/worktrees/my-wt/gitdir`,
+      );
+      expect(result[2]!.hostPath).toBeTruthy();
     });
 
     it("replaces .git file mount when host repo is a worktree", async () => {
@@ -469,7 +474,7 @@ describe("patchGitMountsForWindows", () => {
         ),
       );
 
-      expect(result).toHaveLength(2);
+      expect(result).toHaveLength(3);
       // .git file mount replaced with corrected version
       expect(result[0]!.sandboxPath).toBe(`${SANDBOX_REPO_DIR}/.git`);
       // Parent .git dir remapped
@@ -477,6 +482,10 @@ describe("patchGitMountsForWindows", () => {
         hostPath: "C:/Users/parent-repo/.git",
         sandboxPath: PARENT_GIT_SANDBOX_DIR,
       });
+      // Parent admin back-pointer mounted to the sandbox worktree .git file
+      expect(result[2]!.sandboxPath).toBe(
+        `${PARENT_GIT_SANDBOX_DIR}/worktrees/my-branch/gitdir`,
+      );
     });
 
     it("corrected .git file contains POSIX gitdir path", async () => {
@@ -510,6 +519,14 @@ describe("patchGitMountsForWindows", () => {
       expect(writtenContent).toBe(
         `gitdir: ${PARENT_GIT_SANDBOX_DIR}/worktrees/feat-x\n`,
       );
+
+      const adminOverlayMount = result.find(
+        (m) =>
+          m.sandboxPath === `${PARENT_GIT_SANDBOX_DIR}/worktrees/feat-x/gitdir`,
+      );
+      expect(adminOverlayMount).toBeDefined();
+      const adminContent = await readFile(adminOverlayMount!.hostPath, "utf-8");
+      expect(adminContent).toBe(`${SANDBOX_REPO_DIR}/.git\n`);
     });
 
     it("returns mounts unchanged when .git file has no gitdir line", async () => {
@@ -552,7 +569,7 @@ describe("patchGitMountsForWindows", () => {
         ),
       );
 
-      expect(result).toHaveLength(2);
+      expect(result).toHaveLength(3);
       expect(result[0]).toEqual({
         hostPath: "C:/Users/project/.git",
         sandboxPath: PARENT_GIT_SANDBOX_DIR,
@@ -564,6 +581,8 @@ describe("patchGitMountsForWindows", () => {
       expect(content).toBe(
         `gitdir: ${PARENT_GIT_SANDBOX_DIR}/worktrees/backslash-wt\n`,
       );
+      const adminContent = await readFile(result[2]!.hostPath, "utf-8");
+      expect(adminContent).toBe(`${SANDBOX_REPO_DIR}/.git\n`);
     });
   });
 });

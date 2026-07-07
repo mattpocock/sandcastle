@@ -198,10 +198,13 @@ export const parseGitdirPath = (
  * On Windows, patch git mounts so that worktree `.git` files resolve inside
  * the Linux sandbox. See ADR-0006 for the full rationale.
  *
- * Two fixes are applied:
+ * Three fixes are applied:
  * 1. The parent `.git` directory mount is remapped to `PARENT_GIT_SANDBOX_DIR`.
  * 2. A corrected `.git` file (with a POSIX `gitdir:` path) is created and
  *    mounted at `sandboxRepoDir/.git`, overlaying the original.
+ * 3. A corrected admin back-pointer file is mounted at
+ *    `PARENT_GIT_SANDBOX_DIR/worktrees/<name>/gitdir`, so in-container git
+ *    does not prune the worktree as stale.
  *
  * On non-Windows platforms, or when the worktree's `.git` is a directory
  * (not a worktree pointer), returns the mounts unchanged.
@@ -269,7 +272,7 @@ export const patchGitMountsForWindows = (
     const gitdirPath = match[1]!;
     const { parentGitDir, worktreeName } = parseGitdirPath(gitdirPath);
 
-    // Create a temp file with the corrected gitdir content
+    // Create temp files with corrected forward and backward gitdir content.
     const correctedGitdir = `${PARENT_GIT_SANDBOX_DIR}/worktrees/${worktreeName}`;
     const tempDir = yield* Effect.tryPromise({
       try: () => mkdtemp(join(tmpdir(), "sandcastle-git-")),
@@ -279,11 +282,19 @@ export const patchGitMountsForWindows = (
         }),
     });
     const tempGitFile = join(tempDir, "git-override");
+    const tempAdminGitdirFile = join(tempDir, "admin-gitdir-override");
     yield* Effect.tryPromise({
       try: () => writeFile(tempGitFile, `gitdir: ${correctedGitdir}\n`),
       catch: (e) =>
         new WorktreeError({
           message: `Failed to write git override file: ${e instanceof Error ? e.message : String(e)}`,
+        }),
+    });
+    yield* Effect.tryPromise({
+      try: () => writeFile(tempAdminGitdirFile, `${sandboxRepoDir}/.git\n`),
+      catch: (e) =>
+        new WorktreeError({
+          message: `Failed to write git admin override file: ${e instanceof Error ? e.message : String(e)}`,
         }),
     });
 
@@ -321,6 +332,11 @@ export const patchGitMountsForWindows = (
         sandboxPath: `${sandboxRepoDir}/.git`,
       });
     }
+
+    correctedMounts.push({
+      hostPath: tempAdminGitdirFile,
+      sandboxPath: `${PARENT_GIT_SANDBOX_DIR}/worktrees/${worktreeName}/gitdir`,
+    });
 
     return correctedMounts;
   });
