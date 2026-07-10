@@ -406,6 +406,41 @@ WORKDIR /home/agent
 ENTRYPOINT ["sleep", "infinity"]
 `;
 
+const KIRO_DOCKERFILE = `FROM node:22-bookworm
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \\
+  git \\
+  curl \\
+  jq \\
+  && rm -rf /var/lib/apt/lists/*
+
+{{ISSUE_TRACKER_TOOLS}}
+
+# Build-args for UID/GID alignment: sandcastle docker build-image
+# defaults these to the host user's UID/GID so image-built files
+# and bind-mounted files share an owner without runtime chown.
+ARG AGENT_UID=1000
+ARG AGENT_GID=1000
+
+# Rename the base image's "node" user to "agent" and align UID/GID.
+RUN groupmod -o -g $AGENT_GID node && usermod -o -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+USER \${AGENT_UID}:\${AGENT_GID}
+
+# Install Kiro CLI
+RUN curl -fsSL https://cli.kiro.dev/install | bash
+
+# Add Kiro CLI to PATH
+ENV PATH="/home/agent/.local/bin:$PATH"
+
+WORKDIR /home/agent
+
+# In worktree sandbox mode, Sandcastle bind-mounts the git worktree at ${SANDBOX_REPO_DIR}
+# and overrides the working directory to ${SANDBOX_REPO_DIR} at container start.
+# Structure your Dockerfile so that ${SANDBOX_REPO_DIR} can serve as the project root.
+ENTRYPOINT ["sleep", "infinity"]
+`;
+
 const AGENT_REGISTRY: AgentEntry[] = [
   {
     name: "claude-code",
@@ -472,6 +507,17 @@ OPENCODE_API_KEY=`,
 # COPILOT_GITHUB_TOKEN takes precedence over GH_TOKEN and GITHUB_TOKEN.
 GITHUB_TOKEN=`,
     setupCommand: `copilot -i "$(cat ${SETUP_ISSUE_TRACKER_PATH})"`,
+  },
+  {
+    name: "kiro",
+    label: "Kiro CLI",
+    defaultModel: "claude-sonnet-4.6",
+    factoryImport: "kiro",
+    dockerfileTemplate: KIRO_DOCKERFILE,
+    envExample: `# Kiro API key (requires Kiro Pro or higher subscription)
+# Generate at https://app.kiro.dev/settings/api-keys
+KIRO_API_KEY=`,
+    setupCommand: `kiro-cli chat "$(cat ${SETUP_ISSUE_TRACKER_PATH})"`,
   },
 ];
 

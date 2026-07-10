@@ -7,6 +7,7 @@ import {
   codex,
   copilot,
   cursor,
+  kiro,
   opencode,
   pi,
 } from "./AgentProvider.js";
@@ -2584,5 +2585,183 @@ describe("sessionStorage", () => {
       await rm(hostDir, { recursive: true, force: true });
       await rm(sandboxDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("kiro factory", () => {
+  it("returns a provider with name 'kiro'", () => {
+    const provider = kiro("claude-sonnet-4-5");
+    expect(provider.name).toBe("kiro");
+  });
+
+  it("does not capture sessions by default", () => {
+    const provider = kiro("claude-sonnet-4-5");
+    expect(provider.captureSessions).toBe(false);
+  });
+
+  it("buildPrintCommand includes --no-interactive and model", () => {
+    const provider = kiro("claude-sonnet-4-5");
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).toContain("--no-interactive");
+    expect(command).toContain("claude-sonnet-4-5");
+  });
+
+  it("buildPrintCommand delivers prompt via stdin, not argv", () => {
+    const provider = kiro("claude-sonnet-4-5");
+    const { command, stdin } = provider.buildPrintCommand(opts("do something"));
+    expect(stdin).toBe("do something");
+    expect(command).not.toContain("do something");
+  });
+
+  it("buildPrintCommand includes --trust-all-tools when dangerouslySkipPermissions is true", () => {
+    const provider = kiro("claude-sonnet-4-5");
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+    });
+    expect(command).toContain("--trust-all-tools");
+  });
+
+  it("buildPrintCommand omits --trust-all-tools when dangerouslySkipPermissions is false", () => {
+    const provider = kiro("claude-sonnet-4-5");
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: false,
+    });
+    expect(command).not.toContain("--trust-all-tools");
+  });
+
+  it("buildPrintCommand includes --effort when specified", () => {
+    const provider = kiro("claude-sonnet-4-5", { effort: "high" });
+    const { command } = provider.buildPrintCommand(opts("test"));
+    expect(command).toContain("--effort high");
+  });
+
+  it("buildPrintCommand omits --effort when not specified", () => {
+    const provider = kiro("claude-sonnet-4-5");
+    const { command } = provider.buildPrintCommand(opts("test"));
+    expect(command).not.toContain("--effort");
+  });
+
+  it("buildPrintCommand includes --agent when specified", () => {
+    const provider = kiro("claude-sonnet-4-5", { agent: "my-agent" });
+    const { command } = provider.buildPrintCommand(opts("test"));
+    expect(command).toContain("--agent \'my-agent\'");
+  });
+
+  it("buildPrintCommand ignores resumeSession (resume not yet supported)", () => {
+    const provider = kiro("claude-sonnet-4-5");
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+      resumeSession: "abc-123",
+    });
+    expect(command).not.toContain("--resume");
+    expect(command).not.toContain("abc-123");
+  });
+
+  it("buildInteractiveArgs includes kiro-cli binary, chat subcommand, --model, and prompt", () => {
+    const provider = kiro("claude-sonnet-4-5");
+    const args = provider.buildInteractiveArgs!(opts("hello"));
+    expect(args[0]).toBe("kiro-cli");
+    expect(args[1]).toBe("chat");
+    expect(args).toContain("--model");
+    expect(args).toContain("claude-sonnet-4-5");
+    expect(args).toContain("hello");
+  });
+
+  it("buildInteractiveArgs includes --effort when specified", () => {
+    const provider = kiro("claude-sonnet-4-5", { effort: "high" });
+    const args = provider.buildInteractiveArgs!(opts("test"));
+    expect(args).toContain("--effort");
+    expect(args).toContain("high");
+  });
+
+  it("buildInteractiveArgs includes --agent when specified", () => {
+    const provider = kiro("claude-sonnet-4-5", { agent: "my-agent" });
+    const args = provider.buildInteractiveArgs!(opts("test"));
+    expect(args).toContain("--agent");
+    expect(args).toContain("my-agent");
+  });
+
+  it("accepts an env option and exposes it on the provider", () => {
+    const provider = kiro("claude-sonnet-4-5", {
+      env: { KIRO_API_KEY: "test" },
+    });
+    expect(provider.env).toEqual({ KIRO_API_KEY: "test" });
+  });
+
+  it("defaults env to empty object when not provided", () => {
+    const provider = kiro("claude-sonnet-4-5");
+    expect(provider.env).toEqual({});
+  });
+
+  it("bakes model into each provider instance independently", () => {
+    const provider1 = kiro("model-a");
+    const provider2 = kiro("model-b");
+    expect(provider1.buildPrintCommand(opts("test")).command).toContain(
+      "model-a",
+    );
+    expect(provider2.buildPrintCommand(opts("test")).command).toContain(
+      "model-b",
+    );
+    expect(provider1.buildPrintCommand(opts("test")).command).not.toContain(
+      "model-b",
+    );
+  });
+
+  it("parseStreamLine extracts result from '> ' prefixed line", () => {
+    const provider = kiro("claude-sonnet-4-5");
+    expect(provider.parseStreamLine("> HELLO")).toEqual([
+      { type: "text", text: "HELLO" },
+      { type: "result", result: "HELLO" },
+    ]);
+  });
+
+  it("parseStreamLine extracts tool_call from tool usage line", () => {
+    const provider = kiro("claude-sonnet-4-5");
+    const events = provider.parseStreamLine(
+      "Reading directory: /tmp (using tool: read, max depth: 0)",
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: "tool_call", name: "read" }),
+    );
+  });
+
+  it("parseStreamLine returns text event for regular lines", () => {
+    const provider = kiro("claude-sonnet-4-5");
+    expect(provider.parseStreamLine("Some output text")).toEqual([
+      { type: "text", text: "Some output text" },
+    ]);
+  });
+
+  it("parseStreamLine returns empty array for blank lines", () => {
+    const provider = kiro("claude-sonnet-4-5");
+    expect(provider.parseStreamLine("")).toEqual([]);
+    expect(provider.parseStreamLine("   ")).toEqual([]);
+  });
+
+  it("parseStreamLine strips ANSI escape codes", () => {
+    const provider = kiro("claude-sonnet-4-5");
+    const events = provider.parseStreamLine("\x1b[32m> HELLO\x1b[0m");
+    expect(events).toEqual([
+      { type: "text", text: "HELLO" },
+      { type: "result", result: "HELLO" },
+    ]);
+  });
+
+  it("parseStreamLine handles a tool-usage line with an empty tool-name capture group", () => {
+    const provider = kiro("claude-sonnet-4-5");
+    // The tool-name group can match an empty string (e.g. "(using tool: )") —
+    // this still surfaces as a tool_call with an empty name rather than
+    // silently dropping the event or crashing.
+    const line = "Doing something (using tool: )";
+    const events = provider.parseStreamLine(line);
+    expect(events).toEqual([{ type: "tool_call", name: "", args: line }]);
+  });
+
+  it("parseStreamLine treats lines consisting only of control characters as blank", () => {
+    const provider = kiro("claude-sonnet-4-5");
+    expect(provider.parseStreamLine("\x1b[0m\x1b[0m")).toEqual([]);
   });
 });

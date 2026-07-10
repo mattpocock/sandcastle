@@ -1149,6 +1149,92 @@ export const copilot = (
 });
 
 // ---------------------------------------------------------------------------
+// Kiro CLI agent provider
+// ---------------------------------------------------------------------------
+
+/** Options for the Kiro CLI agent provider. */
+export interface KiroOptions {
+  /** Reasoning effort level. Maps to the CLI's --effort flag. */
+  readonly effort?: "low" | "medium" | "high" | "xhigh" | "max";
+  /**
+   * Agent to use. Maps to the CLI's --agent flag.
+   * Selects a custom agent configuration from ~/.kiro/agents/ or .kiro/agents/.
+   */
+  readonly agent?: string;
+  /** Environment variables injected by this agent provider. */
+  readonly env?: Record<string, string>;
+}
+
+/**
+ * Parse one line of `kiro-cli chat --no-interactive` plain-text output.
+ *
+ * Output format (ANSI stripped):
+ * - Tool call:   "Reading X (using tool: Y...)"  → tool_call event
+ * - Final answer: "> some text"                  → result event
+ * - Other lines are emitted as text events for streaming display.
+ */
+const parseKiroStreamLine = (line: string): ParsedStreamEvent[] => {
+  // Strip ANSI escape sequences
+  const clean = line.replace(/\x1b\[[0-9;]*[mGKHF]/g, "").trim();
+  if (!clean) return [];
+
+  // Final answer line: "> text"
+  if (clean.startsWith("> ")) {
+    const text = clean.slice(2);
+    return [
+      { type: "text", text },
+      { type: "result", result: text },
+    ];
+  }
+
+  // Tool call line: "Reading X (using tool: Y...)" or "Running X (using tool: Y...)"
+  const toolMatch = clean.match(/\(using tool:\s*([^,)]+)/i);
+  if (toolMatch) {
+    return [{ type: "tool_call", name: toolMatch[1]!.trim(), args: clean }];
+  }
+
+  return [{ type: "text", text: clean }];
+};
+
+export const kiro = (model: string, options?: KiroOptions): AgentProvider => ({
+  name: "kiro",
+  env: options?.env ?? {},
+  captureSessions: false,
+
+  // Kiro CLI does expose `--resume-id <id>`, but Sandcastle does not yet capture
+  // or transfer its session files, so resume is not wired up end-to-end. Until
+  // that round-trip is verified, kiro is non-resumable: captureSessions is false,
+  // there is no sessionStorage, and resumeSession is ignored here — like cursor,
+  // copilot, pi, and opencode.
+  buildPrintCommand({
+    prompt,
+    dangerouslySkipPermissions,
+  }: AgentCommandOptions): PrintCommand {
+    const effortFlag = options?.effort ? ` --effort ${options.effort}` : "";
+    const agentFlag = options?.agent
+      ? ` --agent ${shellEscape(options.agent)}`
+      : "";
+    const trustFlag = dangerouslySkipPermissions ? " --trust-all-tools" : "";
+    return {
+      command: `kiro-cli chat --no-interactive${trustFlag} --model ${shellEscape(model)}${effortFlag}${agentFlag}`,
+      stdin: prompt,
+    };
+  },
+
+  buildInteractiveArgs({ prompt }: AgentCommandOptions): string[] {
+    const args = ["kiro-cli", "chat", "--model", model];
+    if (options?.effort) args.push("--effort", options.effort);
+    if (options?.agent) args.push("--agent", options.agent);
+    if (prompt) args.push(prompt);
+    return args;
+  },
+
+  parseStreamLine(line: string): ParsedStreamEvent[] {
+    return parseKiroStreamLine(line);
+  },
+});
+
+// ---------------------------------------------------------------------------
 // Claude Code agent provider
 // ---------------------------------------------------------------------------
 

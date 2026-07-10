@@ -57,6 +57,7 @@ export {
   codex,
   copilot,
   cursor,
+  kiro,
   opencode,
   pi,
 } from "./AgentProvider.js";
@@ -68,6 +69,7 @@ export type {
   CodexOptions,
   CopilotOptions,
   CursorOptions,
+  KiroOptions,
   OpenCodeOptions,
   PiOptions,
 } from "./AgentProvider.js";

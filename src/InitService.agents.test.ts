@@ -95,4 +95,19 @@ describe("Agent registry", () => {
     expect(agent!.dockerfileTemplate).toContain("FROM");
     expect(agent!.dockerfileTemplate).toContain("@github/copilot");
   });
+
+  it("listAgents includes kiro", () => {
+    const agents = listAgents();
+    expect(agents.some((a) => a.name === "kiro")).toBe(true);
+  });
+
+  it("getAgent returns kiro entry with expected fields", () => {
+    const agent = getAgent("kiro");
+    expect(agent).toBeDefined();
+    expect(agent!.name).toBe("kiro");
+    expect(agent!.factoryImport).toBe("kiro");
+    expect(agent!.dockerfileTemplate).toContain("FROM");
+    expect(agent!.dockerfileTemplate).toContain("cli.kiro.dev");
+    expect(agent!.envExample).toContain("KIRO_API_KEY");
+  });
 });
