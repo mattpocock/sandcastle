@@ -492,6 +492,12 @@ export interface IssueTrackerEntry {
   };
   /** Lines to append to `.env.example` for this issue tracker, or empty string if none needed. */
   readonly envExample: string;
+  /**
+   * Host-side command that creates the "Sandcastle" label the templates filter
+   * issues by. When set, init offers to run it. Absent for trackers without
+   * labels (beads) or where the command can't be known upfront (custom).
+   */
+  readonly createLabelCommand?: string;
 }
 
 const GITHUB_CLI_TOOLS = `# Install GitHub CLI
@@ -501,6 +507,15 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \\
   | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \\
   && apt-get update && apt-get install -y gh \\
   && rm -rf /var/lib/apt/lists/*`;
+
+const GITLAB_CLI_TOOLS = `# Install GitLab CLI
+# Release assets follow glab_<version>_linux_<arch>.deb with dpkg architecture
+# names, resolved from the latest-release permalink of gitlab-org/cli.
+RUN ARCH=$(dpkg --print-architecture) \\
+  && GLAB_VERSION=$(curl -fsSL "https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/releases/permalink/latest" | jq -r '.tag_name') \\
+  && curl -fsSL -o /tmp/glab.deb "https://gitlab.com/gitlab-org/cli/-/releases/\${GLAB_VERSION}/downloads/glab_\${GLAB_VERSION#v}_linux_\${ARCH}.deb" \\
+  && apt-get install -y /tmp/glab.deb \\
+  && rm -f /tmp/glab.deb`;
 
 const BEADS_TOOLS = `# Install system dependencies for Beads
 RUN apt-get update && apt-get install -y \\
@@ -541,6 +556,23 @@ const ISSUE_TRACKER_REGISTRY: IssueTrackerEntry[] = [
 # Create a fine-grained token: https://github.com/settings/personal-access-tokens/new
 # Required repository permissions: Issues (Read and write) and Metadata (Read)
 GH_TOKEN=`,
+    createLabelCommand: `gh label create "Sandcastle" --description "Issues for Sandcastle to work on" --color "F9A825" 2>/dev/null`,
+  },
+  {
+    name: "gitlab-issues",
+    label: "GitLab Issues",
+    templateArgs: {
+      LIST_TASKS_COMMAND: `glab issue list --label Sandcastle --per-page 100 --output json | jq '[.[] | {number: .iid, title, body: .description, labels: (.labels // [])}]'`,
+      VIEW_TASK_COMMAND: "glab issue view <ID> --comments",
+      CLOSE_TASK_COMMAND: `glab issue note <ID> --message "Completed by Sandcastle" && glab issue close <ID>`,
+      ISSUE_TRACKER_TOOLS: GITLAB_CLI_TOOLS,
+    },
+    envExample: `# GitLab personal access token — the agent uses it to read and manage GitLab issues
+# Create one with the \`api\` scope: https://gitlab.com/-/user_settings/personal_access_tokens
+GITLAB_TOKEN=
+# For self-managed GitLab instances, uncomment and set your instance host:
+# GITLAB_HOST=gitlab.example.com`,
+    createLabelCommand: `glab label create --name "Sandcastle" --description "Issues for Sandcastle to work on" --color "#F9A825" 2>/dev/null`,
   },
   {
     name: "beads",

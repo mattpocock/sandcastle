@@ -109,7 +109,7 @@ const sandboxOption = Options.text("sandbox").pipe(
 
 const issueTrackerOption = Options.text("issue-tracker").pipe(
   Options.withDescription(
-    "Issue tracker to use (e.g. github-issues, beads, custom)",
+    "Issue tracker to use (e.g. github-issues, gitlab-issues, beads, custom)",
   ),
   Options.optional,
 );
@@ -122,7 +122,7 @@ const createLabelOption = Options.choice("create-label", [
   "false",
 ]).pipe(
   Options.withDescription(
-    'Whether to create the "Sandcastle" GitHub label (only meaningful with --issue-tracker github-issues)',
+    'Whether to create the "Sandcastle" label (only meaningful with --issue-tracker github-issues or gitlab-issues)',
   ),
   Options.optional,
 );
@@ -393,25 +393,22 @@ const initCommand = Command.make(
         selectedTemplate = selected as string;
       }
 
-      // Offer to create the "Sandcastle" label on the repo (skip for non-GitHub issue trackers).
-      // CLI flag > interactive confirm. The flag is only meaningful for the github-issues tracker.
+      // Offer to create the "Sandcastle" label on the repo (skip for issue
+      // trackers without a label-create command). CLI flag > interactive
+      // confirm. The flag is only meaningful for trackers that declare one.
       let shouldCreateLabel = false;
-      if (selectedIssueTracker.name === "github-issues") {
+      const createLabelCommand = selectedIssueTracker.createLabelCommand;
+      if (createLabelCommand !== undefined) {
         shouldCreateLabel = yield* resolveConfirmFlag({
           choice: createLabelChoice,
           flag: "--create-label",
-          promptMessage:
-            'Create a "Sandcastle" GitHub label? (Templates filter issues by this label)',
+          promptMessage: `Create a "Sandcastle" ${selectedIssueTracker.label} label? (Templates filter issues by this label)`,
           cancelMessage: "Label selection cancelled.",
         });
 
         if (shouldCreateLabel) {
           yield* Effect.try({
-            try: () =>
-              execSync(
-                'gh label create "Sandcastle" --description "Issues for Sandcastle to work on" --color "F9A825" 2>/dev/null',
-                { cwd, stdio: "ignore" },
-              ),
+            try: () => execSync(createLabelCommand, { cwd, stdio: "ignore" }),
             catch: () => undefined,
           }).pipe(Effect.ignore);
         }
