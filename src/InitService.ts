@@ -184,6 +184,79 @@ export const hostHasDependency = (
   });
 
 // ---------------------------------------------------------------------------
+// Java project detection
+// ---------------------------------------------------------------------------
+
+/**
+ * sdkman identifier baked into the Dockerfile when the repo is a Java project
+ * (pom.xml present) but declares no version in a `.sdkmanrc`. A current JDK
+ * compiles older `--release` targets, so a recent LTS is a safe default.
+ */
+export const DEFAULT_JAVA_VERSION = "25.0.3-tem";
+
+/**
+ * Resolve the sdkman Java identifier for the host repo, or undefined when the
+ * repo is not a Java project. A `java=` entry in `.sdkmanrc` wins; a repo with
+ * only a pom.xml gets {@link DEFAULT_JAVA_VERSION}.
+ */
+export const resolveJavaVersion = (
+  repoDir: string,
+): Effect.Effect<string | undefined, never, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+
+    const sdkmanrc = yield* fs
+      .readFileString(join(repoDir, ".sdkmanrc"))
+      .pipe(Effect.orElseSucceed(() => ""));
+    const javaEntry = sdkmanrc.match(/^\s*java\s*=\s*(\S+)/m);
+    if (javaEntry) return javaEntry[1];
+
+    const hasPom = yield* fs
+      .exists(join(repoDir, "pom.xml"))
+      .pipe(Effect.orElseSucceed(() => false));
+    if (hasPom) return DEFAULT_JAVA_VERSION;
+
+    return undefined;
+  });
+
+/** Root-context layer with sdkman's archive prerequisites. */
+const JAVA_SYSTEM_DEPS_DOCKERFILE = `# Java toolchain prerequisites (sdkman needs zip/unzip)
+RUN apt-get update && apt-get install -y \\
+  zip \\
+  unzip \\
+  && rm -rf /var/lib/apt/lists/*`;
+
+/**
+ * Agent-user layer installing sdkman, the repo's Java version, and Maven.
+ * \`{{JAVA_VERSION}}\` is substituted with the resolved sdkman identifier
+ * before this block lands in the Dockerfile.
+ */
+const JAVA_RUNTIME_TOOLS_DOCKERFILE = `# Install sdkman, Java {{JAVA_VERSION}}, and Maven for the agent user
+RUN curl -fsSL "https://get.sdkman.io?rcupdate=false" | bash \\
+  && bash -c 'source "$HOME/.sdkman/bin/sdkman-init.sh" \\
+    && sdk install java {{JAVA_VERSION}} \\
+    && sdk install maven'
+ENV JAVA_HOME="/home/agent/.sdkman/candidates/java/current"
+ENV PATH="/home/agent/.sdkman/candidates/java/current/bin:/home/agent/.sdkman/candidates/maven/current/bin:$PATH"`;
+
+/**
+ * Template arguments for the Java Dockerfile layers. Empty strings when the
+ * repo is not a Java project, so the placeholders vanish from the Dockerfile.
+ */
+const buildJavaTemplateArgs = (
+  javaVersion: string | undefined,
+): Record<string, string> =>
+  javaVersion === undefined
+    ? { JAVA_SYSTEM_DEPS: "", JAVA_RUNTIME_TOOLS: "" }
+    : {
+        JAVA_SYSTEM_DEPS: JAVA_SYSTEM_DEPS_DOCKERFILE,
+        JAVA_RUNTIME_TOOLS: JAVA_RUNTIME_TOOLS_DOCKERFILE.replace(
+          /\{\{JAVA_VERSION\}\}/g,
+          javaVersion,
+        ),
+      };
+
+// ---------------------------------------------------------------------------
 // Agent registry (internal — not part of public API)
 // ---------------------------------------------------------------------------
 
@@ -215,6 +288,8 @@ RUN apt-get update && apt-get install -y \\
 
 {{ISSUE_TRACKER_TOOLS}}
 
+{{JAVA_SYSTEM_DEPS}}
+
 # Build-args for UID/GID alignment: sandcastle docker build-image
 # defaults these to the host user's UID/GID so image-built files
 # and bind-mounted files share an owner without runtime chown.
@@ -230,6 +305,8 @@ RUN curl -fsSL https://claude.ai/install.sh | bash
 
 # Add Claude to PATH
 ENV PATH="/home/agent/.local/bin:$PATH"
+
+{{JAVA_RUNTIME_TOOLS}}
 
 WORKDIR /home/agent
 
@@ -250,6 +327,8 @@ RUN apt-get update && apt-get install -y \\
 
 {{ISSUE_TRACKER_TOOLS}}
 
+{{JAVA_SYSTEM_DEPS}}
+
 # Build-args for UID/GID alignment: sandcastle docker build-image
 # defaults these to the host user's UID/GID so image-built files
 # and bind-mounted files share an owner without runtime chown.
@@ -263,6 +342,8 @@ RUN groupmod -o -g $AGENT_GID node && usermod -o -u $AGENT_UID -g $AGENT_GID -d 
 RUN npm install -g @mariozechner/pi-coding-agent
 
 USER \${AGENT_UID}:\${AGENT_GID}
+
+{{JAVA_RUNTIME_TOOLS}}
 
 WORKDIR /home/agent
 
@@ -283,6 +364,8 @@ RUN apt-get update && apt-get install -y \\
 
 {{ISSUE_TRACKER_TOOLS}}
 
+{{JAVA_SYSTEM_DEPS}}
+
 # Build-args for UID/GID alignment: sandcastle docker build-image
 # defaults these to the host user's UID/GID so image-built files
 # and bind-mounted files share an owner without runtime chown.
@@ -296,6 +379,8 @@ RUN groupmod -o -g $AGENT_GID node && usermod -o -u $AGENT_UID -g $AGENT_GID -d 
 RUN npm install -g @openai/codex
 
 USER \${AGENT_UID}:\${AGENT_GID}
+
+{{JAVA_RUNTIME_TOOLS}}
 
 WORKDIR /home/agent
 
@@ -316,6 +401,8 @@ RUN apt-get update && apt-get install -y \\
 
 {{ISSUE_TRACKER_TOOLS}}
 
+{{JAVA_SYSTEM_DEPS}}
+
 # Build-args for UID/GID alignment: sandcastle docker build-image
 # defaults these to the host user's UID/GID so image-built files
 # and bind-mounted files share an owner without runtime chown.
@@ -331,6 +418,8 @@ RUN curl https://cursor.com/install -fsS | bash
 
 # Add Cursor CLI to PATH
 ENV PATH="/home/agent/.local/bin:$PATH"
+
+{{JAVA_RUNTIME_TOOLS}}
 
 WORKDIR /home/agent
 
@@ -351,6 +440,8 @@ RUN apt-get update && apt-get install -y \\
 
 {{ISSUE_TRACKER_TOOLS}}
 
+{{JAVA_SYSTEM_DEPS}}
+
 # Build-args for UID/GID alignment: sandcastle docker build-image
 # defaults these to the host user's UID/GID so image-built files
 # and bind-mounted files share an owner without runtime chown.
@@ -364,6 +455,8 @@ RUN groupmod -o -g $AGENT_GID node && usermod -o -u $AGENT_UID -g $AGENT_GID -d 
 RUN npm install -g opencode-ai@latest
 
 USER \${AGENT_UID}:\${AGENT_GID}
+
+{{JAVA_RUNTIME_TOOLS}}
 
 WORKDIR /home/agent
 
@@ -384,6 +477,8 @@ RUN apt-get update && apt-get install -y \\
 
 {{ISSUE_TRACKER_TOOLS}}
 
+{{JAVA_SYSTEM_DEPS}}
+
 # Build-args for UID/GID alignment: sandcastle docker build-image
 # defaults these to the host user's UID/GID so image-built files
 # and bind-mounted files share an owner without runtime chown.
@@ -397,6 +492,8 @@ RUN groupmod -o -g $AGENT_GID node && usermod -o -u $AGENT_UID -g $AGENT_GID -d 
 RUN npm install -g @github/copilot
 
 USER \${AGENT_UID}:\${AGENT_GID}
+
+{{JAVA_RUNTIME_TOOLS}}
 
 WORKDIR /home/agent
 
@@ -869,12 +966,14 @@ const isTextFile = (filename: string): boolean => {
 };
 
 /**
- * Replace `{{KEY}}` template arguments from the issue tracker's
- * `templateArgs` map in all text files in the scaffolded config directory.
+ * Replace `{{KEY}}` template arguments from the given map in all text files
+ * in the scaffolded config directory. Container files additionally get runs
+ * of blank lines collapsed, so placeholders substituted with an empty string
+ * (e.g. the Java layers in a non-Java repo) leave no gaps behind.
  */
 const substituteTemplateArgs = (
   configDir: string,
-  issueTracker: IssueTrackerEntry,
+  templateArgs: Record<string, string>,
 ): Effect.Effect<void, Error, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -890,13 +989,14 @@ const substituteTemplateArgs = (
             .readFileString(filePath)
             .pipe(Effect.mapError((e) => new Error(e.message)));
           const original = content;
-          for (const [key, value] of Object.entries(
-            issueTracker.templateArgs,
-          )) {
+          for (const [key, value] of Object.entries(templateArgs)) {
             content = content.replace(
               new RegExp(`\\{\\{${key}\\}\\}`, "g"),
               value,
             );
+          }
+          if (f === "Dockerfile" || f === "Containerfile") {
+            content = content.replace(/\n{3,}/g, "\n\n");
           }
           if (content !== original) {
             yield* fs
@@ -987,6 +1087,11 @@ export interface ScaffoldOptions {
 
 export interface ScaffoldResult {
   mainFilename: string;
+  /**
+   * sdkman Java identifier baked into the Dockerfile, or undefined when the
+   * host repo is not a Java project.
+   */
+  javaVersion?: string;
 }
 
 /**
@@ -1084,8 +1189,13 @@ export const scaffold = (
       mainFilename,
     );
 
-    // Replace issue tracker template arguments in all text files (must run before label stripping)
-    yield* substituteTemplateArgs(configDir, issueTracker);
+    // Replace issue tracker and Java template arguments in all text files
+    // (must run before label stripping)
+    const javaVersion = yield* resolveJavaVersion(repoDir);
+    yield* substituteTemplateArgs(configDir, {
+      ...issueTracker.templateArgs,
+      ...buildJavaTemplateArgs(javaVersion),
+    });
 
     // Strip --label Sandcastle from prompt files when the user declined label creation
     if (!createLabel) {
@@ -1105,5 +1215,5 @@ export const scaffold = (
         .pipe(Effect.mapError((e) => new Error(e.message)));
     }
 
-    return { mainFilename };
+    return { mainFilename, javaVersion };
   });

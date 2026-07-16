@@ -436,6 +436,13 @@ const initCommand = Command.make(
         ),
       );
 
+      if (scaffoldResult.javaVersion !== undefined) {
+        yield* d.status(
+          `Detected a Java project — baked Java ${scaffoldResult.javaVersion} and Maven (via sdkman) into the ${selectedSandboxProvider.containerfileName}.`,
+          "info",
+        );
+      }
+
       // Detect the host package manager so the zod offer below and the next
       // steps below both use the right install command.
       const packageManager = yield* detectPackageManager(cwd);
