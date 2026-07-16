@@ -3,11 +3,33 @@ import { Effect } from "effect";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
+import { VERSION } from "./version.js";
 
 const GITIGNORE = `.env
 logs/
 worktrees/
 `;
+
+/**
+ * package.json written into .sandcastle/ when the host repo has no root
+ * manifest (e.g. a Java or Python project). Node resolution walks up from
+ * .sandcastle/main.mts to this file, so `npx tsx .sandcastle/main.mts` can
+ * resolve `@ai-hero/sandcastle` without polluting the host root.
+ */
+const buildConfigManifest = (): string =>
+  JSON.stringify(
+    {
+      name: "sandcastle-config",
+      private: true,
+      type: "module",
+      dependencies: {
+        "@ai-hero/sandcastle": `^${VERSION}`,
+        tsx: "^4.21.0",
+      },
+    },
+    null,
+    2,
+  ) + "\n";
 
 /**
  * Filename of the setup prompt scaffolded for the `custom` issue tracker.
@@ -143,6 +165,23 @@ export const addDependencyCommand = (
       return `bun add ${pkg}`;
     case "npm":
       return `npm install ${pkg}`;
+  }
+};
+
+/** Build the command that installs the dependencies declared in `dir`'s package.json. */
+export const installInDirCommand = (
+  packageManager: PackageManager,
+  dir: string,
+): string => {
+  switch (packageManager) {
+    case "pnpm":
+      return `pnpm install --dir ${dir}`;
+    case "yarn":
+      return `yarn --cwd ${dir} install`;
+    case "bun":
+      return `bun install --cwd ${dir}`;
+    case "npm":
+      return `npm install --prefix ${dir}`;
   }
 };
 
@@ -625,7 +664,12 @@ export function getNextStepsLines(
   issueTracker: IssueTrackerEntry,
   agent: AgentEntry,
   packageManager: PackageManager,
+  options: { configManifest?: boolean } = {},
 ): string[] {
+  // When the host repo has no root package.json, init scaffolds a manifest
+  // inside .sandcastle/ instead. There are no host scripts to add the run
+  // command to, and dependencies install into .sandcastle/.
+  const configManifest = options.configManifest === true;
   // The custom issue tracker scaffolds a broken-until-configured project, so
   // its next steps are about running the setup prompt — not the template's
   // normal "set env vars and go" flow. This branch wins over template-specific
@@ -641,21 +685,35 @@ export function getNextStepsLines(
     ];
   }
   if (template === "blank") {
+    let step = 1;
     const lines = [
       "Next steps:",
-      `1. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
+      `${step++}. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
     ];
     if (agent.name === "claude-code") {
       lines.push(
         "   To use your Claude subscription instead of an API key, run `claude setup-token` on your host and paste the result into CLAUDE_CODE_OAUTH_TOKEN.",
       );
     }
+    if (configManifest) {
+      lines.push(
+        `${step++}. Install the scaffold's dependencies: \`${installInDirCommand(packageManager, ".sandcastle")}\``,
+      );
+    }
     lines.push(
-      "2. Read and customize .sandcastle/prompt.md to describe what you want the agent to do",
-      `3. Customize .sandcastle/${mainFilename} — it uses the JS API (\`run()\`) to control how the agent runs`,
-      `4. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
-      "5. Run `npm run sandcastle` to start the agent",
+      `${step++}. Read and customize .sandcastle/prompt.md to describe what you want the agent to do`,
+      `${step++}. Customize .sandcastle/${mainFilename} — it uses the JS API (\`run()\`) to control how the agent runs`,
     );
+    if (configManifest) {
+      lines.push(
+        `${step++}. Run \`npx tsx .sandcastle/${mainFilename}\` to start the agent`,
+      );
+    } else {
+      lines.push(
+        `${step++}. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
+        `${step++}. Run \`npm run sandcastle\` to start the agent`,
+      );
+    }
     return lines;
   } else {
     const hasReviewer = template.includes("review");
@@ -670,8 +728,16 @@ export function getNextStepsLines(
         "   To use your Claude subscription instead of an API key, run `claude setup-token` on your host and paste the result into CLAUDE_CODE_OAUTH_TOKEN.",
       );
     }
+    if (configManifest) {
+      lines.push(
+        `${step++}. Install the scaffold's dependencies: \`${installInDirCommand(packageManager, ".sandcastle")}\``,
+      );
+    } else {
+      lines.push(
+        `${step++}. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
+      );
+    }
     lines.push(
-      `${step++}. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
       `${step++}. Templates use \`copyToWorktree: ["node_modules"]\` to copy your host node_modules into the sandbox for fast startup — the \`npm install\` in the onSandboxReady hook is a safety net for platform-specific binaries. Adjust both if you use a different package manager`,
     );
     if (usesPlanSchema) {
@@ -687,7 +753,11 @@ export function getNextStepsLines(
         `${step++}. Customize .sandcastle/CODING_STANDARDS.md with your project's standards — the reviewer agent loads it during review`,
       );
     }
-    lines.push(`${step++}. Run \`npm run sandcastle\` to start the agent`);
+    lines.push(
+      configManifest
+        ? `${step++}. Run \`npx tsx .sandcastle/${mainFilename}\` to start the agent`
+        : `${step++}. Run \`npm run sandcastle\` to start the agent`,
+    );
     return lines;
   }
 }
@@ -987,6 +1057,11 @@ export interface ScaffoldOptions {
 
 export interface ScaffoldResult {
   mainFilename: string;
+  /**
+   * True when the host repo had no root package.json, so init wrote a manifest
+   * inside .sandcastle/ (declaring @ai-hero/sandcastle and tsx) instead.
+   */
+  createdConfigManifest: boolean;
 }
 
 /**
@@ -1043,6 +1118,12 @@ export const scaffold = (
 
     const mainFilename = yield* detectMainFilename(repoDir);
 
+    // Hosts without a root package.json (e.g. Java or Python repos) get a
+    // manifest inside .sandcastle/ so the scaffold's imports resolve there.
+    const hostHasManifest = yield* fs
+      .exists(join(repoDir, "package.json"))
+      .pipe(Effect.orElseSucceed(() => false));
+
     yield* fs
       .makeDirectory(configDir, { recursive: false })
       .pipe(Effect.mapError((e) => new Error(e.message)));
@@ -1058,6 +1139,16 @@ export const scaffold = (
 
     yield* Effect.all(
       [
+        ...(hostHasManifest
+          ? []
+          : [
+              fs
+                .writeFileString(
+                  join(configDir, "package.json"),
+                  buildConfigManifest(),
+                )
+                .pipe(Effect.mapError((e) => new Error(e.message))),
+            ]),
         fs
           .writeFileString(
             join(configDir, sandboxProvider.containerfileName),
@@ -1105,5 +1196,5 @@ export const scaffold = (
         .pipe(Effect.mapError((e) => new Error(e.message)));
     }
 
-    return { mainFilename };
+    return { mainFilename, createdConfigManifest: !hostHasManifest };
   });

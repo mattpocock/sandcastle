@@ -769,6 +769,8 @@ Scaffolds the `.sandcastle/` config directory and builds the container image. Th
 
 Init detects your host package manager (npm, pnpm, yarn, or bun) from a `packageManager` field or lockfile, defaulting to npm. Templates whose `main` file imports a host dependency — the planner templates import [Zod](https://zod.dev) for their `<plan>` output schema — prompt you to install it with that package manager when it isn't already in your `package.json`, so the first `npx tsx .sandcastle/main.ts` doesn't fail with `ERR_MODULE_NOT_FOUND`.
 
+Init also works in repos without a root `package.json` (e.g. Java or Python projects). In that case it writes a manifest inside `.sandcastle/` declaring `@ai-hero/sandcastle` and `tsx` as dependencies — Node resolution walks up from `.sandcastle/main.mts` and finds it there, keeping the host root clean. Template dependencies like Zod install into `.sandcastle/` too, and the printed next steps tell you to run `npm install --prefix .sandcastle` before starting the agent.
+
 Every interactive prompt has a paired `--flag` so the entire init can run non-interactively (e.g. in CI or a scripted setup). When stdin is not a TTY and a required flag is missing, init fails fast with a clear error rather than wedging on a prompt.
 
 | Option                    | Required | Default                      | Description                                                                                                    |

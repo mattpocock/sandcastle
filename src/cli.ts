@@ -440,12 +440,18 @@ const initCommand = Command.make(
       // steps below both use the right install command.
       const packageManager = yield* detectPackageManager(cwd);
 
+      // When the host has no root package.json, the manifest was scaffolded
+      // inside .sandcastle/ — template dependencies install there instead.
+      const depsDir = scaffoldResult.createdConfigManifest
+        ? join(cwd, CONFIG_DIR)
+        : cwd;
+
       // If the chosen template imports zod on the host (the planner templates
       // build their <plan> output schema with it) and the host doesn't already
       // declare it, offer to install it. Without this, the very first
       // `npx tsx .sandcastle/main.ts` crashes with ERR_MODULE_NOT_FOUND.
       if (getTemplateDependencies(selectedTemplate).includes("zod")) {
-        const alreadyInstalled = yield* hostHasDependency(cwd, "zod");
+        const alreadyInstalled = yield* hostHasDependency(depsDir, "zod");
         if (!alreadyInstalled) {
           const installCmd = addDependencyCommand(packageManager, "zod");
           const shouldInstall = yield* resolveConfirmFlag({
@@ -457,7 +463,7 @@ const initCommand = Command.make(
           if (shouldInstall) {
             const installed = yield* Effect.sync(() => {
               try {
-                execSync(installCmd, { cwd, stdio: "ignore" });
+                execSync(installCmd, { cwd: depsDir, stdio: "ignore" });
                 return true;
               } catch {
                 return false;
@@ -526,6 +532,7 @@ const initCommand = Command.make(
         selectedIssueTracker,
         selectedAgent,
         packageManager,
+        { configManifest: scaffoldResult.createdConfigManifest },
       );
       for (const [i, line] of nextSteps.entries()) {
         yield* d.text(i === 0 ? line : styleText("dim", line));
