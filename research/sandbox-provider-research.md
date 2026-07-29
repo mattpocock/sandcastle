@@ -261,7 +261,7 @@ Kernel-level access control. Not a mount mechanism — restricts which paths a p
 
 ### macOS-Specific
 
-#### Apple Containers (`container` CLI) — NEW
+#### Apple Container (`container` CLI)
 
 |                       |                                                     |
 | --------------------- | --------------------------------------------------- |
@@ -274,7 +274,7 @@ Kernel-level access control. Not a mount mechanism — restricts which paths a p
 | **Platform**          | macOS 26 (Tahoe) only, Apple Silicon only           |
 | **API**               | Swift `Containerization` framework, `container` CLI |
 
-Apple's official container runtime. Each container is a microVM. Open source. Sub-second cold start. Per-container IP (no port forwarding). **Requires unreleased macOS 26.** Very new but very promising.
+Apple's official container runtime. Each container is a microVM. Open source. Sub-second cold start. Supports bind mounts, port publishing, and per-container networking. Requires macOS 26 on Apple silicon. In version 1.2.0, VirtioFS mount sources must be directories, `--mount` cannot encode `,` or `=` in source or target paths, and `container copy` does not traverse a live VirtioFS mount; the provider therefore validates mount paths and streams explicit file transfers through `container exec`.
 
 #### Lima
 
@@ -563,7 +563,7 @@ Lower-level services that could host sandboxes but require more DIY.
 
 1. **Podman** — Closest to Docker. Daemonless, rootless, Docker CLI-compatible. Many users already have it. The provider implementation would be nearly identical to Docker with different binary names and minor flag differences.
 
-2. **Apple Containers** — Track this closely. When macOS 26 ships, this becomes the native Mac option. Open source (Apache 2.0), sub-second startup, no Docker Desktop needed.
+2. **Apple Container** — Native macOS bind-mount provider. Open source (Apache 2.0), sub-second startup, no Docker Desktop needed.
 
 ### Near-term (isolated providers, requires implementing git sync)
 
@@ -581,7 +581,7 @@ Lower-level services that could host sandboxes but require more DIY.
 
 **Bind-mounting local directories is only possible with local tools.** Every cloud service requires file syncing. This is the fundamental divide in the provider architecture:
 
-- **Bind-mount providers** (local): Docker, Podman, nerdctl, bubblewrap, Apple Containers, systemd-nspawn, Incus
+- **Bind-mount providers** (local): Docker, Podman, nerdctl, bubblewrap, Apple Container, systemd-nspawn, Incus
 - **Isolated providers** (remote): Daytona, E2B, Runloop, Blaxel, Modal, Fly Machines, Morph Cloud
 
 The isolated provider path requires implementing the `copyIn`/`copyOut`/`extractCommits` contract — specifically the git bundle/patch sync that's defined in the type system but not yet implemented (previous implementation available in git history).

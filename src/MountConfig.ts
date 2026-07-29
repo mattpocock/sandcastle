@@ -4,7 +4,7 @@
  * Each entry describes a host directory to mount into the sandbox container.
  */
 
-/** A single bind-mount descriptor for docker()/podman() providers. */
+/** A single bind-mount descriptor for local sandbox providers. */
 export interface MountConfig {
   /**
    * Path on the host. Supports:

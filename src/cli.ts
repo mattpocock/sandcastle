@@ -13,6 +13,10 @@ import {
   removeImage as podmanRemoveImage,
 } from "./PodmanLifecycle.js";
 import {
+  buildImage as appleContainerBuildImage,
+  removeImage as appleContainerRemoveImage,
+} from "./AppleContainerLifecycle.js";
+import {
   scaffold,
   listTemplates,
   listAgents,
@@ -39,7 +43,7 @@ import { VERSION } from "./version.js";
 // --- Shared options ---
 
 const imageNameOption = Options.text("image-name").pipe(
-  Options.withDescription("Docker image name"),
+  Options.withDescription("Sandbox image name"),
   Options.optional,
 );
 
@@ -494,18 +498,35 @@ const initCommand = Command.make(
 
         if (shouldBuild) {
           const containerfileDir = join(cwd, CONFIG_DIR);
-          if (selectedSandboxProvider.name === "podman") {
-            yield* d.spinner(
-              `Building ${providerLabel} image '${imageName}'...`,
-              podmanBuildImage(imageName, containerfileDir),
-            );
-          } else {
-            yield* d.spinner(
-              `Building ${providerLabel} image '${imageName}'...`,
-              buildImage(imageName, containerfileDir, {
-                buildArgs: defaultUidBuildArgs(),
-              }),
-            );
+          switch (selectedSandboxProvider.name) {
+            case "docker":
+              yield* d.spinner(
+                `Building ${providerLabel} image '${imageName}'...`,
+                buildImage(imageName, containerfileDir, {
+                  buildArgs: defaultUidBuildArgs(),
+                }),
+              );
+              break;
+            case "podman":
+              yield* d.spinner(
+                `Building ${providerLabel} image '${imageName}'...`,
+                podmanBuildImage(imageName, containerfileDir),
+              );
+              break;
+            case "apple-container":
+              yield* d.spinner(
+                `Building ${providerLabel} image '${imageName}'...`,
+                appleContainerBuildImage(imageName, containerfileDir, {
+                  buildArgs: defaultUidBuildArgs(),
+                }),
+              );
+              break;
+            default:
+              yield* Effect.fail(
+                new InitError({
+                  message: `No image builder is registered for sandbox provider '${selectedSandboxProvider.name}'.`,
+                }),
+              );
           }
           yield* d.status(
             "Init complete! Image built successfully.",
@@ -679,6 +700,68 @@ const podmanCommand = Command.make("podman", {}, () =>
   Command.withSubcommands([podmanBuildImageCommand, podmanRemoveImageCommand]),
 );
 
+const appleContainerBuildImageCommand = Command.make(
+  "build-image",
+  {
+    imageName: imageNameOption,
+    dockerfile: dockerfileOption,
+  },
+  ({ imageName: imageNameFlag, dockerfile }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const cwd = process.cwd();
+      yield* requireConfigDir(cwd);
+
+      const imageName = resolveImageName(imageNameFlag, cwd);
+      const dockerfileDir = join(cwd, CONFIG_DIR);
+      const dockerfilePath =
+        dockerfile._tag === "Some" ? dockerfile.value : undefined;
+
+      yield* d.spinner(
+        `Building Apple Container image '${imageName}'...`,
+        appleContainerBuildImage(imageName, dockerfileDir, {
+          dockerfile: dockerfilePath,
+          buildArgs: defaultUidBuildArgs(),
+        }),
+      );
+      yield* d.status("Build complete!", "success");
+    }),
+);
+
+const appleContainerRemoveImageCommand = Command.make(
+  "remove-image",
+  {
+    imageName: imageNameOption,
+  },
+  ({ imageName: imageNameFlag }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const cwd = process.cwd();
+      const imageName = resolveImageName(imageNameFlag, cwd);
+
+      yield* d.spinner(
+        `Removing Apple Container image '${imageName}'...`,
+        appleContainerRemoveImage(imageName),
+      );
+      yield* d.status("Image removed.", "success");
+    }),
+);
+
+const appleContainerCommand = Command.make("apple-container", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    yield* d.status(
+      "Apple Container sandbox commands. Use --help to see available subcommands.",
+      "info",
+    );
+  }),
+).pipe(
+  Command.withSubcommands([
+    appleContainerBuildImageCommand,
+    appleContainerRemoveImageCommand,
+  ]),
+);
+
 // --- Root command ---
 
 const rootCommand = Command.make("sandcastle", {}, () =>
@@ -690,7 +773,12 @@ const rootCommand = Command.make("sandcastle", {}, () =>
 );
 
 export const sandcastle = rootCommand.pipe(
-  Command.withSubcommands([initCommand, dockerCommand, podmanCommand]),
+  Command.withSubcommands([
+    initCommand,
+    dockerCommand,
+    podmanCommand,
+    appleContainerCommand,
+  ]),
 );
 
 export const cli = Command.run(sandcastle, {

@@ -18,6 +18,8 @@ export const formatErrorMessage = (error: SandboxError): string => {
       return `Docker operation failed: ${error.message}. Is Docker running?`;
     case "PodmanError":
       return `Podman operation failed: ${error.message}. Is Podman running?`;
+    case "AppleContainerError":
+      return `Apple Container operation failed: ${error.message}. Are Apple Container services running?`;
     case "SyncError":
       return `Git sync failed: ${error.message}`;
     case "WorktreeError":
@@ -69,6 +71,7 @@ export const withFriendlyErrors = <A, E, R>(
     CopyError: showErrorAndExit,
     DockerError: showErrorAndExit,
     PodmanError: showErrorAndExit,
+    AppleContainerError: showErrorAndExit,
     SyncError: showErrorAndExit,
     WorktreeError: showErrorAndExit,
     PromptError: showErrorAndExit,

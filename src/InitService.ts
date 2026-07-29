@@ -586,6 +586,8 @@ export const getAgent = (name: string): AgentEntry | undefined =>
 export interface SandboxProviderEntry {
   readonly name: string;
   readonly label: string;
+  readonly factoryImport: string;
+  readonly importSubpath: string;
   /** Filename written to .sandcastle/ (e.g. "Dockerfile" or "Containerfile") */
   readonly containerfileName: string;
   /** CLI namespace for build/remove commands (e.g. "docker" or "podman") */
@@ -596,14 +598,26 @@ const SANDBOX_PROVIDER_REGISTRY: SandboxProviderEntry[] = [
   {
     name: "docker",
     label: "Docker",
+    factoryImport: "docker",
+    importSubpath: "docker",
     containerfileName: "Dockerfile",
     cliNamespace: "docker",
   },
   {
     name: "podman",
     label: "Podman",
+    factoryImport: "podman",
+    importSubpath: "podman",
     containerfileName: "Containerfile",
     cliNamespace: "podman",
+  },
+  {
+    name: "apple-container",
+    label: "Apple Container",
+    factoryImport: "appleContainer",
+    importSubpath: "apple-container",
+    containerfileName: "Dockerfile",
+    cliNamespace: "apple-container",
   },
 ];
 
@@ -801,13 +815,11 @@ const rewriteMainTs = (
       `${agent.factoryImport}("${model}")`,
     );
 
-    // Replace the sandbox provider. Templates always use `docker` as the
-    // placeholder, where the registry name doubles as both the factory function
-    // name and the `/sandboxes/<name>` import subpath segment. A single
-    // case-sensitive word-boundary replace therefore rewrites the named import,
-    // the import subpath, and every factory call site — and is a no-op when
-    // docker is selected.
-    content = content.replace(/\bdocker\b/g, sandboxProvider.name);
+    content = content.replace(
+      /@ai-hero\/sandcastle\/sandboxes\/docker/g,
+      `@ai-hero/sandcastle/sandboxes/${sandboxProvider.importSubpath}`,
+    );
+    content = content.replace(/\bdocker\b/g, sandboxProvider.factoryImport);
 
     yield* fs
       .writeFileString(mainTsPath, content)
@@ -1061,7 +1073,10 @@ export const scaffold = (
         fs
           .writeFileString(
             join(configDir, sandboxProvider.containerfileName),
-            agent.dockerfileTemplate,
+            agent.dockerfileTemplate.replaceAll(
+              "sandcastle docker build-image",
+              `sandcastle ${sandboxProvider.cliNamespace} build-image`,
+            ),
           )
           .pipe(Effect.mapError((e) => new Error(e.message))),
         fs

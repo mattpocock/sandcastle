@@ -2294,6 +2294,7 @@ describe("InitService scaffold", () => {
   describe("sandbox provider", () => {
     const dockerProvider = getSandboxProvider("docker")!;
     const podmanProvider = getSandboxProvider("podman")!;
+    const appleContainerProvider = getSandboxProvider("apple-container")!;
 
     it("selecting docker writes Dockerfile to .sandcastle/", async () => {
       const dir = await makeDir();
@@ -2368,6 +2369,32 @@ describe("InitService scaffold", () => {
       expect(mainTs).not.toContain("docker");
       // parallel-planner calls the factory three times
       expect(mainTs.match(/sandbox: podman\(\)/g)).toHaveLength(3);
+    });
+
+    it("selecting Apple Container writes a Dockerfile and its factory import", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        sandboxProvider: appleContainerProvider,
+        templateName: "parallel-planner",
+      });
+
+      const dockerfile = await readFile(
+        join(dir, ".sandcastle", "Dockerfile"),
+        "utf-8",
+      );
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+
+      expect(dockerfile).toContain("FROM node:22-bookworm");
+      expect(dockerfile).toContain("sandcastle apple-container build-image");
+      expect(dockerfile).not.toContain("sandcastle docker build-image");
+      expect(mainTs).toContain(
+        'import { appleContainer } from "@ai-hero/sandcastle/sandboxes/apple-container"',
+      );
+      expect(mainTs.match(/sandbox: appleContainer\(\)/g)).toHaveLength(3);
+      expect(mainTs).not.toContain("sandboxes/docker");
     });
 
     it("selecting docker leaves the main file importing and calling docker", async () => {

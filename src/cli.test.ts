@@ -101,6 +101,7 @@ describe("sandcastle CLI", () => {
       expect(output).toContain("nonexistent");
       expect(output).toContain("docker");
       expect(output).toContain("podman");
+      expect(output).toContain("apple-container");
     }
   });
 
@@ -173,6 +174,36 @@ describe("sandcastle CLI", () => {
     }
   });
 
+  it("exposes Apple Container image lifecycle commands", async () => {
+    const { stdout: rootHelp } = await runCli("--help", process.cwd());
+    const { stdout: providerHelp } = await runCli(
+      "apple-container --help",
+      process.cwd(),
+    );
+    const { stdout: buildHelp } = await runCli(
+      "apple-container build-image --help",
+      process.cwd(),
+    );
+
+    expect(rootHelp).toContain("apple-container build-image");
+    expect(rootHelp).toContain("apple-container remove-image");
+    expect(providerHelp).toContain("build-image");
+    expect(providerHelp).toContain("remove-image");
+    expect(buildHelp).toContain("--dockerfile");
+    expect(buildHelp).toContain("--image-name");
+  });
+
+  it("Apple Container build-image requires an initialized project", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    await expect(
+      runCli("apple-container build-image", hostDir),
+    ).rejects.toMatchObject({
+      stdout: expect.stringContaining("No .sandcastle/ found"),
+    });
+  });
+
   it("init --agent nonexistent produces error listing available agents", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
@@ -241,6 +272,25 @@ describe("sandcastle CLI", () => {
     const entries = await readdir(join(hostDir, ".sandcastle"));
     expect(entries).toContain("Dockerfile");
     expect(entries).toContain("prompt.md");
+  });
+
+  it("init scaffolds Apple Container without invoking the runtime when build is deferred", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    const { stdout } = await runCli(
+      "init --agent claude-code --template blank --sandbox apple-container --issue-tracker beads --build-image false",
+      hostDir,
+    );
+
+    expect(stdout).toContain("sandcastle apple-container build-image");
+    const entries = await readdir(join(hostDir, ".sandcastle"));
+    expect(entries).toContain("Dockerfile");
+    const main = await import("node:fs/promises").then(({ readFile }) =>
+      readFile(join(hostDir, ".sandcastle", "main.mts"), "utf8"),
+    );
+    expect(main).toContain("@ai-hero/sandcastle/sandboxes/apple-container");
+    expect(main).toContain("appleContainer()");
   });
 
   it("init without --agent fails fast with a clear non-interactive error message", async () => {

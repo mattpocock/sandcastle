@@ -30,6 +30,13 @@ export class PodmanError extends Data.TaggedError("PodmanError")<{
   readonly message: string;
 }> {}
 
+/** Apple Container infrastructure operation failed */
+export class AppleContainerError extends Data.TaggedError(
+  "AppleContainerError",
+)<{
+  readonly message: string;
+}> {}
+
 /** Git sync-in or sync-out operation failed */
 export class SyncError extends Data.TaggedError("SyncError")<{
   readonly message: string;
@@ -200,6 +207,7 @@ export type SandboxError =
   | CopyError
   | DockerError
   | PodmanError
+  | AppleContainerError
   | SyncError
   | WorktreeError
   | PromptError

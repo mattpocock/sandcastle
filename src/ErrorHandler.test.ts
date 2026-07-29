@@ -5,6 +5,7 @@ import type { DisplayEntry } from "./Display.js";
 import {
   AgentError,
   AgentIdleTimeoutError,
+  AppleContainerError,
   ConfigDirError,
   CopyError,
   DockerError,
@@ -49,6 +50,15 @@ describe("formatErrorMessage", () => {
     expect(msg).toContain("daemon not running");
     expect(msg).toContain("Docker");
     expect(msg).toContain("Is Docker running?");
+  });
+
+  it("AppleContainerError includes message and service hint", () => {
+    const msg = formatErrorMessage(
+      new AppleContainerError({ message: "API server unavailable" }),
+    );
+    expect(msg).toContain("API server unavailable");
+    expect(msg).toContain("Apple Container");
+    expect(msg).toContain("services running");
   });
 
   it("SyncError includes message", () => {

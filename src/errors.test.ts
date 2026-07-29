@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   AgentError,
+  AppleContainerError,
   CopyError,
   DockerError,
   ExecError,
@@ -37,6 +38,12 @@ describe("tagged errors", () => {
   it("DockerError has correct _tag", () => {
     const err = new DockerError({ message: "docker failed" });
     expect(err._tag).toBe("DockerError");
+    expect(err).toBeInstanceOf(Error);
+  });
+
+  it("AppleContainerError has correct _tag", () => {
+    const err = new AppleContainerError({ message: "service unavailable" });
+    expect(err._tag).toBe("AppleContainerError");
     expect(err).toBeInstanceOf(Error);
   });
 

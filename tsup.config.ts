@@ -11,6 +11,7 @@ export default defineConfig({
     main: "src/main.ts",
     "sandboxes/docker": "src/sandboxes/docker.ts",
     "sandboxes/podman": "src/sandboxes/podman.ts",
+    "sandboxes/apple-container": "src/sandboxes/apple-container.ts",
     "sandboxes/vercel": "src/sandboxes/vercel.ts",
     "sandboxes/daytona": "src/sandboxes/daytona.ts",
     "sandboxes/no-sandbox": "src/sandboxes/no-sandbox.ts",

@@ -1,5 +1,5 @@
 /**
- * Shared mount utilities for Docker and Podman sandbox providers.
+ * Shared mount utilities for local bind-mount sandbox providers.
  *
  * Handles host/sandbox path resolution, tilde expansion, user mount
  * validation, image naming, and Windows path normalization.

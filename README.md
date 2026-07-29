@@ -58,7 +58,7 @@ import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 
 await run({
   agent: claudeCode("claude-opus-4-8"),
-  sandbox: docker(), // or podman(), vercel(), or your own provider
+  sandbox: docker(), // or podman(), appleContainer(), vercel(), or your own provider
   promptFile: ".sandcastle/prompt.md",
 });
 ```
@@ -67,22 +67,24 @@ await run({
 
 Sandcastle uses a `SandboxProvider` to create isolated environments. The `sandbox` option on `run()`, `interactive()`, and `createSandbox()` accepts any provider, including `noSandbox()` — opt in to running the agent directly on the host when container isolation is undesired. Built-in providers:
 
-| Provider   | Import path                                | Type       | Accepted by                                 |
-| ---------- | ------------------------------------------ | ---------- | ------------------------------------------- |
-| Docker     | `@ai-hero/sandcastle/sandboxes/docker`     | Bind-mount | `run()`, `createSandbox()`, `interactive()` |
-| Podman     | `@ai-hero/sandcastle/sandboxes/podman`     | Bind-mount | `run()`, `createSandbox()`, `interactive()` |
-| Vercel     | `@ai-hero/sandcastle/sandboxes/vercel`     | Isolated   | `run()`, `createSandbox()`, `interactive()` |
-| No-sandbox | `@ai-hero/sandcastle/sandboxes/no-sandbox` | None       | `run()`, `createSandbox()`, `interactive()` |
+| Provider        | Import path                                     | Type       | Accepted by                                 |
+| --------------- | ----------------------------------------------- | ---------- | ------------------------------------------- |
+| Docker          | `@ai-hero/sandcastle/sandboxes/docker`          | Bind-mount | `run()`, `createSandbox()`, `interactive()` |
+| Podman          | `@ai-hero/sandcastle/sandboxes/podman`          | Bind-mount | `run()`, `createSandbox()`, `interactive()` |
+| Apple Container | `@ai-hero/sandcastle/sandboxes/apple-container` | Bind-mount | `run()`, `createSandbox()`, `interactive()` |
+| Vercel          | `@ai-hero/sandcastle/sandboxes/vercel`          | Isolated   | `run()`, `createSandbox()`, `interactive()` |
+| No-sandbox      | `@ai-hero/sandcastle/sandboxes/no-sandbox`      | None       | `run()`, `createSandbox()`, `interactive()` |
 
 Worktree methods (`wt.run()`, `wt.interactive()`, `wt.createSandbox()`) accept the same providers as their top-level counterparts. `wt.interactive()` defaults to `noSandbox()` when no sandbox is specified.
 
 ```typescript
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { podman } from "@ai-hero/sandcastle/sandboxes/podman";
+import { appleContainer } from "@ai-hero/sandcastle/sandboxes/apple-container";
 import { vercel } from "@ai-hero/sandcastle/sandboxes/vercel";
 import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
 
-// Docker, Podman, and Vercel are interchangeable in run() and createSandbox():
+// Built-in providers are interchangeable in run() and createSandbox():
 await run({
   agent: claudeCode("claude-opus-4-8"),
   sandbox: docker(),
@@ -98,6 +100,65 @@ await interactive({
   cwd: "/path/to/other-repo", // optional — defaults to process.cwd()
 });
 ```
+
+Apple Container uses Apple's native `container` CLI and runs each sandbox in a lightweight VM. It requires an Apple silicon Mac running macOS 26 or newer.
+
+1. Install the latest signed package from the [Apple Container releases](https://github.com/apple/container/releases).
+2. Start its user services and install the recommended kernel:
+
+```bash
+container system start --enable-kernel-install
+container system status
+```
+
+An interactive first start can use `container system start` and accept the kernel prompt. Over SSH or in CI, use `--enable-kernel-install`; otherwise the prompt cannot read input and startup fails. Starting or stopping Apple Container does not start, stop, or reconfigure Docker Desktop.
+
+```typescript
+import { appleContainer } from "@ai-hero/sandcastle/sandboxes/apple-container";
+
+const sandbox = appleContainer({
+  imageName: "sandcastle:local",
+  cpus: 4,
+  memory: "8G",
+  network: "default",
+  ssh: true,
+  mounts: [
+    {
+      hostPath: "~/.npm",
+      sandboxPath: "/home/agent/.npm",
+      readonly: true,
+    },
+  ],
+  env: { APP_ENV: "development" },
+});
+```
+
+Apple Container defaults each sandbox VM to 4 CPUs and 1 GB of memory. Agent workloads commonly need more memory, so set `memory` and `cpus` explicitly when appropriate. These limits apply per concurrent sandbox. Image builds run in a separate builder VM; for a large build, configure it before `build-image`:
+
+```bash
+container builder stop
+container builder delete
+container builder start --cpus 4 --memory 8G
+sandcastle apple-container build-image
+```
+
+Set `ssh: true` only when the host has a working `SSH_AUTH_SOCK`. Sandcastle checks the runtime service, local image, image architecture, and numeric image user before creating a sandbox and fails with the corrective command instead of falling back to another provider.
+
+Apple Container's VirtioFS mounts accept directory sources only. The provider rejects a single-file `hostPath` before starting a VM; mount a dedicated directory for live access, or use the sandbox handle's `copyFileIn` and `copyFileOut` methods for one-time file transfer. Apple Container 1.2.0 also cannot encode `,` or `=` in a `--mount` source or target path, so Sandcastle rejects those paths before launch with a direct error.
+
+Common enablement failures:
+
+| Symptom                                                                      | Cause                                                                         | Resolution                                                                                                                                         |
+| ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `container: command not found`                                               | Apple Container is not installed                                              | Install Apple's signed release package. The installer requires one administrator authorization; normal runtime commands run as the logged-in user. |
+| `No default kernel configured` followed by `failed to read user input`       | First start was run without a TTY, so the kernel prompt could not be answered | Run `container system start --enable-kernel-install`.                                                                                              |
+| `Apple Container services are unavailable`                                   | The per-user API service is stopped or unhealthy                              | Run `container system start`, then confirm with `container system status`.                                                                         |
+| `Image 'sandcastle:…' is unavailable locally`                                | The repository image has not been built in Apple Container's image store      | Run `sandcastle apple-container build-image`. Images in Docker's store are separate.                                                               |
+| `Image identity mismatch`                                                    | The image was built for a different numeric UID or GID                        | Rebuild with `sandcastle apple-container build-image`, or explicitly configure the matching `containerUid` and `containerGid`.                     |
+| `bind mounts require directory host paths`                                   | Apple Container does not accept an individual file as a VirtioFS source       | Mount a dedicated containing directory, or transfer the file with `copyFileIn` and `copyFileOut`.                                                  |
+| `cannot represent mount source path` or `cannot represent mount target path` | A mount path contains `,` or `=`, which Apple Container treats as syntax      | Move the directory to a path without those characters and update the mount.                                                                        |
+| Sandbox process exits under load                                             | The default 1 GB sandbox VM is too small                                      | Increase `memory` and, if needed, `cpus` in `appleContainer({ ... })`.                                                                             |
+| Image build fails under load                                                 | The separate builder VM is too small                                          | Recreate it with `container builder start --cpus … --memory …`, then retry the build.                                                              |
 
 You can also [create your own provider](#custom-sandbox-providers) using `createBindMountSandboxProvider` or `createIsolatedSandboxProvider`.
 
@@ -765,7 +826,7 @@ Select a template during `sandcastle init` when prompted, or re-run init in a fr
 
 ### `sandcastle init`
 
-Scaffolds the `.sandcastle/` config directory and builds the container image. This is the first command you run in a new repo. You choose a sandbox provider (Docker or Podman) during init — selecting Podman writes a `Containerfile` instead of `Dockerfile` and uses `sandcastle podman build-image` for the build step.
+Scaffolds the `.sandcastle/` config directory and builds the sandbox image. This is the first command you run in a new repo. You choose Docker, Podman, or Apple Container during init. Podman writes a `Containerfile`; Docker and Apple Container write a `Dockerfile`. Each provider uses its own namespaced `build-image` command.
 
 Init detects your host package manager (npm, pnpm, yarn, or bun) from a `packageManager` field or lockfile, defaulting to npm. Templates whose `main` file imports a host dependency — the planner templates import [Zod](https://zod.dev) for their `<plan>` output schema — prompt you to install it with that package manager when it isn't already in your `package.json`, so the first `npx tsx .sandcastle/main.ts` doesn't fail with `ERR_MODULE_NOT_FOUND`.
 
@@ -773,10 +834,10 @@ Every interactive prompt has a paired `--flag` so the entire init can run non-in
 
 | Option                    | Required | Default                      | Description                                                                                                    |
 | ------------------------- | -------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `--image-name`            | No       | `sandcastle:<repo-dir-name>` | Docker image name                                                                                              |
+| `--image-name`            | No       | `sandcastle:<repo-dir-name>` | Sandbox image name                                                                                             |
 | `--agent`                 | No       | Interactive prompt           | Agent to use (`claude-code`, `pi`, `codex`, `cursor`, `opencode`, `copilot`)                                   |
 | `--model`                 | No       | Agent's default model        | Model to use (e.g. `claude-sonnet-4-6`). Defaults to agent's default                                           |
-| `--sandbox`               | No       | Interactive prompt           | Sandbox provider to use (`docker`, `podman`)                                                                   |
+| `--sandbox`               | No       | Interactive prompt           | Sandbox provider to use (`docker`, `podman`, `apple-container`)                                                |
 | `--template`              | No       | Interactive prompt           | Template to scaffold (e.g. `blank`, `simple-loop`)                                                             |
 | `--issue-tracker`         | No       | Interactive prompt           | Issue tracker to use (`github-issues`, `beads`, `custom`)                                                      |
 | `--create-label`          | No       | Interactive prompt           | `true` / `false` — whether to create the `Sandcastle` GitHub label (only with `--issue-tracker github-issues`) |
@@ -828,6 +889,23 @@ Removes the Podman image.
 | Option         | Required | Default                      | Description       |
 | -------------- | -------- | ---------------------------- | ----------------- |
 | `--image-name` | No       | `sandcastle:<repo-dir-name>` | Podman image name |
+
+### `sandcastle apple-container build-image`
+
+Builds an OCI image with Apple Container from the Dockerfile in `.sandcastle/`. The build automatically passes the host UID and GID so the image's `agent` user matches bind-mounted files.
+
+| Option         | Required | Default                      | Description                                                                       |
+| -------------- | -------- | ---------------------------- | --------------------------------------------------------------------------------- |
+| `--image-name` | No       | `sandcastle:<repo-dir-name>` | Apple Container image name                                                        |
+| `--dockerfile` | No       | —                            | Path to a custom Dockerfile (build context will be the current working directory) |
+
+### `sandcastle apple-container remove-image`
+
+Removes the Apple Container image.
+
+| Option         | Required | Default                      | Description                |
+| -------------- | -------- | ---------------------------- | -------------------------- |
+| `--image-name` | No       | `sandcastle:<repo-dir-name>` | Apple Container image name |
 
 ### `RunOptions`
 
@@ -1023,9 +1101,9 @@ Environment variables are also resolved automatically from `.sandcastle/.env` an
 
 ## Custom Sandbox Providers
 
-Sandcastle ships with built-in providers for Docker, Podman, and Vercel, but you can create your own. A sandbox provider tells Sandcastle how to execute commands in an isolated environment. There are two kinds:
+Sandcastle ships with built-in providers for Docker, Podman, Apple Container, and Vercel, but you can create your own. A sandbox provider tells Sandcastle how to execute commands in an isolated environment. There are two kinds:
 
-- **Bind-mount** — the sandbox can mount a host directory. Sandcastle creates a worktree on the host and the provider mounts it in. No file sync needed. Use this for Docker, Podman, or any local container runtime.
+- **Bind-mount** — the sandbox can mount a host directory. Sandcastle creates a worktree on the host and the provider mounts it in. No file sync needed. Use this for Docker, Podman, Apple Container, or another local runtime.
 - **Isolated** — the sandbox has its own filesystem (e.g. a cloud VM). The provider handles syncing code in and out via `copyIn` and `copyFileOut`. Use this when the sandbox cannot access the host filesystem.
 
 ### The sandbox handle contract
@@ -1322,6 +1400,7 @@ const result = await run({
 For real-world examples, see:
 
 - [`src/sandboxes/docker.ts`](src/sandboxes/docker.ts) — bind-mount provider using Docker containers (with SELinux label support)
+- [`src/sandboxes/apple-container.ts`](src/sandboxes/apple-container.ts) — bind-mount provider using Apple's native lightweight VMs
 - [`src/sandboxes/vercel.ts`](src/sandboxes/vercel.ts) — isolated provider using Vercel Firecracker microVMs via `@vercel/sandbox`
 - [`src/sandboxes/podman.ts`](src/sandboxes/podman.ts) — bind-mount provider using Podman containers (with SELinux label support)
 - [`src/sandboxes/test-isolated.ts`](src/sandboxes/test-isolated.ts) — isolated provider using temp directories (used in tests)
