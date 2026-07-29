@@ -4,7 +4,7 @@ import { exec } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, readdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { AgentError, AgentIdleTimeoutError } from "./errors.js";
@@ -26,6 +26,7 @@ import {
   WorktreeDockerSandboxFactory,
   SANDBOX_REPO_DIR,
 } from "./SandboxFactory.js";
+import { pruneStale } from "./WorktreeManager.js";
 
 const execAsync = promisify(exec);
 
@@ -414,6 +415,86 @@ describe("WorktreeDockerSandboxFactory", () => {
     expect(result.preservedWorktreePath).toBe(observedWorktreePath);
     expect(result.value).toBe("done");
     expect(existsSync(observedWorktreePath!)).toBe(true);
+  });
+
+  // Documents current behaviour, and passes as-is: preserved worktrees are
+  // never reclaimed by the prune that runs before every new worktree, because
+  // its criterion is "git no longer knows this directory", not "this directory
+  // is old". An orphaned worktree in the same run gets removed, so the
+  // difference between the two is visible side by side.
+  //
+  // For an unattended process this means every run that ends with uncommitted
+  // work leaves a full copy of the repo behind, for good: nothing collects
+  // them and there is no option to opt out.
+  it("prune leaves preserved worktrees from earlier runs in place, but removes an orphaned one", async () => {
+    const stderrSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    // Two runs, each ending with uncommitted work in its own worktree.
+    const preservedPaths: string[] = [];
+    for (const marker of ["first", "second"]) {
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const factory = yield* SandboxFactory;
+          return yield* factory.withSandbox((info) =>
+            Effect.gen(function* () {
+              yield* Effect.promise(() =>
+                writeFile(
+                  join(info.hostWorktreePath!, `${marker}.txt`),
+                  marker,
+                ),
+              );
+              return marker;
+            }),
+          );
+        }).pipe(Effect.provide(makeLayer())),
+      );
+      preservedPaths.push(result.preservedWorktreePath!);
+    }
+
+    stderrSpy.mockRestore();
+
+    // Two distinct worktrees are on disk after the two runs.
+    expect(new Set(preservedPaths).size).toBe(2);
+    for (const path of preservedPaths) {
+      expect(existsSync(path)).toBe(true);
+    }
+
+    // A third directory under .sandcastle/worktrees/ that git does not know
+    // about — an orphaned worktree, e.g. left behind by a crash.
+    const worktreesDir = join(hostRepoDir, ".sandcastle", "worktrees");
+    const orphanedPath = join(worktreesDir, "orphaned-worktree");
+    await mkdir(orphanedPath, { recursive: true });
+
+    // The cleanup sandcastle performs by itself before creating any worktree.
+    const pruneExit = await Effect.runPromiseExit(
+      pruneStale(hostRepoDir).pipe(Effect.provide(NodeFileSystem.layer)),
+    );
+
+    // It runs, and it succeeds.
+    expect(Exit.isSuccess(pruneExit)).toBe(true);
+
+    // The orphaned worktree is gone.
+    expect(existsSync(orphanedPath)).toBe(false);
+
+    // Both preserved worktrees are still there.
+    for (const path of preservedPaths) {
+      expect(existsSync(path)).toBe(true);
+    }
+    const remaining = await readdir(worktreesDir);
+    expect(remaining.sort()).toEqual(
+      preservedPaths.map((path) => basename(path)).sort(),
+    );
+
+    // Why prune spares them: git still has them registered, so they are not
+    // orphaned. The orphaned directory was never in this list.
+    const { stdout: worktreeList } = await execAsync(
+      "git worktree list --porcelain",
+      { cwd: hostRepoDir },
+    );
+    for (const path of preservedPaths) {
+      expect(worktreeList).toContain(basename(path));
+    }
+    expect(worktreeList).not.toContain(basename(orphanedPath));
   });
 
   it("prints uncommitted changes message on success with dirty worktree", async () => {
