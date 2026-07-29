@@ -262,19 +262,14 @@ export const createWorktree = async (
     closed = true;
 
     return Effect.gen(function* () {
-      const isDirty = yield* WorktreeManager.hasUncommittedChanges(
+      const disposition = yield* WorktreeManager.closeWorktree(
         worktreeInfo.path,
-      ).pipe(Effect.catchAll(() => Effect.succeed(false)));
+      ).pipe(Effect.catchAll(() => Effect.succeed("removed" as const)));
 
-      if (isDirty) {
-        return { preservedWorktreePath: worktreeInfo.path } as CloseResult;
-      }
-
-      yield* WorktreeManager.remove(worktreeInfo.path).pipe(
-        Effect.catchAll(() => Effect.void),
-      );
-
-      return { preservedWorktreePath: undefined } as CloseResult;
+      return {
+        preservedWorktreePath:
+          disposition === "preserved" ? worktreeInfo.path : undefined,
+      } as CloseResult;
     }).pipe(Effect.runPromise);
   };
 

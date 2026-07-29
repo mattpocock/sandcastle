@@ -197,32 +197,28 @@ const printWorktreePreservedMessage = (
 };
 
 /**
- * Check for uncommitted changes and either preserve or remove the worktree.
+ * Closes the worktree and reports the outcome on stderr.
  * Returns the preserved path if preserved, undefined if removed.
  */
 const cleanupWorktree = (
   worktreePath: string,
   exit: Exit.Exit<unknown, unknown>,
 ): Effect.Effect<string | undefined, WorktreeError> =>
-  WorktreeManager.hasUncommittedChanges(worktreePath).pipe(
-    Effect.catchAll(() => Effect.succeed(false)),
-    Effect.flatMap((isDirty) => {
-      if (isDirty) {
-        printWorktreePreservedMessage(
-          worktreePath,
-          Exit.isSuccess(exit)
-            ? `Run succeeded but worktree has uncommitted changes at ${worktreePath}`
-            : `Worktree preserved at ${worktreePath}`,
-        );
-        return Effect.succeed(worktreePath as string | undefined);
-      }
-      if (!Exit.isSuccess(exit)) {
-        console.error(`\nWorktree removed (no uncommitted changes)`);
-      }
-      return WorktreeManager.remove(worktreePath).pipe(
-        Effect.map(() => undefined as string | undefined),
+  WorktreeManager.closeWorktree(worktreePath, (disposition) => {
+    if (disposition === "preserved") {
+      printWorktreePreservedMessage(
+        worktreePath,
+        Exit.isSuccess(exit)
+          ? `Run succeeded but worktree has uncommitted changes at ${worktreePath}`
+          : `Worktree preserved at ${worktreePath}`,
       );
-    }),
+    } else if (!Exit.isSuccess(exit)) {
+      console.error(`\nWorktree removed (no uncommitted changes)`);
+    }
+  }).pipe(
+    Effect.map((disposition) =>
+      disposition === "preserved" ? worktreePath : undefined,
+    ),
   );
 
 /**

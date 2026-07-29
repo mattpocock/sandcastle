@@ -418,22 +418,15 @@ export const interactive = async (
 
       const exitCode = lifecycleResult.result;
 
-      // Check for uncommitted changes (worktree mode only)
+      // Close the worktree: kept when it holds uncommitted work (worktree mode only)
       let preservedWorktreePath: string | undefined;
       if (worktreeInfo) {
-        const hasUncommitted = yield* WorktreeManager.hasUncommittedChanges(
+        const disposition = yield* WorktreeManager.closeWorktree(
           worktreeInfo.path,
-        ).pipe(Effect.catchAll(() => Effect.succeed(false)));
-        if (hasUncommitted) {
+        ).pipe(Effect.catchAll(() => Effect.succeed("removed" as const)));
+        if (disposition === "preserved") {
           preservedWorktreePath = worktreeInfo.path;
         }
-      }
-
-      // Clean up worktree if not preserved
-      if (worktreeInfo && !preservedWorktreePath) {
-        yield* WorktreeManager.remove(worktreeInfo.path).pipe(
-          Effect.catchAll(() => Effect.void),
-        );
       }
 
       // Final summary
