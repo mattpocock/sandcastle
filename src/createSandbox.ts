@@ -1090,18 +1090,14 @@ export const createSandbox = async (
           yield* Effect.promise(() => providerHandle.close());
         }
 
-        // Preserve the worktree when it has uncommitted changes; otherwise remove it.
-        const isDirty = yield* WorktreeManager.hasUncommittedChanges(
+        const disposition = yield* WorktreeManager.closeWorktree(
           worktreePath,
-        ).pipe(Effect.catchAll(() => Effect.succeed(false)));
-        if (isDirty) {
-          return { preservedWorktreePath: worktreePath };
-        }
+        ).pipe(Effect.catchAll(() => Effect.succeed("removed" as const)));
 
-        yield* WorktreeManager.remove(worktreePath).pipe(
-          Effect.catchAll(() => Effect.void),
-        );
-        return { preservedWorktreePath: undefined };
+        return {
+          preservedWorktreePath:
+            disposition === "preserved" ? worktreePath : undefined,
+        };
       }),
     );
   };

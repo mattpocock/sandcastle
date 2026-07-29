@@ -454,6 +454,39 @@ export const remove = (
   );
 };
 
+/** What happened to a worktree once the run that used it was over. */
+export type WorktreeDisposition = "preserved" | "removed";
+
+/**
+ * Decides what happens to a worktree when the run that used it ends, and
+ * carries the decision out: uncommitted work is kept so it can still be
+ * reviewed, anything else is removed.
+ *
+ * This is the only place that choice is made. Every door that closes a
+ * worktree comes through here, so the rule is written once.
+ *
+ * `announce` is called with the decision before anything is removed, for
+ * callers that report the outcome to whoever started the run. Removal failures
+ * stay on the error channel, so each caller keeps deciding how loud they are.
+ */
+export const closeWorktree = (
+  worktreePath: string,
+  announce: (disposition: WorktreeDisposition) => void = () => {},
+): Effect.Effect<WorktreeDisposition, WorktreeError> =>
+  hasUncommittedChanges(worktreePath).pipe(
+    Effect.catchAll(() => Effect.succeed(false)),
+    Effect.flatMap((isDirty) => {
+      if (isDirty) {
+        announce("preserved");
+        return Effect.succeed<WorktreeDisposition>("preserved");
+      }
+      announce("removed");
+      return remove(worktreePath).pipe(
+        Effect.map((): WorktreeDisposition => "removed"),
+      );
+    }),
+  );
+
 /**
  * Prunes stale git worktree metadata and removes orphaned directories under
  * `.sandcastle/worktrees/`.
