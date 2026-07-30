@@ -26,7 +26,10 @@ import {
   WorktreeDockerSandboxFactory,
   SANDBOX_REPO_DIR,
 } from "./SandboxFactory.js";
-import { pruneStale } from "./WorktreeManager.js";
+import {
+  pruneStale,
+  type UncommittedChangesPolicy,
+} from "./WorktreeManager.js";
 
 const execAsync = promisify(exec);
 
@@ -100,6 +103,7 @@ describe("WorktreeDockerSandboxFactory", () => {
   const makeLayer = (
     displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]),
     branchStrategy: BranchStrategy = { type: "merge-to-head" },
+    onUncommittedChanges?: UncommittedChangesPolicy,
   ) =>
     Layer.provide(
       WorktreeDockerSandboxFactory.layer,
@@ -109,6 +113,7 @@ describe("WorktreeDockerSandboxFactory", () => {
           hostRepoDir,
           sandboxProvider: mockProvider.provider,
           branchStrategy,
+          onUncommittedChanges,
         }),
         NodeFileSystem.layer,
         SilentDisplay.layer(displayRef),
@@ -415,6 +420,82 @@ describe("WorktreeDockerSandboxFactory", () => {
     expect(result.preservedWorktreePath).toBe(observedWorktreePath);
     expect(result.value).toBe("done");
     expect(existsSync(observedWorktreePath!)).toBe(true);
+  });
+
+  it("removes the worktree on success with dirty worktree when onUncommittedChanges is remove-worktree", async () => {
+    const stderrSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    let observedWorktreePath: string | undefined;
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const factory = yield* SandboxFactory;
+        return yield* factory.withSandbox((info) =>
+          Effect.gen(function* () {
+            observedWorktreePath = info.hostWorktreePath;
+            yield* Effect.promise(() =>
+              writeFile(join(info.hostWorktreePath!, "dirty.txt"), "dirty"),
+            );
+            return "done";
+          }),
+        );
+      }).pipe(
+        Effect.provide(
+          makeLayer(undefined, { type: "merge-to-head" }, "remove-worktree"),
+        ),
+      ),
+    );
+
+    expect(result.value).toBe("done");
+    // Nothing was preserved, so nothing is reported as preserved.
+    expect(result.preservedWorktreePath).toBeUndefined();
+    expect(existsSync(observedWorktreePath!)).toBe(false);
+    // No directory is left under .sandcastle/worktrees/ either.
+    expect(await findCreatedWorktree(hostRepoDir)).toBeUndefined();
+    // The preserved-worktree notice belongs to the preserving policy only.
+    expect(stderrSpy).not.toHaveBeenCalled();
+    stderrSpy.mockRestore();
+  });
+
+  it("does not attach preservedWorktreePath to AgentError on failure with dirty worktree when onUncommittedChanges is remove-worktree", async () => {
+    const stderrSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    let observedWorktreePath: string | undefined;
+    const exit = await Effect.runPromiseExit(
+      Effect.gen(function* () {
+        const factory = yield* SandboxFactory;
+        yield* factory.withSandbox((info) =>
+          Effect.gen(function* () {
+            observedWorktreePath = info.hostWorktreePath;
+            yield* Effect.promise(() =>
+              writeFile(join(info.hostWorktreePath!, "dirty.txt"), "dirty"),
+            );
+            return yield* Effect.fail(
+              new AgentError({ message: "agent failed" }),
+            );
+          }),
+        );
+      }).pipe(
+        Effect.provide(
+          makeLayer(undefined, { type: "merge-to-head" }, "remove-worktree"),
+        ),
+      ),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (!Exit.isFailure(exit)) throw new Error("unreachable");
+    expect(exit.cause._tag).toBe("Fail");
+    if (exit.cause._tag !== "Fail") throw new Error("unreachable");
+    expect(exit.cause.error).toBeInstanceOf(AgentError);
+    expect(
+      (exit.cause.error as AgentError).preservedWorktreePath,
+    ).toBeUndefined();
+    expect(existsSync(observedWorktreePath!)).toBe(false);
+    // The worktree did hold uncommitted changes, so the message the failure
+    // path prints for a clean tree would be a lie here.
+    expect(stderrSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("no uncommitted changes"),
+    );
+    stderrSpy.mockRestore();
   });
 
   // Documents current behaviour, and passes as-is: preserved worktrees are
