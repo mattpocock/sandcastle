@@ -7,6 +7,7 @@ export type {
   IterationUsage,
   Timeouts,
 } from "./run.js";
+export type { UncommittedChangesPolicy } from "./WorktreeManager.js";
 export { interactive } from "./interactive.js";
 export type { InteractiveOptions, InteractiveResult } from "./interactive.js";
 export { createSandbox } from "./createSandbox.js";

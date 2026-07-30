@@ -454,13 +454,37 @@ export const remove = (
   );
 };
 
+/**
+ * What to do with the worktree when the run that used it ends with uncommitted
+ * changes still in it.
+ *
+ * - `"preserve-worktree"` — keep it on disk so the work can still be reviewed,
+ *   and report where it is. This is the default: it is the right answer for
+ *   someone sitting at a terminal, who would rather be shown the work than have
+ *   it thrown away.
+ * - `"remove-worktree"` — remove it anyway. For an unattended process, which
+ *   nobody is going to come and review, and where every run that ends dirty
+ *   would otherwise leave a full copy of the repository behind for good.
+ */
+export type UncommittedChangesPolicy = "preserve-worktree" | "remove-worktree";
+
+const DEFAULT_UNCOMMITTED_CHANGES_POLICY: UncommittedChangesPolicy =
+  "preserve-worktree";
+
 /** What happened to a worktree once the run that used it was over. */
-export type WorktreeDisposition = "preserved" | "removed";
+export type WorktreeDisposition =
+  /** It held uncommitted work, and the policy said to keep it. */
+  | "preserved"
+  /** It held nothing uncommitted, so removing it lost nothing. */
+  | "removed"
+  /** It held uncommitted work, and the policy said to remove it anyway. */
+  | "discarded";
 
 /**
  * Decides what happens to a worktree when the run that used it ends, and
  * carries the decision out: uncommitted work is kept so it can still be
- * reviewed, anything else is removed.
+ * reviewed — unless `policy` says to remove it anyway — and anything else is
+ * removed.
  *
  * This is the only place that choice is made. Every door that closes a
  * worktree comes through here, so the rule is written once.
@@ -473,21 +497,26 @@ export type WorktreeDisposition = "preserved" | "removed";
  */
 export const closeWorktree = (
   worktreePath: string,
+  policy: UncommittedChangesPolicy = DEFAULT_UNCOMMITTED_CHANGES_POLICY,
   announce: (disposition: WorktreeDisposition) => Effect.Effect<void> = () =>
     Effect.void,
 ): Effect.Effect<WorktreeDisposition, WorktreeError> =>
   hasUncommittedChanges(worktreePath).pipe(
     Effect.catchAll(() => Effect.succeed(false)),
-    Effect.flatMap((isDirty) =>
-      isDirty
-        ? announce("preserved").pipe(
-            Effect.map((): WorktreeDisposition => "preserved"),
-          )
-        : announce("removed").pipe(
-            Effect.andThen(remove(worktreePath)),
-            Effect.map((): WorktreeDisposition => "removed"),
-          ),
-    ),
+    Effect.flatMap((isDirty) => {
+      if (isDirty && policy === "preserve-worktree") {
+        return announce("preserved").pipe(
+          Effect.map((): WorktreeDisposition => "preserved"),
+        );
+      }
+      const disposition: WorktreeDisposition = isDirty
+        ? "discarded"
+        : "removed";
+      return announce(disposition).pipe(
+        Effect.andThen(remove(worktreePath)),
+        Effect.map(() => disposition),
+      );
+    }),
   );
 
 /**

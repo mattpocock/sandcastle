@@ -181,6 +181,8 @@ export class SandboxConfig extends Context.Tag("SandboxConfig")<
     readonly signal?: AbortSignal;
     /** Override default timeouts for built-in lifecycle steps. */
     readonly timeouts?: Timeouts;
+    /** What to do with the worktree when the run ends with uncommitted changes in it. Defaults to preserving it. */
+    readonly onUncommittedChanges?: WorktreeManager.UncommittedChangesPolicy;
   }
 >() {}
 
@@ -220,8 +222,9 @@ const cleanupWorktree = (
   display: DisplayService,
   worktreePath: string,
   exit: Exit.Exit<unknown, unknown>,
+  policy: WorktreeManager.UncommittedChangesPolicy | undefined,
 ): Effect.Effect<string | undefined, WorktreeError> =>
-  WorktreeManager.closeWorktree(worktreePath, (disposition) => {
+  WorktreeManager.closeWorktree(worktreePath, policy, (disposition) => {
     if (disposition === "preserved") {
       return announceWorktreePreserved(
         display,
@@ -231,7 +234,7 @@ const cleanupWorktree = (
           : `Worktree preserved at ${worktreePath}`,
       );
     }
-    if (!Exit.isSuccess(exit)) {
+    if (disposition === "removed" && !Exit.isSuccess(exit)) {
       return display.text(`Worktree removed (no uncommitted changes)`);
     }
     return Effect.void;
@@ -317,6 +320,7 @@ export const WorktreeDockerSandboxFactory = {
         hooks,
         signal,
         timeouts,
+        onUncommittedChanges,
       } = yield* SandboxConfig;
 
       const isHeadMode = branchStrategy.type === "head";
@@ -454,7 +458,12 @@ export const WorktreeDockerSandboxFactory = {
                   ),
                 ) as Effect.Effect<A, E | SandboxError, R>,
               (worktreeInfo, exit) =>
-                cleanupWorktree(display, worktreeInfo.path, exit).pipe(
+                cleanupWorktree(
+                  display,
+                  worktreeInfo.path,
+                  exit,
+                  onUncommittedChanges,
+                ).pipe(
                   Effect.tap((p) => {
                     preservedPath = p;
                   }),
@@ -520,7 +529,12 @@ export const WorktreeDockerSandboxFactory = {
                   ),
                 ) as Effect.Effect<A, E | SandboxError, R>,
               (worktreeInfo, exit) =>
-                cleanupWorktree(display, worktreeInfo.path, exit).pipe(
+                cleanupWorktree(
+                  display,
+                  worktreeInfo.path,
+                  exit,
+                  onUncommittedChanges,
+                ).pipe(
                   Effect.tap((p) => {
                     preservedPath = p;
                   }),
@@ -684,7 +698,12 @@ export const WorktreeDockerSandboxFactory = {
               ) as Effect.Effect<A, E | SandboxError, R>,
             // Release: remove or preserve the worktree based on dirty state.
             (worktreeInfo, exit) =>
-              cleanupWorktree(display, worktreeInfo.path, exit).pipe(
+              cleanupWorktree(
+                display,
+                worktreeInfo.path,
+                exit,
+                onUncommittedChanges,
+              ).pipe(
                 Effect.tap((p) => {
                   preservedWorktreePath = p;
                 }),
