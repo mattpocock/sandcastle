@@ -213,6 +213,11 @@ const result = await run({
     mergeToHostMs: 60_000, // default: 30_000
   },
 
+  // What happens to the worktree when the run ends with uncommitted changes
+  // still in it: "preserve-worktree" (the default) keeps it on disk and
+  // reports where it is, "remove-worktree" removes it anyway.
+  onUncommittedChanges: "remove-worktree",
+
   // How to record progress. Default: write to a file under .sandcastle/logs/
   logging: {
     type: "file",
@@ -342,7 +347,7 @@ await sandbox.run({
 
 #### Automatic cleanup with `await using`
 
-`await using` calls `sandbox.close()` automatically when the block exits. If the sandbox has uncommitted changes, the worktree is preserved on disk; if clean, both container and worktree are removed.
+`await using` calls `sandbox.close()` automatically when the block exits. If the sandbox has uncommitted changes, the worktree is preserved on disk; if clean, both container and worktree are removed. Pass `onUncommittedChanges: "remove-worktree"` to have it removed either way — see [Worktree lifecycle](#worktree-lifecycle).
 
 #### Manual `close()` with `CloseResult`
 
@@ -360,14 +365,15 @@ if (closeResult.preservedWorktreePath) {
 
 #### `CreateSandboxOptions`
 
-| Option           | Type            | Default         | Description                                                                                                         |
-| ---------------- | --------------- | --------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `branch`         | string          | —               | **Required.** Explicit branch for the sandbox                                                                       |
-| `sandbox`        | SandboxProvider | —               | **Required.** Sandbox provider (e.g. `docker()`, `podman()`)                                                        |
-| `cwd`            | string          | `process.cwd()` | Host repo directory — relative paths resolve against `process.cwd()`                                                |
-| `hooks`          | SandboxHooks    | —               | Lifecycle hooks (`host.*`, `sandbox.*`) — run once at creation time                                                 |
-| `copyToWorktree` | string[]        | —               | Host-relative file paths to copy into the sandbox at creation time                                                  |
-| `timeouts`       | Timeouts        | —               | Override built-in lifecycle step timeouts (`copyToWorktreeMs`, `gitSetupMs`, `commitCollectionMs`, `mergeToHostMs`) |
+| Option                 | Type                     | Default               | Description                                                                                                                   |
+| ---------------------- | ------------------------ | --------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `branch`               | string                   | —                     | **Required.** Explicit branch for the sandbox                                                                                 |
+| `sandbox`              | SandboxProvider          | —                     | **Required.** Sandbox provider (e.g. `docker()`, `podman()`)                                                                  |
+| `cwd`                  | string                   | `process.cwd()`       | Host repo directory — relative paths resolve against `process.cwd()`                                                          |
+| `hooks`                | SandboxHooks             | —                     | Lifecycle hooks (`host.*`, `sandbox.*`) — run once at creation time                                                           |
+| `copyToWorktree`       | string[]                 | —                     | Host-relative file paths to copy into the sandbox at creation time                                                            |
+| `timeouts`             | Timeouts                 | —                     | Override built-in lifecycle step timeouts (`copyToWorktreeMs`, `gitSetupMs`, `commitCollectionMs`, `mergeToHostMs`)           |
+| `onUncommittedChanges` | UncommittedChangesPolicy | `"preserve-worktree"` | What `close()` does with the worktree when it still holds uncommitted changes — see [Worktree lifecycle](#worktree-lifecycle) |
 
 #### `Sandbox`
 
@@ -556,6 +562,26 @@ Sandcastle uses a **branch strategy** configured on the sandbox provider to cont
 For bind-mount providers (like Docker), the worktree directory is bind-mounted into the container — the agent writes directly to the host filesystem through the mount, so no sync is needed.
 
 From your point of view, you just configure `branchStrategy: { type: 'branch', branch: 'foo' }` on `run()`, and get a commit on branch `foo` once it's complete. All 100% local.
+
+### Worktree lifecycle
+
+Worktrees live under `.sandcastle/worktrees/` on the host. Before creating a new one, Sandcastle prunes that directory — but it only removes **orphaned** worktrees, the directories git no longer knows about. A worktree kept because the run left uncommitted changes in it is **preserved**, not orphaned: git still knows it, so the prune leaves it alone (its criterion is "git no longer knows this directory", not "this directory is old") and it stays there until someone removes it by hand.
+
+`run()` and `createSandbox()` both accept `onUncommittedChanges` to choose what happens to the worktree when the run — or `close()` — finds uncommitted changes still in it:
+
+- `"preserve-worktree"` — the default, and what Sandcastle has always done: the worktree is left on disk so the work can still be reviewed, and its path comes back on the result (`RunResult.preservedWorktreePath`, `CloseResult.preservedWorktreePath`) and on the errors that carry it. A `run()` also reports where the worktree is and how to remove it alongside the rest of its output.
+- `"remove-worktree"` — the worktree is removed anyway. Nothing is left on disk and nothing is reported as preserved.
+
+Reach for `"remove-worktree"` when nobody is sitting in front of the process: a long-running unattended service never reviews a preserved worktree, so every run that ends dirty leaves a full copy of the repository behind for good.
+
+```typescript
+await run({
+  agent: claudeCode("claude-opus-4-8"),
+  sandbox: docker(),
+  promptFile: ".sandcastle/prompt.md",
+  onUncommittedChanges: "remove-worktree",
+});
+```
 
 ## Prompts
 
@@ -831,27 +857,28 @@ Removes the Podman image.
 
 ### `RunOptions`
 
-| Option                     | Type               | Default                       | Description                                                                                                                                                                                                                  |
-| -------------------------- | ------------------ | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agent`                    | AgentProvider      | —                             | **Required.** Agent provider (e.g. `claudeCode("claude-opus-4-8")`, `pi("claude-sonnet-4-6")`, `codex("gpt-5.4")`, `cursor("composer-2")`, `opencode("opencode/big-pickle")`, `copilot("claude-sonnet-4.5")`)                |
-| `sandbox`                  | SandboxProvider    | —                             | **Required.** Sandbox provider (e.g. `docker()`, `podman()`, `docker({ imageName: "sandcastle:local" })`)                                                                                                                    |
-| `cwd`                      | string             | `process.cwd()`               | Host repo directory — anchor for `.sandcastle/` artifacts and git operations. Relative paths resolve against `process.cwd()`.                                                                                                |
-| `prompt`                   | string             | —                             | Inline prompt (mutually exclusive with `promptFile`)                                                                                                                                                                         |
-| `promptFile`               | string             | —                             | Path to prompt file (mutually exclusive with `prompt`). Resolves against `process.cwd()`, **not** `cwd`.                                                                                                                     |
-| `maxIterations`            | number             | `1`                           | Maximum iterations to run                                                                                                                                                                                                    |
-| `hooks`                    | SandboxHooks       | —                             | Lifecycle hooks (`host.*`, `sandbox.*`)                                                                                                                                                                                      |
-| `name`                     | string             | —                             | Display name for the run, shown as a prefix in log output                                                                                                                                                                    |
-| `promptArgs`               | PromptArgs         | —                             | Key-value map for `{{KEY}}` placeholder substitution                                                                                                                                                                         |
-| `branchStrategy`           | BranchStrategy     | per-provider default          | Branch strategy: `{ type: 'head' }`, `{ type: 'merge-to-head' }`, or `{ type: 'branch', branch: '…' }`                                                                                                                       |
-| `copyToWorktree`           | string[]           | —                             | Host-relative file paths to copy into the sandbox before start (not supported with `branchStrategy: { type: 'head' }`)                                                                                                       |
-| `logging`                  | object             | file (auto-generated)         | `{ type: 'file', path }` or `{ type: 'stdout' }`                                                                                                                                                                             |
-| `completionSignal`         | string \| string[] | `<promise>COMPLETE</promise>` | String or array of strings the agent emits to stop the iteration loop early                                                                                                                                                  |
-| `idleTimeoutSeconds`       | number             | `600`                         | Idle timeout in seconds — resets on each agent output event                                                                                                                                                                  |
-| `completionTimeoutSeconds` | number             | `60`                          | Grace window in seconds after the completion signal is observed but the agent process has not exited (hanging process). See [Hanging processes after the completion signal](#hanging-processes-after-the-completion-signal). |
-| `resumeSession`            | string             | —                             | Resume a prior session by ID for agents that support resume. Incompatible with `maxIterations > 1`. Session file must exist on host.                                                                                         |
-| `signal`                   | AbortSignal        | —                             | Cancel the run when aborted. Kills the in-flight agent subprocess and cancels lifecycle hooks; the worktree is preserved on disk. Rejects with `signal.reason`.                                                              |
-| `timeouts`                 | Timeouts           | —                             | Override default timeouts for built-in lifecycle steps: `copyToWorktreeMs` (60 000), `gitSetupMs` (10 000), `commitCollectionMs` (30 000), `mergeToHostMs` (30 000).                                                         |
-| `output`                   | OutputDefinition   | —                             | Structured output definition (`Output.object(…)` or `Output.string(…)`). Requires `maxIterations === 1`. See [Structured output](#structured-output).                                                                        |
+| Option                     | Type                     | Default                       | Description                                                                                                                                                                                                                  |
+| -------------------------- | ------------------------ | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent`                    | AgentProvider            | —                             | **Required.** Agent provider (e.g. `claudeCode("claude-opus-4-8")`, `pi("claude-sonnet-4-6")`, `codex("gpt-5.4")`, `cursor("composer-2")`, `opencode("opencode/big-pickle")`, `copilot("claude-sonnet-4.5")`)                |
+| `sandbox`                  | SandboxProvider          | —                             | **Required.** Sandbox provider (e.g. `docker()`, `podman()`, `docker({ imageName: "sandcastle:local" })`)                                                                                                                    |
+| `cwd`                      | string                   | `process.cwd()`               | Host repo directory — anchor for `.sandcastle/` artifacts and git operations. Relative paths resolve against `process.cwd()`.                                                                                                |
+| `prompt`                   | string                   | —                             | Inline prompt (mutually exclusive with `promptFile`)                                                                                                                                                                         |
+| `promptFile`               | string                   | —                             | Path to prompt file (mutually exclusive with `prompt`). Resolves against `process.cwd()`, **not** `cwd`.                                                                                                                     |
+| `maxIterations`            | number                   | `1`                           | Maximum iterations to run                                                                                                                                                                                                    |
+| `hooks`                    | SandboxHooks             | —                             | Lifecycle hooks (`host.*`, `sandbox.*`)                                                                                                                                                                                      |
+| `name`                     | string                   | —                             | Display name for the run, shown as a prefix in log output                                                                                                                                                                    |
+| `promptArgs`               | PromptArgs               | —                             | Key-value map for `{{KEY}}` placeholder substitution                                                                                                                                                                         |
+| `branchStrategy`           | BranchStrategy           | per-provider default          | Branch strategy: `{ type: 'head' }`, `{ type: 'merge-to-head' }`, or `{ type: 'branch', branch: '…' }`                                                                                                                       |
+| `copyToWorktree`           | string[]                 | —                             | Host-relative file paths to copy into the sandbox before start (not supported with `branchStrategy: { type: 'head' }`)                                                                                                       |
+| `logging`                  | object                   | file (auto-generated)         | `{ type: 'file', path }` or `{ type: 'stdout' }`                                                                                                                                                                             |
+| `completionSignal`         | string \| string[]       | `<promise>COMPLETE</promise>` | String or array of strings the agent emits to stop the iteration loop early                                                                                                                                                  |
+| `idleTimeoutSeconds`       | number                   | `600`                         | Idle timeout in seconds — resets on each agent output event                                                                                                                                                                  |
+| `completionTimeoutSeconds` | number                   | `60`                          | Grace window in seconds after the completion signal is observed but the agent process has not exited (hanging process). See [Hanging processes after the completion signal](#hanging-processes-after-the-completion-signal). |
+| `resumeSession`            | string                   | —                             | Resume a prior session by ID for agents that support resume. Incompatible with `maxIterations > 1`. Session file must exist on host.                                                                                         |
+| `signal`                   | AbortSignal              | —                             | Cancel the run when aborted. Kills the in-flight agent subprocess and cancels lifecycle hooks; the worktree is preserved on disk. Rejects with `signal.reason`.                                                              |
+| `timeouts`                 | Timeouts                 | —                             | Override default timeouts for built-in lifecycle steps: `copyToWorktreeMs` (60 000), `gitSetupMs` (10 000), `commitCollectionMs` (30 000), `mergeToHostMs` (30 000).                                                         |
+| `onUncommittedChanges`     | UncommittedChangesPolicy | `"preserve-worktree"`         | What happens to the worktree when the run ends with uncommitted changes still in it. See [Worktree lifecycle](#worktree-lifecycle).                                                                                          |
+| `output`                   | OutputDefinition         | —                             | Structured output definition (`Output.object(…)` or `Output.string(…)`). Requires `maxIterations === 1`. See [Structured output](#structured-output).                                                                        |
 
 ### `RunResult`
 
