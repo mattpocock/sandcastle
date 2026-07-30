@@ -115,6 +115,10 @@ describe("WorktreeDockerSandboxFactory", () => {
       ),
     );
 
+  /** What the run wrote to its output channel, as one string. */
+  const textOutput = (entries: ReadonlyArray<DisplayEntry>): string =>
+    entries.flatMap((e) => (e._tag === "text" ? [e.message] : [])).join("\n");
+
   beforeEach(async () => {
     hostRepoDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
     tempDirs.push(hostRepoDir);
@@ -497,8 +501,8 @@ describe("WorktreeDockerSandboxFactory", () => {
     expect(worktreeList).not.toContain(basename(orphanedPath));
   });
 
-  it("prints uncommitted changes message on success with dirty worktree", async () => {
-    const stderrSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  it("logs uncommitted changes message on success with dirty worktree", async () => {
+    const displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
 
     let observedWorktreePath: string | undefined;
     await Effect.runPromise(
@@ -512,13 +516,18 @@ describe("WorktreeDockerSandboxFactory", () => {
             );
           }),
         );
-      }).pipe(Effect.provide(makeLayer())),
+      }).pipe(Effect.provide(makeLayer(displayRef))),
     );
 
-    const output = stderrSpy.mock.calls.map((c) => c[0]).join(" ");
+    // The warning goes through the run's output channel, so whoever drains that
+    // channel to a file finds it there. It no longer goes to stderr, which an
+    // unattended caller has no way to read.
+    const output = textOutput(await Effect.runPromise(Ref.get(displayRef)));
     expect(output).toContain("uncommitted changes");
     expect(output).toContain(observedWorktreePath);
-    stderrSpy.mockRestore();
+    expect(output).toContain(
+      `git worktree remove --force ${observedWorktreePath}`,
+    );
   });
 
   it("removes worktree on failure with clean worktree", async () => {
@@ -575,8 +584,8 @@ describe("WorktreeDockerSandboxFactory", () => {
     expect(worktree).toBeUndefined();
   });
 
-  it("prints 'no uncommitted changes' message on failure with clean worktree", async () => {
-    const stderrSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  it("logs 'no uncommitted changes' message on failure with clean worktree", async () => {
+    const displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
 
     await expect(
       Effect.runPromise(
@@ -585,13 +594,12 @@ describe("WorktreeDockerSandboxFactory", () => {
           yield* factory.withSandbox(() =>
             Effect.fail(new AgentError({ message: "agent failed" })),
           );
-        }).pipe(Effect.provide(makeLayer())),
+        }).pipe(Effect.provide(makeLayer(displayRef))),
       ),
     ).rejects.toThrow();
 
-    const output = stderrSpy.mock.calls.map((c) => c[0]).join(" ");
+    const output = textOutput(await Effect.runPromise(Ref.get(displayRef)));
     expect(output).toContain("no uncommitted changes");
-    stderrSpy.mockRestore();
   });
 
   it("does not attach preservedWorktreePath to AgentIdleTimeoutError when worktree is clean on failure", async () => {
