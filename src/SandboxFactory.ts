@@ -15,7 +15,7 @@ import {
 import type { Timeouts } from "./run.js";
 import * as WorktreeManager from "./WorktreeManager.js";
 import { copyToWorktree } from "./CopyToWorktree.js";
-import { Display } from "./Display.js";
+import { Display, type DisplayService } from "./Display.js";
 import type {
   SandboxProvider,
   BranchStrategy,
@@ -187,37 +187,57 @@ export class SandboxConfig extends Context.Tag("SandboxConfig")<
 >() {}
 
 /**
- * Print a message to stderr about a preserved worktree, with review and cleanup instructions.
+ * Reports a preserved worktree through `Display`, with review and cleanup
+ * instructions.
+ *
+ * Going through `Display` rather than straight to stderr is the point of it: in
+ * log-to-file mode this lands in the run log alongside the rest of the run,
+ * which is where an unattended caller is looking. In terminal mode it is still
+ * shown on screen. The three lines are unchanged; the blank line that used to
+ * separate them from raw stderr output is gone, since line breaks are the
+ * display layer's business now.
+ *
+ * `createSandbox`'s SIGINT/SIGTERM handler still writes these lines straight to
+ * stderr: a display write is an effect, and there is no guarantee it flushes
+ * while the process is going down.
  */
-const printWorktreePreservedMessage = (
+const announceWorktreePreserved = (
+  display: DisplayService,
   worktreePath: string,
   reason: string,
-): void => {
-  console.error(`\n${reason}`);
-  console.error(`  To review: cd ${worktreePath}`);
-  console.error(`  To clean up: git worktree remove --force ${worktreePath}`);
-};
+): Effect.Effect<void> =>
+  display.text(
+    [
+      reason,
+      `  To review: cd ${worktreePath}`,
+      `  To clean up: git worktree remove --force ${worktreePath}`,
+    ].join("\n"),
+  );
 
 /**
- * Closes the worktree and reports the outcome on stderr.
+ * Closes the worktree and reports the outcome through `Display`.
  * Returns the preserved path if preserved, undefined if removed.
  */
 const cleanupWorktree = (
+  display: DisplayService,
   worktreePath: string,
   exit: Exit.Exit<unknown, unknown>,
   policy: WorktreeManager.UncommittedChangesPolicy | undefined,
 ): Effect.Effect<string | undefined, WorktreeError> =>
   WorktreeManager.closeWorktree(worktreePath, policy, (disposition) => {
     if (disposition === "preserved") {
-      printWorktreePreservedMessage(
+      return announceWorktreePreserved(
+        display,
         worktreePath,
         Exit.isSuccess(exit)
           ? `Run succeeded but worktree has uncommitted changes at ${worktreePath}`
           : `Worktree preserved at ${worktreePath}`,
       );
-    } else if (disposition === "removed" && !Exit.isSuccess(exit)) {
-      console.error(`\nWorktree removed (no uncommitted changes)`);
     }
+    if (disposition === "removed" && !Exit.isSuccess(exit)) {
+      return display.text(`Worktree removed (no uncommitted changes)`);
+    }
+    return Effect.void;
   }).pipe(
     Effect.map((disposition) =>
       disposition === "preserved" ? worktreePath : undefined,
@@ -439,6 +459,7 @@ export const WorktreeDockerSandboxFactory = {
                 ) as Effect.Effect<A, E | SandboxError, R>,
               (worktreeInfo, exit) =>
                 cleanupWorktree(
+                  display,
                   worktreeInfo.path,
                   exit,
                   onUncommittedChanges,
@@ -509,6 +530,7 @@ export const WorktreeDockerSandboxFactory = {
                 ) as Effect.Effect<A, E | SandboxError, R>,
               (worktreeInfo, exit) =>
                 cleanupWorktree(
+                  display,
                   worktreeInfo.path,
                   exit,
                   onUncommittedChanges,
@@ -677,6 +699,7 @@ export const WorktreeDockerSandboxFactory = {
             // Release: remove or preserve the worktree based on dirty state.
             (worktreeInfo, exit) =>
               cleanupWorktree(
+                display,
                 worktreeInfo.path,
                 exit,
                 onUncommittedChanges,

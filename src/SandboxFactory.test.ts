@@ -120,6 +120,10 @@ describe("WorktreeDockerSandboxFactory", () => {
       ),
     );
 
+  /** What the run wrote to its output channel, as one string. */
+  const textOutput = (entries: ReadonlyArray<DisplayEntry>): string =>
+    entries.flatMap((e) => (e._tag === "text" ? [e.message] : [])).join("\n");
+
   beforeEach(async () => {
     hostRepoDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
     tempDirs.push(hostRepoDir);
@@ -423,7 +427,7 @@ describe("WorktreeDockerSandboxFactory", () => {
   });
 
   it("removes the worktree on success with dirty worktree when onUncommittedChanges is remove-worktree", async () => {
-    const stderrSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
 
     let observedWorktreePath: string | undefined;
     const result = await Effect.runPromise(
@@ -440,7 +444,7 @@ describe("WorktreeDockerSandboxFactory", () => {
         );
       }).pipe(
         Effect.provide(
-          makeLayer(undefined, { type: "merge-to-head" }, "remove-worktree"),
+          makeLayer(displayRef, { type: "merge-to-head" }, "remove-worktree"),
         ),
       ),
     );
@@ -452,12 +456,13 @@ describe("WorktreeDockerSandboxFactory", () => {
     // No directory is left under .sandcastle/worktrees/ either.
     expect(await findCreatedWorktree(hostRepoDir)).toBeUndefined();
     // The preserved-worktree notice belongs to the preserving policy only.
-    expect(stderrSpy).not.toHaveBeenCalled();
-    stderrSpy.mockRestore();
+    const output = textOutput(await Effect.runPromise(Ref.get(displayRef)));
+    expect(output).not.toContain("uncommitted changes");
+    expect(output).not.toContain("To review");
   });
 
   it("does not attach preservedWorktreePath to AgentError on failure with dirty worktree when onUncommittedChanges is remove-worktree", async () => {
-    const stderrSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
 
     let observedWorktreePath: string | undefined;
     const exit = await Effect.runPromiseExit(
@@ -476,7 +481,7 @@ describe("WorktreeDockerSandboxFactory", () => {
         );
       }).pipe(
         Effect.provide(
-          makeLayer(undefined, { type: "merge-to-head" }, "remove-worktree"),
+          makeLayer(displayRef, { type: "merge-to-head" }, "remove-worktree"),
         ),
       ),
     );
@@ -491,11 +496,9 @@ describe("WorktreeDockerSandboxFactory", () => {
     ).toBeUndefined();
     expect(existsSync(observedWorktreePath!)).toBe(false);
     // The worktree did hold uncommitted changes, so the message the failure
-    // path prints for a clean tree would be a lie here.
-    expect(stderrSpy).not.toHaveBeenCalledWith(
-      expect.stringContaining("no uncommitted changes"),
-    );
-    stderrSpy.mockRestore();
+    // path logs for a clean tree would be a lie here.
+    const output = textOutput(await Effect.runPromise(Ref.get(displayRef)));
+    expect(output).not.toContain("no uncommitted changes");
   });
 
   // Documents current behaviour, and passes as-is: preserved worktrees are
@@ -578,8 +581,8 @@ describe("WorktreeDockerSandboxFactory", () => {
     expect(worktreeList).not.toContain(basename(orphanedPath));
   });
 
-  it("prints uncommitted changes message on success with dirty worktree", async () => {
-    const stderrSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  it("logs uncommitted changes message on success with dirty worktree", async () => {
+    const displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
 
     let observedWorktreePath: string | undefined;
     await Effect.runPromise(
@@ -593,13 +596,18 @@ describe("WorktreeDockerSandboxFactory", () => {
             );
           }),
         );
-      }).pipe(Effect.provide(makeLayer())),
+      }).pipe(Effect.provide(makeLayer(displayRef))),
     );
 
-    const output = stderrSpy.mock.calls.map((c) => c[0]).join(" ");
+    // The warning goes through the run's output channel, so whoever drains that
+    // channel to a file finds it there. It no longer goes to stderr, which an
+    // unattended caller has no way to read.
+    const output = textOutput(await Effect.runPromise(Ref.get(displayRef)));
     expect(output).toContain("uncommitted changes");
     expect(output).toContain(observedWorktreePath);
-    stderrSpy.mockRestore();
+    expect(output).toContain(
+      `git worktree remove --force ${observedWorktreePath}`,
+    );
   });
 
   it("removes worktree on failure with clean worktree", async () => {
@@ -656,8 +664,8 @@ describe("WorktreeDockerSandboxFactory", () => {
     expect(worktree).toBeUndefined();
   });
 
-  it("prints 'no uncommitted changes' message on failure with clean worktree", async () => {
-    const stderrSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  it("logs 'no uncommitted changes' message on failure with clean worktree", async () => {
+    const displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
 
     await expect(
       Effect.runPromise(
@@ -666,13 +674,12 @@ describe("WorktreeDockerSandboxFactory", () => {
           yield* factory.withSandbox(() =>
             Effect.fail(new AgentError({ message: "agent failed" })),
           );
-        }).pipe(Effect.provide(makeLayer())),
+        }).pipe(Effect.provide(makeLayer(displayRef))),
       ),
     ).rejects.toThrow();
 
-    const output = stderrSpy.mock.calls.map((c) => c[0]).join(" ");
+    const output = textOutput(await Effect.runPromise(Ref.get(displayRef)));
     expect(output).toContain("no uncommitted changes");
-    stderrSpy.mockRestore();
   });
 
   it("does not attach preservedWorktreePath to AgentIdleTimeoutError when worktree is clean on failure", async () => {
