@@ -33,6 +33,9 @@ describe("Agent registry", () => {
     expect(agent!.factoryImport).toBe("pi");
     expect(agent!.dockerfileTemplate).toContain("FROM");
     expect(agent!.dockerfileTemplate).toContain(
+      "@earendil-works/pi-coding-agent",
+    );
+    expect(agent!.dockerfileTemplate).not.toContain(
       "@mariozechner/pi-coding-agent",
     );
   });
