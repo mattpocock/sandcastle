@@ -462,6 +462,17 @@ OPENCODE_API_KEY=`,
     setupCommand: `opencode --prompt "$(cat ${SETUP_ISSUE_TRACKER_PATH})"`,
   },
   {
+    name: "orcarouter",
+    label: "OrcaRouter",
+    defaultModel: "orcarouter/auto",
+    factoryImport: "orcarouter",
+    dockerfileTemplate: OPENCODE_DOCKERFILE,
+    envExample: `# OrcaRouter API key — get one at https://www.orcarouter.ai
+# Routes open-weight and hosted models through the OrcaRouter gateway.
+ORCAROUTER_API_KEY=`,
+    setupCommand: `opencode --prompt "$(cat ${SETUP_ISSUE_TRACKER_PATH})"`,
+  },
+  {
     name: "copilot",
     label: "GitHub Copilot CLI",
     defaultModel: "claude-sonnet-4.5",
