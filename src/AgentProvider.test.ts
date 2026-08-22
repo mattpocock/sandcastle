@@ -7,6 +7,7 @@ import {
   codex,
   copilot,
   cursor,
+  grok,
   opencode,
   pi,
 } from "./AgentProvider.js";
@@ -1954,6 +1955,97 @@ describe("copilot factory", () => {
     expect(provider1.buildPrintCommand(opts("test")).command).not.toContain(
       "model-b",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// grok factory
+// ---------------------------------------------------------------------------
+
+describe("grok factory", () => {
+  it("returns a provider with name 'grok'", () => {
+    const provider = grok("grok-4.6");
+    expect(provider.name).toBe("grok");
+  });
+
+  it("captures sessions by default", () => {
+    const provider = grok("grok-4.6");
+    expect(provider.captureSessions).toBe(true);
+    expect(provider.sessionStorage).toBeDefined();
+  });
+
+  it("buildPrintCommand delivers prompt via stdin", () => {
+    const provider = grok("grok-4.6");
+    const { command, stdin } = provider.buildPrintCommand(opts("do something"));
+    expect(command).toContain("grok --no-auto-update");
+    expect(command).toContain("--output-format streaming-json");
+    expect(command).toContain("-m 'grok-4.6'");
+    expect(command).toContain("--always-approve");
+    expect(command).toContain("--prompt-file /dev/stdin");
+    expect(command).not.toContain("'do something'");
+    expect(stdin).toBe("do something");
+  });
+
+  it("buildPrintCommand honours resumeSession and forkSession", () => {
+    const provider = grok("grok-4.6");
+    const { command } = provider.buildPrintCommand({
+      prompt: "continue",
+      dangerouslySkipPermissions: true,
+      resumeSession: "abc-123",
+      forkSession: true,
+    });
+    expect(command).toContain("-r 'abc-123'");
+    expect(command).toContain("--fork-session");
+  });
+
+  it("parseStreamLine extracts text, tool_call, session_id, and usage", () => {
+    const provider = grok("grok-4.6");
+    expect(
+      provider.parseStreamLine(
+        JSON.stringify({ type: "text", data: "hello" }),
+      ),
+    ).toEqual([{ type: "text", text: "hello" }]);
+    expect(
+      provider.parseStreamLine(
+        JSON.stringify({
+          type: "tool_call",
+          toolName: "run_terminal_cmd",
+          rawInput: { command: "ls /" },
+        }),
+      ),
+    ).toEqual([{ type: "tool_call", name: "Bash", args: "ls /" }]);
+    expect(
+      provider.parseStreamLine(
+        JSON.stringify({
+          type: "end",
+          sessionId: "01a027f2-fa63-7e02-a9eb-d0c186a1261b",
+          usage: { input_tokens: 10, output_tokens: 4 },
+        }),
+      ),
+    ).toEqual([
+      {
+        type: "session_id",
+        sessionId: "01a027f2-fa63-7e02-a9eb-d0c186a1261b",
+      },
+      {
+        type: "usage",
+        usage: {
+          inputTokens: 10,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 0,
+          outputTokens: 4,
+        },
+      },
+    ]);
+  });
+
+  it("parseStreamLine surfaces error events as result", () => {
+    const provider = grok("grok-4.6");
+    expect(
+      provider.parseStreamLine(
+        JSON.stringify({ type: "error", message: "auth failed" }),
+      ),
+    ).toEqual([{ type: "result", result: "auth failed" }]);
   });
 });
 

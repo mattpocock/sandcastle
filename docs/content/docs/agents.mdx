@@ -40,6 +40,26 @@ Required environment variables:
 | --- | --- |
 | `GH_TOKEN` | GitHub personal access token |
 
+### Grok Build
+
+Uses the Grok Build CLI (`grok`) as the AI coding agent. Sandcastle runs it headless with `--output-format streaming-json` and parses the NDJSON event stream for live text, tool calls, usage, and session IDs. Resume uses `grok -r <session-id>` against `~/.grok/sessions/`.
+
+Required environment variables:
+
+| Variable | Description |
+| --- | --- |
+| `XAI_API_KEY` | xAI API key for headless Grok Build (the documented CI path). Super Grok TUI login in `~/.grok/auth.json` is not copied into the sandbox image. |
+
+```ts
+import { grok } from "@ai-hero/sandcastle";
+
+await run({
+  agent: grok("grok-4.6", { effort: "high" }),
+  sandbox: docker(),
+  promptFile: ".sandcastle/prompt.md",
+});
+```
+
 ## Custom Providers
 
 Agent providers are swappable. To add support for a different AI coding tool, create a new provider that implements the agent provider interface with its own env manifest, env check, and Dockerfile template.

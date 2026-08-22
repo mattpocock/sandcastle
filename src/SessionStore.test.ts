@@ -11,8 +11,11 @@ import {
   locateCodexHostSession,
   locatePiHostSession,
   piSessionDirPath,
+  encodeGrokSessionDir,
+  findGrokSessionOnHost,
   transferClaudeSession,
   transferCodexSession,
+  transferGrokSession,
   transferPiSession,
 } from "./SessionStore.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -395,6 +398,47 @@ describe("transferPiSession", () => {
 
   it("handles empty JSONL", () => {
     expect(transferPiSession("", "/a", "/b")).toBe("");
+  });
+});
+
+describe("encodeGrokSessionDir", () => {
+  it("URL-encodes the working directory", () => {
+    expect(encodeGrokSessionDir("/Users/hunter/code/projects")).toBe(
+      "%2FUsers%2Fhunter%2Fcode%2Fprojects",
+    );
+  });
+});
+
+describe("transferGrokSession", () => {
+  it("rewrites top-level and payload cwd fields", () => {
+    const jsonl = [
+      JSON.stringify({ cwd: "/sandbox/repo", type: "session" }),
+      JSON.stringify({ payload: { cwd: "/sandbox/repo" }, type: "update" }),
+    ].join("\n");
+    const out = transferGrokSession(jsonl, "/sandbox/repo", "/host/repo");
+    const lines = out.split("\n").map((l) => JSON.parse(l) as Record<string, unknown>);
+    expect(lines[0]?.cwd).toBe("/host/repo");
+    expect((lines[1]?.payload as { cwd: string }).cwd).toBe("/host/repo");
+  });
+
+  it("handles empty JSONL", () => {
+    expect(transferGrokSession("", "/a", "/b")).toBe("");
+  });
+});
+
+describe("findGrokSessionOnHost", () => {
+  it("finds a session by id under its encoded-cwd group", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "sandcastle-find-grok-"));
+    try {
+      const id = "01a027f2-fa63-7e02-a9eb-d0c186a1261b";
+      const group = encodeGrokSessionDir("/host/repo");
+      await mkdir(join(dir, group, id), { recursive: true });
+      await writeFile(join(dir, group, id, "updates.jsonl"), "{}\n");
+      const found = await findGrokSessionOnHost(id, dir);
+      expect(found.path).toBe(join(dir, group, id, "updates.jsonl"));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 

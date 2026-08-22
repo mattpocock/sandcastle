@@ -8,7 +8,12 @@ import {
   encodePiSessionDir,
   findClaudeSessionOnHost,
   findCodexSessionOnHost,
+  findGrokSessionOnHost,
   findPiSessionOnHost,
+  grokHostSessionPath,
+  grokSandboxSessionPath,
+  locateGrokHostSession,
+  locateGrokSandboxSession,
   listClaudeSubagentSessionsInSandbox,
   locateCodexHostSession,
   locateCodexSandboxSession,
@@ -17,6 +22,7 @@ import {
   piSessionDirPath,
   transferClaudeSession,
   transferCodexSession,
+  transferGrokSession,
   transferPiSession,
   type HostSessionLookup,
 } from "./SessionStore.js";
@@ -1263,5 +1269,197 @@ export const claudeCode = (
       }
     }
     return undefined;
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Grok Build agent provider
+// ---------------------------------------------------------------------------
+
+const parseGrokUsage = (usage: unknown): IterationUsage | undefined => {
+  if (typeof usage !== "object" || usage === null) return undefined;
+  const u = usage as Record<string, unknown>;
+  if (typeof u.input_tokens !== "number" || typeof u.output_tokens !== "number") {
+    return undefined;
+  }
+  return {
+    inputTokens: u.input_tokens,
+    cacheCreationInputTokens:
+      typeof u.cache_creation_input_tokens === "number"
+        ? u.cache_creation_input_tokens
+        : 0,
+    cacheReadInputTokens:
+      typeof u.cache_read_input_tokens === "number"
+        ? u.cache_read_input_tokens
+        : 0,
+    outputTokens: u.output_tokens,
+  };
+};
+
+/**
+ * Parse one line of `grok --output-format streaming-json` NDJSON.
+ *
+ * Schema (xAI headless docs):
+ * - `text` — `{ data }` assistant text chunk
+ * - `tool_call` — `{ toolName, rawInput }`
+ * - `usage` — token snapshot
+ * - `end` — `{ sessionId, usage }`
+ * - `error` — `{ message }`
+ */
+const parseGrokStreamLine = (line: string): ParsedStreamEvent[] => {
+  if (!line.startsWith("{")) return [];
+  try {
+    const obj = JSON.parse(line) as Record<string, unknown>;
+
+    if (obj.type === "text" && typeof obj.data === "string") {
+      return [{ type: "text", text: obj.data }];
+    }
+
+    if (obj.type === "tool_call") {
+      const rawName = obj.toolName;
+      if (typeof rawName !== "string") return [];
+      const mappedName =
+        rawName === "run_terminal_cmd" || rawName === "bash" ? "Bash" : rawName;
+      const argField = TOOL_ARG_FIELDS[mappedName];
+      const rawInput =
+        obj.rawInput && typeof obj.rawInput === "object"
+          ? (obj.rawInput as Record<string, unknown>)
+          : undefined;
+      if (argField === undefined || !rawInput) return [];
+      const argValue = rawInput[argField] ?? rawInput.command ?? rawInput.cmd;
+      if (typeof argValue !== "string") return [];
+      return [{ type: "tool_call", name: mappedName, args: argValue }];
+    }
+
+    if (obj.type === "usage") {
+      const usage = parseGrokUsage(obj.usage);
+      return usage ? [{ type: "usage", usage }] : [];
+    }
+
+    if (obj.type === "end") {
+      const events: ParsedStreamEvent[] = [];
+      if (typeof obj.sessionId === "string") {
+        events.push({ type: "session_id", sessionId: obj.sessionId });
+      }
+      const usage = parseGrokUsage(obj.usage);
+      if (usage) events.push({ type: "usage", usage });
+      return events;
+    }
+
+    if (obj.type === "error" || obj.type === "agent_error") {
+      const msg = extractErrorMessage(obj);
+      return msg ? [{ type: "result", result: msg }] : [];
+    }
+  } catch {
+    // Not valid JSON — skip
+  }
+  return [];
+};
+
+const makeGrokSessionStorage = (options?: GrokOptions): AgentSessionStorage => {
+  const hostSessionsDir = options?.sessionStorage?.hostSessionsDir;
+  const sandboxSessionsDir =
+    options?.sessionStorage?.sandboxSessionsDir ??
+    posix.join("/home/agent", ".grok", "sessions");
+
+  return {
+    hostSessionFilePath: (cwd, id) =>
+      grokHostSessionPath(cwd, id, hostSessionsDir),
+    existsOnHost: async (_cwd, id) => {
+      const found = await findGrokSessionOnHost(id, hostSessionsDir);
+      return found.path !== undefined;
+    },
+    readHostSession: async (_cwd, id) => {
+      const found = await findGrokSessionOnHost(id, hostSessionsDir);
+      if (!found.path) return undefined;
+      return readFile(found.path, "utf-8");
+    },
+    captureToHost: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
+      const located = await locateGrokSandboxSession(
+        sessionId,
+        handle,
+        sandboxSessionsDir,
+      );
+      const jsonl = await readSandboxFile(handle, located.path, "grok-cap");
+      const rewritten = transferGrokSession(jsonl, sandboxCwd, hostCwd);
+      const target = grokHostSessionPath(hostCwd, sessionId, hostSessionsDir);
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, rewritten);
+    },
+    resumeIntoSandbox: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
+      const located = await locateGrokHostSession(sessionId, hostSessionsDir);
+      const jsonl = await readFile(located.path, "utf-8");
+      const rewritten = transferGrokSession(jsonl, hostCwd, sandboxCwd);
+      const target = grokSandboxSessionPath(
+        sandboxCwd,
+        sessionId,
+        sandboxSessionsDir,
+      );
+      await writeSandboxFile(handle, target, rewritten, "grok-res");
+    },
+    findByIdOnHost: (id) => findGrokSessionOnHost(id, hostSessionsDir),
+  };
+};
+
+/** Options for the Grok Build agent provider. */
+export interface GrokOptions {
+  /** Reasoning effort. Maps to Grok's `--effort` flag. */
+  readonly effort?:
+    | "none"
+    | "minimal"
+    | "low"
+    | "medium"
+    | "high"
+    | "xhigh"
+    | "max";
+  /** Environment variables injected by this agent provider. */
+  readonly env?: Record<string, string>;
+  /** When false, session capture is disabled. Default: true. */
+  readonly captureSessions?: boolean;
+  /** Override Grok session directories for tests or non-standard installs. */
+  readonly sessionStorage?: {
+    readonly hostSessionsDir?: string;
+    readonly sandboxSessionsDir?: string;
+  };
+}
+
+export const grok = (
+  model: string,
+  options?: GrokOptions,
+): AgentProvider & { readonly sessionStorage: AgentSessionStorage } => ({
+  name: "grok",
+  env: options?.env ?? {},
+  captureSessions: options?.captureSessions ?? true,
+  sessionStorage: makeGrokSessionStorage(options),
+
+  buildPrintCommand({
+    prompt,
+    dangerouslySkipPermissions,
+    resumeSession,
+    forkSession,
+  }: AgentCommandOptions): PrintCommand {
+    const effortFlag = options?.effort
+      ? ` --effort ${shellEscape(options.effort)}`
+      : "";
+    const approveFlag = dangerouslySkipPermissions ? " --always-approve" : "";
+    const resumeFlag = resumeSession
+      ? ` -r ${shellEscape(resumeSession)}`
+      : "";
+    const forkFlag = resumeSession && forkSession ? " --fork-session" : "";
+    return {
+      command: `grok --no-auto-update --output-format streaming-json -m ${shellEscape(model)}${effortFlag}${approveFlag}${resumeFlag}${forkFlag} --prompt-file /dev/stdin`,
+      stdin: prompt,
+    };
+  },
+
+  buildInteractiveArgs({ prompt }: AgentCommandOptions): string[] {
+    const args = ["grok", "--model", model];
+    if (options?.effort) args.push("--effort", options.effort);
+    if (prompt) args.push(prompt);
+    return args;
+  },
+
+  parseStreamLine(line: string): ParsedStreamEvent[] {
+    return parseGrokStreamLine(line);
   },
 });
