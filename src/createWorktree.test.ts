@@ -1238,6 +1238,50 @@ describe("worktree.createSandbox()", () => {
     }
   });
 
+  it("rejects and closes the provider when an onSandboxReady hook exits non-zero", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-sandbox-hook-failure-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const ws = await createWorktree({
+      branchStrategy: { type: "branch", branch: "ws-failing-hook" },
+      cwd: hostDir,
+    });
+    let closeCallCount = 0;
+    const provider = createBindMountSandboxProvider({
+      name: "failing-hook",
+      create: async (options) => ({
+        worktreePath: options.worktreePath,
+        exec: async (command) =>
+          command === "fail-setup"
+            ? { stdout: "", stderr: "setup failed", exitCode: 7 }
+            : { stdout: "", stderr: "", exitCode: 0 },
+        copyFileIn: async () => {},
+        copyFileOut: async () => {},
+        close: async () => {
+          closeCallCount++;
+        },
+      }),
+    });
+
+    try {
+      await expect(
+        ws.createSandbox({
+          sandbox: provider,
+          hooks: {
+            sandbox: { onSandboxReady: [{ command: "fail-setup" }] },
+          },
+        }),
+      ).rejects.toThrow("Command failed (exit 7): fail-setup\nsetup failed");
+
+      expect(closeCallCount).toBe(1);
+      expect(existsSync(ws.worktreePath)).toBe(true);
+    } finally {
+      await ws.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
   it("ws.close() cleans up worktree after sandbox.close()", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "ws-sandbox-"));
     await initRepo(hostDir);
