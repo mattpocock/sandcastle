@@ -8,8 +8,9 @@
  * its own transfer function.
  */
 
+import { createHash } from "node:crypto";
 import { access, readdir } from "node:fs/promises";
-import { join, posix, relative } from "node:path";
+import { basename, join, posix, relative } from "node:path";
 import type { BindMountSandboxHandle } from "./SandboxProvider.js";
 
 // ---------------------------------------------------------------------------
@@ -427,14 +428,54 @@ export const transferPiSession = (
 // Grok Build session paths and transfer
 // ---------------------------------------------------------------------------
 
+/** Max bytes for a single directory name (APFS / ext4 / NTFS NAME_MAX). */
+const GROK_MAX_DIRNAME_BYTES = 255;
+
+/**
+ * Grok's `slugify`: lowercase, non-alphanumeric → `-`, collapse dashes,
+ * truncate to `maxLen` characters.
+ */
+const slugifyGrok = (input: string, maxLen: number): string => {
+  let result = "";
+  let prevDash = false;
+  for (const c of input.toLowerCase()) {
+    if ((c >= "a" && c <= "z") || (c >= "0" && c <= "9")) {
+      result += c;
+      prevDash = false;
+    } else if (!prevDash) {
+      result += "-";
+      prevDash = true;
+    }
+  }
+  const trimmed = result.replace(/^-+|-+$/g, "");
+  return Array.from(trimmed).slice(0, maxLen).join("");
+};
+
 /**
  * Encode a cwd into Grok Build's `~/.grok/sessions/<encoded>/` layout.
- * Grok URL-encodes the working directory. Paths longer than 255 bytes use a
- * slug-plus-hash group and a `.cwd` file; callers that only have the cwd
- * still use this encoder, and `findGrokSessionOnHost` scans every group.
+ *
+ * Short cwds (URL-encoded form ≤ 255 bytes) use `encodeURIComponent`, matching
+ * Grok's `urlencoding::encode` for typical Unix paths. Longer cwds use
+ * `{slug}-{hash16}` so the dirname stays inside NAME_MAX. Grok's hash is
+ * blake3; we use sha256 to avoid a new runtime dependency. Capture writes a
+ * `.cwd` file in the group so the original path is recoverable, and
+ * `findGrokSessionOnHost` scans every group.
  */
-export const encodeGrokSessionDir = (cwd: string): string =>
-  encodeURIComponent(cwd);
+export const encodeGrokSessionDir = (cwd: string): string => {
+  const urlEncoded = encodeURIComponent(cwd);
+  if (Buffer.byteLength(urlEncoded) <= GROK_MAX_DIRNAME_BYTES) {
+    return urlEncoded;
+  }
+  const hash16 = createHash("sha256").update(cwd).digest("hex").slice(0, 16);
+  const normalized = cwd.replace(/[\\/]+$/, "") || cwd;
+  const leaf = basename(normalized) || "workspace";
+  const slug = slugifyGrok(leaf, 40) || "workspace";
+  return `${slug}-${hash16}`;
+};
+
+/** True when Grok would store this cwd under a hashed group (not URL-encoded). */
+export const grokSessionDirIsHashed = (cwd: string): boolean =>
+  encodeGrokSessionDir(cwd) !== encodeURIComponent(cwd);
 
 const grokSessionsRoot = (sessionsDir?: string): string =>
   sessionsDir ?? join(process.env.HOME ?? "~", ".grok", "sessions");
@@ -444,14 +485,21 @@ export const grokHostSessionPath = (
   cwd: string,
   id: string,
   sessionsDir?: string,
-): string => join(grokSessionsRoot(sessionsDir), encodeGrokSessionDir(cwd), id, "updates.jsonl");
+): string =>
+  join(
+    grokSessionsRoot(sessionsDir),
+    encodeGrokSessionDir(cwd),
+    id,
+    "updates.jsonl",
+  );
 
 /** Sandbox-side path to a Grok session's `updates.jsonl` (POSIX separators). */
 export const grokSandboxSessionPath = (
   cwd: string,
   id: string,
   sessionsDir: string,
-): string => posix.join(sessionsDir, encodeGrokSessionDir(cwd), id, "updates.jsonl");
+): string =>
+  posix.join(sessionsDir, encodeGrokSessionDir(cwd), id, "updates.jsonl");
 
 const grokSessionUpdatesPath = async (
   rootDir: string,
@@ -554,4 +602,36 @@ export const transferGrokSession = (
       }
     })
     .join("\n");
+};
+
+/**
+ * Rewrite cwd fields in a Grok `summary.json` object. Resume loads this file
+ * first (`read_summary_sync`); transferring only `updates.jsonl` is not enough.
+ * Pure function — no file I/O.
+ */
+export const transferGrokSummary = (
+  raw: string,
+  fromCwd: string,
+  toCwd: string,
+): string => {
+  if (raw === "") return raw;
+  try {
+    const entry = JSON.parse(raw) as Record<string, unknown>;
+    let changed = false;
+    if (typeof entry.cwd === "string" && entry.cwd === fromCwd) {
+      entry.cwd = toCwd;
+      changed = true;
+    }
+    const info = entry.info;
+    if (info && typeof info === "object") {
+      const i = info as Record<string, unknown>;
+      if (typeof i.cwd === "string" && i.cwd === fromCwd) {
+        i.cwd = toCwd;
+        changed = true;
+      }
+    }
+    return changed ? JSON.stringify(entry, null, 2) : raw;
+  } catch {
+    return raw;
+  }
 };

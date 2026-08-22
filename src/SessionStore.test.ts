@@ -16,6 +16,7 @@ import {
   transferClaudeSession,
   transferCodexSession,
   transferGrokSession,
+  transferGrokSummary,
   transferPiSession,
 } from "./SessionStore.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -407,6 +408,14 @@ describe("encodeGrokSessionDir", () => {
       "%2FUsers%2Fhunter%2Fcode%2Fprojects",
     );
   });
+
+  it("falls back to a short slug-hash dirname when URL-encoding exceeds 255 bytes", () => {
+    const longCwd = `/Users/test/${"中".repeat(30)}`;
+    const encoded = encodeGrokSessionDir(longCwd);
+    expect(Buffer.byteLength(encoded)).toBeLessThanOrEqual(255);
+    expect(encoded.startsWith("%2F")).toBe(false);
+    expect(encoded).toMatch(/^[a-z0-9-]+-[0-9a-f]{16}$/);
+  });
 });
 
 describe("transferGrokSession", () => {
@@ -416,13 +425,33 @@ describe("transferGrokSession", () => {
       JSON.stringify({ payload: { cwd: "/sandbox/repo" }, type: "update" }),
     ].join("\n");
     const out = transferGrokSession(jsonl, "/sandbox/repo", "/host/repo");
-    const lines = out.split("\n").map((l) => JSON.parse(l) as Record<string, unknown>);
+    const lines = out
+      .split("\n")
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
     expect(lines[0]?.cwd).toBe("/host/repo");
     expect((lines[1]?.payload as { cwd: string }).cwd).toBe("/host/repo");
   });
 
   it("handles empty JSONL", () => {
     expect(transferGrokSession("", "/a", "/b")).toBe("");
+  });
+});
+
+describe("transferGrokSummary", () => {
+  it("rewrites info.cwd", () => {
+    const raw = JSON.stringify(
+      { info: { id: "abc", cwd: "/sandbox/repo" }, session_summary: "hi" },
+      null,
+      2,
+    );
+    const out = JSON.parse(
+      transferGrokSummary(raw, "/sandbox/repo", "/host/repo"),
+    ) as { info: { cwd: string } };
+    expect(out.info.cwd).toBe("/host/repo");
+  });
+
+  it("handles empty input", () => {
+    expect(transferGrokSummary("", "/a", "/b")).toBe("");
   });
 });
 

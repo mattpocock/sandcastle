@@ -46,6 +46,7 @@ export {
   grokHostSessionPath,
   grokSandboxSessionPath,
   transferGrokSession,
+  transferGrokSummary,
 } from "./SessionStore.js";
 export type { HostSessionLookup } from "./SessionStore.js";
 export type { SandboxHooks } from "./SandboxLifecycle.js";

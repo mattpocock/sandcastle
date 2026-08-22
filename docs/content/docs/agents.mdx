@@ -19,15 +19,15 @@ The default agent provider. Uses Claude Code as the AI coding agent inside the s
 
 Required environment variables (one of):
 
-| Variable | Description |
-| --- | --- |
+| Variable                  | Description                                                                                                                                        |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code OAuth token — get one by running `claude setup-token` on your host. Lets the agent use your Claude subscription instead of an API key. |
-| `ANTHROPIC_API_KEY` | Anthropic API key (alternative to `CLAUDE_CODE_OAUTH_TOKEN`) |
+| `ANTHROPIC_API_KEY`       | Anthropic API key (alternative to `CLAUDE_CODE_OAUTH_TOKEN`)                                                                                       |
 
 Plus:
 
-| Variable | Description |
-| --- | --- |
+| Variable   | Description                  |
+| ---------- | ---------------------------- |
 | `GH_TOKEN` | GitHub personal access token |
 
 ### OpenCode
@@ -36,8 +36,8 @@ Uses OpenCode as the AI coding agent. Sandcastle runs it with `--format json` an
 
 Required environment variables:
 
-| Variable | Description |
-| --- | --- |
+| Variable   | Description                  |
+| ---------- | ---------------------------- |
 | `GH_TOKEN` | GitHub personal access token |
 
 ### Grok Build
@@ -46,8 +46,8 @@ Uses the Grok Build CLI (`grok`) as the AI coding agent. Sandcastle runs it head
 
 Required environment variables:
 
-| Variable | Description |
-| --- | --- |
+| Variable      | Description                                                                                                                                     |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | `XAI_API_KEY` | xAI API key for headless Grok Build (the documented CI path). Super Grok TUI login in `~/.grok/auth.json` is not copied into the sandbox image. |
 
 ```ts

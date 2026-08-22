@@ -1,6 +1,6 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, posix } from "node:path";
+import { dirname, join, posix } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   claudeCode,
@@ -1998,13 +1998,34 @@ describe("grok factory", () => {
     expect(command).toContain("--fork-session");
   });
 
+  it("buildInteractiveArgs includes binary, model and prompt", () => {
+    const provider = grok("grok-4.6", { effort: "high" });
+    const args = provider.buildInteractiveArgs!(opts("do something"));
+    expect(args).toEqual([
+      "grok",
+      "--model",
+      "grok-4.6",
+      "--effort",
+      "high",
+      "do something",
+    ]);
+  });
+
+  it("buildInteractiveArgs omits prompt when empty", () => {
+    const provider = grok("grok-4.6");
+    const args = provider.buildInteractiveArgs!(opts(""));
+    expect(args).toEqual(["grok", "--model", "grok-4.6"]);
+    expect(args).not.toContain("");
+  });
+
   it("parseStreamLine extracts text, tool_call, session_id, and usage", () => {
     const provider = grok("grok-4.6");
     expect(
-      provider.parseStreamLine(
-        JSON.stringify({ type: "text", data: "hello" }),
-      ),
-    ).toEqual([{ type: "text", text: "hello" }]);
+      provider.parseStreamLine(JSON.stringify({ type: "text", data: "hello" })),
+    ).toEqual([
+      { type: "text", text: "hello" },
+      { type: "result", result: "hello" },
+    ]);
     expect(
       provider.parseStreamLine(
         JSON.stringify({
@@ -2156,6 +2177,10 @@ describe("parseSessionUsage (Claude Code)", () => {
   it("is not defined on cursor provider", () => {
     expect(cursor("model").parseSessionUsage).toBeUndefined();
   });
+
+  it("is not defined on grok provider", () => {
+    expect(grok("model").parseSessionUsage).toBeUndefined();
+  });
 });
 
 describe("captureSessions flag", () => {
@@ -2195,6 +2220,16 @@ describe("captureSessions flag", () => {
 
   it("cursor has captureSessions false", () => {
     expect(cursor("cursor-model").captureSessions).toBe(false);
+  });
+
+  it("grok defaults captureSessions to true", () => {
+    expect(grok("grok-4.6").captureSessions).toBe(true);
+  });
+
+  it("grok allows opting out of captureSessions", () => {
+    expect(grok("grok-4.6", { captureSessions: false }).captureSessions).toBe(
+      false,
+    );
   });
 });
 
@@ -2672,6 +2707,133 @@ describe("sessionStorage", () => {
       // siblings and the main session must not produce warnings of their own.
       expect(errors).toHaveLength(1);
       expect(errors[0]).toContain("agent-bad.jsonl");
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it("grok captureToHost transfers updates.jsonl and summary.json with cwd rewritten", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-grok-host-"));
+    const sandboxDir = await mkdtemp(join(tmpdir(), "sandcastle-grok-sbx-"));
+    try {
+      const id = "01a027f2-fa63-7e02-a9eb-d0c186a1261b";
+      const sandboxCwd = "/sandbox/repo";
+      const hostCwd = "/host/repo";
+      const sandboxGroup = encodeURIComponent(sandboxCwd);
+      const sandboxSessionDir = join(sandboxDir, sandboxGroup, id);
+      await mkdir(sandboxSessionDir, { recursive: true });
+      await writeFile(
+        join(sandboxSessionDir, "updates.jsonl"),
+        [
+          JSON.stringify({ cwd: sandboxCwd, type: "session" }),
+          JSON.stringify({ payload: { cwd: sandboxCwd }, type: "update" }),
+        ].join("\n"),
+      );
+      await writeFile(
+        join(sandboxSessionDir, "summary.json"),
+        JSON.stringify(
+          {
+            info: { id, cwd: sandboxCwd },
+            session_summary: "captured",
+          },
+          null,
+          2,
+        ),
+      );
+
+      const provider = grok("grok-4.6", {
+        sessionStorage: {
+          hostSessionsDir: hostDir,
+          sandboxSessionsDir: sandboxDir,
+        },
+      });
+
+      await provider.sessionStorage!.captureToHost({
+        hostCwd,
+        sandboxCwd,
+        sessionId: id,
+        handle: fsBindMountHandle(),
+      });
+
+      const hostUpdates = join(
+        hostDir,
+        encodeURIComponent(hostCwd),
+        id,
+        "updates.jsonl",
+      );
+      const updates = (await readFile(hostUpdates, "utf-8"))
+        .split("\n")
+        .map((l) => JSON.parse(l) as Record<string, unknown>);
+      expect(updates[0]?.cwd).toBe(hostCwd);
+      expect((updates[1]?.payload as { cwd: string }).cwd).toBe(hostCwd);
+
+      const hostSummary = JSON.parse(
+        await readFile(join(dirname(hostUpdates), "summary.json"), "utf-8"),
+      ) as { info: { cwd: string } };
+      expect(hostSummary.info.cwd).toBe(hostCwd);
+
+      expect(await provider.sessionStorage!.existsOnHost(hostCwd, id)).toBe(
+        true,
+      );
+      expect(provider.sessionStorage!.hostSessionFilePath(hostCwd, id)).toBe(
+        hostUpdates,
+      );
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it("grok resumeIntoSandbox transfers updates.jsonl and summary.json with cwd rewritten", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-grok-res-host-"));
+    const sandboxDir = await mkdtemp(
+      join(tmpdir(), "sandcastle-grok-res-sbx-"),
+    );
+    try {
+      const id = "01a027f2-fa63-7e02-a9eb-d0c186a1261b";
+      const hostCwd = "/host/repo";
+      const sandboxCwd = "/sandbox/repo";
+      const hostSessionDir = join(hostDir, encodeURIComponent(hostCwd), id);
+      await mkdir(hostSessionDir, { recursive: true });
+      await writeFile(
+        join(hostSessionDir, "updates.jsonl"),
+        JSON.stringify({ cwd: hostCwd, type: "session" }),
+      );
+      await writeFile(
+        join(hostSessionDir, "summary.json"),
+        JSON.stringify({ info: { id, cwd: hostCwd } }, null, 2),
+      );
+
+      const provider = grok("grok-4.6", {
+        sessionStorage: {
+          hostSessionsDir: hostDir,
+          sandboxSessionsDir: sandboxDir,
+        },
+      });
+
+      await provider.sessionStorage!.resumeIntoSandbox({
+        hostCwd,
+        sandboxCwd,
+        sessionId: id,
+        handle: fsBindMountHandle(),
+      });
+
+      const sandboxUpdates = join(
+        sandboxDir,
+        encodeURIComponent(sandboxCwd),
+        id,
+        "updates.jsonl",
+      );
+      const update = JSON.parse(await readFile(sandboxUpdates, "utf-8")) as {
+        cwd: string;
+      };
+      expect(update.cwd).toBe(sandboxCwd);
+
+      const sandboxSummary = JSON.parse(
+        await readFile(join(dirname(sandboxUpdates), "summary.json"), "utf-8"),
+      ) as { info: { cwd: string } };
+      expect(sandboxSummary.info.cwd).toBe(sandboxCwd);
     } finally {
       await rm(hostDir, { recursive: true, force: true });
       await rm(sandboxDir, { recursive: true, force: true });

@@ -12,6 +12,7 @@ import {
   findPiSessionOnHost,
   grokHostSessionPath,
   grokSandboxSessionPath,
+  grokSessionDirIsHashed,
   locateGrokHostSession,
   locateGrokSandboxSession,
   listClaudeSubagentSessionsInSandbox,
@@ -23,6 +24,7 @@ import {
   transferClaudeSession,
   transferCodexSession,
   transferGrokSession,
+  transferGrokSummary,
   transferPiSession,
   type HostSessionLookup,
 } from "./SessionStore.js";
@@ -1279,7 +1281,10 @@ export const claudeCode = (
 const parseGrokUsage = (usage: unknown): IterationUsage | undefined => {
   if (typeof usage !== "object" || usage === null) return undefined;
   const u = usage as Record<string, unknown>;
-  if (typeof u.input_tokens !== "number" || typeof u.output_tokens !== "number") {
+  if (
+    typeof u.input_tokens !== "number" ||
+    typeof u.output_tokens !== "number"
+  ) {
     return undefined;
   }
   return {
@@ -1312,7 +1317,12 @@ const parseGrokStreamLine = (line: string): ParsedStreamEvent[] => {
     const obj = JSON.parse(line) as Record<string, unknown>;
 
     if (obj.type === "text" && typeof obj.data === "string") {
-      return [{ type: "text", text: obj.data }];
+      // Same pattern as OpenCode/Codex: live display uses `text`; the
+      // orchestrator keeps the last `result` as the iteration output.
+      return [
+        { type: "text", text: obj.data },
+        { type: "result", result: obj.data },
+      ];
     }
 
     if (obj.type === "tool_call") {
@@ -1326,7 +1336,7 @@ const parseGrokStreamLine = (line: string): ParsedStreamEvent[] => {
           ? (obj.rawInput as Record<string, unknown>)
           : undefined;
       if (argField === undefined || !rawInput) return [];
-      const argValue = rawInput[argField] ?? rawInput.command ?? rawInput.cmd;
+      const argValue = rawInput[argField];
       if (typeof argValue !== "string") return [];
       return [{ type: "tool_call", name: mappedName, args: argValue }];
     }
@@ -1385,6 +1395,28 @@ const makeGrokSessionStorage = (options?: GrokOptions): AgentSessionStorage => {
       const target = grokHostSessionPath(hostCwd, sessionId, hostSessionsDir);
       await mkdir(dirname(target), { recursive: true });
       await writeFile(target, rewritten);
+
+      // Resume loads summary.json first (hard error if missing). Transfer it
+      // alongside updates.jsonl and rewrite Info.cwd.
+      const sandboxSummary = posix.join(
+        posix.dirname(located.path),
+        "summary.json",
+      );
+      const summaryRaw = await readSandboxFile(
+        handle,
+        sandboxSummary,
+        "grok-sum",
+      );
+      const rewrittenSummary = transferGrokSummary(
+        summaryRaw,
+        sandboxCwd,
+        hostCwd,
+      );
+      await writeFile(join(dirname(target), "summary.json"), rewrittenSummary);
+
+      if (grokSessionDirIsHashed(hostCwd)) {
+        await writeFile(join(dirname(dirname(target)), ".cwd"), hostCwd);
+      }
     },
     resumeIntoSandbox: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
       const located = await locateGrokHostSession(sessionId, hostSessionsDir);
@@ -1396,6 +1428,20 @@ const makeGrokSessionStorage = (options?: GrokOptions): AgentSessionStorage => {
         sandboxSessionsDir,
       );
       await writeSandboxFile(handle, target, rewritten, "grok-res");
+
+      const hostSummary = join(dirname(located.path), "summary.json");
+      const summaryRaw = await readFile(hostSummary, "utf-8");
+      const rewrittenSummary = transferGrokSummary(
+        summaryRaw,
+        hostCwd,
+        sandboxCwd,
+      );
+      await writeSandboxFile(
+        handle,
+        posix.join(posix.dirname(target), "summary.json"),
+        rewrittenSummary,
+        "grok-sum-res",
+      );
     },
     findByIdOnHost: (id) => findGrokSessionOnHost(id, hostSessionsDir),
   };
@@ -1442,9 +1488,7 @@ export const grok = (
       ? ` --effort ${shellEscape(options.effort)}`
       : "";
     const approveFlag = dangerouslySkipPermissions ? " --always-approve" : "";
-    const resumeFlag = resumeSession
-      ? ` -r ${shellEscape(resumeSession)}`
-      : "";
+    const resumeFlag = resumeSession ? ` -r ${shellEscape(resumeSession)}` : "";
     const forkFlag = resumeSession && forkSession ? " --fork-session" : "";
     return {
       command: `grok --no-auto-update --output-format streaming-json -m ${shellEscape(model)}${effortFlag}${approveFlag}${resumeFlag}${forkFlag} --prompt-file /dev/stdin`,
