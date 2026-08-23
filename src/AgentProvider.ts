@@ -787,24 +787,30 @@ export const codex = (
     const effortFlag = options?.effort
       ? ` -c ${shellEscape(`model_reasoning_effort="${options.effort}"`)}`
       : "";
+    // `-a` is a top-level Codex option, and resumed/forked exec commands do not
+    // accept `-s`, so both must precede the `exec` subcommand.
+    const codexCommand =
+      options?.approvalsReviewer === "auto_review"
+        ? "codex -a on-request -s danger-full-access"
+        : "codex";
     // auto_review only fires on interactive approvals, so the bypass flag is
-    // dropped in favour of `-a on-request`. `-s danger-full-access` disables
-    // Codex's own filesystem sandbox — Sandcastle owns that boundary, and
-    // here the reviewer agent owns the per-action approval boundary.
+    // dropped. `-s danger-full-access` disables Codex's own filesystem sandbox
+    // — Sandcastle owns that boundary, and here the reviewer agent owns the
+    // per-action approval boundary.
     const approvalsFlags =
       options?.approvalsReviewer === "auto_review"
-        ? ` -a on-request -s danger-full-access -c ${shellEscape(`approvals_reviewer="auto_review"`)}`
+        ? ` -c ${shellEscape(`approvals_reviewer="auto_review"`)}`
         : " --dangerously-bypass-approvals-and-sandbox";
     // Codex distinguishes fork from resume at the verb level — `codex exec
     // fork <id>` leaves the parent rollout intact; `codex exec resume <id>`
     // appends to it. See ADR 0018.
     let base: string;
     if (resumeSession && forkSession) {
-      base = `codex exec fork ${shellEscape(resumeSession)}`;
+      base = `${codexCommand} exec fork ${shellEscape(resumeSession)}`;
     } else if (resumeSession) {
-      base = `codex exec resume ${shellEscape(resumeSession)}`;
+      base = `${codexCommand} exec resume ${shellEscape(resumeSession)}`;
     } else {
-      base = "codex exec";
+      base = `${codexCommand} exec`;
     }
     const stdinArg = resumeSession ? " -" : "";
     return {

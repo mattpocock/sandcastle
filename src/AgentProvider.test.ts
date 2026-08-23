@@ -776,15 +776,41 @@ describe("codex factory", () => {
     expect(command).not.toContain("--dangerously-bypass-approvals-and-sandbox");
   });
 
-  it("buildPrintCommand emits -a on-request and -s danger-full-access when approvalsReviewer is 'auto_review'", () => {
+  it("buildPrintCommand places the auto-review approval policy before fresh, resume, and fork exec commands", () => {
     // Approvals must be interactive for the reviewer to have anything to evaluate;
     // codex's own filesystem sandbox is disabled because the safety boundary is the reviewer.
     const provider = codex("gpt-5.4-mini", {
       approvalsReviewer: "auto_review",
     });
-    const { command } = provider.buildPrintCommand(opts("test"));
-    expect(command).toContain("-a on-request");
-    expect(command).toContain("-s danger-full-access");
+    const cases = [
+      {
+        options: opts("test"),
+        expectedPrefix:
+          "codex -a on-request -s danger-full-access exec --json ",
+      },
+      {
+        options: {
+          ...opts("continue"),
+          resumeSession: "abc-123",
+        },
+        expectedPrefix:
+          "codex -a on-request -s danger-full-access exec resume 'abc-123' --json ",
+      },
+      {
+        options: {
+          ...opts("branch off"),
+          resumeSession: "abc-123",
+          forkSession: true,
+        },
+        expectedPrefix:
+          "codex -a on-request -s danger-full-access exec fork 'abc-123' --json ",
+      },
+    ];
+
+    for (const { options, expectedPrefix } of cases) {
+      const { command } = provider.buildPrintCommand(options);
+      expect(command.startsWith(expectedPrefix)).toBe(true);
+    }
   });
 
   it("buildPrintCommand keeps --dangerously-bypass-approvals-and-sandbox when approvalsReviewer is unset", () => {
