@@ -164,34 +164,71 @@ describe("WorktreeManager.create", () => {
 
   it("creates a worktree at .sandcastle/worktrees/<name>/", async () => {
     const repoDir = await setupRepo();
-    const { path } = await run(create(repoDir));
+    const { path } = await run(create(repoDir, join(repoDir, ".sandcastle")));
     expect(path).toContain(join(repoDir, ".sandcastle", "worktrees"));
     const s = await stat(path);
     expect(s.isDirectory()).toBe(true);
   });
 
+  it("creates the worktree under a custom stateDir", async () => {
+    const repoDir = await setupRepo();
+    const { path } = await run(create(repoDir, join(repoDir, ".mytool.local")));
+    expect(path).toContain(join(repoDir, ".mytool.local", "worktrees"));
+    expect(path).not.toContain(join(repoDir, ".sandcastle"));
+    const s = await stat(path);
+    expect(s.isDirectory()).toBe(true);
+  });
+
+  // Regression: remove() must resolve the repo dir from git, not by walking a
+  // fixed number of levels up — a nested (or absolute) stateDir changes the
+  // worktree's depth below the repo.
+  it("removes a worktree created under a nested stateDir", async () => {
+    const repoDir = await setupRepo();
+    const { path } = await run(
+      create(repoDir, join(repoDir, "nested/state/dir")),
+    );
+    expect(path).toContain(
+      join(repoDir, "nested", "state", "dir", "worktrees"),
+    );
+    await run(remove(path));
+    await expect(stat(path)).rejects.toThrow(/ENOENT/u);
+  });
+
+  it("removes a worktree created under an absolute stateDir", async () => {
+    const repoDir = await setupRepo();
+    const absState = await mkdtemp(join(tmpdir(), "wt-abs-state-"));
+    const { path } = await run(create(repoDir, absState));
+    expect(path).toContain(join(absState, "worktrees"));
+    await run(remove(path));
+    await expect(stat(path)).rejects.toThrow(/ENOENT/u);
+  });
+
   it("returns the branch name", async () => {
     const repoDir = await setupRepo();
-    const { branch } = await run(create(repoDir));
+    const { branch } = await run(create(repoDir, join(repoDir, ".sandcastle")));
     expect(branch).toBeTypeOf("string");
     expect(branch.length).toBeGreaterThan(0);
   });
 
   it("creates a sandcastle/<timestamp>-<random> branch when no branch is specified", async () => {
     const repoDir = await setupRepo();
-    const { branch } = await run(create(repoDir));
+    const { branch } = await run(create(repoDir, join(repoDir, ".sandcastle")));
     expect(branch).toMatch(/^sandcastle\/\d{8}-\d{6}-[0-9a-f]{6}$/u);
   });
 
   it("includes name in branch when name is specified", async () => {
     const repoDir = await setupRepo();
-    const { branch } = await run(create(repoDir, { name: "my-run" }));
+    const { branch } = await run(
+      create(repoDir, join(repoDir, ".sandcastle"), { name: "my-run" }),
+    );
     expect(branch).toMatch(/^sandcastle\/my-run\/\d{8}-\d{6}-[0-9a-f]{6}$/u);
   });
 
   it("includes name in worktree directory when name is specified", async () => {
     const repoDir = await setupRepo();
-    const { path } = await run(create(repoDir, { name: "my-run" }));
+    const { path } = await run(
+      create(repoDir, join(repoDir, ".sandcastle"), { name: "my-run" }),
+    );
     expect(path).toMatch(/sandcastle-my-run-\d{8}-\d{6}-[0-9a-f]{6}$/u);
   });
 
@@ -203,7 +240,9 @@ describe("WorktreeManager.create", () => {
     await execAsync("git checkout main", { cwd: repoDir });
 
     const { path, branch } = await run(
-      create(repoDir, { branch: "feature/my-feature" }),
+      create(repoDir, join(repoDir, ".sandcastle"), {
+        branch: "feature/my-feature",
+      }),
     );
     expect(branch).toBe("feature/my-feature");
     await expect(getBranch(path)).resolves.toBe("feature/my-feature");
@@ -211,7 +250,7 @@ describe("WorktreeManager.create", () => {
 
   it("the worktree directory is on the correct branch", async () => {
     const repoDir = await setupRepo();
-    const { path } = await run(create(repoDir));
+    const { path } = await run(create(repoDir, join(repoDir, ".sandcastle")));
     // The worktree should have a valid git repo
     const { stdout } = await execAsync("git rev-parse --abbrev-ref HEAD", {
       cwd: path,
@@ -225,9 +264,13 @@ describe("WorktreeManager.create", () => {
     await commitFile(repoDir, "x.txt", "x", "branch commit");
     await execAsync("git checkout main", { cwd: repoDir });
 
-    const first = await run(create(repoDir, { branch: "my-branch" }));
+    const first = await run(
+      create(repoDir, join(repoDir, ".sandcastle"), { branch: "my-branch" }),
+    );
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    const second = await run(create(repoDir, { branch: "my-branch" }));
+    const second = await run(
+      create(repoDir, join(repoDir, ".sandcastle"), { branch: "my-branch" }),
+    );
 
     expect(second.path).toBe(first.path);
     expect(second.branch).toBe("my-branch");
@@ -247,13 +290,17 @@ describe("WorktreeManager.create", () => {
     await commitFile(repoDir, "x.txt", "x", "branch commit");
     await execAsync("git checkout main", { cwd: repoDir });
 
-    const first = await run(create(repoDir, { branch: "my-branch" }));
+    const first = await run(
+      create(repoDir, join(repoDir, ".sandcastle"), { branch: "my-branch" }),
+    );
 
     // Make the worktree dirty
     await writeFile(join(first.path, "dirty.txt"), "uncommitted");
 
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const second = await run(create(repoDir, { branch: "my-branch" }));
+    const second = await run(
+      create(repoDir, join(repoDir, ".sandcastle"), { branch: "my-branch" }),
+    );
 
     expect(second.path).toBe(first.path);
     expect(second.branch).toBe("my-branch");
@@ -276,8 +323,12 @@ describe("WorktreeManager.create", () => {
     await execAsync("git checkout main", { cwd: repoDir });
 
     const [wtA, wtB] = await Promise.all([
-      run(create(repoDir, { branch: "branch-a" })),
-      run(create(repoDir, { branch: "branch-b" })),
+      run(
+        create(repoDir, join(repoDir, ".sandcastle"), { branch: "branch-a" }),
+      ),
+      run(
+        create(repoDir, join(repoDir, ".sandcastle"), { branch: "branch-b" }),
+      ),
     ]);
 
     expect(wtA.branch).toBe("branch-a");
@@ -291,7 +342,9 @@ describe("WorktreeManager.create", () => {
   it("creates a new branch from HEAD when specified branch does not exist", async () => {
     const repoDir = await setupRepo();
     const { path, branch } = await run(
-      create(repoDir, { branch: "sandcastle/issue-42-new-feature" }),
+      create(repoDir, join(repoDir, ".sandcastle"), {
+        branch: "sandcastle/issue-42-new-feature",
+      }),
     );
 
     expect(branch).toBe("sandcastle/issue-42-new-feature");
@@ -323,7 +376,7 @@ describe("WorktreeManager.create", () => {
     });
 
     const { path, branch } = await run(
-      create(repoDir, {
+      create(repoDir, join(repoDir, ".sandcastle"), {
         branch: "feature/from-base",
         baseBranch: baseSha.trim(),
       }),
@@ -360,7 +413,7 @@ describe("WorktreeManager.create", () => {
 
     // baseBranch should be ignored since existing-branch already exists
     const { path } = await run(
-      create(repoDir, {
+      create(repoDir, join(repoDir, ".sandcastle"), {
         branch: "existing-branch",
         baseBranch: mainHead.trim(),
       }),
@@ -382,7 +435,9 @@ describe("WorktreeManager.create", () => {
     await execAsync("git push -u origin my-branch", { cwd: repoDir });
     await execAsync("git checkout main", { cwd: repoDir });
 
-    const first = await run(create(repoDir, { branch: "my-branch" }));
+    const first = await run(
+      create(repoDir, join(repoDir, ".sandcastle"), { branch: "my-branch" }),
+    );
     const { stdout: initialSha } = await execAsync("git rev-parse HEAD", {
       cwd: first.path,
     });
@@ -391,7 +446,9 @@ describe("WorktreeManager.create", () => {
     await pushOrigin("my-branch", "new.txt", "new", "new origin commit");
 
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    const second = await run(create(repoDir, { branch: "my-branch" }));
+    const second = await run(
+      create(repoDir, join(repoDir, ".sandcastle"), { branch: "my-branch" }),
+    );
     expect(log).toHaveBeenCalledWith(
       expect.stringMatching(
         /^Fast-forwarded worktree at .* \(branch 'my-branch'\) to origin\/my-branch$/u,
@@ -420,7 +477,9 @@ describe("WorktreeManager.create", () => {
     await execAsync("git push -u origin my-branch", { cwd: repoDir });
     await execAsync("git checkout main", { cwd: repoDir });
 
-    const first = await run(create(repoDir, { branch: "my-branch" }));
+    const first = await run(
+      create(repoDir, join(repoDir, ".sandcastle"), { branch: "my-branch" }),
+    );
 
     // Add an unpushed commit in the worktree
     await commitFile(first.path, "local.txt", "local", "local-only commit");
@@ -432,7 +491,9 @@ describe("WorktreeManager.create", () => {
     await pushOrigin("my-branch", "remote.txt", "remote", "remote-only commit");
 
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    const second = await run(create(repoDir, { branch: "my-branch" }));
+    const second = await run(
+      create(repoDir, join(repoDir, ".sandcastle"), { branch: "my-branch" }),
+    );
     expect(log).toHaveBeenCalledWith(
       expect.stringMatching(
         /^Branch 'my-branch' has diverged from origin \(reusing worktree at .* as-is\)$/u,
@@ -460,7 +521,9 @@ describe("WorktreeManager.create", () => {
     await execAsync("git push -u origin my-branch", { cwd: repoDir });
     await execAsync("git checkout main", { cwd: repoDir });
 
-    const first = await run(create(repoDir, { branch: "my-branch" }));
+    const first = await run(
+      create(repoDir, join(repoDir, ".sandcastle"), { branch: "my-branch" }),
+    );
     const { stdout: initialSha } = await execAsync("git rev-parse HEAD", {
       cwd: first.path,
     });
@@ -472,7 +535,9 @@ describe("WorktreeManager.create", () => {
     // should be skipped so the uncommitted change isn't disturbed.
     await pushOrigin("my-branch", "new.txt", "new", "new origin commit");
 
-    const second = await run(create(repoDir, { branch: "my-branch" }));
+    const second = await run(
+      create(repoDir, join(repoDir, ".sandcastle"), { branch: "my-branch" }),
+    );
 
     expect(second.path).toBe(first.path);
     const { stdout: afterSha } = await execAsync("git rev-parse HEAD", {
@@ -493,13 +558,17 @@ describe("WorktreeManager.create", () => {
     await commitFile(repoDir, "x.txt", "x", "branch commit");
     await execAsync("git checkout main", { cwd: repoDir });
 
-    const first = await run(create(repoDir, { branch: "my-branch" }));
+    const first = await run(
+      create(repoDir, join(repoDir, ".sandcastle"), { branch: "my-branch" }),
+    );
     const { stdout: initialSha } = await execAsync("git rev-parse HEAD", {
       cwd: first.path,
     });
 
     // Reuse must not throw — the fetch failure is swallowed.
-    const second = await run(create(repoDir, { branch: "my-branch" }));
+    const second = await run(
+      create(repoDir, join(repoDir, ".sandcastle"), { branch: "my-branch" }),
+    );
 
     expect(second.path).toBe(first.path);
     const { stdout: afterSha } = await execAsync("git rev-parse HEAD", {
@@ -522,7 +591,9 @@ describe("WorktreeManager.create", () => {
     await execAsync("git push -u origin my-branch", { cwd: repoDir });
     await execAsync("git checkout main", { cwd: repoDir });
 
-    const first = await run(create(repoDir, { branch: "my-branch" }));
+    const first = await run(
+      create(repoDir, join(repoDir, ".sandcastle"), { branch: "my-branch" }),
+    );
 
     // Local commit; origin/my-branch stays put.
     await commitFile(first.path, "local.txt", "local", "local-only commit");
@@ -530,7 +601,9 @@ describe("WorktreeManager.create", () => {
       cwd: first.path,
     });
 
-    const second = await run(create(repoDir, { branch: "my-branch" }));
+    const second = await run(
+      create(repoDir, join(repoDir, ".sandcastle"), { branch: "my-branch" }),
+    );
 
     expect(second.path).toBe(first.path);
     const { stdout: afterSha } = await execAsync("git rev-parse HEAD", {
@@ -558,7 +631,9 @@ describe("WorktreeManager.create", () => {
     await execAsync("git push -u origin my-branch", { cwd: repoDir });
     await execAsync("git checkout main", { cwd: repoDir });
 
-    const first = await run(create(repoDir, { branch: "my-branch" }));
+    const first = await run(
+      create(repoDir, join(repoDir, ".sandcastle"), { branch: "my-branch" }),
+    );
 
     // Pause the rebase mid-way: `--exec false` runs `false` after each
     // cherry-pick, fails on the first one, and leaves HEAD detached with a
@@ -584,7 +659,9 @@ describe("WorktreeManager.create", () => {
     // Move origin forward so the buggy code would have something to ff to.
     await pushOrigin("my-branch", "new.txt", "new", "new origin commit");
 
-    const second = await run(create(repoDir, { branch: "my-branch" }));
+    const second = await run(
+      create(repoDir, join(repoDir, ".sandcastle"), { branch: "my-branch" }),
+    );
     expect(second.path).toBe(first.path);
 
     const { stdout: afterSha } = await execAsync("git rev-parse HEAD", {
@@ -611,12 +688,16 @@ describe("WorktreeManager.create", () => {
     await commitFile(repoDir, "x.txt", "x", "branch commit");
     await execAsync("git checkout main", { cwd: repoDir });
 
-    const first = await run(create(repoDir, { branch: "my-branch" }));
+    const first = await run(
+      create(repoDir, join(repoDir, ".sandcastle"), { branch: "my-branch" }),
+    );
 
     // Add a committed (but unpushed) change — should NOT count as dirty
     await commitFile(first.path, "extra.txt", "extra", "extra commit");
 
-    const second = await run(create(repoDir, { branch: "my-branch" }));
+    const second = await run(
+      create(repoDir, join(repoDir, ".sandcastle"), { branch: "my-branch" }),
+    );
 
     expect(second.path).toBe(first.path);
     expect(second.branch).toBe("my-branch");
@@ -646,7 +727,11 @@ describe("WorktreeManager.create", () => {
     );
 
     // Create the worktree for feat/rebase-test
-    const first = await run(create(repoDir, { branch: "feat/rebase-test" }));
+    const first = await run(
+      create(repoDir, join(repoDir, ".sandcastle"), {
+        branch: "feat/rebase-test",
+      }),
+    );
     expect(first.branch).toBe("feat/rebase-test");
 
     // Start a rebase inside the worktree that will conflict (detaches HEAD)
@@ -662,7 +747,11 @@ describe("WorktreeManager.create", () => {
     expect(headRef.trim()).toBe("HEAD"); // detached
 
     // Now try to create the worktree again — should reuse the existing one
-    const second = await run(create(repoDir, { branch: "feat/rebase-test" }));
+    const second = await run(
+      create(repoDir, join(repoDir, ".sandcastle"), {
+        branch: "feat/rebase-test",
+      }),
+    );
 
     expect(second.path).toBe(first.path);
     expect(second.branch).toBe("feat/rebase-test");
@@ -675,7 +764,9 @@ describe("WorktreeManager.create", () => {
   it("detects collision when branch is checked out in the main working tree", async () => {
     const repoDir = await setupRepo();
     // "main" is the currently checked-out branch in the main working tree
-    const err = await runFail(create(repoDir, { branch: "main" }));
+    const err = await runFail(
+      create(repoDir, join(repoDir, ".sandcastle"), { branch: "main" }),
+    );
     expect(err.message).toMatch(/already checked out/iu);
     // The error should explain why this happens (sandcastle uses worktrees,
     // git forbids the same branch in two worktrees) and what to do about it,
@@ -694,7 +785,9 @@ describe("WorktreeManager.create", () => {
     });
 
     const { path, branch } = await run(
-      create(repoDir, { branch: "sandcastle/no-tracking-test" }),
+      create(repoDir, join(repoDir, ".sandcastle"), {
+        branch: "sandcastle/no-tracking-test",
+      }),
     );
 
     // If -c branch.autoSetupMerge=false is working, the new branch should
@@ -716,7 +809,9 @@ describe("WorktreeManager.create", () => {
       cwd: repoDir,
     });
 
-    const { path, branch } = await run(create(repoDir));
+    const { path, branch } = await run(
+      create(repoDir, join(repoDir, ".sandcastle")),
+    );
 
     // The temp branch should also have no upstream tracking config
     const escapedBranch = branch
@@ -735,7 +830,7 @@ describe("WorktreeManager.create", () => {
 describe("WorktreeManager.remove", () => {
   it("removes the worktree directory", async () => {
     const repoDir = await setupRepo();
-    const { path } = await run(create(repoDir));
+    const { path } = await run(create(repoDir, join(repoDir, ".sandcastle")));
 
     await run(remove(path));
 
@@ -744,7 +839,7 @@ describe("WorktreeManager.remove", () => {
 
   it("removes git worktree metadata", async () => {
     const repoDir = await setupRepo();
-    const { path } = await run(create(repoDir));
+    const { path } = await run(create(repoDir, join(repoDir, ".sandcastle")));
 
     await run(remove(path));
 
@@ -759,14 +854,14 @@ describe("WorktreeManager.remove", () => {
 describe("WorktreeManager.pruneStale", () => {
   it("runs git worktree prune to clean up stale metadata", async () => {
     const repoDir = await setupRepo();
-    const { path } = await run(create(repoDir));
+    const { path } = await run(create(repoDir, join(repoDir, ".sandcastle")));
 
     // Manually delete the worktree directory (simulating a crash)
     const { execSync } = await import("node:child_process");
     execSync(`rm -rf "${path}"`);
 
     // pruneStale should not throw
-    await run(pruneStale(repoDir));
+    await run(pruneStale(repoDir, join(repoDir, ".sandcastle")));
 
     // Git metadata should be cleaned up
     const { stdout } = await execAsync("git worktree list --porcelain", {
@@ -784,7 +879,7 @@ describe("WorktreeManager.pruneStale", () => {
     const orphanDir = join(worktreesDir, "orphan-dir");
     await mkdir(orphanDir);
 
-    await run(pruneStale(repoDir));
+    await run(pruneStale(repoDir, join(repoDir, ".sandcastle")));
 
     const entries = await readdir(worktreesDir).catch(() => []);
     expect(entries).not.toContain("orphan-dir");
@@ -792,8 +887,8 @@ describe("WorktreeManager.pruneStale", () => {
 
   it("does not remove active worktrees", async () => {
     const repoDir = await setupRepo();
-    const { path } = await run(create(repoDir));
-    await run(pruneStale(repoDir));
+    const { path } = await run(create(repoDir, join(repoDir, ".sandcastle")));
+    await run(pruneStale(repoDir, join(repoDir, ".sandcastle")));
 
     const s = await stat(path);
     expect(s.isDirectory()).toBe(true);
@@ -810,9 +905,9 @@ describe("WorktreeManager.pruneStale", () => {
     const externalDir = await mkdtemp(join(tmpdir(), "wt-external-"));
     await symlink(externalDir, join(repoDir, ".sandcastle"));
 
-    const { path } = await run(create(repoDir));
+    const { path } = await run(create(repoDir, join(repoDir, ".sandcastle")));
 
-    await run(pruneStale(repoDir));
+    await run(pruneStale(repoDir, join(repoDir, ".sandcastle")));
 
     const s = await stat(path);
     expect(s.isDirectory()).toBe(true);
@@ -824,7 +919,7 @@ describe("WorktreeManager.pruneStale", () => {
 describe("WorktreeManager.hasUncommittedChanges", () => {
   it("returns false for a clean worktree", async () => {
     const repoDir = await setupRepo();
-    const { path } = await run(create(repoDir));
+    const { path } = await run(create(repoDir, join(repoDir, ".sandcastle")));
 
     const result = await run(hasUncommittedChanges(path));
     expect(result).toBe(false);
@@ -834,7 +929,7 @@ describe("WorktreeManager.hasUncommittedChanges", () => {
 
   it("returns true when there are unstaged modifications", async () => {
     const repoDir = await setupRepo();
-    const { path } = await run(create(repoDir));
+    const { path } = await run(create(repoDir, join(repoDir, ".sandcastle")));
 
     // Modify a tracked file without staging
     await writeFile(join(path, "hello.txt"), "modified content");
@@ -847,7 +942,7 @@ describe("WorktreeManager.hasUncommittedChanges", () => {
 
   it("returns true when there are staged changes", async () => {
     const repoDir = await setupRepo();
-    const { path } = await run(create(repoDir));
+    const { path } = await run(create(repoDir, join(repoDir, ".sandcastle")));
 
     // Stage a new file
     await writeFile(join(path, "new-file.txt"), "new content");
@@ -861,7 +956,7 @@ describe("WorktreeManager.hasUncommittedChanges", () => {
 
   it("returns true when there are untracked files", async () => {
     const repoDir = await setupRepo();
-    const { path } = await run(create(repoDir));
+    const { path } = await run(create(repoDir, join(repoDir, ".sandcastle")));
 
     // Add an untracked file
     await writeFile(join(path, "untracked.txt"), "untracked");

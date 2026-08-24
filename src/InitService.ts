@@ -1,6 +1,7 @@
 import { FileSystem } from "@effect/platform";
 import { Config, Effect, Option, Schema } from "effect";
 import { delimiter, dirname, join } from "node:path";
+import { DEFAULT_STATE_DIR } from "./resolveCwd.js";
 import { fileURLToPath } from "node:url";
 import { assertBwrapUsable } from "./bwrapPreflight.js";
 import { InitError } from "./errors.js";
@@ -1441,7 +1442,7 @@ export const scaffold = (
       imageName,
     } = options;
     const fs = yield* FileSystem.FileSystem;
-    const configDir = join(repoDir, ".sandcastle");
+    const configDir = join(repoDir, DEFAULT_STATE_DIR);
 
     const exists = yield* fs
       .exists(configDir)

@@ -190,6 +190,12 @@ export class SandboxConfig extends Context.Tag(
   {
     readonly env: Record<string, string>;
     readonly hostRepoDir: string;
+    /**
+     * Resolved absolute state directory for Sandcastle's gitignored runtime
+     * artifacts (`worktrees/`, `.env`, default `logs/`). Resolved once at the
+     * entry point via `resolveStateDir`; consumers use it directly.
+     */
+    readonly stateDir: string;
     /** Paths relative to the host repo root to copy into the worktree before sandbox start. */
     readonly copyToWorktree?: string[];
     /** When specified, the run name is included in the auto-generated branch and worktree names. */
@@ -373,6 +379,7 @@ export const WorktreeDockerSandboxFactory = {
       const {
         env,
         hostRepoDir,
+        stateDir,
         copyToWorktree: copyPaths,
         name,
         tempBranch,
@@ -402,7 +409,7 @@ export const WorktreeDockerSandboxFactory = {
 
       /** Prune stale worktrees (best-effort), then create a fresh one. */
       const pruneAndCreate = () =>
-        WorktreeManager.pruneStale(hostRepoDir).pipe(
+        WorktreeManager.pruneStale(hostRepoDir, stateDir).pipe(
           Effect.catchAll((e) =>
             Console.error(
               "[sandcastle] Warning: failed to prune stale worktrees:",
@@ -411,8 +418,14 @@ export const WorktreeDockerSandboxFactory = {
           ),
           Effect.andThen(
             branch !== undefined && branch !== ""
-              ? WorktreeManager.create(hostRepoDir, { branch, baseBranch })
-              : WorktreeManager.create(hostRepoDir, { name, tempBranch }),
+              ? WorktreeManager.create(hostRepoDir, stateDir, {
+                  branch,
+                  baseBranch,
+                })
+              : WorktreeManager.create(hostRepoDir, stateDir, {
+                  name,
+                  tempBranch,
+                }),
           ),
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           // A SIGINT/SIGTERM exits the process before the release below runs,

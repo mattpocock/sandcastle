@@ -26,6 +26,11 @@ import type {
 } from "./SandboxProvider.js";
 import type { CloseResult, Sandbox } from "./createSandbox.js";
 import { createSandboxFromWorktree } from "./createSandbox.js";
+import {
+  DEFAULT_STATE_DIR,
+  resolveCwd,
+  resolveStateDir,
+} from "./resolveCwd.js";
 import type { InteractiveResult } from "./interactive.js";
 import {
   buildAgentStreamHandler,
@@ -44,7 +49,6 @@ import { startSandbox } from "./startSandbox.js";
 import { syncOut } from "./syncOut.js";
 import * as WorktreeManager from "./WorktreeManager.js";
 import { copyToWorktree } from "./CopyToWorktree.js";
-import { resolveCwd } from "./resolveCwd.js";
 import { assertResumeSessionExists } from "./resumePrecheck.js";
 import {
   substitutePromptArgs,
@@ -74,6 +78,12 @@ export interface CreateWorktreeOptions {
    * - Defaults to `process.cwd()` when omitted.
    */
   readonly cwd?: string;
+  /**
+   * Directory for Sandcastle's gitignored runtime artifacts (`.env`,
+   * `worktrees/`, default `logs/`). Relative to `cwd`, or absolute.
+   * Defaults to `.sandcastle`.
+   */
+  readonly stateDir?: string;
   /** Paths relative to the host repo root to copy into the worktree at creation time. */
   readonly copyToWorktree?: string[];
   /** Lifecycle hooks grouped by execution location (host or sandbox).
@@ -230,30 +240,40 @@ export const createWorktree = async (
   // `keepSourceBranch: true` (so the worktree's source branch survives).
   const isMergeToHead = options.branchStrategy.type === "merge-to-head";
 
-  const { hostRepoDir, worktreeInfo } = await Effect.gen(function* () {
-    const repoDir = yield* resolveCwd(options.cwd);
-    yield* WorktreeManager.pruneStale(repoDir).pipe(
-      Effect.catchAll(() => Effect.void),
-    );
-    const info = yield* WorktreeManager.create(repoDir, {
-      branch,
-      baseBranch,
-    });
-    if (options.copyToWorktree && options.copyToWorktree.length > 0) {
-      yield* copyToWorktree(
-        options.copyToWorktree,
+  const { hostRepoDir, stateDir, worktreeInfo } = await Effect.gen(
+    function* () {
+      const repoDir = yield* resolveCwd(options.cwd);
+      const resolvedStateDir = resolveStateDir(
         repoDir,
-        info.path,
-        options.timeouts?.copyToWorktreeMs,
+        options.stateDir ?? DEFAULT_STATE_DIR,
       );
-    }
-    // Run host.onWorktreeReady hooks after copyToWorktree, before sandbox creation
-    const onWorktreeReady = options.hooks?.host?.onWorktreeReady;
-    if (onWorktreeReady !== undefined && onWorktreeReady.length > 0) {
-      yield* runHostHooks(onWorktreeReady, info.path);
-    }
-    return { hostRepoDir: repoDir, worktreeInfo: info };
-  }).pipe(Effect.provide(NodeContext.layer), Effect.runPromise);
+      yield* WorktreeManager.pruneStale(repoDir, resolvedStateDir).pipe(
+        Effect.catchAll(() => Effect.void),
+      );
+      const info = yield* WorktreeManager.create(repoDir, resolvedStateDir, {
+        branch,
+        baseBranch,
+      });
+      if (options.copyToWorktree && options.copyToWorktree.length > 0) {
+        yield* copyToWorktree(
+          options.copyToWorktree,
+          repoDir,
+          info.path,
+          options.timeouts?.copyToWorktreeMs,
+        );
+      }
+      // Run host.onWorktreeReady hooks after copyToWorktree, before sandbox creation
+      const onWorktreeReady = options.hooks?.host?.onWorktreeReady;
+      if (onWorktreeReady !== undefined && onWorktreeReady.length > 0) {
+        yield* runHostHooks(onWorktreeReady, info.path);
+      }
+      return {
+        hostRepoDir: repoDir,
+        stateDir: resolvedStateDir,
+        worktreeInfo: info,
+      };
+    },
+  ).pipe(Effect.provide(NodeContext.layer), Effect.runPromise);
 
   let closed = false;
 
@@ -320,7 +340,7 @@ export const createWorktree = async (
       const isInlinePrompt = resolved?.source === "inline";
 
       // 2. Resolve env vars
-      const resolvedEnv = yield* resolveEnv(hostRepoDir);
+      const resolvedEnv = yield* resolveEnv(stateDir);
       const env = mergeProviderEnv({
         resolvedEnv,
         agentProviderEnv: provider.env,
@@ -557,7 +577,7 @@ export const createWorktree = async (
       const isInlinePrompt = resolved.source === "inline";
 
       // 2. Resolve env vars
-      const resolvedEnv = yield* resolveEnv(hostRepoDir);
+      const resolvedEnv = yield* resolveEnv(stateDir);
       const env = mergeProviderEnv({
         resolvedEnv,
         agentProviderEnv: provider.env,
@@ -649,8 +669,7 @@ export const createWorktree = async (
       const resolvedLogging: LoggingOption = opts.logging ?? {
         type: "file",
         path: join(
-          hostRepoDir,
-          ".sandcastle",
+          stateDir,
           "logs",
           buildLogFilename(worktreeInfo.branch, undefined, opts.name),
         ),
@@ -786,6 +805,7 @@ export const createWorktree = async (
       branch: worktreeInfo.branch,
       worktreePath: worktreeInfo.path,
       hostRepoDir,
+      stateDir,
       sandbox: opts.sandbox,
       hooks: opts.hooks,
       // Isolated sandboxes sync in via git bundle, so the worktree's own
