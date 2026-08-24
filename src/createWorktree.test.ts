@@ -90,6 +90,31 @@ describe("createWorktree", () => {
     }
   });
 
+  it("places all worktree artifacts under a custom stateDir (end-to-end)", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-test-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const ws = await createWorktree({
+      branchStrategy: { type: "branch", branch: "test-branch" },
+      cwd: hostDir,
+      stateDir: ".myorch.local",
+    });
+
+    try {
+      expect(ws.worktreePath).toContain(
+        join(hostDir, ".myorch.local", "worktrees"),
+      );
+      expect(ws.worktreePath).not.toContain(join(hostDir, ".sandcastle"));
+      expect(existsSync(ws.worktreePath)).toBe(true);
+      // The default dir must not be created when overridden.
+      expect(existsSync(join(hostDir, ".sandcastle"))).toBe(false);
+    } finally {
+      await ws.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
   it("creates a worktree with baseBranch forking from specified ref", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "ws-test-"));
     await initRepo(hostDir);

@@ -4,7 +4,12 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import { resolveCwd, CwdError } from "./resolveCwd.js";
+import {
+  resolveCwd,
+  CwdError,
+  resolveStateDir,
+  DEFAULT_STATE_DIR,
+} from "./resolveCwd.js";
 
 describe("resolveCwd", () => {
   it("returns process.cwd() when input is undefined", async () => {
@@ -76,5 +81,24 @@ describe("resolveCwd", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("resolveStateDir", () => {
+  it("joins DEFAULT_STATE_DIR to the anchor", () => {
+    expect(resolveStateDir("/repo", DEFAULT_STATE_DIR)).toBe(
+      join("/repo", DEFAULT_STATE_DIR),
+    );
+    expect(DEFAULT_STATE_DIR).toBe(".sandcastle");
+  });
+
+  it("joins a relative stateDir to the anchor", () => {
+    expect(resolveStateDir("/repo", ".mytool.local")).toBe(
+      "/repo/.mytool.local",
+    );
+  });
+
+  it("uses an absolute stateDir verbatim, ignoring the anchor", () => {
+    expect(resolveStateDir("/repo", "/var/state/mine")).toBe("/var/state/mine");
   });
 });

@@ -3,7 +3,11 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import path, { join } from "node:path";
 import { styleText } from "node:util";
 import { Effect, Layer } from "effect";
-import { resolveCwd } from "./resolveCwd.js";
+import {
+  DEFAULT_STATE_DIR,
+  resolveCwd,
+  resolveStateDir,
+} from "./resolveCwd.js";
 import { assertResumeSessionExists } from "./resumePrecheck.js";
 import type { AgentProvider } from "./AgentProvider.js";
 import {
@@ -344,6 +348,19 @@ export interface RunOptions<A extends AgentProvider = AgentProvider> {
    * - Defaults to `process.cwd()` when omitted.
    */
   readonly cwd?: string;
+  /**
+   * Directory for Sandcastle's gitignored runtime artifacts: `.env`,
+   * `worktrees/`, `patches/`, and the default `logs/` location.
+   *
+   * - Relative paths are resolved against `cwd` (the host repo directory).
+   * - Absolute paths are used as-is.
+   * - Defaults to `.sandcastle`.
+   *
+   * Useful when embedding Sandcastle under a higher-level tool that owns the
+   * per-repo directory name (e.g. `.mytool.local`). An explicit `logging.path`
+   * still takes precedence over the `<stateDir>/logs` default.
+   */
+  readonly stateDir?: string;
   /** Inline prompt string (mutually exclusive with promptFile) */
   readonly prompt?: string;
   /**
@@ -582,6 +599,10 @@ export async function run(
   const hostRepoDir = await Effect.runPromise(
     resolveCwd(options.cwd).pipe(Effect.provide(NodeContext.layer)),
   );
+  const stateDir = resolveStateDir(
+    hostRepoDir,
+    options.stateDir ?? DEFAULT_STATE_DIR,
+  );
 
   // Validate: resumeSession file must exist on the host
   if (options.resumeSession) {
@@ -617,7 +638,7 @@ export async function run(
 
   // Resolve env vars and merge with provider env
   const resolvedEnv = await Effect.runPromise(
-    resolveEnv(hostRepoDir).pipe(Effect.provide(NodeContext.layer)),
+    resolveEnv(stateDir).pipe(Effect.provide(NodeContext.layer)),
   );
   const env = mergeProviderEnv({
     resolvedEnv,
@@ -647,8 +668,7 @@ export async function run(
   const resolvedLogging: LoggingOption = options.logging ?? {
     type: "file",
     path: join(
-      hostRepoDir,
-      ".sandcastle",
+      stateDir,
       "logs",
       buildLogFilename(resolvedBranch, targetBranch, options.name),
     ),
@@ -675,6 +695,7 @@ export async function run(
       Layer.succeed(SandboxConfig, {
         env,
         hostRepoDir,
+        stateDir,
         copyToWorktree: options.copyToWorktree,
         name: options.name,
         sandboxProvider: options.sandbox,

@@ -81,6 +81,7 @@ describe("WorktreeDockerSandboxFactory — baseBranch (real git)", () => {
         Layer.succeed(SandboxConfig, {
           env: {},
           hostRepoDir,
+          stateDir: join(hostRepoDir, ".sandcastle"),
           sandboxProvider: noopProvider(),
           branchStrategy: {
             type: "branch",
