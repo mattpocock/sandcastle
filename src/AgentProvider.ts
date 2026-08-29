@@ -64,6 +64,33 @@ const extractErrorMessage = (obj: any): string | undefined => {
   return undefined;
 };
 
+/**
+ * Claude Code's final `result` event reports cumulative usage for the whole
+ * print-mode run — summed across every API call, unlike the last-assistant-
+ * message snapshot parseSessionUsage reads from the session JSONL. Emitting it
+ * as a stream event gives runs without session capture (noSandbox, capture
+ * failures) a usage value; when the session is captured, the session-parsed
+ * snapshot still overrides it in the Orchestrator.
+ */
+const parseClaudeResultUsage = (usage: unknown): IterationUsage | undefined => {
+  if (typeof usage !== "object" || usage === null) return undefined;
+  const u = usage as Record<string, unknown>;
+  if (
+    typeof u.input_tokens !== "number" ||
+    typeof u.cache_creation_input_tokens !== "number" ||
+    typeof u.cache_read_input_tokens !== "number" ||
+    typeof u.output_tokens !== "number"
+  ) {
+    return undefined;
+  }
+  return {
+    inputTokens: u.input_tokens,
+    cacheCreationInputTokens: u.cache_creation_input_tokens,
+    cacheReadInputTokens: u.cache_read_input_tokens,
+    outputTokens: u.output_tokens,
+  };
+};
+
 const parseStreamJsonLine = (line: string): ParsedStreamEvent[] => {
   if (!line.startsWith("{")) return [];
   try {
@@ -104,8 +131,16 @@ const parseStreamJsonLine = (line: string): ParsedStreamEvent[] => {
       }
       return events;
     }
-    if (obj.type === "result" && typeof obj.result === "string") {
-      return [{ type: "result", result: obj.result }];
+    if (obj.type === "result") {
+      const events: ParsedStreamEvent[] = [];
+      if (typeof obj.result === "string") {
+        events.push({ type: "result", result: obj.result });
+      }
+      const usage = parseClaudeResultUsage(obj.usage);
+      if (usage) {
+        events.push({ type: "usage", usage });
+      }
+      return events;
     }
     if (
       obj.type === "system" &&

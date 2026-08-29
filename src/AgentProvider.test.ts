@@ -78,6 +78,75 @@ describe("claudeCode factory", () => {
     ]);
   });
 
+  it("parseStreamLine extracts cumulative usage from the result message", () => {
+    const provider = claudeCode("claude-opus-4-8");
+    const line = JSON.stringify({
+      type: "result",
+      result: "Final answer",
+      usage: {
+        input_tokens: 14,
+        cache_creation_input_tokens: 44194,
+        cache_read_input_tokens: 0,
+        output_tokens: 134,
+      },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "result", result: "Final answer" },
+      {
+        type: "usage",
+        usage: {
+          inputTokens: 14,
+          cacheCreationInputTokens: 44194,
+          cacheReadInputTokens: 0,
+          outputTokens: 134,
+        },
+      },
+    ]);
+  });
+
+  it("parseStreamLine emits usage from a result message without result text", () => {
+    // Error results (e.g. subtype error_during_execution) can omit the result
+    // string while still reporting what the run consumed.
+    const provider = claudeCode("claude-opus-4-8");
+    const line = JSON.stringify({
+      type: "result",
+      subtype: "error_during_execution",
+      usage: {
+        input_tokens: 9,
+        cache_creation_input_tokens: 21941,
+        cache_read_input_tokens: 0,
+        output_tokens: 4,
+      },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      {
+        type: "usage",
+        usage: {
+          inputTokens: 9,
+          cacheCreationInputTokens: 21941,
+          cacheReadInputTokens: 0,
+          outputTokens: 4,
+        },
+      },
+    ]);
+  });
+
+  it("parseStreamLine skips result usage with missing or malformed fields", () => {
+    const provider = claudeCode("claude-opus-4-8");
+    const malformed = JSON.stringify({
+      type: "result",
+      result: "Final answer",
+      usage: { input_tokens: "lots", output_tokens: 51 },
+    });
+    expect(provider.parseStreamLine(malformed)).toEqual([
+      { type: "result", result: "Final answer" },
+    ]);
+    const absent = JSON.stringify({ type: "result", result: "Final answer" });
+    expect(provider.parseStreamLine(absent)).toEqual([
+      { type: "result", result: "Final answer" },
+    ]);
+  });
+
   it("parseStreamLine returns empty array for non-JSON lines", () => {
     const provider = claudeCode("claude-opus-4-8");
     expect(provider.parseStreamLine("not json")).toEqual([]);
