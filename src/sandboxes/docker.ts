@@ -151,6 +151,8 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
     create: async (
       createOptions: BindMountCreateOptions,
     ): Promise<BindMountSandboxHandle> => {
+      const signal = createOptions.signal;
+      signal?.throwIfAborted();
       const containerName = `sandcastle-${randomUUID()}`;
 
       const worktreePath =
@@ -174,75 +176,93 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
       const containerGid = options?.containerGid ?? process.getgid?.() ?? 1000;
 
       // Pre-flight: verify image exists and UID matches
-      await checkImageUid(imageName, containerUid);
+      await checkImageUid(imageName, containerUid, signal);
+      signal?.throwIfAborted();
 
-      // Start container
-      await Effect.runPromise(
-        startContainer(
-          containerName,
-          imageName,
-          {
-            ...createOptions.env,
-            HOME: "/home/agent",
-          },
-          {
-            volumeMounts,
-            workdir: worktreePath,
-            user: `${containerUid}:${containerGid}`,
-            network: options?.network,
-            groups: options?.groups,
-            devices: options?.devices,
-            cpus: options?.cpus,
-            selinuxLabel,
-          },
-        ),
-      );
-
-      // Create parent directories for file mounts and chown to the container user
-      for (const dir of parentDirsToCreate) {
-        await new Promise<void>((resolve, reject) => {
-          execFile(
-            "docker",
-            [
-              "exec",
-              "--user",
-              "0:0",
-              containerName,
-              "sh",
-              "-c",
-              `mkdir -p "$1" && chown "$2" "$1"`,
-              "sh",
-              dir,
-              `${containerUid}:${containerGid}`,
-            ],
-            (error) => {
-              if (error) {
-                reject(
-                  new Error(
-                    `Failed to create parent directory '${dir}' in container: ${error.message}`,
-                  ),
-                );
-              } else {
-                resolve();
-              }
-            },
-          );
-        });
-      }
-
-      // Register synchronous container cleanup via the shared shutdown registry
-      // so concurrent sandboxes share a single exit/SIGINT/SIGTERM listener
-      // instead of tripping Node's MaxListenersExceededWarning.
+      // Register before startup so shutdown can clean up even before create()
+      // returns a handle. Failed or interrupted setup uses forced removal.
+      let cleanedUp = false;
+      let closePromise: Promise<void> | undefined;
       const removeContainerSync = () => {
+        if (cleanedUp) return;
+        cleanedUp = true;
+        signal?.removeEventListener("abort", removeContainerSync);
+        unregisterShutdown();
         try {
           execFileSync("docker", ["rm", "-f", containerName], {
             stdio: "ignore",
+            timeout: 5000,
           });
         } catch {
           /* best-effort */
         }
       };
       const unregisterShutdown = registerShutdown(removeContainerSync);
+
+      try {
+        // Start container
+        await Effect.runPromise(
+          startContainer(
+            containerName,
+            imageName,
+            {
+              ...createOptions.env,
+              HOME: "/home/agent",
+            },
+            {
+              volumeMounts,
+              workdir: worktreePath,
+              user: `${containerUid}:${containerGid}`,
+              network: options?.network,
+              groups: options?.groups,
+              devices: options?.devices,
+              cpus: options?.cpus,
+              selinuxLabel,
+            },
+          ),
+          { signal },
+        );
+        signal?.throwIfAborted();
+        signal?.addEventListener("abort", removeContainerSync, { once: true });
+
+        // Create parent directories for file mounts and chown to the container user
+        for (const dir of parentDirsToCreate) {
+          await new Promise<void>((resolve, reject) => {
+            execFile(
+              "docker",
+              [
+                "exec",
+                "--user",
+                "0:0",
+                containerName,
+                "sh",
+                "-c",
+                `mkdir -p "$1" && chown "$2" "$1"`,
+                "sh",
+                dir,
+                `${containerUid}:${containerGid}`,
+              ],
+              { signal },
+              (error) => {
+                if (error) {
+                  reject(
+                    new Error(
+                      `Failed to create parent directory '${dir}' in container: ${error.message}`,
+                    ),
+                  );
+                } else {
+                  resolve();
+                }
+              },
+            );
+          });
+        }
+
+        signal?.throwIfAborted();
+      } catch (error) {
+        removeContainerSync();
+        throw error;
+      }
 
       const handle: BindMountSandboxHandle = {
         worktreePath,
@@ -381,9 +401,17 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
             );
           }),
 
-        close: async (): Promise<void> => {
-          unregisterShutdown();
-          await Effect.runPromise(removeContainer(containerName));
+        close: (): Promise<void> => {
+          if (!closePromise) {
+            closePromise = (async () => {
+              if (cleanedUp) return;
+              cleanedUp = true;
+              signal?.removeEventListener("abort", removeContainerSync);
+              unregisterShutdown();
+              await Effect.runPromise(removeContainer(containerName));
+            })();
+          }
+          return closePromise;
         },
       };
 
@@ -395,12 +423,21 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
 // Re-export for backwards compatibility
 export { defaultImageName };
 
-const checkImageUid = (imageName: string, expectedUid: number): Promise<void> =>
+const checkImageUid = (
+  imageName: string,
+  expectedUid: number,
+  signal?: AbortSignal,
+): Promise<void> =>
   new Promise<void>((resolve, reject) => {
     execFile(
       "docker",
       ["image", "inspect", imageName, "--format", "{{.Config.User}}"],
+      { signal },
       (error, stdout) => {
+        if (signal?.aborted) {
+          reject(signal.reason);
+          return;
+        }
         if (error) {
           reject(
             new Error(
