@@ -917,6 +917,11 @@ const second = await first.resume?.("Now implement the plan");
 
 `resume` is present only on results from resumable providers (Claude Code, Codex, Pi) — hence the optional-chaining call.
 
+The prompts passed to `.resume()` and `.fork()` are inline prompts, including on
+results from `sandbox.run()`. They do not inherit `promptArgs` from an earlier
+prompt template. `{{KEY}}` placeholders and shell expressions in these prompts
+remain literal; explicitly passing non-empty `promptArgs` is still an error.
+
 Before the sandbox starts, Sandcastle validates that the session file exists on the host and transfers it into the sandbox with `cwd` fields rewritten to match the sandbox-side path. Claude Code receives `--resume <id>`; Codex receives `codex exec resume <id>` with the prompt piped over stdin; Pi receives `--session <id>`.
 
 Constraints:
