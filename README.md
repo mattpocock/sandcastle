@@ -1053,6 +1053,11 @@ interface ExecResult {
 }
 ```
 
+The Docker and Podman providers return `exitCode: 1` when their command process
+is terminated by a signal. Numeric exit codes are preserved, including `0` for
+success. Custom providers should also report signal termination as a non-zero
+exit code.
+
 ### Bind-mount provider example
 
 A minimal bind-mount provider that shells out to local processes (no container):
@@ -1110,7 +1115,7 @@ const localProcess = () =>
                 resolve({
                   stdout: stdoutChunks.join("\n"),
                   stderr: stderrChunks.join(""),
-                  exitCode: code ?? 0,
+                  exitCode: code ?? 1,
                 });
               });
             });
@@ -1128,7 +1133,11 @@ const localProcess = () =>
                   resolve({
                     stdout: stdout.toString(),
                     stderr: stderr.toString(),
-                    exitCode: typeof error?.code === "number" ? error.code : 0,
+                    exitCode: error
+                      ? typeof error.code === "number"
+                        ? error.code
+                        : 1
+                      : 0,
                   });
                 }
               },
@@ -1211,7 +1220,7 @@ const tempDir = () =>
                 resolve({
                   stdout: stdoutChunks.join("\n"),
                   stderr: stderrChunks.join(""),
-                  exitCode: code ?? 0,
+                  exitCode: code ?? 1,
                 });
               });
             });
@@ -1229,7 +1238,11 @@ const tempDir = () =>
                   resolve({
                     stdout: stdout.toString(),
                     stderr: stderr.toString(),
-                    exitCode: typeof error?.code === "number" ? error.code : 0,
+                    exitCode: error
+                      ? typeof error.code === "number"
+                        ? error.code
+                        : 1
+                      : 0,
                   });
                 }
               },
