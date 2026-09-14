@@ -444,8 +444,8 @@ describe("patchGitMountsForWindows", () => {
     });
 
     it("replaces .git file mount when host repo is a worktree", async () => {
-      // Scenario A: Host repo is itself a worktree. resolveGitMounts returned
-      // two mounts: the .git file and the parent .git directory.
+      // Retain support for callers supplying an explicit .git pointer mount
+      // alongside the parent .git directory.
       const mounts = [
         {
           hostPath: "/tmp/test-worktree/.git",
