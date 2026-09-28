@@ -543,6 +543,32 @@ const makePiSessionStorage = (options?: PiOptions): AgentSessionStorage => {
   };
 };
 
+/**
+ * Map a Pi message `usage` object to the Claude-shaped IterationUsage.
+ *
+ * Pi reports `{ input, output, cacheRead, cacheWrite, totalTokens }`, where
+ * `input` is the *uncached* prompt tokens (cache reads/writes are broken out
+ * separately), so it maps 1:1 onto the Claude shape.
+ */
+const parsePiUsage = (usage: unknown): IterationUsage | undefined => {
+  if (typeof usage !== "object" || usage === null) return undefined;
+  const u = usage as Record<string, unknown>;
+  if (
+    typeof u.input !== "number" ||
+    typeof u.cacheWrite !== "number" ||
+    typeof u.cacheRead !== "number" ||
+    typeof u.output !== "number"
+  ) {
+    return undefined;
+  }
+  return {
+    inputTokens: u.input,
+    cacheCreationInputTokens: u.cacheWrite,
+    cacheReadInputTokens: u.cacheRead,
+    outputTokens: u.output,
+  };
+};
+
 const parsePiStreamLine = (line: string): ParsedStreamEvent[] => {
   if (!line.startsWith("{")) return [];
   try {
@@ -586,23 +612,52 @@ const parsePiStreamLine = (line: string): ParsedStreamEvent[] => {
       const messages = obj.messages as {
         role: string;
         content: { type: string; text?: string }[];
+        usage?: unknown;
       }[];
+      const events: ParsedStreamEvent[] = [];
+      let result: string | undefined;
+      // `agent_end` carries the full conversation, so sum usage across every
+      // assistant message to report the whole session's tokens rather than
+      // only the final turn.
+      let inputTokens = 0;
+      let cacheCreationInputTokens = 0;
+      let cacheReadInputTokens = 0;
+      let outputTokens = 0;
+      let hasUsage = false;
       for (let i = messages.length - 1; i >= 0; i--) {
         const msg = messages[i];
-        if (msg?.role === "assistant") {
+        if (msg?.role !== "assistant") continue;
+        if (result === undefined) {
           const texts: string[] = [];
           for (const block of msg.content) {
             if (block.type === "text" && typeof block.text === "string") {
               texts.push(block.text);
             }
           }
-          if (texts.length > 0) {
-            return [{ type: "result", result: texts.join("") }];
-          }
-          break;
+          if (texts.length > 0) result = texts.join("");
+        }
+        const messageUsage = parsePiUsage(msg.usage);
+        if (messageUsage) {
+          hasUsage = true;
+          inputTokens += messageUsage.inputTokens;
+          cacheCreationInputTokens += messageUsage.cacheCreationInputTokens;
+          cacheReadInputTokens += messageUsage.cacheReadInputTokens;
+          outputTokens += messageUsage.outputTokens;
         }
       }
-      return [];
+      if (result !== undefined) events.push({ type: "result", result });
+      if (hasUsage) {
+        events.push({
+          type: "usage",
+          usage: {
+            inputTokens,
+            cacheCreationInputTokens,
+            cacheReadInputTokens,
+            outputTokens,
+          },
+        });
+      }
+      return events;
     }
   } catch {
     // Not valid JSON — skip
