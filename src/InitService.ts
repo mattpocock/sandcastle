@@ -417,7 +417,13 @@ const AGENT_REGISTRY: AgentEntry[] = [
 # Lets the agent use your Claude subscription instead of an API key.
 CLAUDE_CODE_OAUTH_TOKEN=
 # Or use an Anthropic API key instead — uncomment and fill in:
-# ANTHROPIC_API_KEY=`,
+# ANTHROPIC_API_KEY=
+# Or use Amazon Bedrock — uncomment and fill in:
+# CLAUDE_CODE_USE_BEDROCK=1
+# AWS_ACCESS_KEY_ID=
+# AWS_SECRET_ACCESS_KEY=
+# AWS_SESSION_TOKEN=
+# AWS_REGION=`,
     setupCommand: `claude "$(cat ${SETUP_ISSUE_TRACKER_PATH})"`,
   },
   {
@@ -648,6 +654,7 @@ export function getNextStepsLines(
     if (agent.name === "claude-code") {
       lines.push(
         "   To use your Claude subscription instead of an API key, run `claude setup-token` on your host and paste the result into CLAUDE_CODE_OAUTH_TOKEN.",
+        '   To use Amazon Bedrock instead, uncomment and fill in CLAUDE_CODE_USE_BEDROCK and the AWS_* variables (see README "Using Amazon Bedrock").',
       );
     }
     lines.push(
@@ -668,6 +675,7 @@ export function getNextStepsLines(
     if (agent.name === "claude-code") {
       lines.push(
         "   To use your Claude subscription instead of an API key, run `claude setup-token` on your host and paste the result into CLAUDE_CODE_OAUTH_TOKEN.",
+        '   To use Amazon Bedrock instead, uncomment and fill in CLAUDE_CODE_USE_BEDROCK and the AWS_* variables (see README "Using Amazon Bedrock").',
       );
     }
     lines.push(

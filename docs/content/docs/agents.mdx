@@ -23,6 +23,7 @@ Required environment variables (one of):
 | --- | --- |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code OAuth token — get one by running `claude setup-token` on your host. Lets the agent use your Claude subscription instead of an API key. |
 | `ANTHROPIC_API_KEY` | Anthropic API key (alternative to `CLAUDE_CODE_OAUTH_TOKEN`) |
+| `CLAUDE_CODE_USE_BEDROCK` | Set to `1` to use Claude via Amazon Bedrock instead. Requires `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_REGION` (plus `AWS_SESSION_TOKEN` for temporary credentials), and a Bedrock model ID such as `claudeCode("us.anthropic.claude-opus-5-5")`. |
 
 Plus:
 
