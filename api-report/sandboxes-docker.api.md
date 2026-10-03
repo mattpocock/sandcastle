@@ -14,6 +14,7 @@ export const docker: (options?: DockerOptions) => SandboxProvider;
 
 // @public
 export interface DockerOptions {
+    readonly capDrop?: readonly string[];
     readonly containerGid?: number;
     readonly containerUid?: number;
     readonly cpus?: number;

@@ -90,6 +90,16 @@ export interface DockerOptions {
    */
   readonly groups?: readonly (string | number)[];
   /**
+   * Linux capabilities to remove from the container's default capability set,
+   * via `--cap-drop`.
+   *
+   * - `["DAC_OVERRIDE"]` → `--cap-drop DAC_OVERRIDE`
+   * - `["DAC_OVERRIDE", "FOWNER"]` → one `--cap-drop` flag per capability
+   *
+   * When omitted, Docker's default capability set is used.
+   */
+  readonly capDrop?: readonly string[];
+  /**
    * Host devices to expose to the container, via `--device`.
    *
    * Each entry is a full device spec in `host[:container[:permissions]]` form:
@@ -191,6 +201,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
             user: `${containerUid}:${containerGid}`,
             network: options?.network,
             groups: options?.groups,
+            capDrop: options?.capDrop,
             devices: options?.devices,
             cpus: options?.cpus,
             selinuxLabel,
