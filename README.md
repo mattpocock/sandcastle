@@ -39,7 +39,7 @@ npm install --save-dev @ai-hero/sandcastle
 npx @ai-hero/sandcastle init
 ```
 
-3. Edit `.sandcastle/.env` and fill in your default values for `CLAUDE_CODE_OAUTH_TOKEN` (run `claude setup-token` on your host to get one). To use an Anthropic API key instead, uncomment and fill in `ANTHROPIC_API_KEY`.
+3. Edit `.sandcastle/.env` and fill in your default values for `CLAUDE_CODE_OAUTH_TOKEN` (run `claude setup-token` on your host to get one). To use an Anthropic API key instead, uncomment and fill in `ANTHROPIC_API_KEY`. To use Amazon Bedrock, uncomment and fill in `CLAUDE_CODE_USE_BEDROCK`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_REGION` (plus `AWS_SESSION_TOKEN` for temporary credentials).
 
 ```bash
 cp .sandcastle/.env.example .sandcastle/.env
@@ -61,6 +61,70 @@ await run({
   sandbox: docker(), // or podman(), vercel(), or your own provider
   promptFile: ".sandcastle/prompt.md",
 });
+```
+
+## Using Amazon Bedrock
+
+Sandcastle supports Claude models via Amazon Bedrock. The Claude Code CLI uses Bedrock when `CLAUDE_CODE_USE_BEDROCK=1` is set, authenticating with the AWS credentials in its environment.
+
+### Setup
+
+1. In `.sandcastle/.env`, comment out `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY`, then uncomment and fill in:
+
+```bash
+CLAUDE_CODE_USE_BEDROCK=1
+AWS_ACCESS_KEY_ID=your-access-key-id
+AWS_SECRET_ACCESS_KEY=your-secret-access-key
+AWS_SESSION_TOKEN=your-session-token  # only for temporary credentials (SSO, assumed roles)
+AWS_REGION=us-east-1  # or your preferred region
+```
+
+Only variables declared in `.sandcastle/.env` are forwarded into the sandbox, and `~/.aws` is not mounted, so `AWS_PROFILE` and SSO profiles don't work inside the sandbox. Export the resolved credentials instead (e.g. `aws configure export-credentials --format env`). Temporary credentials expire; re-export them into `.sandcastle/.env` when they do. For long-running agents, prefer IAM user keys or a role session with a longer duration.
+
+2. Use Bedrock-specific model IDs when calling `claudeCode()`:
+
+```typescript
+import { run, claudeCode } from "@ai-hero/sandcastle";
+import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+
+await run({
+  agent: claudeCode("us.anthropic.claude-opus-5-5"),
+  sandbox: docker(),
+  promptFile: ".sandcastle/prompt.md",
+});
+```
+
+### Bedrock Model IDs
+
+Bedrock uses region-prefixed inference profile IDs. Common examples:
+
+- `us.anthropic.claude-opus-5-5` - Claude Opus 5.5
+- `us.anthropic.claude-sonnet-5` - Claude Sonnet 5
+- `us.anthropic.claude-haiku-4-5-20251001-v1:0` - Claude Haiku 4.5
+
+Check the [AWS Bedrock documentation](https://docs.aws.amazon.com/bedrock/latest/userguide/model-ids-arns.html) for the full list of available models in your region.
+
+### IAM Permissions
+
+Your AWS credentials need the following permissions:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+      ],
+      "Resource": [
+        "arn:aws:bedrock:*::foundation-model/anthropic.claude-*",
+        "arn:aws:bedrock:*:*:inference-profile/*"
+      ]
+    }
+  ]
+}
 ```
 
 ## Sandbox Providers
@@ -1004,7 +1068,15 @@ Both **agent providers** and **sandbox providers** accept an optional `env: Reco
 ```typescript
 await run({
   agent: claudeCode("claude-opus-4-8", {
+    // Anthropic API key
     env: { ANTHROPIC_API_KEY: "sk-ant-..." },
+    // Or for Bedrock:
+    // env: {
+    //   CLAUDE_CODE_USE_BEDROCK: "1",
+    //   AWS_ACCESS_KEY_ID: "...",
+    //   AWS_SECRET_ACCESS_KEY: "...",
+    //   AWS_REGION: "us-east-1",
+    // },
   }),
   sandbox: docker({
     env: { DOCKER_SPECIFIC_VAR: "value" },
