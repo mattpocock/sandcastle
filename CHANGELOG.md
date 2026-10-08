@@ -1,5 +1,11 @@
 # @ai-hero/sandcastle
 
+## 0.12.1
+
+### Patch Changes
+
+- c70820f: Fix README Quick start: correct the mislabelled `// 3.` comment to `// 4.` under step 4, and reword step 3 to copy `.sandcastle/.env.example` to `.sandcastle/.env` before filling in values, matching the command order.
+
 ## 0.12.0
 
 ### Minor Changes
