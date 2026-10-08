@@ -232,6 +232,43 @@ describe("InitService scaffold", () => {
     expect(dockerfile).not.toContain("pnpm");
   });
 
+  it.each([
+    {
+      packageManager: "pnpm" as const,
+      expected:
+        "RUN corepack enable && corepack prepare pnpm@latest --activate",
+      unexpected: "npm install -g bun",
+    },
+    {
+      packageManager: "yarn" as const,
+      expected:
+        "RUN corepack enable && corepack prepare yarn@stable --activate",
+      unexpected: "npm install -g bun",
+    },
+    {
+      packageManager: "bun" as const,
+      expected: "RUN npm install -g bun",
+      unexpected: "RUN corepack enable",
+    },
+  ])(
+    "Dockerfile includes $packageManager for sandbox dependency hooks",
+    async ({ packageManager, expected, unexpected }) => {
+      const dir = await makeDir();
+      await runScaffold(dir, { packageManager });
+
+      const dockerfile = await readFile(
+        join(dir, ".sandcastle", "Dockerfile"),
+        "utf-8",
+      );
+      expect(dockerfile).toContain(expected);
+      expect(dockerfile).toContain(
+        `# ${packageManager === "bun" ? "Install Bun" : `Enable ${packageManager}`} for sandbox dependency hooks`,
+      );
+      expect(dockerfile).not.toContain(unexpected);
+      expect(dockerfile).not.toContain("{{ISSUE_TRACKER_TOOLS}}");
+    },
+  );
+
   it("skeleton prompt contains section headers and hints", async () => {
     const dir = await makeDir();
     await runScaffold(dir);
@@ -365,6 +402,51 @@ describe("InitService scaffold", () => {
     expect(mainTs).toContain("onSandboxReady");
   });
 
+  it.each([
+    { packageManager: "npm" as const, expectedCommand: "npm install" },
+    { packageManager: "pnpm" as const, expectedCommand: "pnpm install" },
+    { packageManager: "yarn" as const, expectedCommand: "yarn install" },
+    { packageManager: "bun" as const, expectedCommand: "bun install" },
+  ])(
+    "simple-loop main.mts uses $packageManager for sandbox installs",
+    async ({ packageManager, expectedCommand }) => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        packageManager,
+      });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain(`command: "${expectedCommand}"`);
+      if (packageManager !== "npm") {
+        expect(mainTs).not.toContain('command: "npm install"');
+      }
+    },
+  );
+
+  it.each([
+    "simple-loop",
+    "sequential-reviewer",
+    "parallel-planner",
+    "parallel-planner-with-review",
+  ])("%s main.mts rewrites the sandbox install hook", async (templateName) => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      templateName,
+      packageManager: "pnpm",
+    });
+
+    const mainTs = await readFile(
+      join(dir, ".sandcastle", "main.mts"),
+      "utf-8",
+    );
+    expect(mainTs).toContain('command: "pnpm install"');
+    expect(mainTs).not.toContain('command: "npm install"');
+  });
+
   it("simple-loop prompt.md contains shell expressions for issues and commit history", async () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "simple-loop" });
@@ -377,6 +459,44 @@ describe("InitService scaffold", () => {
     expect(prompt).toContain("!`git log");
     expect(prompt).toContain("<promise>COMPLETE</promise>");
   });
+
+  it.each([
+    {
+      templateName: "simple-loop",
+      file: "prompt.md",
+    },
+    {
+      templateName: "sequential-reviewer",
+      file: "implement-prompt.md",
+    },
+    {
+      templateName: "parallel-planner",
+      file: "implement-prompt.md",
+    },
+    {
+      templateName: "parallel-planner",
+      file: "merge-prompt.md",
+    },
+    {
+      templateName: "parallel-planner-with-review",
+      file: "implement-prompt.md",
+    },
+    {
+      templateName: "parallel-planner-with-review",
+      file: "merge-prompt.md",
+    },
+  ])(
+    "$templateName/$file verify prompt avoids hard-coded npm scripts",
+    async ({ templateName, file }) => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName });
+
+      const prompt = await readFile(join(dir, ".sandcastle", file), "utf-8");
+      expect(prompt).toContain("project's typecheck and tests");
+      expect(prompt).not.toContain("npm run typecheck");
+      expect(prompt).not.toContain("npm run test");
+    },
+  );
 
   describe("sequential-reviewer template", () => {
     it("produces main.mts, implement-prompt.md, and review-prompt.md", async () => {
@@ -616,17 +736,35 @@ describe("InitService scaffold", () => {
       expect(joined).toContain("npm run sandcastle");
     });
 
-    it("non-blank template includes a note about customizing the install command", () => {
+    it("non-blank template includes a note about sandbox install hooks", () => {
       const lines = next("simple-loop", "main.mts");
       const joined = lines.join("\n");
       expect(joined).toContain("npm install");
       expect(joined).toContain("onSandboxReady");
     });
 
-    it("non-blank template mentions copyToWorktree and node_modules", () => {
+    it.each([
+      { packageManager: "npm" as const, expectedCommand: "npm install" },
+      { packageManager: "pnpm" as const, expectedCommand: "pnpm install" },
+      { packageManager: "yarn" as const, expectedCommand: "yarn install" },
+      { packageManager: "bun" as const, expectedCommand: "bun install" },
+    ])(
+      "non-blank next steps use $packageManager sandbox install command",
+      ({ packageManager, expectedCommand }) => {
+        const lines = next("simple-loop", "main.mts", packageManager);
+        const hookLine = lines.find((line) => line.includes("onSandboxReady"));
+        expect(hookLine).toContain(expectedCommand);
+        expect(hookLine).not.toContain("package manager equivalent");
+        if (packageManager !== "npm") {
+          expect(hookLine).not.toContain("`npm install`");
+        }
+      },
+    );
+
+    it("non-blank template mentions isolatedPaths and node_modules", () => {
       const lines = next("simple-loop", "main.mts");
       const joined = lines.join("\n");
-      expect(joined).toContain("copyToWorktree");
+      expect(joined).toContain("isolatedPaths");
       expect(joined).toContain("node_modules");
     });
 
@@ -2319,6 +2457,25 @@ describe("InitService scaffold", () => {
       expect(containerfile).not.toContain("{{ISSUE_TRACKER_TOOLS}}");
     });
 
+    it("selecting podman writes package manager tooling to Containerfile", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        sandboxProvider: podmanProvider,
+        packageManager: "pnpm",
+      });
+
+      const containerfile = await readFile(
+        join(dir, ".sandcastle", "Containerfile"),
+        "utf-8",
+      );
+      expect(containerfile).toContain("RUN corepack enable");
+      expect(containerfile).toContain("corepack prepare pnpm@latest");
+      expect(containerfile).toContain(
+        "# Enable pnpm for sandbox dependency hooks",
+      );
+      expect(containerfile).not.toContain("{{ISSUE_TRACKER_TOOLS}}");
+    });
+
     it("selecting podman does not write Dockerfile", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { sandboxProvider: podmanProvider });
@@ -2366,8 +2523,10 @@ describe("InitService scaffold", () => {
         "utf-8",
       );
       expect(mainTs).not.toContain("docker");
-      // parallel-planner calls the factory three times
-      expect(mainTs.match(/sandbox: podman\(\)/g)).toHaveLength(3);
+      expect(mainTs).toContain(
+        'const sandboxProvider = podman({ isolatedPaths: ["node_modules"] });',
+      );
+      expect(mainTs).toContain("sandbox: sandboxProvider");
     });
 
     it("selecting docker leaves the main file importing and calling docker", async () => {

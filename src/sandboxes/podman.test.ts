@@ -56,6 +56,66 @@ describe("podman()", () => {
     expect(withFalse.tag).toBe("bind-mount");
   });
 
+  it("mounts isolatedPaths as anonymous volumes under the workspace", async () => {
+    mockExecFile.mockImplementation((_command, args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      if (Array.isArray(args) && args[0] === "machine" && args[1] === "list") {
+        callback(null, JSON.stringify([{ Running: true }]), "");
+      } else {
+        callback(null, "", "");
+      }
+      return undefined as any;
+    });
+
+    const provider = podman({
+      isolatedPaths: ["node_modules", ".next/cache"],
+    });
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    const runArgs = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    )?.[1] as string[];
+
+    expect(runArgs).toContain("/home/agent/workspace/node_modules");
+    expect(runArgs).toContain("/home/agent/workspace/.next/cache");
+    expect(runArgs).not.toContain("/home/agent/workspace/node_modules:z");
+    expect(runArgs).not.toContain("/home/agent/workspace/.next/cache:z");
+
+    await handle.close();
+  });
+
+  it("rejects absolute paths in isolatedPaths", async () => {
+    mockExecFile.mockImplementation((_command, args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      if (Array.isArray(args) && args[0] === "machine" && args[1] === "list") {
+        callback(null, JSON.stringify([{ Running: true }]), "");
+      } else {
+        callback(null, "", "");
+      }
+      return undefined as any;
+    });
+
+    const provider = podman({ isolatedPaths: ["/node_modules"] });
+
+    await expect(
+      provider.create({
+        worktreePath: "/tmp/worktree",
+        hostRepoPath: "/tmp/repo",
+        mounts: [
+          { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+        ],
+        env: {},
+      }),
+    ).rejects.toThrow("isolatedPaths entry must be relative");
+  });
+
   it("accepts a mounts option with valid paths", () => {
     const provider = podman({
       mounts: [{ hostPath: "~", sandboxPath: "/mnt/home" }],

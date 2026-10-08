@@ -417,6 +417,10 @@ const initCommand = Command.make(
         }
       }
 
+      // Detect the host package manager so scaffolded sandbox hooks, template
+      // dependency installs, and next steps all use the same command family.
+      const packageManager = yield* detectPackageManager(cwd);
+
       const scaffoldResult = yield* d.spinner(
         "Scaffolding .sandcastle/ config directory...",
         scaffold(cwd, {
@@ -426,6 +430,7 @@ const initCommand = Command.make(
           createLabel: shouldCreateLabel,
           issueTracker: selectedIssueTracker,
           sandboxProvider: selectedSandboxProvider,
+          packageManager,
         }).pipe(
           Effect.mapError(
             (e) =>
@@ -435,10 +440,6 @@ const initCommand = Command.make(
           ),
         ),
       );
-
-      // Detect the host package manager so the zod offer below and the next
-      // steps below both use the right install command.
-      const packageManager = yield* detectPackageManager(cwd);
 
       // If the chosen template imports zod on the host (the planner templates
       // build their <plan> output schema with it) and the host doesn't already

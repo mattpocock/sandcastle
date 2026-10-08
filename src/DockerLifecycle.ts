@@ -66,11 +66,17 @@ export const buildImage = (
     }
   });
 
-export interface VolumeMount {
-  readonly hostPath: string;
-  readonly sandboxPath: string;
-  readonly readonly?: boolean;
-}
+export type VolumeMount =
+  | {
+      readonly hostPath: string;
+      readonly sandboxPath: string;
+      readonly readonly?: boolean;
+    }
+  | {
+      readonly sandboxPath: string;
+      readonly anonymous: true;
+      readonly readonly?: boolean;
+    };
 
 export interface StartContainerOptions {
   readonly volumeMounts?: readonly VolumeMount[];
@@ -179,8 +185,8 @@ export const removeContainer = (
   Effect.gen(function* () {
     // Stop container (ignore errors if already stopped)
     yield* Effect.ignore(dockerExec(["stop", containerName]));
-    // Remove container (ignore errors if not found)
-    yield* Effect.ignore(dockerExec(["rm", containerName]));
+    // Remove container + attached anonymous volumes (ignore errors if not found)
+    yield* Effect.ignore(dockerExec(["rm", "-v", containerName]));
   });
 
 /**

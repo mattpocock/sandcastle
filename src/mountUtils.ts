@@ -328,14 +328,21 @@ export const patchGitMountsForWindows = (
 /**
  * Format a bind mount into a `-v` style string for container runtimes.
  *
- * Produces: `hostPath:sandboxPath[:ro][,z|Z]`
+ * Produces: `hostPath:sandboxPath[:ro][,z|Z]` for host-backed mounts, or
+ * `sandboxPath` for anonymous volumes.
  *
  * Used by both Podman and Docker providers.
  */
 export const formatVolumeMount = (
-  mount: { hostPath: string; sandboxPath: string; readonly?: boolean },
+  mount:
+    | { hostPath: string; sandboxPath: string; readonly?: boolean }
+    | { sandboxPath: string; readonly?: boolean; anonymous: true },
   selinuxLabel: SelinuxLabel | undefined,
 ): string => {
+  if (!("hostPath" in mount)) {
+    return mount.sandboxPath;
+  }
+
   const base = `${mount.hostPath}:${mount.sandboxPath}`;
   const options = [mount.readonly ? "ro" : undefined, selinuxLabel || undefined]
     .filter((option): option is string => option !== undefined)
