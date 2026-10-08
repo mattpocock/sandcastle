@@ -4,13 +4,16 @@ Here are the open issues in the repo:
 
 <issues-json>
 
-!`gh issue list --state open --label ready-for-agent --limit 100 --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`
+!`node src/templates/github-planner-inventory.cjs --label ready-for-agent`
 
 </issues-json>
 
 # TASK
 
-Analyze the open issues and build a dependency graph. For each issue, determine whether it **blocks** or **is blocked by** any other open issue.
+Analyze the open issues and build a dependency graph. Each issue includes a
+`blockers` array whose GitHub states were resolved before this prompt and an
+`explicitBlockersResolved` boolean. `false` means the issue is blocked; `true`
+means it has no unresolved explicit dependency. Do not re-query those states.
 
 An issue B is **blocked by** issue A if:
 
@@ -32,4 +35,5 @@ Output your plan as a JSON object wrapped in `<plan>` tags:
 {"issues": [{"number": 42, "title": "Fix auth bug", "branch": "sandcastle/issue-42"}]}
 </plan>
 
-Include only unblocked issues. If every issue is blocked, include the single highest-priority candidate (the one with the fewest or weakest dependencies).
+Include only unblocked issues. If every issue is blocked, return an empty
+`issues` array. Never select a blocked issue merely to keep the loop running.

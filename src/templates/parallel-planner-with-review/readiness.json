@@ -1,0 +1,9 @@
+{
+  "mode": "report-only",
+  "repository": null,
+  "scopeLabel": "Sandcastle",
+  "readyLabel": "ready-for-agent",
+  "blockedLabel": "blocked",
+  "holdLabels": ["readiness:hold"],
+  "verifyCommand": null
+}

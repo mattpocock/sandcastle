@@ -18,16 +18,34 @@
 
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { execFileSync } from "node:child_process";
 import { z } from "zod";
+// @ts-expect-error scaffold copies the shared helper beside main.mts.
+import { validatePlannerBatch } from "./planner-batch.js";
 
 // The planner emits its plan as JSON inside <plan> tags; Output.object extracts
 // and validates it against this schema. We use Zod here, but any Standard
 // Schema validator works just as well — Valibot, ArkType, etc. See
 // https://standardschema.dev.
+const decisionSchema = z.object({
+  id: z.string(),
+  disposition: z.enum([
+    "selected",
+    "blocked",
+    "not-implementation",
+    "unresolved-decision",
+    "parallel-conflict",
+  ]),
+  reason: z.string().min(1),
+  likelyAreas: z.array(z.string()),
+  conflictsWith: z.array(z.string()).optional(),
+});
+
 const planSchema = z.object({
   issues: z.array(
     z.object({ id: z.string(), title: z.string(), branch: z.string() }),
   ),
+  decisions: z.array(decisionSchema),
 });
 
 // ---------------------------------------------------------------------------
@@ -37,6 +55,7 @@ const planSchema = z.object({
 // Maximum number of plan→execute→merge cycles before stopping.
 // Raise this if your backlog is large; lower it for a quick smoke-test run.
 const MAX_ITERATIONS = 10;
+const MAX_PLANNER_ATTEMPTS = 3;
 
 // Hooks run inside the sandbox before the agent starts each iteration.
 // npm install ensures the sandbox always has fresh dependencies.
@@ -48,6 +67,44 @@ const hooks = {
 // starts. Avoids a full npm install from scratch; the hook above handles
 // platform-specific binaries and any packages added since the last copy.
 const copyToWorktree = ["node_modules"];
+
+const loadPlannerInventory = (): unknown[] =>
+  JSON.parse(
+    execFileSync("bash", [".sandcastle/planner-inventory.sh"], {
+      encoding: "utf8",
+    }),
+  ) as unknown[];
+
+async function planNextBatch() {
+  const inventory = loadPlannerInventory();
+  let feedback = "No previous validation failure.";
+
+  for (let attempt = 1; attempt <= MAX_PLANNER_ATTEMPTS; attempt++) {
+    const result = await sandcastle.run({
+      hooks,
+      sandbox: docker(),
+      name: `planner-${attempt}`,
+      maxIterations: 1,
+      agent: sandcastle.claudeCode("claude-opus-4-8"),
+      promptFile: "./.sandcastle/plan-prompt.md",
+      promptArgs: {
+        ISSUES_JSON: JSON.stringify(inventory),
+        PLAN_FEEDBACK: feedback,
+      },
+      output: sandcastle.Output.object({ tag: "plan", schema: planSchema }),
+    });
+
+    try {
+      validatePlannerBatch(inventory, result.output);
+      return result.output;
+    } catch (error) {
+      feedback = error instanceof Error ? error.message : String(error);
+      console.warn(`Planner attempt ${attempt} rejected: ${feedback}`);
+    }
+  }
+
+  throw new Error(`Planner failed validation: ${feedback}`);
+}
 
 // ---------------------------------------------------------------------------
 // Main loop
@@ -65,23 +122,8 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   //
   // It outputs a <plan> JSON block — Output.object parses and validates it.
   // -------------------------------------------------------------------------
-  const plan = await sandcastle.run({
-    hooks,
-    sandbox: docker(),
-    name: "planner",
-    // One iteration is enough: the planner just needs to read and reason,
-    // not write code. (Structured output requires maxIterations: 1.)
-    maxIterations: 1,
-    // Opus for planning: dependency analysis benefits from deeper reasoning.
-    agent: sandcastle.claudeCode("claude-opus-4-8"),
-    promptFile: "./.sandcastle/plan-prompt.md",
-    // Extract and validate the <plan> JSON into a typed object. Throws
-    // StructuredOutputError if the tag is missing, the JSON is malformed, or
-    // validation fails — which aborts the loop.
-    output: sandcastle.Output.object({ tag: "plan", schema: planSchema }),
-  });
-
-  const issues = plan.output.issues;
+  const plan = await planNextBatch();
+  const issues = plan.issues;
 
   if (issues.length === 0) {
     // No unblocked work — either everything is done or everything is blocked.

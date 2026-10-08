@@ -63,6 +63,183 @@ await run({
 });
 ```
 
+### Codex subscription AFK profile
+
+Use the `codex-afk` init profile for a Docker-based parallel planner,
+implementer, reviewer, and merger that authenticates with a ChatGPT
+subscription and keeps CodeGraph indexes isolated by Git branch:
+
+```bash
+npx @ai-hero/sandcastle init --profile codex-afk
+```
+
+The profile creates `.sandcastle/codex-home` with file-backed ChatGPT OAuth,
+logs in through the host Codex CLI, installs a pinned CodeGraph CLI in the
+sandbox image, and mounts a separate `.codegraph` database for each branch.
+Credentials, Codex sessions, and branch indexes are ignored by Git. The
+generated runtime checks `codex login status` and initializes or incrementally
+syncs CodeGraph before each sandbox begins.
+
+The Codex AFK execution profile currently detects Node.js/npm and native
+Android/Gradle projects. Init generates:
+
+- `.sandcastle/project.json` as the machine-readable project profile;
+- `.sandcastle/FEEDBACK_LOOPS.md` with focused and authoritative commands;
+- a deterministic `.sandcastle/CODING_STANDARDS.md` draft listing detected
+  repository sources of truth;
+- executable bootstrap, package-verification, and cumulative merge-gate scripts
+  under `.sandcastle/scripts/`.
+
+For Node/npm, dependencies are installed inside the Linux sandbox with `npm ci`
+when a `package-lock.json` is present. Sandcastle mounts an isolated npm download
+cache instead of copying host `node_modules`, avoiding host/sandbox native-binary
+incompatibilities.
+
+For Android/Gradle, init detects the Gradle wrapper, Android plugin, and
+`compileSdk` from module build files or `gradle/libs.versions.toml`. The generated
+image includes JDK 17, Android command-line tools, and the required SDK platform;
+the runtime mounts an isolated Gradle cache. Default completion gates run unit
+tests, lint, and a debug assembly without an emulator. Instrumentation tests
+remain opt-in because they require an explicitly configured emulator or device.
+Android images target `linux/amd64`, including on Apple Silicon, because Google
+ships Linux Android build-tool binaries such as `aapt2` for x86_64.
+
+Review the generated standards and feedback files before the first AFK run.
+Projects using pnpm, Yarn, Bun, Python, or non-Android Gradle builds such as
+Spring Boot need a future project profile and currently fail init rather than
+receiving incorrect commands.
+
+For automation, the interactive operations can be controlled explicitly:
+
+```bash
+npx @ai-hero/sandcastle init \
+  --profile codex-afk \
+  --codex-login false \
+  --build-image false \
+  --install-template-deps false \
+  --codegraph-version 1.5.0
+```
+
+When login is skipped, authenticate later without touching the normal
+`~/.codex` home:
+
+```bash
+CODEX_HOME=.sandcastle/codex-home codex login
+```
+
+## Local agent map
+
+The GitHub Actions-inspired layout separates workflow navigation from a wide
+activity viewer. Choose a session and batch, filter agents by issue or status,
+then open **Logs** to search, copy, or download recent recorded activity.
+See the [dashboard guide](docs/agent-map.md) for navigation and retention limits.
+
+Open the read-only dashboard in a second host terminal:
+
+```bash
+npx sandcastle dashboard
+# Agent map: http://127.0.0.1:4317
+# To observe a different project or choose a port:
+npx sandcastle dashboard --cwd /path/to/project --port 4318
+```
+
+The dashboard requires Node.js, not Docker. Agents still use their configured
+sandbox providers. No Docker socket or agent login is needed by the dashboard.
+New `parallel-planner-with-review` and `codex-afk` scaffolds record automatically.
+Existing running processes and old configurations are not retroactively
+instrumented; update the package and add the recording API before the next run.
+
+The map groups planner attempts, parallel issue pipelines (implementer followed
+by reviewer), the batch merger, and optional startup/post-merge readiness checks. Select a node for recent text/tool activity,
+branch, commits, captured session ID and usage when reported. Planner decisions
+explain selected, blocked and deferred candidates. These are workflow edges,
+not a claim that one agent spawned another provider-native subagent.
+
+Snapshots live under `.sandcastle/runs/` and remain available after a restart.
+New scaffolds ignore that directory; add `runs/` to `.sandcastle/.gitignore` in
+existing projects. The dashboard polls every 1.5 seconds; recordings heartbeat
+every 2 seconds. After 15 seconds without a heartbeat, an unfinished recording
+appears `unknown` with a stale heartbeat (including while the host sleeps).
+This does not prove that the runner or its agents died. This is observation,
+not execution resume. Stop/retry/resume controls are intentionally absent.
+If recording storage is unavailable, the recorder warns once and keeps agent
+execution running, using terminal logging for subsequent agent calls until
+storage recovers. No dashboard history is guaranteed during that outage.
+
+### Workflow recovery (opt in)
+
+Use `withWorkflowRecovery` to wrap a custom workflow in durable, verified
+checkpoints and an exclusive repository/target-branch owner. Restart with the
+same run ID and workflow version; verified steps are rechecked and reused.
+Uncertain attempts require read-only reconciliation, never blind retries.
+
+See [workflow recovery](docs/workflow-recovery.md) for the interface, Git/GitHub
+verification responsibilities and crash limitations. Existing scripts and live
+containers are not automatically adopted. Readiness policy stays project-owned.
+
+### Readiness after merge
+
+New reviewed/Codex AFK scaffolds include `.sandcastle/readiness.json`. Set an
+explicit GitHub repository and scope label to assess blocked issues before the
+first planner and after each completed merge. The default is **report-only**:
+no labels change. Automatic publication requires `mode: "apply"` and a trusted
+project-owned verifier; manual holds, stale contracts and incomplete verification
+stop unsafe promotions. Repository routing also applies to task reads/closure.
+
+See [readiness configuration and verifier contract](docs/readiness.md) before
+enabling it. This does not retrofit existing project configurations.
+
+For custom workflows, wrap the existing agent call and forward `logging`:
+
+```typescript
+const map = await sandcastle.createAgentMap({
+  cwd: process.cwd(),
+  name: "My workflow",
+});
+try {
+  // For reviewed issue batches: await map.recordPlan(batchNumber, validatedPlan).
+  await map.track(
+    {
+      batch: 1,
+      role: "implementer",
+      issueId: "42",
+      title: "Add search",
+      branch: "sandcastle/issue-42",
+      provider: "codex",
+      model: "your-model",
+    },
+    (logging) =>
+      sandcastle.run({
+        agent: sandcastle.codex("your-model"),
+        sandbox: docker(),
+        branchStrategy: { type: "branch", branch: "sandcastle/issue-42" },
+        prompt:
+          "Implement issue #42 and emit <promise>COMPLETE</promise> when verified.",
+        logging,
+      }),
+  );
+  await map.finishBatch(1);
+  await map.finish("completed");
+} catch (error) {
+  await map.finish("failed");
+  throw error;
+}
+```
+
+Pass the same `logging` option to `sandbox.run()` when reusing a sandbox. Every
+`track` call preserves the callback's return value or rejection. A resolved call
+without a completion signal is shown as stopped, not successful (planner
+callbacks instead succeed by validating their structured plan before returning).
+`BLOCKED` is distinct from `COMPLETE`. `finish` describes the orchestration
+session's end, not proof that every backlog issue was delivered.
+
+Activity is limited to the last 150 entries per node, each at most 4,000
+characters. Raw provider events are not served. Common credential patterns are
+filtered in snapshots, but arbitrary agent text may still contain sensitive
+content; full run logs remain on disk. Keep recordings private. Usage is the
+last reported iteration snapshot, not cumulative billing or context percentage;
+missing usage/model data is displayed as unavailable rather than estimated.
+
 ## Sandbox Providers
 
 Sandcastle uses a `SandboxProvider` to create isolated environments. The `sandbox` option on `run()`, `interactive()`, and `createSandbox()` accepts any provider, including `noSandbox()` — opt in to running the agent directly on the host when container isolation is undesired. Built-in providers:

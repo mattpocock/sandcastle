@@ -1,4 +1,33 @@
 export { run } from "./run.js";
+export { withWorkflowRecovery } from "./WorkflowRecovery.js";
+export type {
+  WorkflowRecoveryOptions,
+  RecoveryStep,
+  RecoveryWorkflow,
+} from "./WorkflowRecovery.js";
+export {
+  reassessGitHubReadiness,
+  loadGitHubReadinessInventory,
+} from "./Readiness.js";
+export type {
+  GitHubReadinessOptions,
+  GitHubReadinessInventoryOptions,
+  ReadinessSnapshot,
+  ReadinessIssue,
+  ReadinessDependency,
+  ReadinessAssessment,
+  ReadinessTrigger,
+  ReadinessVerificationInput,
+  ReadinessVerification,
+  ReadinessResult,
+} from "./Readiness.js";
+export { createAgentMap, startDashboard } from "./AgentMap.js";
+export type {
+  AgentMap,
+  AgentMapPlan,
+  AgentMapTask,
+  DashboardServer,
+} from "./AgentMap.js";
 export type {
   RunOptions,
   RunResult,
@@ -45,6 +74,7 @@ export {
 export type { HostSessionLookup } from "./SessionStore.js";
 export type { SandboxHooks } from "./SandboxLifecycle.js";
 export type { MountConfig } from "./MountConfig.js";
+export { codeGraphCacheKey, prepareCodeGraphCache } from "./CodeGraphCache.js";
 export { Output, StructuredOutputError } from "./Output.js";
 export type {
   OutputDefinition,

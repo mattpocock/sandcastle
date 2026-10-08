@@ -3,11 +3,25 @@ import { Effect } from "effect";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
+import { InitError } from "./errors.js";
 
-const GITIGNORE = `.env
-logs/
-worktrees/
-`;
+const gitignoreFor = (options: {
+  readonly isolatedCodexHome: boolean;
+  readonly codeGraph: boolean;
+  readonly projectCachePath?: string;
+}): string =>
+  [
+    ".env",
+    "logs/",
+    "runs/",
+    "worktrees/",
+    ...(options.isolatedCodexHome ? ["codex-home/"] : []),
+    ...(options.codeGraph ? ["cache/codegraph/"] : []),
+    ...(options.projectCachePath
+      ? [`${options.projectCachePath.replace(/^\.sandcastle\//, "")}/`]
+      : []),
+    "",
+  ].join("\n");
 
 /**
  * Filename of the setup prompt scaffolded for the `custom` issue tracker.
@@ -27,6 +41,10 @@ export interface TemplateMetadata {
    * `npx tsx .sandcastle/main.ts` doesn't crash with ERR_MODULE_NOT_FOUND.
    */
   dependencies?: readonly string[];
+  /** Reuse another template's files before applying profile-specific rewrites. */
+  sourceTemplate?: string;
+  /** Agent required by a provider-specific template. */
+  requiredAgent?: string;
 }
 
 const TEMPLATES: TemplateMetadata[] = [
@@ -54,6 +72,14 @@ const TEMPLATES: TemplateMetadata[] = [
     description:
       "Plans parallelizable issues, executes with per-branch review, merges",
     dependencies: ["zod"],
+  },
+  {
+    name: "codex-afk",
+    description:
+      "Parallel planner/reviewer with isolated ChatGPT OAuth and branch-local CodeGraph",
+    dependencies: ["zod"],
+    sourceTemplate: "parallel-planner-with-review",
+    requiredAgent: "codex",
   },
 ];
 
@@ -486,6 +512,7 @@ export interface IssueTrackerEntry {
   readonly label: string;
   readonly templateArgs: {
     readonly LIST_TASKS_COMMAND: string;
+    readonly PLANNER_LIST_TASKS_COMMAND: string;
     readonly VIEW_TASK_COMMAND: string;
     readonly CLOSE_TASK_COMMAND: string;
     readonly ISSUE_TRACKER_TOOLS: string;
@@ -533,6 +560,7 @@ const ISSUE_TRACKER_REGISTRY: IssueTrackerEntry[] = [
     label: "GitHub Issues",
     templateArgs: {
       LIST_TASKS_COMMAND: `gh issue list --state open --label Sandcastle --limit 100 --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`,
+      PLANNER_LIST_TASKS_COMMAND: `node .sandcastle/github-planner-inventory.cjs --label Sandcastle`,
       VIEW_TASK_COMMAND: "gh issue view <ID>",
       CLOSE_TASK_COMMAND: `gh issue close <ID> --comment "Completed by Sandcastle"`,
       ISSUE_TRACKER_TOOLS: GITHUB_CLI_TOOLS,
@@ -547,6 +575,7 @@ GH_TOKEN=`,
     label: "Beads",
     templateArgs: {
       LIST_TASKS_COMMAND: "bd ready --json",
+      PLANNER_LIST_TASKS_COMMAND: "bd ready --json",
       VIEW_TASK_COMMAND: "bd show <ID>",
       CLOSE_TASK_COMMAND: `bd close <ID> --reason="Completed by Sandcastle"`,
       ISSUE_TRACKER_TOOLS: BEADS_TOOLS,
@@ -561,6 +590,7 @@ GH_TOKEN=`,
       // non-zero exit and surfaces stderr, so this is the single enforcement
       // point that keeps the scaffold broken until the user configures it.
       LIST_TASKS_COMMAND: CUSTOM_LIST_TASKS_SENTINEL,
+      PLANNER_LIST_TASKS_COMMAND: CUSTOM_LIST_TASKS_SENTINEL,
       // Inline text markers — replaced by the setup agent, never executed.
       VIEW_TASK_COMMAND: CUSTOM_VIEW_TASK_MARKER,
       CLOSE_TASK_COMMAND: CUSTOM_CLOSE_TASK_MARKER,
@@ -657,6 +687,17 @@ export function getNextStepsLines(
       "5. Run `npm run sandcastle` to start the agent",
     );
     return lines;
+  } else if (template === "codex-afk") {
+    return [
+      "Next steps:",
+      "1. Set GitHub issue-tracker credentials in .sandcastle/.env (see .sandcastle/.env.example)",
+      `2. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
+      "3. Review .sandcastle/project.json and the generated .sandcastle/FEEDBACK_LOOPS.md commands",
+      "4. Review and complete the deterministic .sandcastle/CODING_STANDARDS.md draft",
+      `5. Install the planner schema validator if needed (${addDependencyCommand(packageManager, "zod")})`,
+      "6. Run .sandcastle/scripts/verify-affected.sh against a known base SHA to validate the project gates",
+      "7. Build the sandbox image if init did not build it, then run `npm run sandcastle`",
+    ];
   } else {
     const hasReviewer = template.includes("review");
     const usesPlanSchema = getTemplateDependencies(template).includes("zod");
@@ -712,7 +753,1006 @@ const getTemplateDir = (
         new Error(`Unknown template: "${templateName}". Available: ${names}`),
       );
     }
-    return join(getTemplatesDir(), templateName);
+    return join(getTemplatesDir(), template!.sourceTemplate ?? templateName);
+  });
+
+const CODEX_CHATGPT_CONFIG = `cli_auth_credentials_store = "file"
+forced_login_method = "chatgpt"
+`;
+
+const CODEX_CHATGPT_ENV_EXAMPLE = `# Codex authenticates with an isolated ChatGPT subscription login.
+# Run \`sandcastle init --profile codex-afk\` interactively, or run:
+# CODEX_HOME=.sandcastle/codex-home codex login
+`;
+
+interface NodeNpmProjectProfile {
+  readonly schemaVersion: 1;
+  readonly projectType: "node";
+  readonly packageManager: "npm";
+  readonly bootstrap: { readonly command: string };
+  readonly cache: {
+    readonly hostPath: string;
+    readonly sandboxPath: string;
+  };
+  readonly rootPackage: {
+    readonly cwd: ".";
+    readonly focusedTestHint: string;
+    readonly authoritativeGates: readonly string[];
+  };
+}
+
+interface AndroidGradleProjectProfile {
+  readonly schemaVersion: 1;
+  readonly projectType: "android";
+  readonly buildTool: "gradle";
+  readonly javaVersion: 17;
+  readonly androidSdk: {
+    readonly compileSdk: number;
+    readonly packages: readonly string[];
+  };
+  readonly bootstrap: { readonly command: string };
+  readonly cache: {
+    readonly hostPath: string;
+    readonly sandboxPath: string;
+  };
+  readonly rootProject: {
+    readonly cwd: ".";
+    readonly focusedTestHint: string;
+    readonly authoritativeGates: readonly string[];
+  };
+}
+
+type CodexAfkProjectProfile =
+  | NodeNpmProjectProfile
+  | AndroidGradleProjectProfile;
+
+interface DetectedCodexAfkProject {
+  readonly profile: CodexAfkProjectProfile;
+  readonly sources: readonly string[];
+}
+
+const NODE_STANDARDS_SOURCE_CANDIDATES = [
+  "AGENTS.md",
+  "CONTRIBUTING.md",
+  "CONTEXT.md",
+  "README.md",
+  "package.json",
+  "tsconfig.json",
+  "eslint.config.js",
+  "eslint.config.mjs",
+  ".eslintrc",
+  ".prettierrc",
+  "vitest.config.ts",
+  "jest.config.js",
+] as const;
+
+const NON_NODE_PROJECT_MARKERS = [
+  "pyproject.toml",
+  "requirements.txt",
+  "pom.xml",
+  "build.gradle",
+  "build.gradle.kts",
+  "settings.gradle",
+  "settings.gradle.kts",
+] as const;
+
+const ANDROID_BUILD_FILE_CANDIDATES = [
+  "build.gradle",
+  "build.gradle.kts",
+  "app/build.gradle",
+  "app/build.gradle.kts",
+] as const;
+
+const ANDROID_STANDARDS_SOURCE_CANDIDATES = [
+  "AGENTS.md",
+  "CONTRIBUTING.md",
+  "CONTEXT.md",
+  "README.md",
+  "settings.gradle",
+  "settings.gradle.kts",
+  "build.gradle",
+  "build.gradle.kts",
+  "gradle.properties",
+  "gradle/libs.versions.toml",
+  "app/build.gradle",
+  "app/build.gradle.kts",
+] as const;
+
+const readExistingFiles = (
+  repoDir: string,
+  candidates: readonly string[],
+): Effect.Effect<Map<string, string>, never, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const files = new Map<string, string>();
+    for (const candidate of candidates) {
+      const path = join(repoDir, candidate);
+      const exists = yield* fs
+        .exists(path)
+        .pipe(Effect.orElseSucceed(() => false));
+      if (!exists) continue;
+      const content = yield* fs
+        .readFileString(path)
+        .pipe(Effect.orElseSucceed(() => ""));
+      files.set(candidate, content);
+    }
+    return files;
+  });
+
+const parseAndroidCompileSdk = (
+  buildFiles: ReadonlyMap<string, string>,
+): number | undefined => {
+  for (const content of buildFiles.values()) {
+    const direct = content.match(
+      /\bcompileSdk(?:Version)?\s*(?:=|\s)\s*["']?(\d+)["']?/,
+    );
+    if (direct?.[1]) return Number(direct[1]);
+  }
+
+  const versionCatalog = buildFiles.get("gradle/libs.versions.toml");
+  const catalog = versionCatalog?.match(
+    /^\s*compile[-_]?sdk\s*=\s*["']?(\d+)["']?\s*$/im,
+  );
+  return catalog?.[1] ? Number(catalog[1]) : undefined;
+};
+
+const detectAndroidGradleProjectProfile = (
+  repoDir: string,
+): Effect.Effect<
+  DetectedCodexAfkProject | undefined,
+  Error,
+  FileSystem.FileSystem
+> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const gradlewExists = yield* fs
+      .exists(join(repoDir, "gradlew"))
+      .pipe(Effect.orElseSucceed(() => false));
+    const rootEntries = yield* fs
+      .readDirectory(repoDir)
+      .pipe(Effect.orElseSucceed((): string[] => []));
+    const moduleBuildFiles = rootEntries.flatMap((entry) => [
+      `${entry}/build.gradle`,
+      `${entry}/build.gradle.kts`,
+    ]);
+    const buildFiles = yield* readExistingFiles(repoDir, [
+      ...ANDROID_BUILD_FILE_CANDIDATES,
+      ...moduleBuildFiles,
+      "gradle/libs.versions.toml",
+    ]);
+    const androidBuild = [...buildFiles.values()].some(
+      (content) =>
+        /com\.android\.(?:application|library|test)/.test(content) ||
+        /\bandroid\s*\{/.test(content),
+    );
+    if (!gradlewExists || !androidBuild) return undefined;
+
+    const compileSdk = parseAndroidCompileSdk(buildFiles);
+    if (compileSdk === undefined) {
+      return yield* Effect.fail(
+        new Error(
+          "Android/Gradle project detected, but compileSdk could not be resolved from Gradle files or gradle/libs.versions.toml.",
+        ),
+      );
+    }
+
+    const standardsFiles = yield* readExistingFiles(repoDir, [
+      ...ANDROID_STANDARDS_SOURCE_CANDIDATES,
+      ...moduleBuildFiles,
+    ]);
+    return {
+      profile: {
+        schemaVersion: 1,
+        projectType: "android",
+        buildTool: "gradle",
+        javaVersion: 17,
+        androidSdk: {
+          compileSdk,
+          packages: [
+            "platform-tools",
+            `platforms;android-${compileSdk}`,
+            `build-tools;${compileSdk}.0.0`,
+          ],
+        },
+        bootstrap: { command: "./gradlew --no-daemon help" },
+        cache: {
+          hostPath: ".sandcastle/cache/gradle",
+          sandboxPath: "/home/agent/.gradle",
+        },
+        rootProject: {
+          cwd: ".",
+          focusedTestHint:
+            './gradlew :<module>:testDebugUnitTest --tests "<test-class>"',
+          authoritativeGates: [
+            "./gradlew test",
+            "./gradlew lint",
+            "./gradlew assembleDebug",
+          ],
+        },
+      },
+      sources: [...standardsFiles.keys()],
+    };
+  });
+
+const detectNodeNpmProjectProfile = (
+  repoDir: string,
+): Effect.Effect<
+  { readonly profile: NodeNpmProjectProfile; readonly sources: string[] },
+  Error,
+  FileSystem.FileSystem
+> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const packagePath = join(repoDir, "package.json");
+    const hasPackageJson = yield* fs
+      .exists(packagePath)
+      .pipe(Effect.orElseSucceed(() => false));
+    if (!hasPackageJson) {
+      for (const marker of NON_NODE_PROJECT_MARKERS) {
+        const exists = yield* fs
+          .exists(join(repoDir, marker))
+          .pipe(Effect.orElseSucceed(() => false));
+        if (exists) {
+          return yield* Effect.fail(
+            new Error(
+              `The codex-afk project profile supports Node/npm or Android/Gradle; detected ${marker}.`,
+            ),
+          );
+        }
+      }
+    }
+    const packageManager = yield* detectPackageManager(repoDir);
+    if (packageManager !== "npm") {
+      return yield* Effect.fail(
+        new Error(
+          `The codex-afk project profile currently supports npm; detected ${packageManager}.`,
+        ),
+      );
+    }
+
+    const packageJson = yield* fs
+      .readFileString(packagePath)
+      .pipe(Effect.orElseSucceed(() => "{}"));
+    let scripts: Record<string, string> = {};
+    try {
+      const parsed = JSON.parse(packageJson) as { scripts?: unknown };
+      if (
+        typeof parsed.scripts === "object" &&
+        parsed.scripts !== null &&
+        !Array.isArray(parsed.scripts)
+      ) {
+        scripts = Object.fromEntries(
+          Object.entries(parsed.scripts).filter(
+            (entry): entry is [string, string] => typeof entry[1] === "string",
+          ),
+        );
+      }
+    } catch {
+      // A malformed package.json is handled like a project with no scripts;
+      // the generated verification script fails closed below.
+    }
+
+    const hasLockfile = yield* fs
+      .exists(join(repoDir, "package-lock.json"))
+      .pipe(Effect.orElseSucceed(() => false));
+    const authoritativeGates = [
+      ...(scripts.typecheck ? ["npm run typecheck"] : []),
+      ...(scripts.test ? ["npm test"] : []),
+      ...(scripts.build ? ["npm run build"] : []),
+    ];
+    const focusedTestHint = scripts.test?.includes("vitest")
+      ? "npm test -- <affected-test-files> --run"
+      : "npm test -- <affected-test-files>";
+    const sources: string[] = [];
+    for (const candidate of NODE_STANDARDS_SOURCE_CANDIDATES) {
+      const exists = yield* fs
+        .exists(join(repoDir, candidate))
+        .pipe(Effect.orElseSucceed(() => false));
+      if (exists) sources.push(candidate);
+    }
+
+    return {
+      profile: {
+        schemaVersion: 1,
+        projectType: "node",
+        packageManager: "npm",
+        bootstrap: { command: hasLockfile ? "npm ci" : "npm install" },
+        cache: {
+          hostPath: ".sandcastle/cache/npm",
+          sandboxPath: "/home/agent/.npm",
+        },
+        rootPackage: {
+          cwd: ".",
+          focusedTestHint,
+          authoritativeGates,
+        },
+      },
+      sources,
+    };
+  });
+
+const detectCodexAfkProjectProfile = (
+  repoDir: string,
+): Effect.Effect<DetectedCodexAfkProject, Error, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const android = yield* detectAndroidGradleProjectProfile(repoDir);
+    if (android !== undefined) return android;
+    return yield* detectNodeNpmProjectProfile(repoDir);
+  });
+
+const renderFeedbackLoops = (profile: NodeNpmProjectProfile): string => {
+  const gates =
+    profile.rootPackage.authoritativeGates.length > 0
+      ? profile.rootPackage.authoritativeGates
+          .map((command) => `- \`${command}\``)
+          .join("\n")
+      : "- No authoritative gates were detected. Configure this file and the verification scripts before AFK execution.";
+  return `# Feedback Loops
+
+This file is generated from \`.sandcastle/project.json\`. Commands are executed
+inside the sandbox from the repository root. Update the project profile and
+regenerate these artifacts when the package layout or build system changes.
+
+## Bootstrap
+
+- Command: \`${profile.bootstrap.command}\`
+- Cache: \`${profile.cache.hostPath}\` → \`${profile.cache.sandboxPath}\`
+
+## Root Package
+
+- Working directory: \`${profile.rootPackage.cwd}\`
+- Focused test: \`${profile.rootPackage.focusedTestHint}\`
+
+Authoritative gates:
+
+${gates}
+
+## Cumulative Merge Gate
+
+Run \`.sandcastle/scripts/verify-affected.sh <batch-base-sha>\`. It validates
+the complete diff from the immutable batch base before tasks may be closed.
+`;
+};
+
+const renderCodingStandardsDraft = (sources: readonly string[]): string => {
+  const sourceList =
+    sources.length > 0
+      ? sources.map((source) => `- \`${source}\``).join("\n")
+      : "- No repository standards sources were detected.";
+  return `# Coding Standards
+
+This is a deterministic draft created during Sandcastle init. Review and
+customize it before the first AFK run. Do not add executable feedback commands
+here; they belong in \`.sandcastle/FEEDBACK_LOOPS.md\`.
+
+## Detected Sources of Truth
+
+${sourceList}
+
+Read the applicable sources above before changing code. When sources conflict,
+the more specific module-level instruction wins.
+
+## Project-Specific Rules
+
+<!-- Record architecture boundaries, naming, error handling, security,
+persistence, compatibility, testing conventions, and generated-file rules. -->
+`;
+};
+
+const renderShellScript = (commands: readonly string[]): string =>
+  ["#!/usr/bin/env bash", "set -euo pipefail", "", ...commands, ""].join("\n");
+
+const scaffoldNodeNpmProjectProfile = (
+  configDir: string,
+  detected: {
+    readonly profile: NodeNpmProjectProfile;
+    readonly sources: readonly string[];
+  },
+): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const { profile, sources } = detected;
+    const scriptsDir = join(configDir, "scripts");
+    yield* fs
+      .makeDirectory(scriptsDir, { recursive: true })
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+
+    const verifyCommands =
+      profile.rootPackage.authoritativeGates.length > 0
+        ? [
+            'repo_root="$(git rev-parse --show-toplevel)"',
+            'cd "$repo_root"',
+            ...profile.rootPackage.authoritativeGates,
+          ]
+        : [
+            'echo "No authoritative feedback gates were detected. Configure .sandcastle/project.json before AFK execution." >&2',
+            "exit 1",
+          ];
+    const files = [
+      {
+        path: join(configDir, "project.json"),
+        content: `${JSON.stringify(profile, null, 2)}\n`,
+        mode: 0o644,
+      },
+      {
+        path: join(configDir, "FEEDBACK_LOOPS.md"),
+        content: renderFeedbackLoops(profile),
+        mode: 0o644,
+      },
+      {
+        path: join(configDir, "CODING_STANDARDS.md"),
+        content: renderCodingStandardsDraft(sources),
+        mode: 0o644,
+      },
+      {
+        path: join(scriptsDir, "bootstrap.sh"),
+        content: renderShellScript([
+          'repo_root="$(git rev-parse --show-toplevel)"',
+          'cd "$repo_root"',
+          profile.bootstrap.command,
+        ]),
+        mode: 0o755,
+      },
+      {
+        path: join(scriptsDir, "verify-package.sh"),
+        content: renderShellScript([
+          'package_name="${1:-root}"',
+          'if test "$package_name" != "root"; then',
+          '  echo "Unknown package: $package_name" >&2',
+          "  exit 1",
+          "fi",
+          ...verifyCommands,
+        ]),
+        mode: 0o755,
+      },
+      {
+        path: join(scriptsDir, "verify-affected.sh"),
+        content: renderShellScript([
+          'base_sha="${1:?usage: verify-affected.sh <batch-base-sha>}"',
+          'git cat-file -e "${base_sha}^{commit}"',
+          'changed_files="$(git diff --name-only "$base_sha"...HEAD)"',
+          'if test -z "$changed_files"; then',
+          '  echo "No changed files since $base_sha."',
+          "  exit 0",
+          "fi",
+          'script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+          '"$script_dir/verify-package.sh" root',
+          "git diff --check",
+        ]),
+        mode: 0o755,
+      },
+    ];
+
+    for (const file of files) {
+      yield* fs
+        .writeFileString(file.path, file.content)
+        .pipe(Effect.mapError((e) => new Error(e.message)));
+      yield* fs
+        .chmod(file.path, file.mode)
+        .pipe(Effect.mapError((e) => new Error(e.message)));
+    }
+  });
+
+const renderAndroidFeedbackLoops = (
+  profile: AndroidGradleProjectProfile,
+): string => `# Feedback Loops
+
+This file is generated from \`.sandcastle/project.json\` for an Android/Gradle
+project. Commands run inside the sandbox from the repository root.
+
+## Bootstrap
+
+- Command: \`${profile.bootstrap.command}\`
+- Gradle cache: \`${profile.cache.hostPath}\` → \`${profile.cache.sandboxPath}\`
+- Android compile SDK: \`${profile.androidSdk.compileSdk}\`
+
+## Root Project
+
+- Working directory: \`${profile.rootProject.cwd}\`
+- Focused unit test: \`${profile.rootProject.focusedTestHint}\`
+
+Authoritative gates that do not require an emulator:
+
+${profile.rootProject.authoritativeGates.map((command) => `- \`${command}\``).join("\n")}
+
+Instrumentation tests require an explicitly configured emulator or device and
+are therefore not part of the default AFK completion gate.
+
+## Cumulative Merge Gate
+
+Run \`.sandcastle/scripts/verify-affected.sh <batch-base-sha>\`. It validates
+the complete diff from the immutable batch base before tasks may be closed.
+`;
+
+const scaffoldAndroidGradleProjectProfile = (
+  configDir: string,
+  detected: {
+    readonly profile: AndroidGradleProjectProfile;
+    readonly sources: readonly string[];
+  },
+): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const { profile, sources } = detected;
+    const scriptsDir = join(configDir, "scripts");
+    yield* fs
+      .makeDirectory(scriptsDir, { recursive: true })
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+
+    const projectCommands = [
+      'repo_root="$(git rev-parse --show-toplevel)"',
+      'cd "$repo_root"',
+      ...profile.rootProject.authoritativeGates,
+    ];
+    const files = [
+      {
+        path: join(configDir, "project.json"),
+        content: `${JSON.stringify(profile, null, 2)}\n`,
+        mode: 0o644,
+      },
+      {
+        path: join(configDir, "FEEDBACK_LOOPS.md"),
+        content: renderAndroidFeedbackLoops(profile),
+        mode: 0o644,
+      },
+      {
+        path: join(configDir, "CODING_STANDARDS.md"),
+        content: renderCodingStandardsDraft(sources),
+        mode: 0o644,
+      },
+      {
+        path: join(scriptsDir, "bootstrap.sh"),
+        content: renderShellScript([
+          'repo_root="$(git rev-parse --show-toplevel)"',
+          'cd "$repo_root"',
+          "test -x ./gradlew || chmod +x ./gradlew",
+          profile.bootstrap.command,
+        ]),
+        mode: 0o755,
+      },
+      {
+        path: join(scriptsDir, "verify-package.sh"),
+        content: renderShellScript([
+          'project_name="${1:-root}"',
+          'if test "$project_name" != "root"; then',
+          '  echo "Unknown Android project: $project_name" >&2',
+          "  exit 1",
+          "fi",
+          ...projectCommands,
+        ]),
+        mode: 0o755,
+      },
+      {
+        path: join(scriptsDir, "verify-affected.sh"),
+        content: renderShellScript([
+          'base_sha="${1:?usage: verify-affected.sh <batch-base-sha>}"',
+          'git cat-file -e "${base_sha}^{commit}"',
+          'changed_files="$(git diff --name-only "$base_sha"...HEAD)"',
+          'if test -z "$changed_files"; then',
+          '  echo "No changed files since $base_sha."',
+          "  exit 0",
+          "fi",
+          'script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+          '"$script_dir/verify-package.sh" root',
+          "git diff --check",
+        ]),
+        mode: 0o755,
+      },
+    ];
+
+    for (const file of files) {
+      yield* fs
+        .writeFileString(file.path, file.content)
+        .pipe(Effect.mapError((e) => new Error(e.message)));
+      yield* fs
+        .chmod(file.path, file.mode)
+        .pipe(Effect.mapError((e) => new Error(e.message)));
+    }
+  });
+
+const validateCodeGraphVersion = (version: string): string => {
+  if (!/^[0-9A-Za-z][0-9A-Za-z._+-]*$/.test(version)) {
+    throw new Error(`Invalid CodeGraph version: "${version}"`);
+  }
+  return version;
+};
+
+const addCodeGraphToContainerfile = (
+  containerfile: string,
+  version: string,
+): string => {
+  const install = "RUN npm install -g @openai/codex";
+  if (!containerfile.includes(install)) {
+    throw new Error("The codex-afk template requires the Codex Dockerfile.");
+  }
+  const withRuntimeTools = containerfile.replace(
+    "{{ISSUE_TRACKER_TOOLS}}",
+    `# Baseline tools used by Codex recovery and CodeGraph navigation
+RUN apt-get update && apt-get install -y \\
+  build-essential \\
+  python3 \\
+  python-is-python3 \\
+  ripgrep \\
+  && rm -rf /var/lib/apt/lists/*
+
+{{ISSUE_TRACKER_TOOLS}}`,
+  );
+  const installWithCodeGraph = `${install} @colbymchenry/codegraph@${validateCodeGraphVersion(version)}`;
+  return withRuntimeTools.replace(
+    install,
+    `${installWithCodeGraph}
+RUN codex --version && codegraph version && python --version && npm --version`,
+  );
+};
+
+const addAndroidToolchainToContainerfile = (
+  containerfile: string,
+  profile: AndroidGradleProjectProfile,
+): string => {
+  const androidBase = containerfile.replace(
+    "FROM node:22-bookworm",
+    "ARG ANDROID_SANDBOX_PLATFORM=linux/amd64\nFROM --platform=${ANDROID_SANDBOX_PLATFORM} node:22-bookworm",
+  );
+  const uidAnchor = "# Build-args for UID/GID alignment:";
+  if (!androidBase.includes(uidAnchor)) {
+    throw new Error(
+      "The Android profile requires the standard Codex Dockerfile.",
+    );
+  }
+  const packages = profile.androidSdk.packages
+    .map((value) => `"${value}"`)
+    .join(" ");
+  const androidToolchain = `# Android/Gradle build toolchain
+ARG ANDROID_COMMAND_LINE_TOOLS_VERSION=11076708
+ENV ANDROID_SDK_ROOT=/opt/android-sdk
+ENV ANDROID_HOME=/opt/android-sdk
+ENV PATH="\${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin:\${ANDROID_SDK_ROOT}/platform-tools:\${PATH}"
+
+RUN apt-get update && apt-get install -y \\
+  openjdk-${profile.javaVersion}-jdk-headless \\
+  unzip \\
+  && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p "\${ANDROID_SDK_ROOT}/cmdline-tools" \\
+  && curl -fsSL "https://dl.google.com/android/repository/commandlinetools-linux-\${ANDROID_COMMAND_LINE_TOOLS_VERSION}_latest.zip" -o /tmp/android-command-line-tools.zip \\
+  && unzip -q /tmp/android-command-line-tools.zip -d "\${ANDROID_SDK_ROOT}/cmdline-tools" \\
+  && mv "\${ANDROID_SDK_ROOT}/cmdline-tools/cmdline-tools" "\${ANDROID_SDK_ROOT}/cmdline-tools/latest" \\
+  && rm /tmp/android-command-line-tools.zip
+
+RUN yes | sdkmanager --licenses >/dev/null
+RUN sdkmanager ${packages}
+
+RUN java -version && sdkmanager --version
+
+`;
+  return androidBase.replace(uidAnchor, `${androidToolchain}${uidAnchor}`);
+};
+
+const replaceRequired = (
+  content: string,
+  search: string,
+  replacement: string,
+): string => {
+  if (!content.includes(search)) {
+    throw new Error(`codex-afk template anchor is missing: ${search}`);
+  }
+  return content.replace(search, replacement);
+};
+
+const rewriteCodexAfkMain = (
+  configDir: string,
+  mainFilename: string,
+  model: string,
+  project: CodexAfkProjectProfile,
+): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const mainPath = join(configDir, mainFilename);
+    let content = yield* fs
+      .readFileString(mainPath)
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+
+    // rewriteMainTs has already converted the template's placeholder factory
+    // to Codex. Collapse only those original call sites before injecting the
+    // shared provider factory below.
+    content = content.replace(/sandcastle\.codex\([^)]+\)/g, "codexAgent()");
+    const reviewerCall =
+      /name: "reviewer",\s*maxIterations: 1,\s*agent: codexAgent\(\),/.exec(
+        content,
+      )?.[0];
+    if (!reviewerCall)
+      return yield* Effect.fail(
+        new InitError({
+          message: "codex-afk reviewer factory anchor is missing",
+        }),
+      );
+    content = replaceRequired(
+      content,
+      reviewerCall,
+      reviewerCall.replace("codexAgent()", 'codexAgent("xhigh")'),
+    );
+
+    content = replaceRequired(
+      content,
+      `import { execFile } from "node:child_process";
+import { z } from "zod";`,
+      `import { execFile } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { z } from "zod";`,
+    );
+
+    const cachePrefix = project.projectType === "android" ? "GRADLE" : "NPM";
+    const sandboxProjectEnv =
+      project.projectType === "android"
+        ? ', ANDROID_HOME: "/opt/android-sdk", ANDROID_SDK_ROOT: "/opt/android-sdk"'
+        : "";
+    const runtime = `const BASE_BRANCH = (await runHost("git", ["branch", "--show-current"])).trim();
+
+if (!BASE_BRANCH) {
+  throw new Error("Sandcastle requires a named Git branch, not detached HEAD.");
+}
+
+const CODEX_HOME_HOST = ".sandcastle/codex-home";
+const CODEX_HOME_SANDBOX = "/home/agent/.codex";
+const CODEX_CONFIG_HOST = \`\${CODEX_HOME_HOST}/config.toml\`;
+const CODING_STANDARDS_HOST = ".sandcastle/CODING_STANDARDS.md";
+const CODING_STANDARDS_SANDBOX = "/home/agent/CODING_STANDARDS.md";
+const FEEDBACK_LOOPS_HOST = ".sandcastle/FEEDBACK_LOOPS.md";
+const FEEDBACK_LOOPS_SANDBOX = "/home/agent/FEEDBACK_LOOPS.md";
+const ${cachePrefix}_CACHE_HOST = ${JSON.stringify(project.cache.hostPath)};
+const ${cachePrefix}_CACHE_SANDBOX = ${JSON.stringify(project.cache.sandboxPath)};
+const CODEGRAPH_CACHE_ROOT_HOST = ".sandcastle/cache/codegraph";
+const CODEGRAPH_SEED_DATABASE_HOST = ".codegraph/codegraph.db";
+const CODEGRAPH_CACHE_SANDBOX = "/home/agent/workspace/.codegraph";
+
+mkdirSync(CODEX_HOME_HOST, { recursive: true, mode: 0o700 });
+chmodSync(CODEX_HOME_HOST, 0o700);
+if (!existsSync(CODEX_CONFIG_HOST)) {
+  writeFileSync(
+    CODEX_CONFIG_HOST,
+    'cli_auth_credentials_store = "file"\\nforced_login_method = "chatgpt"\\n',
+    { mode: 0o600 },
+  );
+}
+chmodSync(CODEX_CONFIG_HOST, 0o600);
+mkdirSync(${cachePrefix}_CACHE_HOST, { recursive: true });
+
+const codeGraphSyncCommand =
+  "if test -f .codegraph/codegraph.db; then codegraph sync --quiet .; else codegraph init .; fi";
+
+const codexSandbox = (branch: string, extraEnv: Record<string, string> = trackerEnvironment) =>
+  docker({
+    mounts: [
+      { hostPath: CODEX_HOME_HOST, sandboxPath: CODEX_HOME_SANDBOX },
+      {
+        hostPath: CODING_STANDARDS_HOST,
+        sandboxPath: CODING_STANDARDS_SANDBOX,
+        readonly: true,
+      },
+      {
+        hostPath: FEEDBACK_LOOPS_HOST,
+        sandboxPath: FEEDBACK_LOOPS_SANDBOX,
+        readonly: true,
+      },
+      { hostPath: ${cachePrefix}_CACHE_HOST, sandboxPath: ${cachePrefix}_CACHE_SANDBOX },
+      {
+        hostPath: sandcastle.prepareCodeGraphCache({
+          cacheRoot: CODEGRAPH_CACHE_ROOT_HOST,
+          branch,
+          seedDatabase: CODEGRAPH_SEED_DATABASE_HOST,
+        }),
+        sandboxPath: CODEGRAPH_CACHE_SANDBOX,
+      },
+    ],
+    env: { HOME: "/home/agent", CODEX_HOME: CODEX_HOME_SANDBOX${sandboxProjectEnv}, ...extraEnv },
+  });
+
+const codexAgent = (effort: "low" | "medium" | "high" | "xhigh" = "high") =>
+  sandcastle.codex(${JSON.stringify(model)}, {
+    effort,
+    sessionStorage: {
+      hostSessionsDir: \`\${CODEX_HOME_HOST}/sessions\`,
+      sandboxSessionsDir: \`\${CODEX_HOME_SANDBOX}/sessions\`,
+    },
+  });
+
+async function syncCodeGraph(sandbox: sandcastle.Sandbox): Promise<void> {
+  const result = await sandbox.exec(codeGraphSyncCommand);
+  if (result.exitCode !== 0) {
+    throw new Error(\`CodeGraph sync failed: \${result.stderr || result.stdout}\`);
+  }
+}`;
+
+    content = replaceRequired(
+      content,
+      "const MAX_ITERATIONS = 10;",
+      `const MAX_ITERATIONS = 10;\n${runtime}`,
+    );
+    content = replaceRequired(
+      content,
+      `const hooks = {
+  sandbox: { onSandboxReady: [{ command: "npm install" }] },
+};`,
+      `const hooks = {
+  sandbox: {
+    onSandboxReady: [
+      { command: "codex login status" },
+      { command: "test -r /home/agent/CODING_STANDARDS.md" },
+      { command: "test -r /home/agent/FEEDBACK_LOOPS.md" },
+      { command: codeGraphSyncCommand, timeoutMs: 120_000 },
+      { command: "bash .sandcastle/scripts/bootstrap.sh" },
+    ],
+  },
+};`,
+    );
+
+    content = replaceRequired(
+      content,
+      "sandbox: docker({ env: trackerEnvironment }),",
+      "sandbox: codexSandbox(BASE_BRANCH),",
+    );
+    content = replaceRequired(
+      content,
+      "sandbox: docker({ env: readinessEnvironment })",
+      "sandbox: codexSandbox(branch, readinessEnvironment)",
+    );
+    content = replaceRequired(
+      content,
+      "sandbox: docker({ env: trackerEnvironment }),",
+      "sandbox: codexSandbox(issue.branch),",
+    );
+    content = replaceRequired(
+      content,
+      "sandbox: docker({ env: trackerEnvironment }),",
+      "sandbox: codexSandbox(BASE_BRANCH),",
+    );
+    const reviewStart =
+      /if \(sandbox && implement\.commits\.length > 0\) \{\s*/.exec(
+        content,
+      )?.[0];
+    if (!reviewStart)
+      return yield* Effect.fail(
+        new InitError({ message: "codex-afk reviewer sync anchor is missing" }),
+      );
+    content = replaceRequired(
+      content,
+      reviewStart,
+      `${reviewStart}await syncCodeGraph(sandbox);\n${reviewStart.match(/\s*$/)?.[0] ?? ""}`,
+    );
+    content = replaceRequired(
+      content,
+      `// Copy node_modules from the host into the worktree before each sandbox
+// starts. Avoids a full npm install from scratch; the hook above handles
+// platform-specific binaries and any packages added since the last copy.
+const copyToWorktree = ["node_modules"];`,
+      `// Install dependencies inside the Linux sandbox from the lockfile. The
+// package-manager download cache is mounted separately by codexSandbox().
+const copyToWorktree: string[] = [];`,
+    );
+
+    yield* fs
+      .writeFileString(mainPath, content)
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+  });
+
+const configureCodexAfkPrompts = (
+  configDir: string,
+): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const guidance = `## CODEGRAPH NAVIGATION
+
+Use the synchronized branch-local index before broad text searches:
+
+\`\`\`bash
+codegraph explore "{{ISSUE_TITLE}}"
+codegraph query "<relevant symbol>"
+codegraph impact "<public symbol being changed>"
+\`\`\`
+
+Use \`codegraph node\` for caller/callee context and \`codegraph affected\`
+to select focused tests. Fall back to \`rg\` and direct file reads for exact
+wire text, configuration, and graph misses. CodeGraph is navigation evidence, not correctness evidence;
+tests and executable feedback gates establish correctness.
+`;
+    for (const filename of ["implement-prompt.md", "review-prompt.md"]) {
+      const promptPath = join(configDir, filename);
+      const content = yield* fs
+        .readFileString(promptPath)
+        .pipe(Effect.mapError((e) => new Error(e.message)));
+      const withStandardsMount = content.replaceAll(
+        "@.sandcastle/CODING_STANDARDS.md",
+        "/home/agent/CODING_STANDARDS.md",
+      );
+      let withFeedback = withStandardsMount;
+      if (filename === "implement-prompt.md") {
+        withFeedback = replaceRequired(
+          withFeedback,
+          `1. Read \`/home/agent/CODING_STANDARDS.md\` completely.
+2. Inspect \`git status\`, the last ten commits, relevant package manifests,`,
+          `1. Read \`/home/agent/CODING_STANDARDS.md\` completely.
+2. Read \`/home/agent/FEEDBACK_LOOPS.md\` completely for executable
+   bootstrap, focused-test, and authoritative-gate commands.
+3. Inspect \`git status\`, the last ten commits, relevant package manifests,`,
+        );
+        withFeedback = replaceRequired(
+          withFeedback,
+          "one authoritative gate from `/home/agent/CODING_STANDARDS.md`",
+          "one authoritative gate from `/home/agent/FEEDBACK_LOOPS.md`",
+        );
+      } else {
+        withFeedback = replaceRequired(
+          withFeedback,
+          `\`/home/agent/CODING_STANDARDS.md\` completely before judging the change.`,
+          `\`/home/agent/CODING_STANDARDS.md\` completely before judging the change.
+Read \`/home/agent/FEEDBACK_LOOPS.md\` completely before selecting or running
+any executable feedback command.`,
+        );
+        withFeedback = replaceRequired(
+          withFeedback,
+          `Run one authoritative gate from
+   \`/home/agent/CODING_STANDARDS.md\``,
+          `Run one authoritative gate from
+   \`/home/agent/FEEDBACK_LOOPS.md\``,
+        );
+      }
+      const updated = replaceRequired(
+        withFeedback,
+        "# EXPLORATION\n\n",
+        `# EXPLORATION\n\n${guidance}\n`,
+      );
+      yield* fs
+        .writeFileString(promptPath, updated)
+        .pipe(Effect.mapError((e) => new Error(e.message)));
+    }
+
+    const mergePath = join(configDir, "merge-prompt.md");
+    let merge = yield* fs
+      .readFileString(mergePath)
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+    merge = merge.replaceAll(
+      ".sandcastle/CODING_STANDARDS.md",
+      "/home/agent/CODING_STANDARDS.md",
+    );
+    merge = replaceRequired(
+      merge,
+      `1. Read \`/home/agent/CODING_STANDARDS.md\` completely.
+2. Confirm \`{{BATCH_BASE_SHA}}\` names the current pre-merge integration commit.
+3. Inspect the listed branches and associated tasks:`,
+      `1. Read \`/home/agent/CODING_STANDARDS.md\` completely.
+2. Read \`/home/agent/FEEDBACK_LOOPS.md\` completely.
+3. Confirm \`{{BATCH_BASE_SHA}}\` names the current pre-merge integration commit.
+4. Inspect the listed branches and associated tasks:`,
+    );
+    merge = replaceRequired(
+      merge,
+      `After every listed branch has been merged:
+
+1. List the complete change set with
+   \`git diff --name-only {{BATCH_BASE_SHA}}...HEAD\`.
+2. Map those paths to affected packages or modules using their manifests and
+   build configuration.
+3. Run every affected-package authoritative gate defined in
+   \`/home/agent/CODING_STANDARDS.md\`, from the package directory and with its
+   declared package manager or build tool.
+4. Run focused integration or contract tests for boundaries touched by more
+   than one merged branch.
+5. Run \`git diff --check\` and inspect the cumulative diff and repository status
+   for secrets, local state, generated-file mistakes, and unrelated churn.`,
+      `After every listed branch has been merged, run the executable cumulative gate:
+
+\`\`\`bash
+bash .sandcastle/scripts/verify-affected.sh "{{BATCH_BASE_SHA}}"
+\`\`\`
+
+The script owns affected-package mapping and authoritative commands documented
+in \`/home/agent/FEEDBACK_LOOPS.md\`. After it succeeds, inspect the cumulative
+diff and repository status for secrets, local state, generated-file mistakes,
+and unrelated churn.`,
+    );
+    yield* fs
+      .writeFileString(mergePath, merge)
+      .pipe(Effect.mapError((e) => new Error(e.message)));
   });
 
 const COMPILED_FILE_EXTENSIONS = [
@@ -752,6 +1792,66 @@ const copyTemplateFiles = (
         }),
       { concurrency: "unbounded" },
     );
+  });
+
+const scaffoldIssueTrackerFiles = (
+  configDir: string,
+  templateName: string,
+  issueTracker: IssueTrackerEntry,
+  createLabel: boolean,
+): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const plannerTemplate = [
+      "parallel-planner",
+      "parallel-planner-with-review",
+      "codex-afk",
+    ].includes(templateName);
+    if (!plannerTemplate) {
+      return;
+    }
+
+    const fs = yield* FileSystem.FileSystem;
+    const inventoryCommand = createLabel
+      ? issueTracker.templateArgs.PLANNER_LIST_TASKS_COMMAND
+      : issueTracker.templateArgs.PLANNER_LIST_TASKS_COMMAND.replace(
+          / --label Sandcastle/g,
+          "",
+        );
+    const inventoryScript = `#!/usr/bin/env bash
+set -euo pipefail
+${inventoryCommand}
+`;
+
+    yield* fs
+      .writeFileString(join(configDir, "planner-inventory.sh"), inventoryScript)
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+    yield* fs
+      .chmod(join(configDir, "planner-inventory.sh"), 0o755)
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+    yield* fs
+      .copyFile(
+        join(getTemplatesDir(), "planner-batch.ts"),
+        join(configDir, "planner-batch.ts"),
+      )
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+
+    if (issueTracker.name !== "github-issues") {
+      const readinessPath = join(configDir, "readiness.json");
+      if (yield* fs.exists(readinessPath)) {
+        const config = JSON.parse(yield* fs.readFileString(readinessPath));
+        yield* fs.writeFileString(
+          readinessPath,
+          JSON.stringify({ ...config, mode: "disabled" }, null, 2) + "\n",
+        );
+      }
+      return;
+    }
+    yield* fs
+      .copyFile(
+        join(getTemplatesDir(), "github-planner-inventory.cjs"),
+        join(configDir, "github-planner-inventory.cjs"),
+      )
+      .pipe(Effect.mapError((e) => new Error(e.message)));
   });
 
 /**
@@ -983,6 +2083,10 @@ export interface ScaffoldOptions {
   createLabel?: boolean;
   issueTracker?: IssueTrackerEntry;
   sandboxProvider?: SandboxProviderEntry;
+  /** Authentication mode for Codex. ChatGPT uses a project-isolated OAuth home. */
+  agentAuth?: "api-key" | "chatgpt";
+  /** Pinned @colbymchenry/codegraph version used by the codex-afk image. */
+  codeGraphVersion?: string;
 }
 
 export interface ScaffoldResult {
@@ -1026,9 +2130,38 @@ export const scaffold = (
       createLabel = true,
       issueTracker = ISSUE_TRACKER_REGISTRY[0]!, // default: github-issues
       sandboxProvider = SANDBOX_PROVIDER_REGISTRY[0]!, // default: docker
+      agentAuth = templateName === "codex-afk" ? "chatgpt" : "api-key",
+      codeGraphVersion = "1.5.0",
     } = options;
     const fs = yield* FileSystem.FileSystem;
     const configDir = join(repoDir, ".sandcastle");
+    const selectedTemplate = TEMPLATES.find((t) => t.name === templateName);
+    const isCodexAfk = templateName === "codex-afk";
+    const resolvedCodeGraphVersion = isCodexAfk
+      ? yield* Effect.try({
+          try: () => validateCodeGraphVersion(codeGraphVersion),
+          catch: (error) =>
+            error instanceof Error ? error : new Error(`${error}`),
+        })
+      : codeGraphVersion;
+    const codexAfkProject = isCodexAfk
+      ? yield* detectCodexAfkProjectProfile(repoDir)
+      : undefined;
+
+    if (selectedTemplate?.requiredAgent !== undefined) {
+      if (selectedTemplate.requiredAgent !== agent.name) {
+        yield* Effect.fail(
+          new Error(
+            `Template "${templateName}" requires agent "${selectedTemplate.requiredAgent}".`,
+          ),
+        );
+      }
+    }
+    if (agentAuth === "chatgpt" && agent.name !== "codex") {
+      yield* Effect.fail(
+        new Error('Agent auth "chatgpt" is only supported by the Codex agent.'),
+      );
+    }
 
     const exists = yield* fs
       .exists(configDir)
@@ -1048,24 +2181,64 @@ export const scaffold = (
       .pipe(Effect.mapError((e) => new Error(e.message)));
 
     const templateDir = yield* getTemplateDir(templateName);
+    const isolatedCodexHome = agentAuth === "chatgpt";
+
+    if (isolatedCodexHome) {
+      const codexHome = join(configDir, "codex-home");
+      const codexConfig = join(codexHome, "config.toml");
+      yield* fs
+        .makeDirectory(codexHome, { recursive: true })
+        .pipe(Effect.mapError((e) => new Error(e.message)));
+      yield* fs
+        .chmod(codexHome, 0o700)
+        .pipe(Effect.mapError((e) => new Error(e.message)));
+      yield* fs
+        .writeFileString(codexConfig, CODEX_CHATGPT_CONFIG)
+        .pipe(Effect.mapError((e) => new Error(e.message)));
+      yield* fs
+        .chmod(codexConfig, 0o600)
+        .pipe(Effect.mapError((e) => new Error(e.message)));
+    }
 
     // Build .env.example from agent + issue tracker env blocks
-    const envExampleParts = [agent.envExample];
+    const envExampleParts = [
+      isolatedCodexHome ? CODEX_CHATGPT_ENV_EXAMPLE : agent.envExample,
+    ];
     if (issueTracker.envExample) {
       envExampleParts.push(issueTracker.envExample);
     }
     const envExampleContent = envExampleParts.join("\n") + "\n";
+    let containerfileContent = agent.dockerfileTemplate;
+    if (isCodexAfk) {
+      containerfileContent = addCodeGraphToContainerfile(
+        containerfileContent,
+        resolvedCodeGraphVersion,
+      );
+      if (codexAfkProject?.profile.projectType === "android") {
+        containerfileContent = addAndroidToolchainToContainerfile(
+          containerfileContent,
+          codexAfkProject.profile,
+        );
+      }
+    }
 
     yield* Effect.all(
       [
         fs
           .writeFileString(
             join(configDir, sandboxProvider.containerfileName),
-            agent.dockerfileTemplate,
+            containerfileContent,
           )
           .pipe(Effect.mapError((e) => new Error(e.message))),
         fs
-          .writeFileString(join(configDir, ".gitignore"), GITIGNORE)
+          .writeFileString(
+            join(configDir, ".gitignore"),
+            gitignoreFor({
+              isolatedCodexHome,
+              codeGraph: isCodexAfk,
+              projectCachePath: codexAfkProject?.profile.cache.hostPath,
+            }),
+          )
           .pipe(Effect.mapError((e) => new Error(e.message))),
         fs
           .writeFileString(join(configDir, ".env.example"), envExampleContent)
@@ -1073,6 +2246,13 @@ export const scaffold = (
         copyTemplateFiles(templateDir, configDir, mainFilename),
       ],
       { concurrency: "unbounded" },
+    );
+
+    yield* scaffoldIssueTrackerFiles(
+      configDir,
+      templateName,
+      issueTracker,
+      createLabel,
     );
 
     // Rewrite main file with the selected agent factory, model, and sandbox provider
@@ -1084,12 +2264,36 @@ export const scaffold = (
       mainFilename,
     );
 
+    if (codexAfkProject !== undefined) {
+      yield* rewriteCodexAfkMain(
+        configDir,
+        mainFilename,
+        model,
+        codexAfkProject.profile,
+      );
+      if (codexAfkProject.profile.projectType === "android") {
+        yield* scaffoldAndroidGradleProjectProfile(configDir, {
+          profile: codexAfkProject.profile,
+          sources: codexAfkProject.sources,
+        });
+      } else {
+        yield* scaffoldNodeNpmProjectProfile(configDir, {
+          profile: codexAfkProject.profile,
+          sources: codexAfkProject.sources,
+        });
+      }
+    }
+
     // Replace issue tracker template arguments in all text files (must run before label stripping)
     yield* substituteTemplateArgs(configDir, issueTracker);
 
     // Strip --label Sandcastle from prompt files when the user declined label creation
     if (!createLabel) {
       yield* rewritePromptFiles(configDir);
+    }
+
+    if (isCodexAfk) {
+      yield* configureCodexAfkPrompts(configDir);
     }
 
     // For the custom issue tracker, drop the setup prompt the user feeds to
