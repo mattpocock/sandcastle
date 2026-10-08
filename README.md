@@ -1031,6 +1031,13 @@ Sandcastle ships with built-in providers for Docker, Podman, and Vercel, but you
 
 ### The sandbox handle contract
 
+Bind-mount providers receive an optional `signal` in their `create()` options.
+Sandcastle aborts it when creation times out or is interrupted. Providers should
+cancel pending startup operations and clean up resources that have not yet been
+handed back to the caller. The built-in `docker()` provider honors this signal and
+performs best-effort forced cleanup when startup fails or is cancelled.
+After Sandcastle acquires the handle, callers manage its lifetime with `close()`.
+
 Both provider types return a **sandbox handle** from their `create()` function. The handle exposes:
 
 | Method         | Required   | Description                                                                  |

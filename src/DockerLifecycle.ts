@@ -5,11 +5,11 @@ import { DockerError } from "./errors.js";
 import { formatVolumeMount, type SelinuxLabel } from "./mountUtils.js";
 
 const dockerExec = (args: string[]): Effect.Effect<string, DockerError> =>
-  Effect.async((resume) => {
+  Effect.async((resume, signal) => {
     execFile(
       "docker",
       args,
-      { maxBuffer: 10 * 1024 * 1024 },
+      { maxBuffer: 10 * 1024 * 1024, signal },
       (error, stdout, stderr) => {
         if (error) {
           resume(
