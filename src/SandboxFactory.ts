@@ -315,7 +315,7 @@ export const WorktreeDockerSandboxFactory = {
 
       /** Prune stale worktrees (best-effort), then create a fresh one. */
       const pruneAndCreate = () =>
-        WorktreeManager.pruneStale(hostRepoDir).pipe(
+        WorktreeManager.pruneStale(hostRepoDir, timeouts?.worktreePruneMs).pipe(
           Effect.catchAll((e) =>
             Effect.sync(() => {
               console.error(
@@ -325,9 +325,11 @@ export const WorktreeDockerSandboxFactory = {
             }),
           ),
           Effect.andThen(
-            branch
-              ? WorktreeManager.create(hostRepoDir, { branch, baseBranch })
-              : WorktreeManager.create(hostRepoDir, { name }),
+            WorktreeManager.create(
+              hostRepoDir,
+              branch ? { branch, baseBranch } : { name },
+              timeouts?.worktreeCreateMs,
+            ),
           ),
           Effect.provideService(FileSystem.FileSystem, fileSystem),
         );
