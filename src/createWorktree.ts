@@ -366,7 +366,13 @@ export const createWorktree = async (
         );
         handle = startResult.handle;
       } else {
-        const gitPath = join(hostRepoDir, ".git");
+        // Resolve git mounts from the worktree we mount into the sandbox, not
+        // from `hostRepoDir`. When the host repo is itself a linked worktree,
+        // `hostRepoDir/.git` is a pointer file whose identity mount can't be
+        // remapped for Windows (#996). Resolving from the same path we patch
+        // against (`worktreeInfo.path`) keeps the two consistent; the worktree
+        // resolves to the same parent `.git` dir either way.
+        const gitPath = join(worktreeInfo.path, ".git");
         const rawGitMounts = yield* resolveGitMounts(gitPath);
         const gitMounts = yield* patchGitMountsForWindows(
           rawGitMounts,
@@ -575,7 +581,13 @@ export const createWorktree = async (
         handle = startResult.handle;
         sandboxRepoDir = startResult.worktreePath;
       } else {
-        const gitPath = join(hostRepoDir, ".git");
+        // Resolve git mounts from the worktree we mount into the sandbox, not
+        // from `hostRepoDir`. When the host repo is itself a linked worktree,
+        // `hostRepoDir/.git` is a pointer file whose identity mount can't be
+        // remapped for Windows (#996). Resolving from the same path we patch
+        // against (`worktreeInfo.path`) keeps the two consistent; the worktree
+        // resolves to the same parent `.git` dir either way.
+        const gitPath = join(worktreeInfo.path, ".git");
         const rawGitMounts = yield* resolveGitMounts(gitPath);
         const gitMounts = yield* patchGitMountsForWindows(
           rawGitMounts,
