@@ -37,6 +37,38 @@ The custom `refs/sandcastle/` namespace keeps the marker invisible to `git
 log`, `git branch`, and `git tag`, and it never reaches the host: the
 sandbox→host channel (`format-patch`/`am`) carries commits, not refs.
 
+### Previously synced uncommitted changes
+
+The commit base does not describe staged or unstaged changes. Reusing a sandbox
+that leaves changes uncommitted therefore re-emits the full `git diff HEAD`;
+applying that patch to the already-dirty host fails (issue #926). Committing
+those changes on a later run also leaves `git am` facing the old host diff.
+
+Store the exact last-applied binary diff as a blob under a second sandbox-owned
+ref, `refs/sandcastle/sync-diff`. Before applying another run's commits and diff:
+
+- Save both the previous diff (`previous.diff`) and all current artifacts on the
+  host, following the existing save-before-apply recovery protocol.
+- Reverse the previous diff with `git apply --reverse`. A conflict stops the
+  remaining steps without advancing either marker. Unrelated host edits remain.
+- Delete the diff marker once the reversal succeeds. Apply commits as before,
+  then apply the current diff and point the marker at its saved blob only after
+  that application succeeds. A later untracked-file failure does not undo this
+  progress, just as it does not undo shipped commits.
+
+This handles changed diffs, a return to clean HEAD, and dirty changes becoming
+commits. An unchanged diff with no new commits needs no replacement. Binary
+patches make the saved diff reversible without touching the sandbox's index,
+working files, or commit history. The saved patch is copied into a temporary
+sandbox file for hashing so the ref describes the exact artifact applied to
+the host, even if sandbox files subsequently change.
+
+As with existing commit/diff/untracked sync, application is not transactional
+across steps: a later conflict can follow an already-successful reversal or
+commit application. Preserve the artifacts and print only the remaining
+recovery commands. Commit recovery selects numbered `format-patch` files so it
+does not accidentally pass `changes.patch` to `git am`.
+
 ## Considered Options
 
 1. **Host HEAD as the base** (previous behavior) — rejected. Poisoned by

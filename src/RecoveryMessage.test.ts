@@ -4,6 +4,42 @@ import { buildRecoveryMessage } from "./RecoveryMessage.js";
 describe("buildRecoveryMessage", () => {
   const patchDir = ".sandcastle/patches/20260324-153000";
 
+  it("reverses the previous diff before applying only the numbered commit patches", () => {
+    const msg = buildRecoveryMessage({
+      patchDir,
+      failedStep: "previousDiff",
+      hasPreviousDiff: true,
+      hasCommits: true,
+      hasDiff: true,
+      hasUntracked: true,
+    });
+    expect(msg).toContain(
+      "Patch application failed at step 1 (previously synced uncommitted changes).",
+    );
+    expect(msg).toContain(`git apply --reverse ${patchDir}/previous.diff`);
+    expect(msg).toContain(`git am --3way ${patchDir}/[0-9]*.patch`);
+    expect(msg).toContain(`git apply ${patchDir}/changes.patch`);
+    expect(msg).toContain(`cp -r ${patchDir}/untracked/* .`);
+    expect(msg).not.toContain("git am --continue");
+  });
+
+  it("does not repeat a successful reversal after a later diff failure", () => {
+    const msg = buildRecoveryMessage({
+      patchDir,
+      failedStep: "diff",
+      hasPreviousDiff: true,
+      hasCommits: true,
+      hasDiff: true,
+      hasUntracked: false,
+    });
+    expect(msg).toContain(
+      "Patch application failed at step 3 (uncommitted changes).",
+    );
+    expect(msg).toContain(`git apply ${patchDir}/changes.patch`);
+    expect(msg).not.toContain("--reverse");
+    expect(msg).not.toContain("git am");
+  });
+
   it("git am failure with remaining diff and untracked steps", () => {
     const msg = buildRecoveryMessage({
       patchDir,
