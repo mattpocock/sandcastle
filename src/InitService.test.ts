@@ -1139,7 +1139,23 @@ describe("InitService scaffold", () => {
       );
       expect(mainTs).toContain("implement-prompt.md");
       expect(mainTs).toContain("review-prompt.md");
-      expect(mainTs).toContain("implement.commits.length > 0");
+      expect(mainTs).toContain("const reviewNeeded");
+    });
+
+    it("main.mts retries review for existing unmerged branch work", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "parallel-planner-with-review" });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain("const hasUnmergedCommits");
+      expect(mainTs).toContain("HEAD..refs/heads/${branch}");
+      expect(mainTs).toContain(
+        "implement.commits.length > 0 || hasUnmergedCommits(issue.branch)",
+      );
+      expect(mainTs).toContain("hasWork: reviewNeeded");
     });
 
     it("main.mts captures reviewer result and merges commits from both runs", async () => {
@@ -1155,6 +1171,7 @@ describe("InitService scaffold", () => {
       // Commits from both implementer and reviewer must be merged
       expect(mainTs).toContain("implement.commits");
       expect(mainTs).toContain("review.commits");
+      expect(mainTs).toContain("entry.outcome.value.hasWork");
     });
 
     it("main.mts uses Promise.allSettled for parallel execution", async () => {

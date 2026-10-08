@@ -6,10 +6,11 @@
 //                               listing unblocked issues with branch names.
 //   Phase 2 (Execute + Review): For each issue, a sandbox is created via
 //                               createSandbox(). The implementer runs first
-//                               (100 iterations). If it produces commits, a
-//                               reviewer runs in the same sandbox on the same
-//                               branch (1 iteration). All issue pipelines run
-//                               concurrently via Promise.allSettled().
+//                               (100 iterations). If the issue branch has
+//                               unmerged commits, a reviewer runs in the same
+//                               sandbox on the same branch (1 iteration). All
+//                               issue pipelines run concurrently via
+//                               Promise.allSettled().
 //   Phase 3 (Merge):            A single agent merges all completed branches
 //                               into the current branch.
 //
@@ -20,6 +21,8 @@
 //   npx tsx .sandcastle/main.mts
 // Or add to package.json:
 //   "scripts": { "sandcastle": "npx tsx .sandcastle/main.mts" }
+
+import { execFileSync } from "node:child_process";
 
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
@@ -53,6 +56,22 @@ const hooks = {
 // starts. Avoids a full npm install from scratch; the hook above handles
 // platform-specific binaries and any packages added since the last copy.
 const copyToWorktree = ["node_modules"];
+
+// The implementer may have completed in an earlier outer iteration. Use the
+// branch state, rather than only the current run's commit list, to decide
+// whether a reviewer still needs to run after a transient reviewer failure.
+const hasUnmergedCommits = (branch: string): boolean => {
+  try {
+    const count = execFileSync(
+      "git",
+      ["rev-list", "--count", `HEAD..refs/heads/${branch}`],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    ).trim();
+    return Number.parseInt(count, 10) > 0;
+  } catch {
+    return false;
+  }
+};
 
 // ---------------------------------------------------------------------------
 // Main loop
@@ -106,7 +125,8 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   //
   // For each issue, create a sandbox via createSandbox() so the implementer
   // and reviewer share the same sandbox instance per branch. The implementer
-  // runs first; if it produces commits, the reviewer runs in the same sandbox.
+  // runs first; the reviewer runs in the same sandbox when the issue branch
+  // has unmerged commits, including commits produced by an earlier iteration.
   //
   // Promise.allSettled means one failing pipeline doesn't cancel the others.
   // -------------------------------------------------------------------------
@@ -134,8 +154,12 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
           },
         });
 
-        // Only review if the implementer produced commits
-        if (implement.commits.length > 0) {
+        // Review existing branch work too: a prior reviewer may have failed
+        // after the implementer committed, leaving no new commits this run.
+        const reviewNeeded =
+          implement.commits.length > 0 || hasUnmergedCommits(issue.branch);
+
+        if (reviewNeeded) {
           const review = await sandbox.run({
             name: "reviewer",
             maxIterations: 1,
@@ -151,10 +175,11 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
           return {
             ...review,
             commits: [...implement.commits, ...review.commits],
+            hasWork: reviewNeeded,
           };
         }
 
-        return implement;
+        return { ...implement, hasWork: false };
       } finally {
         await sandbox.close();
       }
@@ -170,14 +195,13 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     }
   }
 
-  // Only pass branches that actually produced commits to the merge phase.
-  // An agent that ran successfully but made no commits has nothing to merge.
+  // Only pass branches with reviewed, unmerged work to the merge phase. The
+  // work may have been committed in an earlier outer iteration.
   const completedIssues = settled
     .map((outcome, i) => ({ outcome, issue: issues[i]! }))
     .filter(
       (entry) =>
-        entry.outcome.status === "fulfilled" &&
-        entry.outcome.value.commits.length > 0,
+        entry.outcome.status === "fulfilled" && entry.outcome.value.hasWork,
     )
     .map((entry) => entry.issue);
 
