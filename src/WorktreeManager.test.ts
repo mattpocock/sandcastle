@@ -888,3 +888,52 @@ describe("WorktreeManager git locale", () => {
     expect(await readFile(logPath, "utf8")).toBe("C");
   });
 });
+
+// Issue #1010: the sandbox can write the shared .git, so hooks and
+// core.fsmonitor planted there must not run when Sandcastle calls git on the host.
+describe("host-side git ignores hooks and fsmonitor planted in .git", () => {
+  const plant = async (repoDir: string) => {
+    const markerPath = join(repoDir, "..", `marker-${Date.now()}.log`);
+    for (const hook of ["post-checkout", "reference-transaction"]) {
+      const hookPath = join(repoDir, ".git", "hooks", hook);
+      await writeFile(
+        hookPath,
+        `#!/bin/sh\necho "${hook}" >> "${markerPath}"\n`,
+      );
+      await chmod(hookPath, 0o755);
+    }
+    await execAsync(
+      `git config core.fsmonitor 'echo fsmonitor >> "${markerPath}"; false'`,
+      { cwd: repoDir },
+    );
+    return markerPath;
+  };
+
+  const readMarker = (markerPath: string) =>
+    readFile(markerPath, "utf8").catch(() => "");
+
+  it("planted hook and fsmonitor do run for plain host git (sanity check)", async () => {
+    const repoDir = await setupRepo();
+    const markerPath = await plant(repoDir);
+    await execAsync("git status --porcelain", { cwd: repoDir });
+    await execAsync("git checkout -q -b sanity", { cwd: repoDir });
+    const marker = await readMarker(markerPath);
+    expect(marker).toContain("fsmonitor");
+    expect(marker).toContain("post-checkout");
+  });
+
+  it("create() does not run them", async () => {
+    const repoDir = await setupRepo();
+    const markerPath = await plant(repoDir);
+    await run(create(repoDir));
+    expect(await readMarker(markerPath)).toBe("");
+  });
+
+  it("hasUncommittedChanges() does not run them", async () => {
+    const repoDir = await setupRepo();
+    const { path } = await run(create(repoDir));
+    const markerPath = await plant(repoDir);
+    await run(hasUncommittedChanges(path));
+    expect(await readMarker(markerPath)).toBe("");
+  });
+});

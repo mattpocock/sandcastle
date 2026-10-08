@@ -15,6 +15,7 @@ import {
 import { type ExecResult, type SandboxService } from "./SandboxFactory.js";
 import type { Timeouts } from "./run.js";
 import { countCommitsToSync } from "./syncOut.js";
+import { hostGitEnv } from "./hostGitEnv.js";
 
 const GIT_SETUP_TIMEOUT_MS = 10_000;
 const HOOK_TIMEOUT_MS = 60_000;
@@ -82,6 +83,13 @@ const execOkWithGitTimeout = (
   );
 
 const execAsync = promisify(exec);
+
+/** Runs a git command on the host with hooks and fsmonitor disabled (#1010). */
+const execHostGit = (
+  command: string,
+  options: { cwd: string },
+): Promise<{ stdout: string; stderr: string }> =>
+  execAsync(command, { ...options, env: hostGitEnv() });
 
 export type SandboxHooks = {
   readonly host?: {
@@ -200,7 +208,7 @@ export const withSandboxLifecycle = <A>(
     // Without an explicit branch, record host's current branch for cherry-pick
     const hostCurrentBranch: string | null = !branch
       ? yield* Effect.promise(async () => {
-          const { stdout } = await execAsync(
+          const { stdout } = await execHostGit(
             "git rev-parse --abbrev-ref HEAD",
             { cwd: hostRepoDir },
           );
@@ -211,10 +219,10 @@ export const withSandboxLifecycle = <A>(
     // Read host git identity before entering the sandbox
     const [hostGitName, hostGitEmail] = yield* Effect.promise(async () => {
       const [nameResult, emailResult] = await Promise.all([
-        execAsync("git config user.name", { cwd: hostRepoDir })
+        execHostGit("git config user.name", { cwd: hostRepoDir })
           .then((r) => r.stdout.trim())
           .catch(() => ""),
-        execAsync("git config user.email", { cwd: hostRepoDir })
+        execHostGit("git config user.email", { cwd: hostRepoDir })
           .then((r) => r.stdout.trim())
           .catch(() => ""),
       ]);
@@ -373,7 +381,7 @@ export const withSandboxLifecycle = <A>(
     // the host-side SHA is the correct baseline for git rev-list after applyToHost
     // syncs commits back (syncOut creates new SHAs via format-patch/am).
     const baseHead = yield* Effect.promise(async () => {
-      const { stdout } = await execAsync("git rev-parse HEAD", {
+      const { stdout } = await execHostGit("git rev-parse HEAD", {
         cwd: hostSideWorktreePath,
       });
       return stdout.trim();
@@ -415,7 +423,7 @@ export const withSandboxLifecycle = <A>(
       // Check if there are any new commits on the temp branch
       const hasNewCommits = yield* Effect.promise(async () => {
         try {
-          const { stdout } = await execAsync(
+          const { stdout } = await execHostGit(
             `git rev-list "${baseHead}..HEAD" --count`,
             { cwd: hostSideWorktreePath },
           );
@@ -440,7 +448,7 @@ export const withSandboxLifecycle = <A>(
           Effect.tryPromise({
             try: async () => {
               try {
-                await execAsync(`git merge "${resolvedBranch}"`, {
+                await execHostGit(`git merge "${resolvedBranch}"`, {
                   cwd: hostRepoDir,
                 });
               } catch {
@@ -476,7 +484,7 @@ export const withSandboxLifecycle = <A>(
       // branch and the worktree's lifetime outlives the lifecycle.
       if (!options.keepSourceBranch) {
         yield* Effect.promise(() =>
-          execAsync(`git branch -D "${resolvedBranch}"`, {
+          execHostGit(`git branch -D "${resolvedBranch}"`, {
             cwd: hostRepoDir,
           }).catch(() => {}),
         );
@@ -486,7 +494,7 @@ export const withSandboxLifecycle = <A>(
       commits = yield* display.taskLog("Collecting commits", () =>
         Effect.promise(async () => {
           try {
-            const { stdout } = await execAsync(
+            const { stdout } = await execHostGit(
               `git rev-list "${baseHead}..HEAD" --reverse`,
               { cwd: hostRepoDir },
             );
@@ -514,7 +522,7 @@ export const withSandboxLifecycle = <A>(
       commits = yield* display.taskLog("Collecting commits", () =>
         Effect.promise(async () => {
           try {
-            const { stdout } = await execAsync(
+            const { stdout } = await execHostGit(
               `git rev-list "${baseHead}..refs/heads/${targetBranch}" --reverse`,
               { cwd: hostRepoDir },
             );
