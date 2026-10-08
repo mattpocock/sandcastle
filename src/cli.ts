@@ -409,7 +409,7 @@ const initCommand = Command.make(
           yield* Effect.try({
             try: () =>
               execSync(
-                'gh label create "Sandcastle" --description "Issues for Sandcastle to work on" --color "F9A825" 2>/dev/null',
+                'gh label create "Sandcastle" --description "Issues for Sandcastle to work on" --color "F9A825"',
                 { cwd, stdio: "ignore" },
               ),
             catch: () => undefined,
