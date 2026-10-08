@@ -14,6 +14,11 @@ import {
   type IsolatedSandboxProvider,
 } from "../SandboxProvider.js";
 import { BoundedTail, MAX_TAIL_CHARS } from "../boundedTail.js";
+import {
+  redirectCommandStdinFromFile,
+  removeStdinFileCommand,
+  withStdinFile,
+} from "./stdin-file.js";
 
 import type {
   Daytona as DaytonaClient,
@@ -47,8 +52,7 @@ export interface DaytonaOptions {
    * Supports both image-based and snapshot-based creation.
    */
   readonly create?:
-    | CreateSandboxFromImageParams
-    | CreateSandboxFromSnapshotParams;
+    CreateSandboxFromImageParams | CreateSandboxFromSnapshotParams;
 
   /** Environment variables injected by this provider. Merged at launch time with env resolver and agent provider env. */
   readonly env?: Record<string, string>;
@@ -108,75 +112,96 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
             onLine?: (line: string) => void;
             cwd?: string;
             sudo?: boolean;
+            stdin?: string;
           },
         ): Promise<ExecResult> => {
           const effectiveCommand = opts?.sudo ? `sudo ${command}` : command;
-          if (opts?.onLine) {
-            const onLine = opts.onLine;
-            const sessionId = `sandcastle-${crypto.randomUUID()}`;
-            await sandbox.process.createSession(sessionId);
+          const stdin = opts?.stdin;
+          const cwd = opts?.cwd ?? worktreePath;
 
-            try {
-              const execResponse = await sandbox.process.executeSessionCommand(
-                sessionId,
-                {
-                  command: `cd ${opts?.cwd ?? worktreePath} && ${effectiveCommand}`,
-                  async: true,
-                },
-              );
+          return withStdinFile(
+            stdin,
+            {
+              upload: (path, content) => sandbox.fs.uploadFile(content, path),
+              remove: async (path) => {
+                await sandbox.process.executeCommand(
+                  removeStdinFileCommand(path),
+                );
+              },
+            },
+            async (stdinPath) => {
+              const commandToRun = stdinPath
+                ? redirectCommandStdinFromFile(effectiveCommand, stdinPath)
+                : effectiveCommand;
 
-              const cmdId = execResponse.cmdId!;
+              if (opts?.onLine) {
+                const onLine = opts.onLine;
+                const sessionId = `sandcastle-${crypto.randomUUID()}`;
+                await sandbox.process.createSession(sessionId);
 
-              const stdoutTail = new BoundedTail(maxOutputTailChars, "\n");
-              const stderrTail = new BoundedTail(maxOutputTailChars, "");
-              let partial = "";
+                try {
+                  const execResponse =
+                    await sandbox.process.executeSessionCommand(sessionId, {
+                      command: `cd ${cwd} && ${commandToRun}`,
+                      async: true,
+                    });
 
-              await sandbox.process.getSessionCommandLogs(
-                sessionId,
-                cmdId,
-                (chunk: string) => {
-                  const text = partial + chunk;
-                  const lines = text.split("\n");
-                  partial = lines.pop() ?? "";
-                  for (const line of lines) {
-                    stdoutTail.push(line);
-                    onLine(line);
+                  const cmdId = execResponse.cmdId!;
+
+                  const stdoutTail = new BoundedTail(maxOutputTailChars, "\n");
+                  const stderrTail = new BoundedTail(maxOutputTailChars, "");
+                  let partial = "";
+
+                  await sandbox.process.getSessionCommandLogs(
+                    sessionId,
+                    cmdId,
+                    (chunk: string) => {
+                      const text = partial + chunk;
+                      const lines = text.split("\n");
+                      partial = lines.pop() ?? "";
+                      for (const line of lines) {
+                        stdoutTail.push(line);
+                        onLine(line);
+                      }
+                    },
+                    (chunk: string) => {
+                      stderrTail.push(chunk);
+                    },
+                  );
+
+                  if (partial) {
+                    stdoutTail.push(partial);
+                    onLine(partial);
                   }
-                },
-                (chunk: string) => {
-                  stderrTail.push(chunk);
-                },
-              );
 
-              if (partial) {
-                stdoutTail.push(partial);
-                onLine(partial);
+                  const cmdInfo = await sandbox.process.getSessionCommand(
+                    sessionId,
+                    cmdId,
+                  );
+
+                  return {
+                    stdout: stdoutTail.toString(),
+                    stderr: stderrTail.toString(),
+                    exitCode: cmdInfo.exitCode ?? 0,
+                  };
+                } finally {
+                  await sandbox.process
+                    .deleteSession(sessionId)
+                    .catch(() => {});
+                }
               }
 
-              const cmdInfo = await sandbox.process.getSessionCommand(
-                sessionId,
-                cmdId,
+              const response = await sandbox.process.executeCommand(
+                commandToRun,
+                cwd,
               );
-
               return {
-                stdout: stdoutTail.toString(),
-                stderr: stderrTail.toString(),
-                exitCode: cmdInfo.exitCode ?? 0,
+                stdout: response.result,
+                stderr: "",
+                exitCode: response.exitCode,
               };
-            } finally {
-              await sandbox.process.deleteSession(sessionId).catch(() => {});
-            }
-          }
-
-          const response = await sandbox.process.executeCommand(
-            effectiveCommand,
-            opts?.cwd ?? worktreePath,
+            },
           );
-          return {
-            stdout: response.result,
-            stderr: "",
-            exitCode: response.exitCode,
-          };
         },
 
         copyIn: async (

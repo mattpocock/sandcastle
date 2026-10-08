@@ -9,7 +9,7 @@
 import { execSync } from "node:child_process";
 import { readFile, unlink, writeFile, mkdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, posix } from "node:path";
 import { Writable } from "node:stream";
 import {
   createIsolatedSandboxProvider,
@@ -18,9 +18,10 @@ import {
   type IsolatedSandboxProvider,
 } from "../SandboxProvider.js";
 import { BoundedTail, MAX_TAIL_CHARS } from "../boundedTail.js";
+import { redirectCommandStdinFromFile, withStdinFile } from "./stdin-file.js";
 
-/** Worktree path inside the Vercel sandbox. */
-const VERCEL_REPO_PATH = "/vercel/sandbox/workspace";
+/** Worktree directory inside the Vercel sandbox's default working directory. */
+const VERCEL_WORKTREE_DIR = "workspace";
 
 /**
  * Options for creating a Vercel sandbox provider.
@@ -168,11 +169,36 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
         createParams as Parameters<typeof Sandbox.create>[0],
       );
 
-      // Ensure worktree directory exists
-      await sandbox.mkDir(VERCEL_REPO_PATH);
+      let worktreePath: string;
+      try {
+        // Vercel SDK 2.x starts in /vercel/sandbox, while 3.x starts in
+        // /vercel. Discover the default rather than depending on image layout.
+        const pwdResult = await sandbox.runCommand({ cmd: "pwd" });
+        const defaultCwd = (await pwdResult.stdout()).trim();
+        if (pwdResult.exitCode !== 0 || !posix.isAbsolute(defaultCwd)) {
+          const stderr = await pwdResult.stderr();
+          throw new Error(
+            `Could not determine Vercel sandbox working directory: ${stderr || defaultCwd}`,
+          );
+        }
+
+        worktreePath = posix.join(defaultCwd, VERCEL_WORKTREE_DIR);
+        const mkdirResult = await sandbox.runCommand({
+          cmd: "mkdir",
+          args: ["-p", worktreePath],
+        });
+        if (mkdirResult.exitCode !== 0) {
+          throw new Error(
+            `Could not create Vercel sandbox worktree directory: ${await mkdirResult.stderr()}`,
+          );
+        }
+      } catch (error) {
+        await sandbox.stop().catch(() => {});
+        throw error;
+      }
 
       const handle: IsolatedSandboxHandle = {
-        worktreePath: VERCEL_REPO_PATH,
+        worktreePath,
 
         exec: async (
           command: string,
@@ -180,73 +206,95 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
             onLine?: (line: string) => void;
             cwd?: string;
             sudo?: boolean;
+            stdin?: string;
           },
         ): Promise<ExecResult> => {
-          if (opts?.onLine) {
-            const onLine = opts.onLine;
-            const stdoutTail = new BoundedTail(maxOutputTailChars, "\n");
-            const stderrTail = new BoundedTail(maxOutputTailChars, "");
-            let partial = "";
+          const stdin = opts?.stdin;
 
-            const stdoutWritable = new Writable({
-              write(chunk, _encoding, callback) {
-                const text = partial + chunk.toString();
-                const lines = text.split("\n");
-                partial = lines.pop() ?? "";
-                for (const line of lines) {
-                  stdoutTail.push(line);
-                  onLine(line);
-                }
-                callback();
+          return withStdinFile(
+            stdin,
+            {
+              upload: (path, content) =>
+                sandbox.writeFiles([{ path, content }]),
+              remove: async (path) => {
+                await sandbox.runCommand({
+                  cmd: "rm",
+                  args: ["-f", "--", path],
+                });
               },
-              final(callback) {
-                if (partial) {
-                  stdoutTail.push(partial);
-                  onLine(partial);
-                  partial = "";
-                }
-                callback();
-              },
-            });
+            },
+            async (stdinPath) => {
+              const commandToRun = stdinPath
+                ? redirectCommandStdinFromFile(command, stdinPath)
+                : command;
 
-            const stderrWritable = new Writable({
-              write(chunk, _encoding, callback) {
-                stderrTail.push(chunk.toString());
-                callback();
-              },
-            });
+              if (opts?.onLine) {
+                const onLine = opts.onLine;
+                const stdoutTail = new BoundedTail(maxOutputTailChars, "\n");
+                const stderrTail = new BoundedTail(maxOutputTailChars, "");
+                let partial = "";
 
-            const result = await sandbox.runCommand({
-              cmd: "sh",
-              args: ["-c", command],
-              cwd: opts?.cwd ?? VERCEL_REPO_PATH,
-              stdout: stdoutWritable,
-              stderr: stderrWritable,
-              ...(opts?.sudo ? { sudo: true } : {}),
-            });
+                const stdoutWritable = new Writable({
+                  write(chunk, _encoding, callback) {
+                    const text = partial + chunk.toString();
+                    const lines = text.split("\n");
+                    partial = lines.pop() ?? "";
+                    for (const line of lines) {
+                      stdoutTail.push(line);
+                      onLine(line);
+                    }
+                    callback();
+                  },
+                  final(callback) {
+                    if (partial) {
+                      stdoutTail.push(partial);
+                      onLine(partial);
+                      partial = "";
+                    }
+                    callback();
+                  },
+                });
 
-            return {
-              stdout: stdoutTail.toString(),
-              stderr: stderrTail.toString(),
-              exitCode: result.exitCode,
-            };
-          }
+                const stderrWritable = new Writable({
+                  write(chunk, _encoding, callback) {
+                    stderrTail.push(chunk.toString());
+                    callback();
+                  },
+                });
 
-          const result = await sandbox.runCommand({
-            cmd: "sh",
-            args: ["-c", command],
-            cwd: opts?.cwd ?? VERCEL_REPO_PATH,
-            ...(opts?.sudo ? { sudo: true } : {}),
-          });
+                const result = await sandbox.runCommand({
+                  cmd: "sh",
+                  args: ["-c", commandToRun],
+                  cwd: opts?.cwd ?? worktreePath,
+                  stdout: stdoutWritable,
+                  stderr: stderrWritable,
+                  ...(opts?.sudo ? { sudo: true } : {}),
+                });
 
-          const stdout = await result.stdout();
-          const stderr = await result.stderr();
+                return {
+                  stdout: stdoutTail.toString(),
+                  stderr: stderrTail.toString(),
+                  exitCode: result.exitCode,
+                };
+              }
 
-          return {
-            stdout,
-            stderr,
-            exitCode: result.exitCode,
-          };
+              const result = await sandbox.runCommand({
+                cmd: "sh",
+                args: ["-c", commandToRun],
+                cwd: opts?.cwd ?? worktreePath,
+                ...(opts?.sudo ? { sudo: true } : {}),
+              });
+
+              const stdout = await result.stdout();
+              const stderr = await result.stderr();
+
+              return {
+                stdout,
+                stderr,
+                exitCode: result.exitCode,
+              };
+            },
+          );
         },
 
         copyIn: async (
