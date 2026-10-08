@@ -812,6 +812,7 @@ export async function run(
       }
       return run({
         ...options,
+        promptArgs: undefined,
         ...resumeOptions,
         prompt,
         promptFile: undefined,
@@ -829,6 +830,7 @@ export async function run(
       }
       return run({
         ...options,
+        promptArgs: undefined,
         ...forkOptions,
         prompt,
         promptFile: undefined,
