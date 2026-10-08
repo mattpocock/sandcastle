@@ -373,7 +373,7 @@ describe("patchGitMountsForWindows", () => {
       gitdirContent;
 
   describe("on non-Windows platform", () => {
-    it("returns mounts unchanged", async () => {
+    it("returns mounts unchanged when the worktree .git file is unavailable", async () => {
       const mounts = [{ hostPath: "/repo/.git", sandboxPath: "/repo/.git" }];
       const result = await Effect.runPromise(
         patchGitMountsForWindows(
@@ -386,6 +386,28 @@ describe("patchGitMountsForWindows", () => {
         ),
       );
       expect(result).toEqual(mounts);
+    });
+
+    it("overlays the parent admin gitdir back-pointer", async () => {
+      const mounts = [{ hostPath: "/repo/.git", sandboxPath: "/repo/.git" }];
+      const result = await Effect.runPromise(
+        patchGitMountsForWindows(
+          mounts,
+          "/repo/.sandcastle/worktrees/my-wt",
+          SANDBOX_REPO_DIR,
+          makeReadFile("gitdir: /repo/.git/worktrees/my-wt\n"),
+          makeStatFile("file"),
+          "linux",
+        ),
+      );
+
+      expect(result).toHaveLength(2);
+      expect(result[0]).toEqual(mounts[0]);
+      expect(result[1]!.sandboxPath).toBe("/repo/.git/worktrees/my-wt/gitdir");
+
+      const { readFile } = await import("node:fs/promises");
+      const content = await readFile(result[1]!.hostPath, "utf-8");
+      expect(content).toBe(`${SANDBOX_REPO_DIR}/.git\n`);
     });
   });
 
