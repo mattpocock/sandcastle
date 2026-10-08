@@ -274,6 +274,48 @@ describe("WorktreeManager.create", () => {
     await run(remove(wtB.path));
   });
 
+  it("concurrent prune+create on different branches do not destroy each other (#849)", async () => {
+    const repoDir = await setupRepo();
+
+    // Mirror the parallel-planner template: N concurrent in-process runs, each
+    // on its own branch, each running `pruneStale` then `create` (as
+    // SandboxFactory.pruneAndCreate does). Without serialising the destructive
+    // prune sweep against in-flight creates, a sibling's `pruneStale` deletes a
+    // worktree directory that is mid-`git worktree add`, leaving a dangling
+    // `.git` link.
+    const branches = Array.from({ length: 6 }, (_, i) => `issue-${i + 1}`);
+    for (const branch of branches) {
+      await execAsync(`git branch ${branch}`, { cwd: repoDir });
+    }
+
+    const results = await Promise.all(
+      branches.map((branch) =>
+        run(
+          pruneStale(repoDir).pipe(Effect.andThen(create(repoDir, { branch }))),
+        ),
+      ),
+    );
+
+    // Every worktree must survive on disk with an intact `.git` link, and git
+    // must still recognise it as a valid repository.
+    for (const { path, branch } of results) {
+      expect(await getBranch(path)).toBe(branch);
+      expect((await stat(join(path, ".git"))).isFile()).toBe(true);
+    }
+
+    // git itself agrees all worktrees are still registered (none were swept).
+    const { stdout } = await execAsync("git worktree list --porcelain", {
+      cwd: repoDir,
+    });
+    for (const { path } of results) {
+      expect(stdout).toContain(path);
+    }
+
+    for (const { path } of results) {
+      await run(remove(path));
+    }
+  });
+
   it("creates a new branch from HEAD when specified branch does not exist", async () => {
     const repoDir = await setupRepo();
     const { path, branch } = await run(

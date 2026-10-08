@@ -56,6 +56,12 @@ Only the **branch** strategy is affected. The **merge-to-head** strategy creates
 - **Lock inside the worktree** (e.g. `<worktree-path>/.sandcastle.lock`). Visible to the **agent**, which could delete or commit it. Would require `.gitignore` management.
 - **In-memory mutex/semaphore.** Only protects within a single Node process. The threat model is two separate processes — e.g. two `run()` calls from different terminals or CI jobs.
 
+### In-process serialization (implemented ahead of the file lock)
+
+The file lock above targets the **cross-process** threat model (two separate `sandcastle` processes). A distinct, **in-process** failure surfaced in #849: the `parallel-planner` template fires N concurrent `run()` calls on _different_ branches, and one run's destructive `pruneStale()` sweep would delete a sibling worktree that was still mid-`git worktree add` (its directory exists on disk before git has registered it), producing `fatal: not a git repository: .git/worktrees/…` and zero collected commits.
+
+This is handled by a process-wide read/write lock in `WorktreeManager` (a counting semaphore): `create()` takes a single permit (reader) so sibling creates still run in parallel, while `pruneStale()` takes every permit (writer) so its sweep can never overlap an in-flight create. This is in-process only and does **not** supersede the file lock — two separate processes racing the same repo still need the `O_EXCL` file lock described above, which remains the cross-process follow-up.
+
 ## Consequences
 
 - Two concurrent `run()` or `interactive()` calls targeting the same branch get a clear error on the second call, rather than silently sharing a **worktree**.
