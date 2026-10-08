@@ -140,6 +140,24 @@ describe("claudeCode factory", () => {
     }
   });
 
+  it("buildPrintCommand includes --max-budget-usd when specified", () => {
+    const provider = claudeCode("claude-opus-4-8", { maxBudgetUsd: 2.5 });
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).toContain("--max-budget-usd 2.5");
+  });
+
+  it("buildPrintCommand omits --max-budget-usd when not specified", () => {
+    const provider = claudeCode("claude-opus-4-8", {});
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).not.toContain("--max-budget-usd");
+  });
+
+  it("buildInteractiveArgs includes --max-budget-usd when specified", () => {
+    const provider = claudeCode("claude-opus-4-8", { maxBudgetUsd: 2.5 });
+    const args = provider.buildInteractiveArgs!(opts("do something"));
+    expect(args.join(" ")).toContain("--max-budget-usd 2.5");
+  });
+
   it("accepts an env option and exposes it on the provider", () => {
     const provider = claudeCode("claude-opus-4-8", {
       env: { ANTHROPIC_API_KEY: "sk-test" },

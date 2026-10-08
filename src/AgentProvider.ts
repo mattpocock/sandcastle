@@ -1176,6 +1176,11 @@ export interface ClaudeCodeOptions {
     | "auto"
     | "dontAsk"
     | "bypassPermissions";
+  /**
+   * Maps to Claude's `--max-budget-usd` flag — the run aborts once its API
+   * cost exceeds this many US dollars. Useful as a hard cost cap on AFK runs.
+   */
+  readonly maxBudgetUsd?: number;
 }
 
 export const claudeCode = (
@@ -1202,6 +1207,10 @@ export const claudeCode = (
         ? " --dangerously-skip-permissions"
         : "";
     const effortFlag = options?.effort ? ` --effort ${options.effort}` : "";
+    const budgetFlag =
+      options?.maxBudgetUsd !== undefined
+        ? ` --max-budget-usd ${options.maxBudgetUsd}`
+        : "";
     const resumeFlag = resumeSession
       ? ` --resume ${shellEscape(resumeSession)}`
       : "";
@@ -1210,7 +1219,7 @@ export const claudeCode = (
     // resumed one. See ADR 0018.
     const forkFlag = resumeSession && forkSession ? " --fork-session" : "";
     return {
-      command: `claude --print --verbose${permissionFlag} --output-format stream-json --model ${shellEscape(model)}${effortFlag}${resumeFlag}${forkFlag} -p -`,
+      command: `claude --print --verbose${permissionFlag} --output-format stream-json --model ${shellEscape(model)}${effortFlag}${budgetFlag}${resumeFlag}${forkFlag} -p -`,
       stdin: prompt,
     };
   },
@@ -1227,6 +1236,9 @@ export const claudeCode = (
     }
     args.push("--model", model);
     if (options?.effort) args.push("--effort", options.effort);
+    if (options?.maxBudgetUsd !== undefined) {
+      args.push("--max-budget-usd", String(options.maxBudgetUsd));
+    }
     if (prompt) args.push(prompt);
     return args;
   },
