@@ -998,6 +998,74 @@ export const opencode = (
 });
 
 // ---------------------------------------------------------------------------
+// OrcaRouter agent provider
+// ---------------------------------------------------------------------------
+
+/**
+ * Options for the orcarouter agent provider.
+ *
+ * OrcaRouter is an OpenAI-compatible model gateway that fronts open-weight and
+ * hosted models behind a single endpoint (`https://api.orcarouter.ai/v1`). This
+ * provider delegates to the OpenCode CLI (which routes `orcarouter/*` model ids
+ * to the gateway via its models.dev registry) and injects the gateway API key.
+ */
+export interface OrcaRouterOptions {
+  /** Environment variables injected by this agent provider. */
+  readonly env?: Record<string, string>;
+}
+
+/**
+ * Build an OrcaRouter agent provider backed by the OpenCode CLI.
+ *
+ * `ORCAROUTER_API_KEY` is injected into the sandbox so OpenCode can
+ * authenticate against the gateway. The default model resolves through
+ * OrcaRouter's adaptive router (`orcarouter/auto`), which selects a
+ * cost-appropriate hosted model for each request.
+ */
+export const orcarouter = (
+  model: string,
+  options?: OrcaRouterOptions,
+): AgentProvider => ({
+  name: "orcarouter",
+  // Merged at launch time by mergeProviderEnv; agent env wins over the env
+  // resolver, matching the other agent providers.
+  env: {
+    ...(options?.env ?? {}),
+    // Only set when the user hasn't provided an explicit ORCAROUTER_API_KEY in
+    // .sandcastle/.env — mergeProviderEnv would otherwise reject the overlap.
+    ...(process.env.ORCAROUTER_API_KEY
+      ? { ORCAROUTER_API_KEY: process.env.ORCAROUTER_API_KEY }
+      : {}),
+  },
+  captureSessions: false,
+
+  buildPrintCommand({
+    prompt,
+    dangerouslySkipPermissions,
+  }: AgentCommandOptions): PrintCommand {
+    const permissionsFlag = dangerouslySkipPermissions
+      ? " --dangerously-skip-permissions"
+      : "";
+    return {
+      command: `opencode run --format json --model ${shellEscape(model)}${permissionsFlag} ${shellEscape(prompt)}`,
+    };
+  },
+
+  buildInteractiveArgs({ prompt }: AgentCommandOptions): string[] {
+    const args = ["opencode", "--model", model];
+    // The TUI's seed-prompt flag is `--prompt` (long form only); `-p` is the
+    // `opencode run`/`attach` basic-auth password flag, not a prompt seed.
+    // Pre-fills the textbox but does not auto-submit (sst/opencode#3937).
+    if (prompt) args.push("--prompt", prompt);
+    return args;
+  },
+
+  parseStreamLine(line: string): ParsedStreamEvent[] {
+    return parseOpenCodeStreamLine(line);
+  },
+});
+
+// ---------------------------------------------------------------------------
 // GitHub Copilot CLI agent provider
 // ---------------------------------------------------------------------------
 
