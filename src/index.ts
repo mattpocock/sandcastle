@@ -54,6 +54,7 @@ export type {
 export { CwdError } from "./CwdError.js";
 export {
   claudeCode,
+  devin,
   codex,
   copilot,
   cursor,
@@ -65,6 +66,7 @@ export type {
   AgentCommandOptions,
   PrintCommand,
   ClaudeCodeOptions,
+  DevinOptions,
   CodexOptions,
   CopilotOptions,
   CursorOptions,
