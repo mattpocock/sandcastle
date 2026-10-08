@@ -138,6 +138,7 @@ describe("createSandbox Windows mount patching", () => {
       branch: "test-wt-branch",
       worktreePath,
       hostRepoDir: hostDir,
+      stateDir: join(hostDir, ".sandcastle"),
       sandbox: provider,
     });
 

@@ -106,6 +106,7 @@ describe("WorktreeDockerSandboxFactory", () => {
         Layer.succeed(SandboxConfig, {
           env: { FOO: "bar" },
           hostRepoDir,
+          stateDir: join(hostRepoDir, ".sandcastle"),
           sandboxProvider: mockProvider.provider,
           branchStrategy,
         }),
@@ -184,6 +185,7 @@ describe("WorktreeDockerSandboxFactory", () => {
         Layer.succeed(SandboxConfig, {
           env: { FOO: "bar" },
           hostRepoDir,
+          stateDir: join(hostRepoDir, ".sandcastle"),
           sandboxProvider: provider,
           branchStrategy: { type: "merge-to-head" },
         }),
@@ -351,6 +353,7 @@ describe("WorktreeDockerSandboxFactory", () => {
         Layer.succeed(SandboxConfig, {
           env: {},
           hostRepoDir,
+          stateDir: join(hostRepoDir, ".sandcastle"),
           copyToWorktree: ["some-file.txt"],
           sandboxProvider: mockProvider.provider,
           branchStrategy: { type: "merge-to-head" },
@@ -472,6 +475,7 @@ describe("WorktreeDockerSandboxFactory", () => {
         Layer.succeed(SandboxConfig, {
           env: { FOO: "bar" },
           hostRepoDir,
+          stateDir: join(hostRepoDir, ".sandcastle"),
           sandboxProvider: failingProvider,
           branchStrategy: { type: "merge-to-head" },
         }),
@@ -626,6 +630,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
         Layer.succeed(SandboxConfig, {
           env: {},
           hostRepoDir,
+          stateDir: join(hostRepoDir, ".sandcastle"),
           copyToWorktree,
           sandboxProvider: testIsolated(),
           branchStrategy: { type: "merge-to-head" },
@@ -793,6 +798,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
         Layer.succeed(SandboxConfig, {
           env: {},
           hostRepoDir: hostDir,
+          stateDir: join(hostDir, ".sandcastle"),
           sandboxProvider: testIsolated(),
           branchStrategy: { type: "branch", branch: "feature/my-branch" },
         }),
@@ -902,6 +908,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
         Layer.succeed(SandboxConfig, {
           env: {},
           hostRepoDir: hostDir,
+          stateDir: join(hostDir, ".sandcastle"),
           sandboxProvider: failingProvider,
           branchStrategy: { type: "merge-to-head" },
         }),
@@ -976,6 +983,7 @@ describe("WorktreeDockerSandboxFactory — no-sandbox provider", () => {
         Layer.succeed(SandboxConfig, {
           env: {},
           hostRepoDir,
+          stateDir: join(hostRepoDir, ".sandcastle"),
           sandboxProvider: noSandbox(),
           branchStrategy,
         }),
@@ -1064,6 +1072,7 @@ describe("WorktreeDockerSandboxFactory — no-sandbox provider", () => {
         Layer.succeed(SandboxConfig, {
           env: {},
           hostRepoDir: hostDir,
+          stateDir: join(hostDir, ".sandcastle"),
           sandboxProvider: failingProvider,
           branchStrategy: { type: "merge-to-head" },
         }),

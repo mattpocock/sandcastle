@@ -2,7 +2,7 @@ import { Effect, Option } from "effect";
 import { FileSystem } from "@effect/platform";
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { join, normalize } from "node:path";
+import { dirname, join, normalize } from "node:path";
 import { WorktreeError, WorktreeTimeoutError, withTimeout } from "./errors.js";
 
 const WORKTREE_TIMEOUT_MS = 30_000;
@@ -290,6 +290,7 @@ const fastForwardFromOrigin = (
  */
 export const create = (
   repoDir: string,
+  stateDir: string,
   opts?: {
     branch?: string;
     baseBranch?: string;
@@ -302,7 +303,7 @@ export const create = (
 > =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const worktreesDir = join(repoDir, ".sandcastle", "worktrees");
+    const worktreesDir = join(stateDir, "worktrees");
     yield* fs
       .makeDirectory(worktreesDir, { recursive: true })
       .pipe(Effect.mapError((e) => new WorktreeError({ message: e.message })));
@@ -441,18 +442,23 @@ export const hasUncommittedChanges = (
 /**
  * Removes a worktree and its git metadata.
  *
- * The `worktreePath` must be a path inside `.sandcastle/worktrees/` so that
- * the main repository directory can be derived from it.
+ * The main repository directory is resolved from git via `--git-common-dir`
+ * rather than by walking a fixed number of levels up from `worktreePath`: the
+ * state directory segment is configurable and may be absolute or nested, so the
+ * worktree's depth below the repo is not fixed.
  */
 export const remove = (
   worktreePath: string,
-): Effect.Effect<void, WorktreeError> => {
-  // Derive the main repo dir: worktreePath = <repoDir>/.sandcastle/worktrees/<name>
-  const repoDir = join(worktreePath, "..", "..", "..");
-  return execGit(["worktree", "remove", "--force", worktreePath], repoDir).pipe(
-    Effect.asVoid,
-  );
-};
+): Effect.Effect<void, WorktreeError> =>
+  Effect.gen(function* () {
+    const commonDir = (yield* execGit(
+      ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+      worktreePath,
+    )).trim();
+    // `--git-common-dir` points at the main worktree's `.git`; its parent is the repo.
+    const repoDir = dirname(commonDir);
+    yield* execGit(["worktree", "remove", "--force", worktreePath], repoDir);
+  });
 
 /**
  * Prunes stale git worktree metadata and removes orphaned directories under
@@ -460,6 +466,7 @@ export const remove = (
  */
 export const pruneStale = (
   repoDir: string,
+  stateDir: string,
 ): Effect.Effect<
   void,
   WorktreeError | WorktreeTimeoutError,
@@ -471,7 +478,7 @@ export const pruneStale = (
     // Let git clean up metadata for worktrees whose directories are gone
     yield* execGit(["worktree", "prune"], repoDir);
 
-    const worktreesDir = join(repoDir, ".sandcastle", "worktrees");
+    const worktreesDir = join(stateDir, "worktrees");
 
     // Read directory entries — return null if directory doesn't exist
     const entries: string[] | null = yield* fs.readDirectory(worktreesDir).pipe(

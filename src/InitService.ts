@@ -1,6 +1,7 @@
 import { FileSystem } from "@effect/platform";
 import { Effect } from "effect";
 import { dirname, join } from "node:path";
+import { DEFAULT_STATE_DIR } from "./resolveCwd.js";
 import { fileURLToPath } from "node:url";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 
@@ -1028,7 +1029,7 @@ export const scaffold = (
       sandboxProvider = SANDBOX_PROVIDER_REGISTRY[0]!, // default: docker
     } = options;
     const fs = yield* FileSystem.FileSystem;
-    const configDir = join(repoDir, ".sandcastle");
+    const configDir = join(repoDir, DEFAULT_STATE_DIR);
 
     const exists = yield* fs
       .exists(configDir)
