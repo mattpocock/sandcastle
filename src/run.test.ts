@@ -1045,6 +1045,109 @@ describe("structured output entry-time validation", () => {
   });
 });
 
+describe("structured output across assistant messages", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const payload = '{"items":["alpha","beta"]}';
+  const tagged = `<result>${payload}</result>`;
+
+  it.each([
+    {
+      name: "JSON split inside a string",
+      parts: ['<result>{"items":["al', 'pha","be', 'ta"]}</result>'],
+      final: 'ta"]}</result>',
+    },
+    {
+      name: "split opening tag",
+      parts: ["<res", `ult>${payload}</result>`],
+      final: `ult>${payload}</result>`,
+    },
+    { name: "single message", parts: [tagged], final: tagged },
+    { name: "result-only provider", parts: [], final: tagged },
+    {
+      name: "per-message result snapshots",
+      parts: ['<result>{"items":["al', 'pha","be', 'ta"]}</result>'],
+      final: 'ta"]}</result>',
+      snapshots: true,
+    },
+    {
+      name: "distinct final result",
+      parts: ["Preparing the answer..."],
+      final: tagged,
+    },
+    {
+      name: "corrected tag in a later message",
+      parts: ["<result>invalid JSON</result>", tagged],
+      final: tagged,
+      expectedStdout: `<result>invalid JSON</result>${tagged}`,
+    },
+  ])(
+    "extracts $name without duplicating the final snapshot",
+    async ({ parts, final, snapshots = false, expectedStdout = tagged }) => {
+      const sandbox = createBindMountSandboxProvider({
+        name: "split-output",
+        create: async () => ({
+          worktreePath: "/home/agent/workspace",
+          exec: async (
+            _command: string,
+            options?: { onLine?: (line: string) => void },
+          ) => {
+            const lines = parts.flatMap((text) => {
+              const assistantLine = JSON.stringify({
+                type: "assistant",
+                message: { content: [{ type: "text", text }] },
+              });
+              return snapshots
+                ? [
+                    assistantLine,
+                    JSON.stringify({ type: "result", result: text }),
+                  ]
+                : [assistantLine];
+            });
+            lines.push(JSON.stringify({ type: "result", result: final }));
+            if (options?.onLine) {
+              for (const line of lines) options.onLine(line);
+            }
+            return {
+              stdout: options?.onLine ? lines.join("\n") : "",
+              stderr: "",
+              exitCode: 0,
+            };
+          },
+          copyFileIn: async () => {},
+          copyFileOut: async () => {},
+          close: async () => {},
+        }),
+      });
+
+      const options = {
+        agent: claudeCode("claude-opus-4-8", { captureSessions: false }),
+        sandbox,
+        prompt: "emit your answer inside <result> tags",
+        branchStrategy: { type: "head" as const },
+      };
+      const objectResult = await run({
+        ...options,
+        output: Output.object({ tag: "result", schema: mockSchema() }),
+      });
+      expect(objectResult.output).toEqual({ items: ["alpha", "beta"] });
+      expect(objectResult.stdout).toBe(expectedStdout);
+
+      const stringResult = await run({
+        ...options,
+        output: Output.string({ tag: "result" }),
+      });
+      expect(stringResult.output).toBe(payload);
+      expect(stringResult.stdout).toBe(expectedStdout);
+    },
+  );
+});
+
 describe("structured output error carries the failed session id", () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
 
