@@ -180,6 +180,12 @@ export interface WorktreeCreateSandboxOptions {
   readonly copyToWorktree?: string[];
   /** Override default timeouts for built-in lifecycle steps. Unset keys keep their defaults. */
   readonly timeouts?: Timeouts;
+  /**
+   * Environment variables contributed by the agent provider (e.g. API keys,
+   * base URLs, provider-selection flags). Merged into the sandbox env by
+   * `mergeProviderEnv`, taking precedence over `sandbox.env`.
+   */
+  readonly agentProviderEnv?: Record<string, string>;
   /** @internal Test-only overrides to bypass the sandbox provider. */
   readonly _test?: {
     readonly buildSandbox?: (
@@ -747,6 +753,7 @@ export const createWorktree = async (
       timeouts: opts.timeouts,
       branchStrategy: options.branchStrategy,
       _test: opts._test,
+      agentProviderEnv: opts.agentProviderEnv,
     });
   };
 
