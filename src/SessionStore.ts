@@ -98,29 +98,70 @@ export const claudeSubagentsDirOnHost = (
 };
 
 /**
- * Enumerate Claude Code subagent / workflow transcripts living under
- * `<projectsDir>/<encoded-cwd>/<sessionId>/subagents/` inside the sandbox.
- * Returns the absolute sandbox-side paths of every `agent-*.jsonl` file
- * (matched at any depth so future per-workflow subdirs still surface).
+ * Enumerate Claude Code subagent / workflow transcripts (`agent-*.jsonl`,
+ * matched at any depth so future per-workflow subdirs still surface) under a
+ * known `subagents/` directory inside the sandbox.
  *
  * Never throws — a missing `subagents/` directory is the normal case for a
  * session that didn't spawn any subagents, and `find` over an absent path
  * also exits non-zero. Both collapse to `[]`.
+ */
+export const listClaudeSubagentSessionsInDir = async (
+  subagentsDir: string,
+  handle: Pick<BindMountSandboxHandle, "exec">,
+): Promise<string[]> => {
+  const result = await handle.exec(
+    `find ${JSON.stringify(subagentsDir)} -type f -name ${JSON.stringify("agent-*.jsonl")} 2>/dev/null`,
+  );
+  if (result.exitCode !== 0) return [];
+  const stdout = result.stdout.trim();
+  if (stdout === "") return [];
+  return stdout.split("\n").filter((line) => line !== "");
+};
+
+/**
+ * Enumerate Claude Code subagent / workflow transcripts for a session whose
+ * `subagents/` directory is reconstructed from `(cwd, id)`. Prefer
+ * {@link listClaudeSubagentSessionsInDir} with a directory derived from the
+ * located main-session path when available, since that sidesteps cwd-encoding
+ * drift.
  */
 export const listClaudeSubagentSessionsInSandbox = async (
   cwd: string,
   id: string,
   handle: Pick<BindMountSandboxHandle, "exec">,
   sandboxProjectsDir: string,
-): Promise<string[]> => {
-  const dir = claudeSubagentsDirInSandbox(cwd, id, sandboxProjectsDir);
-  const result = await handle.exec(
-    `find ${JSON.stringify(dir)} -type f -name ${JSON.stringify("agent-*.jsonl")} 2>/dev/null`,
+): Promise<string[]> =>
+  listClaudeSubagentSessionsInDir(
+    claudeSubagentsDirInSandbox(cwd, id, sandboxProjectsDir),
+    handle,
   );
-  if (result.exitCode !== 0) return [];
-  const stdout = result.stdout.trim();
-  if (stdout === "") return [];
-  return stdout.split("\n").filter((line) => line !== "");
+
+/**
+ * Locate a Claude Code session JSONL inside the sandbox by its unique id,
+ * scanning `<sandboxProjectsDir>/` rather than reconstructing the
+ * `<encoded-cwd>` directory via {@link encodeProjectPath}. Claude Code derives
+ * that directory from its own cwd-encoding rules, which collapse more than path
+ * separators (e.g. `.` → `-`); reconstructing it on the host drifts whenever
+ * Claude's encoding changes and produces "session not found in container"
+ * capture failures. The session id is globally unique, so the first match wins.
+ *
+ * Throws when no match exists — the main session file is expected to be present
+ * once the agent has produced a session id.
+ */
+export const locateClaudeSandboxSession = async (
+  id: string,
+  handle: Pick<BindMountSandboxHandle, "exec">,
+  sandboxProjectsDir: string,
+): Promise<string> => {
+  const result = await handle.exec(
+    `find ${JSON.stringify(sandboxProjectsDir)} -type f -name ${JSON.stringify(`${id}.jsonl`)} -print -quit`,
+  );
+  const path = result.stdout.trim().split("\n")[0];
+  if (result.exitCode !== 0 || !path) {
+    throw new Error(`session ${id} not found under ${sandboxProjectsDir}`);
+  }
+  return path;
 };
 
 /**

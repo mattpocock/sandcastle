@@ -9,7 +9,8 @@ import {
   findClaudeSessionOnHost,
   findCodexSessionOnHost,
   findPiSessionOnHost,
-  listClaudeSubagentSessionsInSandbox,
+  listClaudeSubagentSessionsInDir,
+  locateClaudeSandboxSession,
   locateCodexHostSession,
   locateCodexSandboxSession,
   locatePiHostSession,
@@ -368,14 +369,22 @@ const makeClaudeSessionStorage = (
       return readFile(path, "utf-8");
     },
     captureToHost: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
+      // Locate the session by id instead of reconstructing
+      // `<projectsDir>/<encoded-cwd>/` via encodeProjectPath. Claude Code
+      // derives that directory from its own cwd-encoding (which collapses more
+      // than path separators, e.g. `.` → `-`), so reconstructing it on the host
+      // drifts whenever Claude's encoding changes — the cause of "session not
+      // found in container" capture failures. The id is globally unique.
+      const mainSandboxPath = await locateClaudeSandboxSession(
+        sessionId,
+        handle,
+        sandboxProjectsDir,
+      );
+
       // Main session: failure is fatal — the user expects their session.
       await copyClaudeSessionFile({
         handle,
-        sourcePath: claudeSandboxSessionPath(
-          sandboxCwd,
-          sessionId,
-          sandboxProjectsDir,
-        ),
+        sourcePath: mainSandboxPath,
         fromCwd: sandboxCwd,
         toCwd: hostCwd,
         destPath: claudeHostSessionPath(hostCwd, sessionId, hostProjectsDir),
@@ -385,12 +394,11 @@ const makeClaudeSessionStorage = (
       // Subagent / workflow transcripts: best-effort. A missing `subagents/`
       // dir is the normal case (no Agent-tool / Workflow usage this run);
       // an individual subagent failing to copy must not abort siblings or
-      // the (already-successful) main capture.
-      const subagentSandboxPaths = await listClaudeSubagentSessionsInSandbox(
-        sandboxCwd,
-        sessionId,
+      // the (already-successful) main capture. Derive the directory from the
+      // located main-session path so it tracks Claude's real encoding too.
+      const subagentSandboxPaths = await listClaudeSubagentSessionsInDir(
+        posix.join(posix.dirname(mainSandboxPath), sessionId, "subagents"),
         handle,
-        sandboxProjectsDir,
       );
       const hostSubagentsDir = claudeSubagentsDirOnHost(
         hostCwd,
