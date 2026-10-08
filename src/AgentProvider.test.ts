@@ -7,6 +7,7 @@ import {
   codex,
   copilot,
   cursor,
+  muse,
   opencode,
   pi,
 } from "./AgentProvider.js";
@@ -1009,6 +1010,169 @@ describe("codex factory", () => {
   it("defaults env to empty object when not provided", () => {
     const provider = codex("gpt-5.4-mini");
     expect(provider.env).toEqual({});
+  });
+});
+
+// ---------------------------------------------------------------------------
+// muse factory
+// ---------------------------------------------------------------------------
+
+describe("muse factory", () => {
+  it("returns a provider with name 'muse'", () => {
+    const provider = muse("muse-spark-1.2");
+    expect(provider.name).toBe("muse");
+  });
+
+  it("does not expose envManifest or dockerfileTemplate", () => {
+    const provider = muse("muse-spark-1.2");
+    expect(provider).not.toHaveProperty("envManifest");
+    expect(provider).not.toHaveProperty("dockerfileTemplate");
+  });
+
+  it("buildPrintCommand includes the model and --json flag", () => {
+    const provider = muse("muse-spark-1.2");
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).toContain("muse-spark-1.2");
+    expect(command).toContain("--json");
+  });
+
+  it("buildPrintCommand passes prompt as a positional shell-escaped argument", () => {
+    const provider = muse("muse-spark-1.2");
+    const { command, stdin } = provider.buildPrintCommand(opts("it's a test"));
+    expect(command.endsWith("'it'\\''s a test'")).toBe(true);
+    expect(stdin).toBeUndefined();
+  });
+
+  it("buildPrintCommand rejects prompts larger than the argv-safe limit", () => {
+    const provider = muse("muse-spark-1.2");
+    const huge = "x".repeat(120 * 1024 + 1);
+    expect(() => provider.buildPrintCommand(opts(huge))).toThrow(
+      /Muse print-mode prompt/,
+    );
+  });
+
+  it("buildPrintCommand includes reasoning effort when specified", () => {
+    const provider = muse("muse-spark-1.2", { reasoningEffort: "high" });
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).toContain("--reasoning-effort high");
+  });
+
+  it("buildPrintCommand resumes with --session-id when resumeSession is set", () => {
+    const provider = muse("muse-spark-1.2");
+    const { command } = provider.buildPrintCommand({
+      prompt: "continue",
+      dangerouslySkipPermissions: true,
+      resumeSession: "abc-123",
+    });
+    expect(command).toContain("--session-id 'abc-123'");
+  });
+
+  it("parseStreamLine extracts text from run.output.delta payload.text", () => {
+    const provider = muse("muse-spark-1.2");
+    const line = JSON.stringify({
+      schema_version: 1,
+      payload_type: "run.output.delta",
+      payload: { kind: "run_output_delta", text: "Hello world" },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "text", text: "Hello world" },
+    ]);
+  });
+
+  it("parseStreamLine extracts text from run.output.delta payload.delta", () => {
+    const provider = muse("muse-spark-1.2");
+    const line = JSON.stringify({
+      payload_type: "run.output.delta",
+      payload: { kind: "run_output_delta", delta: "streaming chunk" },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "text", text: "streaming chunk" },
+    ]);
+  });
+
+  it("parseStreamLine concatenates fragmented deltas and surfaces them as result on task.lifecycle.completed", () => {
+    const provider = muse("muse-spark-1.2");
+    // The <plan> tag and its JSON body arrive split across multiple deltas.
+    provider.parseStreamLine(
+      JSON.stringify({
+        payload_type: "run.output.delta",
+        payload: { text: '<plan>{"issues": [{"id": "7"' },
+      }),
+    );
+    provider.parseStreamLine(
+      JSON.stringify({
+        payload_type: "run.output.delta",
+        payload: { text: ', "title": "Research"}]}</plan>' },
+      }),
+    );
+    const completed = provider.parseStreamLine(
+      JSON.stringify({
+        payload_type: "task.lifecycle.completed",
+        payload: { event: { kind: "completed", task_id: "t-1" } },
+      }),
+    );
+    expect(completed).toEqual([
+      {
+        type: "result",
+        result: '<plan>{"issues": [{"id": "7", "title": "Research"}]}</plan>',
+      },
+    ]);
+  });
+
+  it("parseStreamLine emits empty result on task.lifecycle.completed with no prior deltas", () => {
+    const provider = muse("muse-spark-1.2");
+    const completed = provider.parseStreamLine(
+      JSON.stringify({
+        payload_type: "task.lifecycle.completed",
+        payload: { event: { kind: "completed", task_id: "t-1" } },
+      }),
+    );
+    expect(completed).toEqual([{ type: "result", result: "" }]);
+  });
+
+  it("parseStreamLine ignores task.lifecycle.status events", () => {
+    const provider = muse("muse-spark-1.2");
+    const line = JSON.stringify({
+      payload_type: "task.lifecycle.status",
+      payload: { event: { kind: "status", message: "stream_succeeded" } },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([]);
+  });
+
+  it("parseStreamLine returns empty array for non-JSON lines", () => {
+    const provider = muse("muse-spark-1.2");
+    expect(provider.parseStreamLine("not json")).toEqual([]);
+    expect(provider.parseStreamLine("")).toEqual([]);
+  });
+
+  it("parseStreamLine returns empty array for malformed JSON", () => {
+    const provider = muse("muse-spark-1.2");
+    expect(provider.parseStreamLine("{bad json")).toEqual([]);
+  });
+
+  it("parseStreamLine returns empty array for unrecognized event types", () => {
+    const provider = muse("muse-spark-1.2");
+    const line = JSON.stringify({ type: "unknown_event", data: "foo" });
+    expect(provider.parseStreamLine(line)).toEqual([]);
+  });
+
+  it("parseStreamLine accumulates state per provider instance, not shared", () => {
+    const providerA = muse("muse-spark-1.2");
+    const providerB = muse("muse-spark-1.2");
+    providerA.parseStreamLine(
+      JSON.stringify({
+        payload_type: "run.output.delta",
+        payload: { text: "from A" },
+      }),
+    );
+    // B's completion should not see A's accumulated text.
+    const completedB = providerB.parseStreamLine(
+      JSON.stringify({
+        payload_type: "task.lifecycle.completed",
+        payload: { event: { kind: "completed", task_id: "t-2" } },
+      }),
+    );
+    expect(completedB).toEqual([{ type: "result", result: "" }]);
   });
 });
 
