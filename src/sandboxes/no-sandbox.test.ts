@@ -211,3 +211,34 @@ describe("noSandbox", () => {
     });
   });
 });
+
+describe("UTF-8 process output", () => {
+  for (const streaming of [false, true]) {
+    it(`preserves characters written across chunks (${streaming ? "streaming" : "buffered"})`, async () => {
+      const handle = await noSandbox().create({
+        worktreePath: process.cwd(),
+        env: {},
+      });
+      const lines: string[] = [];
+      const sample = "整理文档 🧠";
+      const script = `
+        (async () => {
+          const bytes = Buffer.from(${JSON.stringify(sample + "\n")});
+          for (const byte of bytes) {
+            process.stdout.write(Buffer.from([byte]));
+            process.stderr.write(Buffer.from([byte]));
+            await new Promise(resolve => setTimeout(resolve, 20));
+          }
+        })().catch(error => { console.error(error); process.exitCode = 1; });
+      `;
+      const result = await handle.exec("node --no-warnings", {
+        stdin: script,
+        ...(streaming ? { onLine: (line: string) => lines.push(line) } : {}),
+      });
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toBe(sample + (streaming ? "" : "\n"));
+      expect(result.stderr).toBe(sample + "\n");
+      if (streaming) expect(lines).toEqual([sample]);
+    });
+  }
+});
