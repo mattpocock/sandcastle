@@ -41,6 +41,12 @@ export {
   claudeSandboxSessionPath,
   findClaudeSessionOnHost,
   findCodexSessionOnHost,
+  findGrokSessionOnHost,
+  encodeGrokSessionDir,
+  grokHostSessionPath,
+  grokSandboxSessionPath,
+  transferGrokSession,
+  transferGrokSummary,
 } from "./SessionStore.js";
 export type { HostSessionLookup } from "./SessionStore.js";
 export type { SandboxHooks } from "./SandboxLifecycle.js";
@@ -57,6 +63,7 @@ export {
   codex,
   copilot,
   cursor,
+  grok,
   opencode,
   pi,
 } from "./AgentProvider.js";
@@ -68,6 +75,7 @@ export type {
   CodexOptions,
   CopilotOptions,
   CursorOptions,
+  GrokOptions,
   OpenCodeOptions,
   PiOptions,
 } from "./AgentProvider.js";
