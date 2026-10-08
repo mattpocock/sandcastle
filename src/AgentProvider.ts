@@ -543,6 +543,18 @@ const makePiSessionStorage = (options?: PiOptions): AgentSessionStorage => {
   };
 };
 
+/** Maps Pi's built-in tool names to their friendly display argument. */
+const PI_TOOL_ARG_FIELDS: Record<string, string> = {
+  ...TOOL_ARG_FIELDS,
+  bash: "command",
+  read: "path",
+  edit: "path",
+  write: "path",
+  grep: "pattern",
+  find: "pattern",
+  ls: "path",
+};
+
 const parsePiStreamLine = (line: string): ParsedStreamEvent[] => {
   if (!line.startsWith("{")) return [];
   try {
@@ -550,7 +562,7 @@ const parsePiStreamLine = (line: string): ParsedStreamEvent[] => {
     // The first line of pi's --mode json stdout stream is a `session` header
     // carrying the UUID; subsequent stream entries (model_change,
     // thinking_level_change, message, ...) do not. Verified against
-    // @mariozechner/pi-coding-agent 0.73.1.
+    // @mariozechner/pi-coding-agent 0.73.1 and Pi 0.84.0.
     if (obj.type === "session" && typeof obj.id === "string") {
       return [{ type: "session_id", sessionId: obj.id }];
     }
@@ -567,11 +579,14 @@ const parsePiStreamLine = (line: string): ParsedStreamEvent[] => {
     if (obj.type === "tool_execution_start") {
       const toolName = obj.toolName;
       if (typeof toolName !== "string") return [];
-      const argField = TOOL_ARG_FIELDS[toolName];
+      const argField = PI_TOOL_ARG_FIELDS[toolName];
       if (argField === undefined) return [];
       const args = obj.args as Record<string, unknown> | undefined;
       if (!args) return [];
       const argValue = args[argField];
+      if (toolName === "ls" && argValue === undefined) {
+        return [{ type: "tool_call", name: toolName, args: "." }];
+      }
       if (typeof argValue !== "string") return [];
       return [{ type: "tool_call", name: toolName, args: argValue }];
     }
