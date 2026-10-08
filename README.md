@@ -162,6 +162,10 @@ const result = await run({
     devices: ["/dev/kvm"],
     // Optional: limit CPU resources via --cpus. Fractional values allowed (e.g. 1.5).
     // cpus: 2,
+    // Optional: limit memory via --memory (e.g. "512m", "2g").
+    // memory: "2g",
+    // Optional: limit memory + swap via --memory-swap. Only meaningful alongside memory.
+    // memorySwap: "2g",
   }),
 
   // Host repo directory — replaces process.cwd() as the anchor for

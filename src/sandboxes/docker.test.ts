@@ -306,6 +306,65 @@ describe("docker()", () => {
     await handle.close();
   });
 
+  it("passes --memory and --memory-swap flags to docker run when set", async () => {
+    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      callback(null, "", "");
+      return undefined as any;
+    });
+
+    const provider = docker({ memory: "512m", memorySwap: "1g" });
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    const runArgs = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    )?.[1] as string[];
+
+    const memoryIdx = runArgs.indexOf("--memory");
+    expect(memoryIdx).toBeGreaterThan(-1);
+    expect(runArgs[memoryIdx + 1]).toBe("512m");
+
+    const memorySwapIdx = runArgs.indexOf("--memory-swap");
+    expect(memorySwapIdx).toBeGreaterThan(-1);
+    expect(runArgs[memorySwapIdx + 1]).toBe("1g");
+
+    await handle.close();
+  });
+
+  it("does not pass --memory or --memory-swap to docker run when omitted", async () => {
+    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      callback(null, "", "");
+      return undefined as any;
+    });
+
+    const provider = docker();
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    const runArgs = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    )?.[1] as string[];
+
+    expect(runArgs).not.toContain("--memory");
+    expect(runArgs).not.toContain("--memory-swap");
+
+    await handle.close();
+  });
+
   it("runs pre-flight docker image inspect before docker run", async () => {
     const callOrder: string[] = [];
     mockExecFile.mockImplementation((_command, args, ...rest: any[]) => {

@@ -85,6 +85,10 @@ export interface StartContainerOptions {
   readonly devices?: readonly string[];
   /** Limit CPU resources via `--cpus` (e.g. `1.5`). Fractional values allowed. */
   readonly cpus?: number;
+  /** Limit memory via `--memory` (e.g. `"512m"`, `"2g"`). */
+  readonly memory?: string;
+  /** Limit memory + swap via `--memory-swap` (e.g. `"2g"`). Only meaningful alongside `memory`. */
+  readonly memorySwap?: string;
   /**
    * SELinux volume label suffix applied to bind mounts (default `"z"`).
    *
@@ -152,6 +156,12 @@ export const startContainer = (
     ]);
     const cpusFlags =
       options?.cpus !== undefined ? ["--cpus", String(options.cpus)] : [];
+    const memoryFlags =
+      options?.memory !== undefined ? ["--memory", options.memory] : [];
+    const memorySwapFlags =
+      options?.memorySwap !== undefined
+        ? ["--memory-swap", options.memorySwap]
+        : [];
 
     yield* dockerExec([
       "run",
@@ -166,6 +176,8 @@ export const startContainer = (
       ...groupAddFlags,
       ...deviceFlags,
       ...cpusFlags,
+      ...memoryFlags,
+      ...memorySwapFlags,
       imageName,
     ]);
   });
