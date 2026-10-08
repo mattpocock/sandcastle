@@ -33,6 +33,7 @@ import {
 import {
   withSandboxLifecycle,
   runHostHooks,
+  execOk,
   type SandboxHooks,
 } from "./SandboxLifecycle.js";
 import {
@@ -836,7 +837,7 @@ export const createSandboxFromWorktree = async (
           `git config --global --add safe.directory "${sandboxRepoDir}"`,
         );
         const sandboxEffects = (sandboxOnReady ?? []).map((hook) =>
-          sandbox.exec(hook.command, {
+          execOk(sandbox, hook.command, {
             cwd: sandboxRepoDir,
             sudo: hook.sudo,
           }),
@@ -851,7 +852,13 @@ export const createSandboxFromWorktree = async (
         yield* Effect.all(allEffects, {
           concurrency: "unbounded",
         });
-      }),
+      }).pipe(
+        Effect.onError(() =>
+          providerHandle
+            ? Effect.promise(() => providerHandle!.close().catch(() => {}))
+            : Effect.void,
+        ),
+      ),
     );
   }
 
@@ -1024,7 +1031,7 @@ export const createSandbox = async (
                 `git config --global --add safe.directory "${sandboxRepoDir}"`,
               );
               const sandboxEffects = (sandboxOnReady ?? []).map((hook) =>
-                sandbox.exec(hook.command, {
+                execOk(sandbox, hook.command, {
                   cwd: sandboxRepoDir,
                   sudo: hook.sudo,
                 }),

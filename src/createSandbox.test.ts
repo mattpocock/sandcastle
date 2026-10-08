@@ -1290,6 +1290,46 @@ describe("createSandbox", () => {
     }
   });
 
+  it("rejects and cleans up when an onSandboxReady hook exits non-zero", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-hook-failure-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    let closeCallCount = 0;
+    const provider = createBindMountSandboxProvider({
+      name: "failing-hook",
+      create: async (options) => ({
+        worktreePath: options.worktreePath,
+        exec: async (command) =>
+          command === "fail-setup"
+            ? { stdout: "", stderr: "setup failed", exitCode: 7 }
+            : { stdout: "", stderr: "", exitCode: 0 },
+        copyFileIn: async () => {},
+        copyFileOut: async () => {},
+        close: async () => {
+          closeCallCount++;
+        },
+      }),
+    });
+
+    await expect(
+      createSandbox({
+        branch: "failing-hook",
+        sandbox: provider,
+        hooks: {
+          sandbox: { onSandboxReady: [{ command: "fail-setup" }] },
+        },
+        cwd: hostDir,
+      }),
+    ).rejects.toThrow("Command failed (exit 7): fail-setup\nsetup failed");
+
+    expect(closeCallCount).toBe(1);
+    expect(
+      existsSync(join(hostDir, ".sandcastle", "worktrees", "failing-hook")),
+    ).toBe(false);
+    await rm(hostDir, { recursive: true, force: true });
+  });
+
   it("provider's create() is called exactly once across multiple .run() calls", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
