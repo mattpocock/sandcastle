@@ -85,6 +85,20 @@ export interface CreateSandboxOptions {
   readonly copyToWorktree?: string[];
   /** Override default timeouts for built-in lifecycle steps. Unset keys keep their defaults. */
   readonly timeouts?: Timeouts;
+  /**
+   * What to do with the worktree when `close()` finds uncommitted changes still
+   * in it. Same choice, same name and same values as `run()` — this is the
+   * second public door onto the one place that decision is made.
+   *
+   * - `"preserve-worktree"` (default) — the worktree is left on disk so the
+   *   work can still be reviewed, and its path comes back on
+   *   `CloseResult.preservedWorktreePath`.
+   * - `"remove-worktree"` — the worktree is removed anyway, nothing is left on
+   *   disk and nothing is reported as preserved. For a long-running unattended
+   *   process, where a preserved worktree is never reviewed and is never
+   *   collected by the prune that runs before each new one.
+   */
+  readonly onUncommittedChanges?: WorktreeManager.UncommittedChangesPolicy;
   /** @internal Test-only overrides to bypass the sandbox provider. */
   readonly _test?: {
     readonly buildSandbox?: (sandboxDir: string) => SandboxService;
@@ -1090,18 +1104,15 @@ export const createSandbox = async (
           yield* Effect.promise(() => providerHandle.close());
         }
 
-        // Preserve the worktree when it has uncommitted changes; otherwise remove it.
-        const isDirty = yield* WorktreeManager.hasUncommittedChanges(
+        const disposition = yield* WorktreeManager.closeWorktree(
           worktreePath,
-        ).pipe(Effect.catchAll(() => Effect.succeed(false)));
-        if (isDirty) {
-          return { preservedWorktreePath: worktreePath };
-        }
+          options.onUncommittedChanges,
+        ).pipe(Effect.catchAll(() => Effect.succeed("removed" as const)));
 
-        yield* WorktreeManager.remove(worktreePath).pipe(
-          Effect.catchAll(() => Effect.void),
-        );
-        return { preservedWorktreePath: undefined };
+        return {
+          preservedWorktreePath:
+            disposition === "preserved" ? worktreePath : undefined,
+        };
       }),
     );
   };

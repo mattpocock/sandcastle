@@ -4,7 +4,7 @@ import { exec } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, readdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { AgentError, AgentIdleTimeoutError } from "./errors.js";
@@ -26,6 +26,10 @@ import {
   WorktreeDockerSandboxFactory,
   SANDBOX_REPO_DIR,
 } from "./SandboxFactory.js";
+import {
+  pruneStale,
+  type UncommittedChangesPolicy,
+} from "./WorktreeManager.js";
 
 const execAsync = promisify(exec);
 
@@ -99,6 +103,7 @@ describe("WorktreeDockerSandboxFactory", () => {
   const makeLayer = (
     displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]),
     branchStrategy: BranchStrategy = { type: "merge-to-head" },
+    onUncommittedChanges?: UncommittedChangesPolicy,
   ) =>
     Layer.provide(
       WorktreeDockerSandboxFactory.layer,
@@ -108,11 +113,16 @@ describe("WorktreeDockerSandboxFactory", () => {
           hostRepoDir,
           sandboxProvider: mockProvider.provider,
           branchStrategy,
+          onUncommittedChanges,
         }),
         NodeFileSystem.layer,
         SilentDisplay.layer(displayRef),
       ),
     );
+
+  /** What the run wrote to its output channel, as one string. */
+  const textOutput = (entries: ReadonlyArray<DisplayEntry>): string =>
+    entries.flatMap((e) => (e._tag === "text" ? [e.message] : [])).join("\n");
 
   beforeEach(async () => {
     hostRepoDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
@@ -416,8 +426,163 @@ describe("WorktreeDockerSandboxFactory", () => {
     expect(existsSync(observedWorktreePath!)).toBe(true);
   });
 
-  it("prints uncommitted changes message on success with dirty worktree", async () => {
+  it("removes the worktree on success with dirty worktree when onUncommittedChanges is remove-worktree", async () => {
+    const displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+
+    let observedWorktreePath: string | undefined;
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const factory = yield* SandboxFactory;
+        return yield* factory.withSandbox((info) =>
+          Effect.gen(function* () {
+            observedWorktreePath = info.hostWorktreePath;
+            yield* Effect.promise(() =>
+              writeFile(join(info.hostWorktreePath!, "dirty.txt"), "dirty"),
+            );
+            return "done";
+          }),
+        );
+      }).pipe(
+        Effect.provide(
+          makeLayer(displayRef, { type: "merge-to-head" }, "remove-worktree"),
+        ),
+      ),
+    );
+
+    expect(result.value).toBe("done");
+    // Nothing was preserved, so nothing is reported as preserved.
+    expect(result.preservedWorktreePath).toBeUndefined();
+    expect(existsSync(observedWorktreePath!)).toBe(false);
+    // No directory is left under .sandcastle/worktrees/ either.
+    expect(await findCreatedWorktree(hostRepoDir)).toBeUndefined();
+    // The preserved-worktree notice belongs to the preserving policy only.
+    const output = textOutput(await Effect.runPromise(Ref.get(displayRef)));
+    expect(output).not.toContain("uncommitted changes");
+    expect(output).not.toContain("To review");
+  });
+
+  it("does not attach preservedWorktreePath to AgentError on failure with dirty worktree when onUncommittedChanges is remove-worktree", async () => {
+    const displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+
+    let observedWorktreePath: string | undefined;
+    const exit = await Effect.runPromiseExit(
+      Effect.gen(function* () {
+        const factory = yield* SandboxFactory;
+        yield* factory.withSandbox((info) =>
+          Effect.gen(function* () {
+            observedWorktreePath = info.hostWorktreePath;
+            yield* Effect.promise(() =>
+              writeFile(join(info.hostWorktreePath!, "dirty.txt"), "dirty"),
+            );
+            return yield* Effect.fail(
+              new AgentError({ message: "agent failed" }),
+            );
+          }),
+        );
+      }).pipe(
+        Effect.provide(
+          makeLayer(displayRef, { type: "merge-to-head" }, "remove-worktree"),
+        ),
+      ),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (!Exit.isFailure(exit)) throw new Error("unreachable");
+    expect(exit.cause._tag).toBe("Fail");
+    if (exit.cause._tag !== "Fail") throw new Error("unreachable");
+    expect(exit.cause.error).toBeInstanceOf(AgentError);
+    expect(
+      (exit.cause.error as AgentError).preservedWorktreePath,
+    ).toBeUndefined();
+    expect(existsSync(observedWorktreePath!)).toBe(false);
+    // The worktree did hold uncommitted changes, so the message the failure
+    // path logs for a clean tree would be a lie here.
+    const output = textOutput(await Effect.runPromise(Ref.get(displayRef)));
+    expect(output).not.toContain("no uncommitted changes");
+  });
+
+  // Documents current behaviour, and passes as-is: preserved worktrees are
+  // never reclaimed by the prune that runs before every new worktree, because
+  // its criterion is "git no longer knows this directory", not "this directory
+  // is old". An orphaned worktree in the same run gets removed, so the
+  // difference between the two is visible side by side.
+  //
+  // For an unattended process this means every run that ends with uncommitted
+  // work leaves a full copy of the repo behind, for good: nothing collects
+  // them and there is no option to opt out.
+  it("prune leaves preserved worktrees from earlier runs in place, but removes an orphaned one", async () => {
     const stderrSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    // Two runs, each ending with uncommitted work in its own worktree.
+    const preservedPaths: string[] = [];
+    for (const marker of ["first", "second"]) {
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const factory = yield* SandboxFactory;
+          return yield* factory.withSandbox((info) =>
+            Effect.gen(function* () {
+              yield* Effect.promise(() =>
+                writeFile(
+                  join(info.hostWorktreePath!, `${marker}.txt`),
+                  marker,
+                ),
+              );
+              return marker;
+            }),
+          );
+        }).pipe(Effect.provide(makeLayer())),
+      );
+      preservedPaths.push(result.preservedWorktreePath!);
+    }
+
+    stderrSpy.mockRestore();
+
+    // Two distinct worktrees are on disk after the two runs.
+    expect(new Set(preservedPaths).size).toBe(2);
+    for (const path of preservedPaths) {
+      expect(existsSync(path)).toBe(true);
+    }
+
+    // A third directory under .sandcastle/worktrees/ that git does not know
+    // about — an orphaned worktree, e.g. left behind by a crash.
+    const worktreesDir = join(hostRepoDir, ".sandcastle", "worktrees");
+    const orphanedPath = join(worktreesDir, "orphaned-worktree");
+    await mkdir(orphanedPath, { recursive: true });
+
+    // The cleanup sandcastle performs by itself before creating any worktree.
+    const pruneExit = await Effect.runPromiseExit(
+      pruneStale(hostRepoDir).pipe(Effect.provide(NodeFileSystem.layer)),
+    );
+
+    // It runs, and it succeeds.
+    expect(Exit.isSuccess(pruneExit)).toBe(true);
+
+    // The orphaned worktree is gone.
+    expect(existsSync(orphanedPath)).toBe(false);
+
+    // Both preserved worktrees are still there.
+    for (const path of preservedPaths) {
+      expect(existsSync(path)).toBe(true);
+    }
+    const remaining = await readdir(worktreesDir);
+    expect(remaining.sort()).toEqual(
+      preservedPaths.map((path) => basename(path)).sort(),
+    );
+
+    // Why prune spares them: git still has them registered, so they are not
+    // orphaned. The orphaned directory was never in this list.
+    const { stdout: worktreeList } = await execAsync(
+      "git worktree list --porcelain",
+      { cwd: hostRepoDir },
+    );
+    for (const path of preservedPaths) {
+      expect(worktreeList).toContain(basename(path));
+    }
+    expect(worktreeList).not.toContain(basename(orphanedPath));
+  });
+
+  it("logs uncommitted changes message on success with dirty worktree", async () => {
+    const displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
 
     let observedWorktreePath: string | undefined;
     await Effect.runPromise(
@@ -431,13 +596,18 @@ describe("WorktreeDockerSandboxFactory", () => {
             );
           }),
         );
-      }).pipe(Effect.provide(makeLayer())),
+      }).pipe(Effect.provide(makeLayer(displayRef))),
     );
 
-    const output = stderrSpy.mock.calls.map((c) => c[0]).join(" ");
+    // The warning goes through the run's output channel, so whoever drains that
+    // channel to a file finds it there. It no longer goes to stderr, which an
+    // unattended caller has no way to read.
+    const output = textOutput(await Effect.runPromise(Ref.get(displayRef)));
     expect(output).toContain("uncommitted changes");
     expect(output).toContain(observedWorktreePath);
-    stderrSpy.mockRestore();
+    expect(output).toContain(
+      `git worktree remove --force ${observedWorktreePath}`,
+    );
   });
 
   it("removes worktree on failure with clean worktree", async () => {
@@ -494,8 +664,8 @@ describe("WorktreeDockerSandboxFactory", () => {
     expect(worktree).toBeUndefined();
   });
 
-  it("prints 'no uncommitted changes' message on failure with clean worktree", async () => {
-    const stderrSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  it("logs 'no uncommitted changes' message on failure with clean worktree", async () => {
+    const displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
 
     await expect(
       Effect.runPromise(
@@ -504,13 +674,12 @@ describe("WorktreeDockerSandboxFactory", () => {
           yield* factory.withSandbox(() =>
             Effect.fail(new AgentError({ message: "agent failed" })),
           );
-        }).pipe(Effect.provide(makeLayer())),
+        }).pipe(Effect.provide(makeLayer(displayRef))),
       ),
     ).rejects.toThrow();
 
-    const output = stderrSpy.mock.calls.map((c) => c[0]).join(" ");
+    const output = textOutput(await Effect.runPromise(Ref.get(displayRef)));
     expect(output).toContain("no uncommitted changes");
-    stderrSpy.mockRestore();
   });
 
   it("does not attach preservedWorktreePath to AgentIdleTimeoutError when worktree is clean on failure", async () => {
