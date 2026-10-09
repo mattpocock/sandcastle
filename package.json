@@ -29,6 +29,10 @@
     "./sandboxes/no-sandbox": {
       "import": "./dist/sandboxes/no-sandbox.js",
       "types": "./dist/sandboxes/no-sandbox.d.ts"
+    },
+    "./sandboxes/smol": {
+      "import": "./dist/sandboxes/smol.js",
+      "types": "./dist/sandboxes/smol.d.ts"
     }
   },
   "bin": {
@@ -76,6 +80,7 @@
     "husky": "^9.1.7",
     "lint-staged": "^15.5.1",
     "prettier": "^3.5.3",
+    "smolmachines": "^1.25.1",
     "tsup": "^8.5.1",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3",
@@ -87,13 +92,17 @@
   },
   "peerDependencies": {
     "@daytona/sdk": "^0.164.0",
-    "@vercel/sandbox": ">=1.0.0"
+    "@vercel/sandbox": ">=1.0.0",
+    "smolmachines": "^1.25.1"
   },
   "peerDependenciesMeta": {
     "@vercel/sandbox": {
       "optional": true
     },
     "@daytona/sdk": {
+      "optional": true
+    },
+    "smolmachines": {
       "optional": true
     }
   },
