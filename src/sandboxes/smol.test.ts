@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdtemp,
+  open,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { smol } from "./smol.js";
@@ -157,6 +164,68 @@ describe("smol()", () => {
     mock.exec.mockResolvedValueOnce({ exitCode: 1, stderr: "no disk" });
     await expect(smol().create({ env: {} })).rejects.toThrow("no disk");
     expect(mock.delete).toHaveBeenCalledTimes(1);
+  });
+
+  it("uploads files over the Cloud request limit in bounded chunks", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "smol-sandcastle-large-"));
+    try {
+      const source = join(directory, "large.sh");
+      const file = await open(source, "w");
+      await file.truncate(100 * 1024 * 1024 + 1);
+      await file.close();
+      await chmod(source, 0o755);
+
+      const handle = await smol({ target: "cloud" }).create({ env: {} });
+      await handle.copyIn(source, "/workspace/large.sh");
+      const uploads = mock.writeFile.mock.calls;
+      expect(uploads.length).toBeGreaterThan(1);
+      expect(uploads.every(([, data]) => data.length <= 16 * 1024 * 1024)).toBe(
+        true,
+      );
+      expect(uploads.reduce((sum, [, data]) => sum + data.length, 0)).toBe(
+        100 * 1024 * 1024 + 1,
+      );
+      const commands = mock.execStream.mock.calls.map(([argv]) => argv[2]);
+      expect(commands.some((command) => command.includes("chmod 755"))).toBe(
+        true,
+      );
+      expect(commands.some((command) => command.includes("mv -f"))).toBe(true);
+      expect(mock.exec).toHaveBeenCalledWith([
+        "rm",
+        "-f",
+        expect.stringContaining("sandcastle-upload-"),
+        expect.stringContaining(".sandcastle-"),
+      ]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("removes guest staging files when a chunk upload fails", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "smol-sandcastle-large-"));
+    try {
+      const source = join(directory, "large.bin");
+      const file = await open(source, "w");
+      await file.truncate(33 * 1024 * 1024);
+      await file.close();
+      mock.writeFile.mockRejectedValueOnce(new Error("upload failed"));
+      const handle = await smol().create({ env: {} });
+      await expect(
+        handle.copyIn(source, "/workspace/large.bin"),
+      ).rejects.toThrow("upload failed");
+      expect(mock.exec).toHaveBeenCalledWith([
+        "rm",
+        "-f",
+        expect.stringContaining("sandcastle-upload-"),
+        expect.stringContaining(".sandcastle-"),
+      ]);
+      const commands = mock.execStream.mock.calls.map(([argv]) => argv[2]);
+      expect(commands.every((command) => !command.includes("mv -f"))).toBe(
+        true,
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("copies bytes in and out and preserves file permissions", async () => {

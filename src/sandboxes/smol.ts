@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import {
   mkdtemp,
   mkdir,
+  open,
   readFile,
   rm,
   stat,
@@ -24,6 +25,8 @@ import type { ResourceSpec } from "smolmachines";
 
 const execFileAsync = promisify(execFile);
 const WORKTREE = "/var/tmp/sandcastle-workspace";
+const SINGLE_UPLOAD_BYTES = 32 * 1024 * 1024;
+const UPLOAD_CHUNK_BYTES = 16 * 1024 * 1024;
 const quote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
 
 export interface SmolOptions {
@@ -148,6 +151,54 @@ export const smol = (options: SmolOptions = {}): IsolatedSandboxProvider =>
           );
       };
 
+      // Cloud file uploads have a 100 MiB request limit. Send larger files in
+      // bounded chunks, assembling beside the destination before replacing it.
+      const uploadFile = async (
+        hostPath: string,
+        guestPath: string,
+        mode?: number,
+      ): Promise<void> => {
+        const size = (await stat(hostPath)).size;
+        if (size <= SINGLE_UPLOAD_BYTES) {
+          await machine.writeFile(guestPath, await readFile(hostPath), mode);
+          return;
+        }
+
+        const staging = `${guestPath}.sandcastle-${randomUUID()}.tmp`;
+        const chunk = `/tmp/sandcastle-upload-${randomUUID()}`;
+        const source = await open(hostPath, "r");
+        try {
+          let offset = 0;
+          while (offset < size) {
+            const buffer = Buffer.allocUnsafe(
+              Math.min(UPLOAD_CHUNK_BYTES, size - offset),
+            );
+            const { bytesRead } = await source.read(
+              buffer,
+              0,
+              buffer.length,
+              offset,
+            );
+            if (!bytesRead)
+              throw new Error(`Source file ended during upload: ${hostPath}`);
+            await machine.writeFile(chunk, buffer.subarray(0, bytesRead));
+            await execOk(
+              `cat ${quote(chunk)} ${offset === 0 ? ">" : ">>"} ${quote(staging)} && rm -f ${quote(chunk)}`,
+            );
+            offset += bytesRead;
+          }
+          await execOk(
+            `${mode === undefined ? "" : `chmod ${mode.toString(8)} ${quote(staging)} && `}mv -f ${quote(staging)} ${quote(guestPath)}`,
+          );
+        } finally {
+          try {
+            await source.close();
+          } finally {
+            await machine.exec(["rm", "-f", chunk, staging]).catch(() => {});
+          }
+        }
+      };
+
       return {
         worktreePath: WORKTREE,
         exec,
@@ -155,11 +206,7 @@ export const smol = (options: SmolOptions = {}): IsolatedSandboxProvider =>
           const source = await stat(hostPath);
           if (!source.isDirectory()) {
             await execOk(`mkdir -p ${quote(dirname(sandboxPath))}`);
-            await machine.writeFile(
-              sandboxPath,
-              await readFile(hostPath),
-              source.mode & 0o777,
-            );
+            await uploadFile(hostPath, sandboxPath, source.mode & 0o777);
             return;
           }
 
@@ -168,7 +215,7 @@ export const smol = (options: SmolOptions = {}): IsolatedSandboxProvider =>
           const guestArchive = `/tmp/sandcastle-copyin-${randomUUID()}.tar.gz`;
           try {
             await execFileAsync("tar", ["-czf", archive, "-C", hostPath, "."]);
-            await machine.writeFile(guestArchive, await readFile(archive));
+            await uploadFile(archive, guestArchive);
             await execOk(
               `mkdir -p ${quote(sandboxPath)} && tar -xzf ${quote(guestArchive)} -C ${quote(sandboxPath)}`,
             );
