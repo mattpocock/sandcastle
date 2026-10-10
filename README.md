@@ -14,7 +14,7 @@ A TypeScript library for orchestrating AI coding agents in isolated sandboxes:
 2. Sandcastle handles sandboxing the agent with a configurable branch strategy.
 3. The commits made on the branches get merged back.
 
-Sandcastle is provider-agnostic — it ships with built-in providers for Docker, Podman, and Vercel, and you can create your own. Great for parallelizing multiple AFK agents, creating review pipelines, or even just orchestrating your own agents.
+Sandcastle is provider-agnostic — it ships with built-in providers for Docker, Podman, Vercel, and Smol, and you can create your own. Great for parallelizing multiple AFK agents, creating review pipelines, or even just orchestrating your own agents.
 
 ## Prerequisites
 
@@ -23,6 +23,7 @@ Sandcastle is provider-agnostic — it ships with built-in providers for Docker,
   - [Docker Desktop](https://www.docker.com/) — most common for local development
   - [Podman](https://podman.io/) — rootless alternative to Docker
   - [Vercel](https://vercel.com/) — cloud-based Firecracker microVMs via `@vercel/sandbox`
+  - [Smol Machines](https://github.com/smol-machines/smol) — microVMs on your laptop or in Smol Cloud via `smolmachines`
   - Or [create your own](#custom-sandbox-providers) using `createBindMountSandboxProvider` or `createIsolatedSandboxProvider`
 
 ## Quick start
@@ -72,7 +73,34 @@ Sandcastle uses a `SandboxProvider` to create isolated environments. The `sandbo
 | Docker     | `@ai-hero/sandcastle/sandboxes/docker`     | Bind-mount | `run()`, `createSandbox()`, `interactive()` |
 | Podman     | `@ai-hero/sandcastle/sandboxes/podman`     | Bind-mount | `run()`, `createSandbox()`, `interactive()` |
 | Vercel     | `@ai-hero/sandcastle/sandboxes/vercel`     | Isolated   | `run()`, `createSandbox()`, `interactive()` |
+| Smol       | `@ai-hero/sandcastle/sandboxes/smol`       | Isolated   | `run()`, `createSandbox()`                  |
 | No-sandbox | `@ai-hero/sandcastle/sandboxes/no-sandbox` | None       | `run()`, `createSandbox()`, `interactive()` |
+
+To run Sandcastle in Smol microVMs, install its optional SDK and select the target in your program:
+
+```bash
+npm install smolmachines
+```
+
+```typescript
+import { run, claudeCode } from "@ai-hero/sandcastle";
+import { smol } from "@ai-hero/sandcastle/sandboxes/smol";
+
+await run({
+  agent: claudeCode("claude-opus-4-8"),
+  sandbox: smol(), // local microVM; requires hardware virtualization
+  hooks: {
+    sandbox: {
+      onSandboxReady: [{ command: "npm install -g @anthropic-ai/claude-code" }],
+    },
+  },
+  prompt: "Fix the failing tests",
+});
+
+// Set SMOL_CLOUD_TOKEN and use smol({ target: "cloud" }) for a cloud VM.
+```
+
+The default `node:22` guest includes Node.js, Git, and a shell. Use `smol({ image: "your-agent-image" })` to preinstall an agent CLI, or install one during your sandbox setup. `smol()` supports `run()` and `createSandbox()`; terminal based `interactive()` needs a provider with `interactiveExec`.
 
 Worktree methods (`wt.run()`, `wt.interactive()`, `wt.createSandbox()`) accept the same providers as their top-level counterparts. `wt.interactive()` defaults to `noSandbox()` when no sandbox is specified.
 

@@ -177,6 +177,39 @@ describe("startSandbox", () => {
       await handle.close();
     });
 
+    it("closes an isolated VM if git bundle sync fails", async () => {
+      const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
+      tempDirs.push(hostDir);
+      await initRepo(hostDir);
+      await commitFile(hostDir, "hello.txt", "hello", "initial");
+
+      const realProvider = testIsolated();
+      let closeCount = 0;
+      const provider = createIsolatedSandboxProvider({
+        name: "failing-sync",
+        create: async (options) => {
+          const handle = await realProvider.create(options);
+          return {
+            ...handle,
+            copyIn: async () => {
+              throw new Error("bundle transfer failed");
+            },
+            close: async () => {
+              closeCount++;
+              await handle.close();
+            },
+          };
+        },
+      });
+
+      await expect(
+        Effect.runPromise(
+          startSandbox({ provider, hostRepoDir: hostDir, env: {} }),
+        ),
+      ).rejects.toThrow("bundle transfer failed");
+      expect(closeCount).toBe(1);
+    });
+
     it("times out when copyIn hangs", async () => {
       const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
       tempDirs.push(hostDir);

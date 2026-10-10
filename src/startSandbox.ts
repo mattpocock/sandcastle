@@ -204,6 +204,9 @@ const startIsolatedSandbox = (
       ),
     );
 
+    const closeOnError = () =>
+      Effect.promise(() => handle.close().catch(() => {}));
+
     yield* syncIn(options.hostRepoDir, handle).pipe(
       withTimeout(
         SYNC_IN_TIMEOUT_MS,
@@ -213,6 +216,7 @@ const startIsolatedSandbox = (
             timeoutMs: SYNC_IN_TIMEOUT_MS,
           }),
       ),
+      Effect.onError(closeOnError),
     );
 
     if (options.copyPaths && options.copyPaths.length > 0) {
@@ -244,6 +248,7 @@ const startIsolatedSandbox = (
               paths: pathsToCopy,
             }),
         ),
+        Effect.onError(closeOnError),
       );
     }
 
