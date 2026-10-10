@@ -117,6 +117,18 @@ describe("smol()", () => {
     expect(mock.exec).toHaveBeenLastCalledWith(["rm", "-f", path]);
   });
 
+  it("removes partially uploaded stdin when a guest transfer fails", async () => {
+    const handle = await smol().create({ env: {} });
+    mock.writeFile.mockRejectedValueOnce(new Error("guest upload interrupted"));
+
+    await expect(
+      handle.exec("cat", { stdin: "private payload" }),
+    ).rejects.toThrow("guest upload interrupted");
+    const [path] = mock.writeFile.mock.calls[0] as [string];
+    expect(mock.exec).toHaveBeenLastCalledWith(["rm", "-f", path]);
+    expect(mock.execStream).not.toHaveBeenCalled();
+  });
+
   it("returns complete output when no streaming callback is requested", async () => {
     mock.execStream.mockImplementation(() =>
       stream(

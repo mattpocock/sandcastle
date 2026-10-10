@@ -86,7 +86,6 @@ export const smol = (options: SmolOptions = {}): IsolatedSandboxProvider =>
           opts?.stdin !== undefined
             ? `/tmp/sandcastle-stdin-${randomUUID()}`
             : undefined;
-        if (inputPath) await machine.writeFile(inputPath, opts!.stdin!);
         const script = inputPath
           ? `sh -c ${quote(command)} < ${quote(inputPath)}`
           : command;
@@ -98,6 +97,7 @@ export const smol = (options: SmolOptions = {}): IsolatedSandboxProvider =>
         let exitCode: number | undefined;
 
         try {
+          if (inputPath) await machine.writeFile(inputPath, opts!.stdin!);
           for await (const event of machine.execStream(["sh", "-c", script], {
             workdir: opts?.cwd ?? WORKTREE,
             env: createOptions.env,
