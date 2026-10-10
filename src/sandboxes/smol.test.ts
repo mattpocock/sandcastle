@@ -258,6 +258,55 @@ describe("smol()", () => {
     }
   });
 
+  it("rejects Cloud filenames that the file proxy would rewrite before copying anything", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "smol-sandcastle-path-"));
+    try {
+      const source = join(directory, "source.txt");
+      const destination = join(directory, "destination.txt");
+      await writeFile(source, "important data");
+      const handle = await smol({ target: "cloud" }).create({ env: {} });
+      for (const suffix of ["#draft", "?v=2", "%20draft", "\nname", "\0name"]) {
+        const path = `/workspace/report${suffix}.txt`;
+        await expect(handle.copyIn(source, path)).rejects.toThrow(
+          "Smol Cloud file path",
+        );
+        await expect(handle.copyFileOut(path, destination)).rejects.toThrow(
+          "Smol Cloud file path",
+        );
+      }
+      expect(mock.writeFile).not.toHaveBeenCalled();
+      expect(mock.readFile).not.toHaveBeenCalled();
+      expect(mock.execStream).not.toHaveBeenCalled();
+      await expect(readdir(directory)).resolves.toEqual(["source.txt"]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps local file paths with URL delimiters usable", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "smol-sandcastle-local-path-"),
+    );
+    try {
+      const source = join(directory, "source.txt");
+      const destination = join(directory, "destination.txt");
+      await writeFile(source, "local data");
+      const handle = await smol({ target: "local" }).create({ env: {} });
+      await handle.copyIn(source, "/workspace/report#draft%20.txt");
+      await handle.copyFileOut("/workspace/report#draft%20.txt", destination);
+      expect(mock.writeFile).toHaveBeenCalledWith(
+        "/workspace/report#draft%20.txt",
+        Buffer.from("local data"),
+        expect.any(Number),
+      );
+      expect(mock.readFile).toHaveBeenCalledWith(
+        "/workspace/report#draft%20.txt",
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("falls back to buffered reads for Cloud SDKs without streaming", async () => {
     const directory = await mkdtemp(join(tmpdir(), "smol-sandcastle-copyout-"));
     try {

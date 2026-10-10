@@ -154,6 +154,16 @@ export const smol = (options: SmolOptions = {}): IsolatedSandboxProvider =>
           );
       };
 
+      // Cloud's file route can reinterpret URL delimiters and control bytes in
+      // a path. Reject these before copying to avoid writing a different file.
+      const assertCloudFilePath = (path: string): void => {
+        if (options.target === "cloud" && /[?#%\x00-\x1f\x7f]/.test(path)) {
+          throw new Error(
+            `Smol Cloud file path cannot contain ?, #, %, or control characters: ${JSON.stringify(path)}`,
+          );
+        }
+      };
+
       // Cloud file uploads have a 100 MiB request limit. Send larger files in
       // bounded chunks, assembling beside the destination before replacing it.
       const uploadFile = async (
@@ -161,6 +171,7 @@ export const smol = (options: SmolOptions = {}): IsolatedSandboxProvider =>
         guestPath: string,
         mode?: number,
       ): Promise<void> => {
+        assertCloudFilePath(guestPath);
         const size = (await stat(hostPath)).size;
         if (size <= SINGLE_UPLOAD_BYTES) {
           await machine.writeFile(guestPath, await readFile(hostPath), mode);
@@ -208,6 +219,7 @@ export const smol = (options: SmolOptions = {}): IsolatedSandboxProvider =>
         copyIn: async (hostPath, sandboxPath) => {
           const source = await stat(hostPath);
           if (!source.isDirectory()) {
+            assertCloudFilePath(sandboxPath);
             await execOk(`mkdir -p ${quote(dirname(sandboxPath))}`);
             await uploadFile(hostPath, sandboxPath, source.mode & 0o777);
             return;
@@ -228,6 +240,7 @@ export const smol = (options: SmolOptions = {}): IsolatedSandboxProvider =>
           }
         },
         copyFileOut: async (sandboxPath, hostPath) => {
+          assertCloudFilePath(sandboxPath);
           const streaming = machine as typeof machine & {
             readFileStream?: (path: string) => AsyncIterable<Uint8Array>;
           };
