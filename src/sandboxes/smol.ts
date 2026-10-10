@@ -5,6 +5,9 @@ import { randomUUID } from "node:crypto";
 import {
   mkdtemp,
   mkdir,
+  copyFile,
+  lstat,
+  rename,
   open,
   readFile,
   rm,
@@ -225,9 +228,44 @@ export const smol = (options: SmolOptions = {}): IsolatedSandboxProvider =>
           }
         },
         copyFileOut: async (sandboxPath, hostPath) => {
-          const content = await machine.readFile(sandboxPath);
+          const streaming = machine as typeof machine & {
+            readFileStream?: (path: string) => AsyncIterable<Uint8Array>;
+          };
+          // Older SDKs still use the buffered API; local reads are already
+          // buffered by the native binding, so streaming helps Cloud only.
+          if (
+            options.target !== "cloud" ||
+            typeof streaming.readFileStream !== "function"
+          ) {
+            const content = await machine.readFile(sandboxPath);
+            await mkdir(dirname(hostPath), { recursive: true });
+            await writeFile(hostPath, content);
+            return;
+          }
+
           await mkdir(dirname(hostPath), { recursive: true });
-          await writeFile(hostPath, content);
+          const directory = await mkdtemp(
+            join(dirname(hostPath), ".smol-download-"),
+          );
+          const staged = join(directory, "contents");
+          try {
+            await writeFile(staged, streaming.readFileStream(sandboxPath));
+            const existing = await lstat(hostPath).then(
+              () => true,
+              (error: NodeJS.ErrnoException) => {
+                if (error.code === "ENOENT") return false;
+                throw error;
+              },
+            );
+            if (existing) {
+              // Preserve the destination's symlink/hard-link and permissions.
+              await copyFile(staged, hostPath);
+            } else {
+              await rename(staged, hostPath);
+            }
+          } finally {
+            await rm(directory, { recursive: true, force: true });
+          }
         },
         close: async () => {
           if (closed) return;

@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   chmod,
+  link,
+  lstat,
   mkdtemp,
+  readdir,
+  symlink,
   open,
   readFile,
   rm,
@@ -17,6 +21,9 @@ const mock = vi.hoisted(() => ({
   execStream: vi.fn(),
   writeFile: vi.fn(),
   readFile: vi.fn(),
+  readFileStream: undefined as
+    | undefined
+    | ((path: string) => AsyncGenerator<Uint8Array>),
   delete: vi.fn(),
 }));
 
@@ -37,6 +44,7 @@ describe("smol()", () => {
     mock.delete.mockResolvedValue(undefined);
     mock.writeFile.mockResolvedValue(undefined);
     mock.readFile.mockResolvedValue(Buffer.from("from guest"));
+    mock.readFileStream = undefined;
     mock.execStream.mockImplementation(() =>
       stream({ kind: "exit", exitCode: 0 }),
     );
@@ -223,6 +231,73 @@ describe("smol()", () => {
       expect(commands.every((command) => !command.includes("mv -f"))).toBe(
         true,
       );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to buffered reads for Cloud SDKs without streaming", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "smol-sandcastle-copyout-"));
+    try {
+      const handle = await smol({ target: "cloud" }).create({ env: {} });
+      const destination = join(directory, "output.txt");
+      await handle.copyFileOut("/workspace/output.txt", destination);
+      expect(mock.readFile).toHaveBeenCalledWith("/workspace/output.txt");
+      expect(await readFile(destination, "utf8")).toBe("from guest");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("streams Cloud files and preserves existing symlinks and hard links", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "smol-sandcastle-copyout-"));
+    try {
+      const original = join(directory, "original.txt");
+      const alias = join(directory, "alias.txt");
+      const destination = join(directory, "download.txt");
+      const newFile = join(directory, "fresh.txt");
+      await writeFile(original, "old");
+      await link(original, alias);
+      await symlink(original, destination);
+      mock.readFileStream = async function* () {
+        yield Buffer.from("new ");
+        yield Buffer.from("guest bytes");
+      };
+      const handle = await smol({ target: "cloud" }).create({ env: {} });
+      await handle.copyFileOut("/workspace/output.txt", destination);
+      await handle.copyFileOut("/workspace/output.txt", newFile);
+      expect(mock.readFile).not.toHaveBeenCalled();
+      expect((await lstat(destination)).isSymbolicLink()).toBe(true);
+      expect(await readFile(alias, "utf8")).toBe("new guest bytes");
+      expect(await readFile(newFile, "utf8")).toBe("new guest bytes");
+      expect(
+        (await readdir(directory)).filter((name) =>
+          name.startsWith(".smol-download-"),
+        ),
+      ).toEqual([]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("retains existing output and clears host staging after a failed Cloud stream", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "smol-sandcastle-copyout-"));
+    try {
+      const destination = join(directory, "output.txt");
+      await writeFile(destination, "old bytes");
+      mock.readFileStream = async function* () {
+        yield Buffer.from("partial");
+        throw new Error("guest stream failed");
+      };
+      const handle = await smol({ target: "cloud" }).create({ env: {} });
+      await expect(
+        handle.copyFileOut("/workspace/output.txt", destination),
+      ).rejects.toThrow("guest stream failed");
+      await expect(
+        handle.copyFileOut("/workspace/output.txt", join(directory, "new.txt")),
+      ).rejects.toThrow("guest stream failed");
+      expect(await readFile(destination, "utf8")).toBe("old bytes");
+      expect(await readdir(directory)).toEqual(["output.txt"]);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
