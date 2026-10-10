@@ -168,7 +168,7 @@ export const smol = (options: SmolOptions = {}): IsolatedSandboxProvider =>
         }
 
         const staging = `${guestPath}.sandcastle-${randomUUID()}.tmp`;
-        const chunk = `/tmp/sandcastle-upload-${randomUUID()}`;
+        const chunk = `/workspace/.sandcastle-upload-${randomUUID()}`;
         const source = await open(hostPath, "r");
         try {
           let offset = 0;
@@ -215,7 +215,7 @@ export const smol = (options: SmolOptions = {}): IsolatedSandboxProvider =>
 
           const directory = await mkdtemp(join(tmpdir(), "sandcastle-smol-"));
           const archive = join(directory, "files.tar.gz");
-          const guestArchive = `/tmp/sandcastle-copyin-${randomUUID()}.tar.gz`;
+          const guestArchive = `/workspace/.sandcastle-copyin-${randomUUID()}.tar.gz`;
           try {
             await execFileAsync("tar", ["-czf", archive, "-C", hostPath, "."]);
             await uploadFile(archive, guestArchive);

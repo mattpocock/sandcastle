@@ -4,6 +4,7 @@ import {
   link,
   lstat,
   mkdtemp,
+  mkdir,
   readdir,
   symlink,
   open,
@@ -187,6 +188,9 @@ describe("smol()", () => {
       await handle.copyIn(source, "/workspace/large.sh");
       const uploads = mock.writeFile.mock.calls;
       expect(uploads.length).toBeGreaterThan(1);
+      expect(
+        uploads.every(([guestPath]) => guestPath.startsWith("/workspace/")),
+      ).toBe(true);
       expect(uploads.every(([, data]) => data.length <= 16 * 1024 * 1024)).toBe(
         true,
       );
@@ -204,6 +208,24 @@ describe("smol()", () => {
         expect.stringContaining("sandcastle-upload-"),
         expect.stringContaining(".sandcastle-"),
       ]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("stages directory archives on the VM storage disk", async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), "smol-sandcastle-directory-"),
+    );
+    try {
+      const source = join(directory, "project");
+      await mkdir(source);
+      await writeFile(join(source, "file.txt"), "hello");
+      const handle = await smol().create({ env: {} });
+      await handle.copyIn(source, "/workspace/project");
+      const guestArchive = mock.writeFile.mock.calls[0]?.[0];
+      expect(guestArchive).toMatch(/^\/workspace\/\.sandcastle-copyin-/);
+      expect(mock.exec).toHaveBeenCalledWith(["rm", "-f", guestArchive]);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
