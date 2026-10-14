@@ -38,7 +38,8 @@ export type ParsedStreamEvent =
   | { type: "session_id"; sessionId: string }
   | { type: "usage"; usage: IterationUsage };
 
-const shellEscape = (s: string): string => "'" + s.replace(/'/g, "'\\''") + "'";
+export const shellEscape = (s: string): string =>
+  "'" + s.replace(/'/g, "'\\''") + "'";
 
 /** Maps allowlisted tool names to the input field containing the display arg */
 const TOOL_ARG_FIELDS: Record<string, string> = {

@@ -14,7 +14,7 @@ A TypeScript library for orchestrating AI coding agents in isolated sandboxes:
 2. Sandcastle handles sandboxing the agent with a configurable branch strategy.
 3. The commits made on the branches get merged back.
 
-Sandcastle is provider-agnostic — it ships with built-in providers for Docker, Podman, and Vercel, and you can create your own. Great for parallelizing multiple AFK agents, creating review pipelines, or even just orchestrating your own agents.
+Sandcastle is provider-agnostic — it ships with built-in providers for Docker, Podman, Vercel, and E2B, and you can create your own. Great for parallelizing multiple AFK agents, creating review pipelines, or even just orchestrating your own agents.
 
 ## Prerequisites
 
@@ -23,6 +23,7 @@ Sandcastle is provider-agnostic — it ships with built-in providers for Docker,
   - [Docker Desktop](https://www.docker.com/) — most common for local development
   - [Podman](https://podman.io/) — rootless alternative to Docker
   - [Vercel](https://vercel.com/) — cloud-based Firecracker microVMs via `@vercel/sandbox`
+  - [E2B](https://e2b.dev/) — cloud-based Firecracker microVMs via `e2b`
   - Or [create your own](#custom-sandbox-providers) using `createBindMountSandboxProvider` or `createIsolatedSandboxProvider`
 
 ## Quick start
@@ -72,6 +73,7 @@ Sandcastle uses a `SandboxProvider` to create isolated environments. The `sandbo
 | Docker     | `@ai-hero/sandcastle/sandboxes/docker`     | Bind-mount | `run()`, `createSandbox()`, `interactive()` |
 | Podman     | `@ai-hero/sandcastle/sandboxes/podman`     | Bind-mount | `run()`, `createSandbox()`, `interactive()` |
 | Vercel     | `@ai-hero/sandcastle/sandboxes/vercel`     | Isolated   | `run()`, `createSandbox()`, `interactive()` |
+| E2B        | `@ai-hero/sandcastle/sandboxes/e2b`        | Isolated   | `run()`, `createSandbox()`                  |
 | No-sandbox | `@ai-hero/sandcastle/sandboxes/no-sandbox` | None       | `run()`, `createSandbox()`, `interactive()` |
 
 Worktree methods (`wt.run()`, `wt.interactive()`, `wt.createSandbox()`) accept the same providers as their top-level counterparts. `wt.interactive()` defaults to `noSandbox()` when no sandbox is specified.
@@ -100,6 +102,23 @@ await interactive({
 ```
 
 You can also [create your own provider](#custom-sandbox-providers) using `createBindMountSandboxProvider` or `createIsolatedSandboxProvider`.
+
+### E2B
+
+Install the SDK (`npm install e2b`; current releases need Node 22.19+) and set `E2B_API_KEY` in your shell environment, not in `.sandcastle/.env` — keys declared there are forwarded into the sandbox. E2B's prebuilt `claude` and `codex` templates come with the agent CLI installed:
+
+```typescript
+import { run, claudeCode } from "@ai-hero/sandcastle";
+import { e2b } from "@ai-hero/sandcastle/sandboxes/e2b";
+
+await run({
+  agent: claudeCode("claude-opus-4-8"),
+  sandbox: e2b({ template: "claude" }),
+  prompt: "...",
+});
+```
+
+`e2b()` accepts the E2B SDK's `Sandbox.create()` options (`template`, `timeoutMs`, `apiKey`, `metadata`, `network`, ...) except `envs` and `lifecycle`, which the provider controls. Each sandbox is killed on `close()` or when `timeoutMs` (default 30 minutes) expires, so the timeout must cover setup, the agent run and syncing changes back. With `codex()`, provide `CODEX_API_KEY`. `interactive()` is not supported yet.
 
 ## API
 
@@ -1024,7 +1043,7 @@ Environment variables are also resolved automatically from `.sandcastle/.env` an
 
 ## Custom Sandbox Providers
 
-Sandcastle ships with built-in providers for Docker, Podman, and Vercel, but you can create your own. A sandbox provider tells Sandcastle how to execute commands in an isolated environment. There are two kinds:
+Sandcastle ships with built-in providers for Docker, Podman, Vercel, and E2B, but you can create your own. A sandbox provider tells Sandcastle how to execute commands in an isolated environment. There are two kinds:
 
 - **Bind-mount** — the sandbox can mount a host directory. Sandcastle creates a worktree on the host and the provider mounts it in. No file sync needed. Use this for Docker, Podman, or any local container runtime.
 - **Isolated** — the sandbox has its own filesystem (e.g. a cloud VM). The provider handles syncing code in and out via `copyIn` and `copyFileOut`. Use this when the sandbox cannot access the host filesystem.
