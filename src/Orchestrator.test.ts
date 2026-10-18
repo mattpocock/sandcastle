@@ -13,7 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Display, type DisplayEntry, SilentDisplay } from "./Display.js";
 import { makeLocalSandbox } from "./testSandbox.js";
 import { orchestrate } from "./Orchestrator.js";
@@ -3715,6 +3715,89 @@ describe("Session capture integration", () => {
 });
 
 describe("Orchestrator signal (AbortSignal)", () => {
+  it.each(["abort", "idle timeout", "completion timeout"] as const)(
+    "ignores late output after %s without restarting timers (#1038)",
+    async (ending) => {
+      const hostDir = await mkdtemp(join(tmpdir(), "orch-late-output-"));
+      await initRepo(hostDir);
+      await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+      const controller = new AbortController();
+      let emitLine: ((line: string) => void) | undefined;
+      const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) => {
+        const real = makeLocalSandbox(dir);
+        return {
+          ...real,
+          exec: (command, options) => {
+            if (command.startsWith("claude ") && options?.onLine) {
+              return Effect.promise(() => {
+                emitLine = options.onLine;
+                if (ending === "abort") controller.abort("cancelled");
+                if (ending === "completion timeout") {
+                  for (const line of toStreamJson(
+                    "<promise>COMPLETE</promise>",
+                  ).split("\n")) {
+                    emitLine!(line);
+                  }
+                }
+                return new Promise<never>(() => {});
+              });
+            }
+            return real.exec(command, options);
+          },
+        };
+      });
+      const parseStreamLine = vi.fn(testProvider.parseStreamLine);
+      const exit = await Effect.runPromise(
+        orchestrate({
+          provider: { ...testProvider, parseStreamLine },
+          hostRepoDir: hostDir,
+          iterations: 1,
+          prompt: "test",
+          signal: controller.signal,
+          idleTimeoutSeconds: 0.05,
+          completionTimeoutSeconds: 0.05,
+        }).pipe(
+          Effect.provide(Layer.merge(factoryLayer, testDisplayLayer)),
+          Effect.exit,
+        ),
+      );
+
+      try {
+        expect(exit._tag).toBe(
+          ending === "completion timeout" ? "Success" : "Failure",
+        );
+        if (exit._tag === "Failure") {
+          const error = Cause.squash(exit.cause);
+          if (ending === "abort") expect(error).toBe("cancelled");
+          else expect(error).toBeInstanceOf(AgentIdleTimeoutError);
+        }
+        expect(emitLine).toBeDefined();
+        parseStreamLine.mockClear();
+        vi.useFakeTimers();
+        const timerCount = vi.getTimerCount();
+
+        emitLine!(
+          JSON.stringify({
+            type: "system",
+            subtype: "init",
+            session_id: "late-session",
+          }),
+        );
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect({
+          parsedLines: parseStreamLine.mock.calls.length,
+          timers: vi.getTimerCount(),
+        }).toEqual({ parsedLines: 0, timers: timerCount });
+      } finally {
+        vi.clearAllTimers();
+        vi.useRealTimers();
+        await rm(hostDir, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("rejects with pre-aborted signal before running any iteration", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "orch-host-"));
     await initRepo(hostDir);
