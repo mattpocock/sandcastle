@@ -8,6 +8,7 @@ import {
   copilot,
   cursor,
   opencode,
+  orcarouter,
   pi,
 } from "./AgentProvider.js";
 import type { AgentCommandOptions } from "./AgentProvider.js";
@@ -1573,6 +1574,169 @@ describe("opencode factory", () => {
   it("defaults env to empty object when not provided", () => {
     const provider = opencode("opencode/big-pickle");
     expect(provider.env).toEqual({});
+  });
+});
+
+describe("orcarouter factory", () => {
+  it("returns a provider with name 'orcarouter'", () => {
+    const provider = orcarouter("orcarouter/auto");
+    expect(provider.name).toBe("orcarouter");
+  });
+
+  it("does not expose envManifest or dockerfileTemplate", () => {
+    const provider = orcarouter("orcarouter/auto");
+    expect(provider).not.toHaveProperty("envManifest");
+    expect(provider).not.toHaveProperty("dockerfileTemplate");
+  });
+
+  it("is non-resumable like opencode", () => {
+    const provider = orcarouter("orcarouter/auto");
+    expect(provider.captureSessions).toBe(false);
+    expect(provider.sessionStorage).toBeUndefined();
+  });
+
+  it("buildPrintCommand runs opencode with the gateway model", () => {
+    const provider = orcarouter("orcarouter/auto");
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).toContain("opencode run");
+    expect(command).toContain("--model 'orcarouter/auto'");
+    expect(command).toContain("--format json");
+    expect(command).toContain("--dangerously-skip-permissions");
+  });
+
+  it("buildPrintCommand passes the prompt via argv (OpenCode convention)", () => {
+    const provider = orcarouter("orcarouter/auto");
+    const { command, stdin } = provider.buildPrintCommand(opts("it's a test"));
+    expect(command).toContain("'it'\\''s a test'");
+    expect(stdin).toBeUndefined();
+  });
+
+  it("buildPrintCommand shell-escapes the model", () => {
+    const provider = orcarouter("orcarouter/auto");
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).toContain("--model 'orcarouter/auto'");
+  });
+
+  it("buildPrintCommand omits --dangerously-skip-permissions when not requested", () => {
+    const provider = orcarouter("orcarouter/auto");
+    const { command } = provider.buildPrintCommand({
+      prompt: "do something",
+      dangerouslySkipPermissions: false,
+    });
+    expect(command).not.toContain("--dangerously-skip-permissions");
+  });
+
+  it("buildInteractiveArgs seeds the opencode TUI with the gateway model", () => {
+    const provider = orcarouter("orcarouter/auto");
+    const args = provider.buildInteractiveArgs!(opts("do something"));
+    expect(args).toEqual([
+      "opencode",
+      "--model",
+      "orcarouter/auto",
+      "--prompt",
+      "do something",
+    ]);
+  });
+
+  it("injects ORCAROUTER_API_KEY from process.env into provider env", () => {
+    const original = process.env.ORCAROUTER_API_KEY;
+    process.env.ORCAROUTER_API_KEY = "sk-orca-test";
+    try {
+      const provider = orcarouter("orcarouter/auto");
+      expect(provider.env.ORCAROUTER_API_KEY).toBe("sk-orca-test");
+    } finally {
+      if (original === undefined) {
+        delete process.env.ORCAROUTER_API_KEY;
+      } else {
+        process.env.ORCAROUTER_API_KEY = original;
+      }
+    }
+  });
+
+  it("does not set ORCAROUTER_API_KEY when process.env is absent", () => {
+    const original = process.env.ORCAROUTER_API_KEY;
+    delete process.env.ORCAROUTER_API_KEY;
+    try {
+      const provider = orcarouter("orcarouter/auto");
+      expect(provider.env).toEqual({});
+    } finally {
+      if (original !== undefined) {
+        process.env.ORCAROUTER_API_KEY = original;
+      }
+    }
+  });
+
+  it("merges caller env with the injected gateway key", () => {
+    const original = process.env.ORCAROUTER_API_KEY;
+    process.env.ORCAROUTER_API_KEY = "sk-orca-test";
+    try {
+      const provider = orcarouter("orcarouter/auto", {
+        env: { FOO: "bar" },
+      });
+      expect(provider.env).toEqual({
+        FOO: "bar",
+        ORCAROUTER_API_KEY: "sk-orca-test",
+      });
+    } finally {
+      if (original === undefined) {
+        delete process.env.ORCAROUTER_API_KEY;
+      } else {
+        process.env.ORCAROUTER_API_KEY = original;
+      }
+    }
+  });
+
+  it("parseStreamLine extracts session id from step_start (OpenCode stream)", () => {
+    const provider = orcarouter("orcarouter/auto");
+    const line = JSON.stringify({
+      type: "step_start",
+      sessionID: "ses_19cb8236effe4lu1aSmQyzbeP2",
+      part: { type: "step-start", sessionID: "ses_19cb8236effe4lu1aSmQyzbeP2" },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "session_id", sessionId: "ses_19cb8236effe4lu1aSmQyzbeP2" },
+    ]);
+  });
+
+  it("parseStreamLine extracts text and result from a text event", () => {
+    const provider = orcarouter("orcarouter/auto");
+    const line = JSON.stringify({
+      type: "text",
+      sessionID: "ses_abc",
+      part: { type: "text", text: "Hello from OrcaRouter" },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "text", text: "Hello from OrcaRouter" },
+      { type: "result", result: "Hello from OrcaRouter" },
+    ]);
+  });
+
+  it("parseStreamLine extracts error message from an error event", () => {
+    const provider = orcarouter("orcarouter/auto");
+    const line = JSON.stringify({
+      type: "error",
+      error: {
+        name: "ProviderAuthError",
+        data: { message: "Invalid API key" },
+      },
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "result", result: "Invalid API key" },
+    ]);
+  });
+
+  it("bakes model into each provider instance independently", () => {
+    const provider1 = orcarouter("orcarouter/auto");
+    const provider2 = orcarouter("orcarouter/fusion");
+    expect(provider1.buildPrintCommand(opts("test")).command).toContain(
+      "orcarouter/auto",
+    );
+    expect(provider2.buildPrintCommand(opts("test")).command).toContain(
+      "orcarouter/fusion",
+    );
+    expect(provider1.buildPrintCommand(opts("test")).command).not.toContain(
+      "orcarouter/fusion",
+    );
   });
 });
 

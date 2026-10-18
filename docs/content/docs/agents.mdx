@@ -19,15 +19,15 @@ The default agent provider. Uses Claude Code as the AI coding agent inside the s
 
 Required environment variables (one of):
 
-| Variable | Description |
-| --- | --- |
+| Variable                  | Description                                                                                                                                        |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code OAuth token — get one by running `claude setup-token` on your host. Lets the agent use your Claude subscription instead of an API key. |
-| `ANTHROPIC_API_KEY` | Anthropic API key (alternative to `CLAUDE_CODE_OAUTH_TOKEN`) |
+| `ANTHROPIC_API_KEY`       | Anthropic API key (alternative to `CLAUDE_CODE_OAUTH_TOKEN`)                                                                                       |
 
 Plus:
 
-| Variable | Description |
-| --- | --- |
+| Variable   | Description                  |
+| ---------- | ---------------------------- |
 | `GH_TOKEN` | GitHub personal access token |
 
 ### OpenCode
@@ -36,9 +36,22 @@ Uses OpenCode as the AI coding agent. Sandcastle runs it with `--format json` an
 
 Required environment variables:
 
-| Variable | Description |
-| --- | --- |
+| Variable   | Description                  |
+| ---------- | ---------------------------- |
 | `GH_TOKEN` | GitHub personal access token |
+
+### OrcaRouter
+
+Uses OpenCode as the AI coding agent with model ids routed through the [OrcaRouter](https://www.orcarouter.ai) gateway. OrcaRouter fronts open-weight and hosted models behind a single OpenAI-compatible endpoint (`https://api.orcarouter.ai/v1`); `orcarouter/*` model ids resolve through OpenCode's models.dev registry, and Sandcastle injects the gateway API key into the sandbox.
+
+Required environment variables:
+
+| Variable             | Description                                                                            |
+| -------------------- | -------------------------------------------------------------------------------------- |
+| `ORCAROUTER_API_KEY` | OrcaRouter API key (get one at [https://www.orcarouter.ai](https://www.orcarouter.ai)) |
+| `GH_TOKEN`           | GitHub personal access token                                                           |
+
+The default model is `orcarouter/auto`, which routes adaptively through the gateway — pass any `orcarouter/*` or vendor-qualified model id to `orcarouter(model)`. It is non-resumable (session capture is off), matching OpenCode.
 
 ## Custom Providers
 

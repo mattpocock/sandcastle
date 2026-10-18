@@ -82,6 +82,22 @@ describe("Agent registry", () => {
     expect(agent!.dockerfileTemplate).toContain("opencode-ai");
   });
 
+  it("listAgents includes orcarouter", () => {
+    const agents = listAgents();
+    expect(agents.some((a) => a.name === "orcarouter")).toBe(true);
+  });
+
+  it("getAgent returns orcarouter entry with expected fields", () => {
+    const agent = getAgent("orcarouter");
+    expect(agent).toBeDefined();
+    expect(agent!.name).toBe("orcarouter");
+    expect(agent!.defaultModel).toBe("orcarouter/auto");
+    expect(agent!.factoryImport).toBe("orcarouter");
+    expect(agent!.dockerfileTemplate).toContain("FROM");
+    expect(agent!.dockerfileTemplate).toContain("opencode-ai");
+    expect(agent!.envExample).toContain("ORCAROUTER_API_KEY");
+  });
+
   it("listAgents includes copilot", () => {
     const agents = listAgents();
     expect(agents.some((a) => a.name === "copilot")).toBe(true);

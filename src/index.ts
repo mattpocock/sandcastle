@@ -58,6 +58,7 @@ export {
   copilot,
   cursor,
   opencode,
+  orcarouter,
   pi,
 } from "./AgentProvider.js";
 export type {
@@ -69,6 +70,7 @@ export type {
   CopilotOptions,
   CursorOptions,
   OpenCodeOptions,
+  OrcaRouterOptions,
   PiOptions,
 } from "./AgentProvider.js";
 export {
