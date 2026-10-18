@@ -95,4 +95,20 @@ describe("Agent registry", () => {
     expect(agent!.dockerfileTemplate).toContain("FROM");
     expect(agent!.dockerfileTemplate).toContain("@github/copilot");
   });
+
+  it("listAgents includes grok", () => {
+    const agents = listAgents();
+    expect(agents.some((a) => a.name === "grok")).toBe(true);
+  });
+
+  it("getAgent returns grok entry with expected fields", () => {
+    const agent = getAgent("grok");
+    expect(agent).toBeDefined();
+    expect(agent!.name).toBe("grok");
+    expect(agent!.defaultModel).toBe("grok-4.6");
+    expect(agent!.factoryImport).toBe("grok");
+    expect(agent!.dockerfileTemplate).toContain("FROM");
+    expect(agent!.dockerfileTemplate).toContain("x.ai/cli/install.sh");
+    expect(agent!.envExample).toContain("XAI_API_KEY");
+  });
 });
