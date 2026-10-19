@@ -44,10 +44,16 @@ const invokeAgent = (
     let resultText = "";
     let sessionId: string | undefined;
     let usage: IterationUsage | undefined;
-    // Accumulated text/result output, scanned for the completion signal so a
-    // hanging process can be force-completed once the signal is in the buffer
-    // (see ADR 0019).
+    // Keep assistant text separate from result snapshots: some providers repeat
+    // only the last assistant message in their result event.
     let accumulatedOutput = "";
+    const getResult = (fallback = accumulatedOutput) => {
+      if (resultText && accumulatedOutput.endsWith(resultText)) {
+        return accumulatedOutput;
+      }
+      // A distinct final result may contain text that was never streamed.
+      return resultText || fallback;
+    };
 
     // Deferred that fails when the idle timer fires (no signal seen).
     const timeoutSignal = yield* Deferred.make<never, AgentIdleTimeoutError>();
@@ -95,7 +101,7 @@ const invokeAgent = (
             yield* Effect.sleep(Duration.millis(completionTimeoutMs));
             onCompletionTimeout(completionTimeoutMs);
             yield* Deferred.succeed(completionTimeoutDeferred, {
-              result: resultText || accumulatedOutput,
+              result: getResult(),
               sessionId,
               usage,
             });
@@ -162,7 +168,6 @@ const invokeAgent = (
               accumulatedOutput += parsed.text;
             } else if (parsed.type === "result") {
               resultText = parsed.result;
-              accumulatedOutput += parsed.result;
             } else if (parsed.type === "tool_call") {
               onToolCall(parsed.name, parsed.args);
             } else if (parsed.type === "session_id") {
@@ -172,11 +177,14 @@ const invokeAgent = (
             }
           }
           // Check for the completion signal AFTER parsing this line so the
-          // accumulator contains everything seen so far. Flip to the
+          // buffers contain everything seen so far. Flip to the
           // completion-grace timer the first time the signal appears.
           if (
             !completionDetected &&
-            completionSignals.some((sig) => accumulatedOutput.includes(sig))
+            completionSignals.some(
+              (sig) =>
+                accumulatedOutput.includes(sig) || resultText.includes(sig),
+            )
           ) {
             completionDetected = true;
             interruptFiber(warningFiber);
@@ -206,7 +214,7 @@ const invokeAgent = (
         );
       }
 
-      return { result: resultText || execResult.stdout, sessionId, usage };
+      return { result: getResult(execResult.stdout), sessionId, usage };
     }).pipe(
       Effect.ensuring(
         Effect.sync(() => {
