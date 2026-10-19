@@ -48,6 +48,4 @@ Pick the highest-priority open issue that is not blocked by another open issue.
 
 # Done
 
-When all actionable issues are complete (or you are blocked on all remaining ones), or the open-issues block at the top of this prompt is empty, output the completion signal:
-
-<promise>COMPLETE</promise>
+If the open-issues block at the top of this prompt is empty, or you are blocked on every remaining issue, stop without making any commits — the orchestrator treats a run with no commits as "backlog exhausted".

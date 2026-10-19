@@ -7,32 +7,40 @@ description: Configure Sandcastle for your project.
 
 The `.sandcastle/` directory in your repository contains all Sandcastle configuration:
 
-- `config.json` -- Main configuration file
+- `main.mts` -- Your orchestration script (calls `run()` / `runMany()`)
 - `Dockerfile` -- Defines the sandbox environment
-- `prompt.md` -- The prompt sent to the agent each iteration
+- `prompt.md` -- The prompt sent to the agent on each invocation
 - `.env` / `.env.example` -- Environment variables for the sandbox
 
-## Config File
+## Run options
 
-The `config.json` file controls how Sandcastle operates:
+Run behaviour is configured in code, on the call in `main.mts` — there is no config file. Sandcastle has two entry points:
 
-```json
-{
-  "agent": "claude-code",
-  "maxIterations": 10
-}
+- `run()` invokes the agent **once**. Use it for one-shot tasks and for [structured output](https://github.com/mattpocock/sandcastle#structured-output).
+- `runMany()` invokes the agent in a **loop**, stopping when the agent emits the completion signal (`<promise>COMPLETE</promise>` by default) or after `maxIterations`.
+
+```ts
+import { runMany, claudeCode } from "@ai-hero/sandcastle";
+import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+
+await runMany({
+  agent: claudeCode("claude-opus-4-8"),
+  sandbox: docker(),
+  promptFile: "./.sandcastle/prompt.md",
+  maxIterations: 10,
+});
 ```
 
-### Options
-
-| Option | Description | Default |
-| --- | --- | --- |
-| `agent` | The agent provider to use | `"claude-code"` |
-| `maxIterations` | Maximum iterations per run | `10` |
+| Option             | Applies to  | Description                       | Default                         |
+| ------------------ | ----------- | --------------------------------- | ------------------------------- |
+| `agent`            | both        | The agent provider to use         | —                               |
+| `maxIterations`    | `runMany()` | Maximum iterations per run        | `1`                             |
+| `completionSignal` | `runMany()` | String(s) that end the loop early | `"<promise>COMPLETE</promise>"` |
+| `output`           | `run()`     | Structured output definition      | —                               |
 
 ## Prompt
 
-The `prompt.md` file is the instruction text passed to the agent at the start of each iteration. It supports:
+The `prompt.md` file is the instruction text passed to the agent at the start of each invocation (each iteration, for `runMany()`). It supports:
 
 - **Prompt arguments** -- `{{KEY}}` placeholders replaced with values from `promptArgs`
 - **Shell expressions** -- `` !`command` `` markers that evaluate shell commands inside the sandbox

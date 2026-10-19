@@ -1,13 +1,14 @@
 import {
   run,
+  runMany,
   type OutputObjectDefinition,
-  type RunOptions,
-  type RunResult,
+  type RunManyOptions,
+  type RunManyResult,
 } from "@ai-hero/sandcastle";
 
 export interface RunWithExtractionOptions<T> extends Omit<
-  RunOptions,
-  "output"
+  RunManyOptions,
+  "maxIterations" | "completionSignal"
 > {
   readonly output: OutputObjectDefinition<T>;
   readonly extractionPrompt: string;
@@ -22,14 +23,18 @@ export interface RunWithExtractionOptions<T> extends Omit<
 
 export async function runWithExtraction<T>(
   options: RunWithExtractionOptions<T>,
-): Promise<RunResult & { output: T }> {
+): Promise<RunManyResult & { output: T }> {
   const {
     output,
     extractionPrompt,
     maxRetries = 2,
     ...produceOptions
   } = options;
-  const produce = await run(produceOptions);
+  // The produce prompts end with `<promise>COMPLETE</promise>`. runMany()
+  // (single iteration by default) is what watches for that signal, which keeps
+  // ADR 0019 hang protection on the produce phase — one-shot run() no longer
+  // looks for it.
+  const produce = await runMany(produceOptions);
   const sessionId = produce.iterations.at(-1)?.sessionId;
 
   if (!sessionId) {
@@ -39,13 +44,14 @@ export async function runWithExtraction<T>(
   }
 
   const { promptArgs: _promptArgs, ...extractionOptions } = produceOptions;
+  // Extraction is one-shot run() with `output`: the `</tag>` closing tag now
+  // opens the completion-timeout grace window (ADR 0021), replacing the old
+  // `completionSignal: "</tag>"` workaround.
   const extraction = await run({
     ...extractionOptions,
     name: produceOptions.name ? `${produceOptions.name} (extract)` : undefined,
     promptFile: undefined,
     prompt: extractionPrompt,
-    // Extraction ends with the output tag, not `<promise>COMPLETE</promise>`.
-    completionSignal: `</${output.tag}>`,
     resumeSession: sessionId,
     output: { ...output, maxRetries },
   });

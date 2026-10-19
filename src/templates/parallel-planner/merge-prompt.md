@@ -22,5 +22,3 @@ For each branch that was merged, close its issue using the following command:
 Here are all the issues:
 
 {{ISSUES}}
-
-Once you've merged everything you can, output <promise>COMPLETE</promise>.

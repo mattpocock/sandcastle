@@ -14,3 +14,7 @@ The completion timeout is gated strictly on the completion signal. A process tha
 ## Consequences
 
 Force-completing abandons the hanging process. For container-based sandbox providers, container teardown (`docker rm -f`) kills it. For the no-sandbox provider, `close()` is a no-op and there is no `proc.kill()` anywhere in the codebase, so the abandoned agent process and its children leak on the host. This extends an existing timeout/abort-path leak to the common success case and may warrant an explicit process kill in follow-up.
+
+## Amendment — trigger depends on the entry point
+
+After the `run()`/`runMany()` split ([ADR 0022](0022-split-run-into-run-and-runmany.md)) only `runMany()` has a completion signal. It keeps this ADR's signal-based trigger. One-shot `run()` arms the completion timeout on the structured-output closing tag instead, and has no trigger at all without `output` — see [ADR 0021](0021-run-completion-timeout-on-output-closing-tag.md).

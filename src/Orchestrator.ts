@@ -26,12 +26,12 @@ const invokeAgent = (
   provider: AgentProvider,
   idleTimeoutMs: number,
   completionTimeoutMs: number,
-  completionSignals: readonly string[],
+  completionTimeoutTriggers: readonly string[],
   onText: (text: string) => void,
   onToolCall: (name: string, formattedArgs: string) => void,
   onRawLine: (line: string) => void,
   onIdleWarning: (minutes: number) => void,
-  onCompletionTimeout: (timeoutMs: number) => void,
+  onCompletionTimeout: (timeoutMs: number, trigger: string) => void,
   idleWarningIntervalMs: number = IDLE_WARNING_INTERVAL_MS,
   resumeSession?: string,
   forkSession?: boolean,
@@ -44,9 +44,10 @@ const invokeAgent = (
     let resultText = "";
     let sessionId: string | undefined;
     let usage: IterationUsage | undefined;
-    // Accumulated text/result output, scanned for the completion signal so a
-    // hanging process can be force-completed once the signal is in the buffer
-    // (see ADR 0019).
+    // Accumulated text/result output, scanned for a completion-timeout trigger
+    // (the completion signal for runMany(), the structured-output closing tag
+    // for run()) so a hanging process can be force-completed once the trigger
+    // is in the buffer (see ADRs 0019 and 0021).
     let accumulatedOutput = "";
 
     // Deferred that fails when the idle timer fires (no signal seen).
@@ -61,6 +62,7 @@ const invokeAgent = (
     >();
     let timeoutFiber: Fiber.RuntimeFiber<unknown, unknown> | null = null;
     let completionDetected = false;
+    let matchedTrigger = "";
 
     // Periodic idle warning state
     let warningFiber: Fiber.RuntimeFiber<unknown, unknown> | null = null;
@@ -93,7 +95,7 @@ const invokeAgent = (
         timeoutFiber = Effect.runFork(
           Effect.gen(function* () {
             yield* Effect.sleep(Duration.millis(completionTimeoutMs));
-            onCompletionTimeout(completionTimeoutMs);
+            onCompletionTimeout(completionTimeoutMs, matchedTrigger);
             yield* Deferred.succeed(completionTimeoutDeferred, {
               result: resultText || accumulatedOutput,
               sessionId,
@@ -171,14 +173,17 @@ const invokeAgent = (
               usage = parsed.usage;
             }
           }
-          // Check for the completion signal AFTER parsing this line so the
-          // accumulator contains everything seen so far. Flip to the
-          // completion-grace timer the first time the signal appears.
-          if (
-            !completionDetected &&
-            completionSignals.some((sig) => accumulatedOutput.includes(sig))
-          ) {
+          // Check for a completion-timeout trigger AFTER parsing this line so
+          // the accumulator contains everything seen so far. Flip to the
+          // completion-grace timer the first time a trigger appears.
+          const trigger = completionDetected
+            ? undefined
+            : completionTimeoutTriggers.find((t) =>
+                accumulatedOutput.includes(t),
+              );
+          if (trigger !== undefined) {
             completionDetected = true;
+            matchedTrigger = trigger;
             interruptFiber(warningFiber);
             warningFiber = null;
           }
@@ -243,7 +248,8 @@ const invokeAgent = (
     );
   });
 
-const DEFAULT_COMPLETION_SIGNAL = "<promise>COMPLETE</promise>";
+/** Default completion signal for `runMany()`'s iteration loop. */
+export const DEFAULT_COMPLETION_SIGNAL = "<promise>COMPLETE</promise>";
 const DEFAULT_IDLE_TIMEOUT_SECONDS = 10 * 60; // 600 seconds
 const DEFAULT_COMPLETION_TIMEOUT_SECONDS = 60;
 
@@ -254,13 +260,25 @@ export interface OrchestrateOptions {
   readonly prompt: string;
   readonly branch?: string;
   readonly provider: AgentProvider;
+  /**
+   * Substring(s) that end the iteration loop early. Defaults to
+   * `DEFAULT_COMPLETION_SIGNAL` when omitted. Pass `[]` for a one-shot run
+   * with no completion signal (what `run()` does).
+   */
   readonly completionSignal?: string | string[];
+  /**
+   * Substring(s) that, once seen in the agent's output, swap the idle timeout
+   * for the completion timeout grace window. Defaults to the completion
+   * signals. `run()` passes the structured-output closing tag (`</tag>`) here,
+   * or `[]` when it has no `output` — see ADR 0021.
+   */
+  readonly completionTimeoutTriggers?: readonly string[];
   /** Idle timeout in seconds. If the agent produces no output for this long, it fails with AgentIdleTimeoutError. Default: 600 (10 minutes) */
   readonly idleTimeoutSeconds?: number;
   /**
-   * Grace window in seconds after a completion signal is observed in the
-   * agent's output. The agent process is expected to exit shortly after
-   * emitting the signal; if it does not (because a spawned child is keeping
+   * Grace window in seconds after a completion-timeout trigger (see
+   * `completionTimeoutTriggers`) is observed in the agent's output. The agent
+   * process is expected to exit shortly after emitting it; if it does not (because a spawned child is keeping
    * stdout open — see ADR 0019), this timer fires and the iteration resolves
    * successfully with the buffered output. Resets on every subsequent output
    * line, so trailing data (token-usage events, terminal `result` events,
@@ -337,6 +355,8 @@ export const orchestrate = (
     } else {
       completionSignals = [options.completionSignal];
     }
+    const completionTimeoutTriggers =
+      options.completionTimeoutTriggers ?? completionSignals;
 
     const label = (msg: string): string =>
       options.name ? `[${options.name}] ${msg}` : msg;
@@ -461,11 +481,14 @@ export const orchestrate = (
                       : `Agent idle for ${minutes} minutes`;
                   Effect.runPromise(display.status(label(msg), "warn"));
                 };
-                const onCompletionTimeout = (timeoutMs: number) => {
+                const onCompletionTimeout = (
+                  timeoutMs: number,
+                  trigger: string,
+                ) => {
                   Effect.runPromise(
                     display.status(
                       label(
-                        `Completion signal seen but agent process is hanging — force-completing after ${timeoutMs / 1000}s grace window.`,
+                        `Completion marker ${trigger} seen but agent process is hanging — force-completing after ${timeoutMs / 1000}s grace window.`,
                       ),
                       "warn",
                     ),
@@ -482,7 +505,7 @@ export const orchestrate = (
                   provider,
                   idleTimeoutMs,
                   completionTimeoutMs,
-                  completionSignals,
+                  completionTimeoutTriggers,
                   onText,
                   onToolCall,
                   onRawLine,
@@ -588,10 +611,13 @@ export const orchestrate = (
       }
     }
 
-    yield* display.status(
-      label(`Reached max iterations (${iterations}).`),
-      "info",
-    );
+    // A one-shot run (no completion signal) has no loop to report on.
+    if (completionSignals.length > 0) {
+      yield* display.status(
+        label(`Reached max iterations (${iterations}).`),
+        "info",
+      );
+    }
     return {
       iterations: allIterations,
       completionSignal: undefined,

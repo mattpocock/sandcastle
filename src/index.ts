@@ -1,7 +1,12 @@
-export { run } from "./run.js";
+export { run, runMany } from "./run.js";
 export type {
+  BaseRunOptions,
   RunOptions,
   RunResult,
+  RunManyOptions,
+  RunManyResult,
+  ResumeRunResultOptions,
+  ResumeRunResultFn,
   LoggingOption,
   IterationResult,
   IterationUsage,
@@ -15,7 +20,10 @@ export type {
   Sandbox,
   SandboxRunOptions,
   SandboxRunResult,
+  SandboxRunManyOptions,
+  SandboxRunManyResult,
   ResumeSandboxRunResultOptions,
+  ResumeSandboxRunResultFn,
   SandboxInteractiveOptions,
   SandboxInteractiveResult,
   SandboxExecOptions,
@@ -27,8 +35,11 @@ export type {
   Worktree,
   WorktreeBranchStrategy,
   WorktreeInteractiveOptions,
+  WorktreeBaseRunOptions,
   WorktreeRunOptions,
   WorktreeRunResult,
+  WorktreeRunManyOptions,
+  WorktreeRunManyResult,
   WorktreeCreateSandboxOptions,
 } from "./createWorktree.js";
 export type { PromptArgs } from "./PromptArgumentSubstitution.js";

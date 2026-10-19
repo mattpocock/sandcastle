@@ -30,14 +30,23 @@ import type { CloseResult, Sandbox } from "./createSandbox.js";
 import { createSandboxFromWorktree } from "./createSandbox.js";
 import type { InteractiveResult } from "./interactive.js";
 import {
+  assertNoForeignRunOptions,
   buildAgentStreamHandler,
   buildCompletionMessage,
   buildContextWindowLines,
   buildLogFilename,
+  ONE_SHOT_COMPLETION_MESSAGE,
   printFileDisplayStartup,
+  RUN_MANY_ONLY_OPTIONS,
+  RUN_ONLY_OPTIONS,
 } from "./run.js";
 import type { LoggingOption } from "./run.js";
-import { orchestrate, type IterationResult } from "./Orchestrator.js";
+import {
+  orchestrate,
+  type IterationResult,
+  type IterationUsage,
+  type OrchestrateResult,
+} from "./Orchestrator.js";
 import { agentStreamEmitterLayer } from "./AgentStreamEmitter.js";
 import { resolveEnv } from "./EnvResolver.js";
 import { mergeProviderEnv } from "./mergeProviderEnv.js";
@@ -115,7 +124,8 @@ export interface WorktreeInteractiveOptions {
   readonly signal?: AbortSignal;
 }
 
-export interface WorktreeRunOptions {
+/** Options shared by `worktree.run()` and `worktree.runMany()`. */
+export interface WorktreeBaseRunOptions {
   /** Agent provider to use (e.g. claudeCode("claude-opus-4-8")) */
   readonly agent: AgentProvider;
   /** Sandbox provider (e.g. docker()). Required — AFK agents should always be sandboxed. */
@@ -126,14 +136,8 @@ export interface WorktreeRunOptions {
   readonly promptFile?: string;
   /** Key-value map for {{KEY}} placeholder substitution in prompts */
   readonly promptArgs?: PromptArgs;
-  /** Maximum iterations to run (default: 1). */
-  readonly maxIterations?: number;
-  /** Substring(s) the agent emits to stop the iteration loop early. */
-  readonly completionSignal?: string | string[];
   /** Idle timeout in seconds. Default: 600. */
   readonly idleTimeoutSeconds?: number;
-  /** Grace window in seconds after a completion signal is observed but the agent process has not exited. See ADR 0019. Default: 60. */
-  readonly completionTimeoutSeconds?: number;
   /** Optional name for the run. */
   readonly name?: string;
   /** Logging mode. */
@@ -142,8 +146,6 @@ export interface WorktreeRunOptions {
   readonly hooks?: SandboxHooks;
   /** Environment variables to inject into the sandbox. */
   readonly env?: Record<string, string>;
-  /** Resume a prior Claude Code session by ID. The session JSONL must exist on the host. Incompatible with maxIterations > 1. */
-  readonly resumeSession?: string;
   /**
    * An `AbortSignal` that cancels the run when aborted.
    *
@@ -156,7 +158,42 @@ export interface WorktreeRunOptions {
   readonly signal?: AbortSignal;
 }
 
+/** Options for the one-shot `worktree.run()`: exactly one agent invocation. */
+export interface WorktreeRunOptions extends WorktreeBaseRunOptions {
+  /** Resume a prior agent session by ID. The session JSONL must exist on the host. */
+  readonly resumeSession?: string;
+}
+
+/** Options for `worktree.runMany()`: the iterate-until-signal-or-cap loop. */
+export interface WorktreeRunManyOptions extends WorktreeBaseRunOptions {
+  /** Maximum iterations to run (default: 1). */
+  readonly maxIterations?: number;
+  /** Substring(s) the agent emits to stop the iteration loop early. Default: `"<promise>COMPLETE</promise>"`. */
+  readonly completionSignal?: string | string[];
+  /** Grace window in seconds after a completion signal is observed but the agent process has not exited. See ADR 0019. Default: 60. */
+  readonly completionTimeoutSeconds?: number;
+}
+
+/** Result of the one-shot `worktree.run()`. */
 export interface WorktreeRunResult {
+  /** Agent session ID, or undefined when the provider does not report one. */
+  readonly sessionId?: string;
+  /** Absolute host path to the captured session JSONL, or undefined when capture is disabled or unsupported. */
+  readonly sessionFilePath?: string;
+  /** Token usage snapshot, or undefined when the provider does not report usage. */
+  readonly usage?: IterationUsage;
+  /** The agent's stdout. */
+  readonly stdout: string;
+  /** List of commits made by the agent during the run. */
+  readonly commits: { sha: string }[];
+  /** The branch name the agent worked on. */
+  readonly branch: string;
+  /** Path to the log file, if logging was drained to a file. */
+  readonly logFilePath?: string;
+}
+
+/** Result of `worktree.runMany()`: the per-iteration loop result. */
+export interface WorktreeRunManyResult {
   /** Per-iteration results (use `iterations.length` for the count). */
   readonly iterations: IterationResult[];
   /** The matched completion signal string, or undefined if none fired. */
@@ -193,8 +230,10 @@ export interface Worktree {
   readonly branch: string;
   /** Host path to the worktree (worktree). */
   readonly worktreePath: string;
-  /** Run an AFK agent in this worktree with a required sandbox. */
+  /** Run an AFK agent once (one iteration) in this worktree with a required sandbox. */
   run(options: WorktreeRunOptions): Promise<WorktreeRunResult>;
+  /** Run an AFK agent in a loop (up to `maxIterations`, stopping on the completion signal) in this worktree. */
+  runMany(options: WorktreeRunManyOptions): Promise<WorktreeRunManyResult>;
   /** Run an interactive agent session in this worktree. */
   interactive(options: WorktreeInteractiveOptions): Promise<InteractiveResult>;
   /** Create a long-lived sandbox backed by this worktree's worktree. */
@@ -488,29 +527,38 @@ export const createWorktree = async (
     }
   };
 
-  const worktreeRun = async (
-    opts: WorktreeRunOptions,
-  ): Promise<WorktreeRunResult> => {
+  /**
+   * Shared engine behind `worktree.run()` and `worktree.runMany()`. One-shot
+   * mode runs a single iteration with no completion signal (and no
+   * completion-timeout trigger — `worktree.run()` has no `output`); many
+   * mode is the pre-split loop.
+   */
+  const executeWorktreeRun = async (
+    opts: WorktreeBaseRunOptions & {
+      readonly completionTimeoutSeconds?: number;
+    },
+    mode:
+      | { readonly kind: "one-shot"; readonly resumeSession?: string }
+      | {
+          readonly kind: "many";
+          readonly maxIterations: number;
+          readonly completionSignal?: string | string[];
+        },
+  ): Promise<OrchestrateResult & { logFilePath?: string }> => {
     // If signal is already aborted, reject immediately without any setup
     opts.signal?.throwIfAborted();
 
     const { prompt, promptFile, hooks, agent: provider } = opts;
     const sandboxProvider = opts.sandbox;
-    const maxIterations = opts.maxIterations ?? 1;
+    const resumeSession =
+      mode.kind === "one-shot" ? mode.resumeSession : undefined;
 
-    if (opts.resumeSession && maxIterations > 1) {
-      throw new Error(
-        "resumeSession cannot be combined with maxIterations > 1. " +
-          "Resume applies to iteration 1 only; multi-iteration resume semantics are not supported.",
-      );
-    }
-
-    if (opts.resumeSession) {
+    if (resumeSession) {
       await assertResumeSessionExists({
         provider,
         sandboxTag: sandboxProvider.tag,
         hostRepoDir,
-        resumeSession: opts.resumeSession,
+        resumeSession,
       });
     }
 
@@ -670,7 +718,17 @@ export const createWorktree = async (
 
         const orchestrateResult = yield* orchestrate({
           hostRepoDir,
-          iterations: maxIterations,
+          ...(mode.kind === "many"
+            ? {
+                iterations: mode.maxIterations,
+                completionSignal: mode.completionSignal,
+              }
+            : {
+                iterations: 1,
+                completionSignal: [],
+                completionTimeoutTriggers: [],
+                resumeSession,
+              }),
           hooks,
           prompt: resolvedPrompt,
           // merge-to-head: pass `undefined` so the lifecycle records the host's
@@ -678,21 +736,22 @@ export const createWorktree = async (
           // pin to the worktree's branch so commits stay there.
           branch: isMergeToHead ? undefined : worktreeInfo.branch,
           provider,
-          completionSignal: opts.completionSignal,
           idleTimeoutSeconds: opts.idleTimeoutSeconds,
           completionTimeoutSeconds: opts.completionTimeoutSeconds,
           name: opts.name,
-          resumeSession: opts.resumeSession,
           signal: opts.signal,
           skipPromptExpansion: isInlinePrompt,
           timeouts: options.timeouts,
           keepSourceBranch: isMergeToHead,
         });
 
-        const completion = buildCompletionMessage(
-          orchestrateResult.completionSignal,
-          orchestrateResult.iterations.length,
-        );
+        const completion =
+          mode.kind === "many"
+            ? buildCompletionMessage(
+                orchestrateResult.completionSignal,
+                orchestrateResult.iterations.length,
+              )
+            : ONE_SHOT_COMPLETION_MESSAGE;
         yield* display.status(completion.message, completion.severity);
 
         for (const line of buildContextWindowLines(
@@ -709,14 +768,10 @@ export const createWorktree = async (
       );
 
       return {
-        iterations: result.iterations,
-        completionSignal: result.completionSignal,
-        stdout: result.stdout,
-        commits: result.commits,
-        branch: result.branch,
+        ...result,
         logFilePath:
           resolvedLogging.type === "file" ? resolvedLogging.path : undefined,
-      } satisfies WorktreeRunResult;
+      };
     });
 
     try {
@@ -732,6 +787,57 @@ export const createWorktree = async (
       opts.signal?.throwIfAborted();
       throw error;
     }
+  };
+
+  const worktreeRun = async (
+    opts: WorktreeRunOptions,
+  ): Promise<WorktreeRunResult> => {
+    opts.signal?.throwIfAborted();
+    assertNoForeignRunOptions(
+      opts,
+      RUN_MANY_ONLY_OPTIONS,
+      "worktree.run()",
+      "worktree.run() is one-shot since the run()/runMany() split — use worktree.runMany() for the iteration loop and completion signal.",
+    );
+    const result = await executeWorktreeRun(opts, {
+      kind: "one-shot",
+      resumeSession: opts.resumeSession,
+    });
+    const only = result.iterations.at(-1);
+    return {
+      sessionId: only?.sessionId,
+      sessionFilePath: only?.sessionFilePath,
+      usage: only?.usage,
+      stdout: result.stdout,
+      commits: result.commits,
+      branch: result.branch,
+      logFilePath: result.logFilePath,
+    };
+  };
+
+  const worktreeRunMany = async (
+    opts: WorktreeRunManyOptions,
+  ): Promise<WorktreeRunManyResult> => {
+    opts.signal?.throwIfAborted();
+    assertNoForeignRunOptions(
+      opts,
+      RUN_ONLY_OPTIONS,
+      "worktree.runMany()",
+      "Session resume is one-shot — use worktree.run().",
+    );
+    const result = await executeWorktreeRun(opts, {
+      kind: "many",
+      maxIterations: opts.maxIterations ?? 1,
+      completionSignal: opts.completionSignal,
+    });
+    return {
+      iterations: result.iterations,
+      completionSignal: result.completionSignal,
+      stdout: result.stdout,
+      commits: result.commits,
+      branch: result.branch,
+      logFilePath: result.logFilePath,
+    };
   };
 
   const worktreeCreateSandbox = async (
@@ -754,6 +860,7 @@ export const createWorktree = async (
     branch: worktreeInfo.branch,
     worktreePath: worktreeInfo.path,
     run: worktreeRun,
+    runMany: worktreeRunMany,
     interactive: worktreeInteractive,
     createSandbox: worktreeCreateSandbox,
     close,

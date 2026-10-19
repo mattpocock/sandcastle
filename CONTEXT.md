@@ -86,24 +86,36 @@ _Avoid_: "agent runner", "agent caller"
 A single invocation of the **agent** inside the **sandbox**, producing at most one commit against one **task**.
 _Avoid_: "run" (ambiguous with the JS `run()` function), "cycle", "loop"
 
+**One-shot run**:
+Exactly one **iteration**, driven by `run()` (or `sandbox.run()` / `worktree.run()`). Returns a flat result -- `sessionId`, `usage`, `commits`, etc. at the top level, no `iterations[]`. Has no **completion signal**. The only entry point that accepts **structured output** and `resumeSession`. `.resume()` / `.fork()` always produce a **one-shot run**, whatever produced the result (ADR 0011).
+_Avoid_: "single run", "single-iteration run()" (pre-split wording)
+
+**Iteration loop**:
+Up to `maxIterations` **iterations**, stopping early on the **completion signal**, driven by `runMany()` (or `sandbox.runMany()` / `worktree.runMany()`). Returns `iterations[]` and the matched `completionSignal`. Does not accept **structured output** or `resumeSession`.
+_Avoid_: "loop run", "multi-run", "run({ maxIterations })" (pre-split API)
+
 **Task**:
 A work item from the **issue tracker** that the **agent** selects and works on during an **iteration**.
 _Avoid_: "job", "work item", "ticket"
 
 **Completion signal**:
-The `<promise>COMPLETE</promise>` marker in the **agent**'s output indicating all actionable tasks are finished. A pure termination signal -- carries no payload. Distinct from **structured output**.
+The `<promise>COMPLETE</promise>` marker in the **agent**'s output indicating all actionable tasks are finished. A pure termination signal for the **iteration loop** (`runMany()`) -- carries no payload. A **one-shot run** has no completion signal. Distinct from **structured output**.
 _Avoid_: "done flag", "exit signal", conflating with **structured output**
 
 **Hanging process**:
-An **agent** invocation that has emitted its **completion signal** but whose underlying process has not exited (typically because a spawned child -- a `gh`/git subprocess or long-lived MCP server -- inherited the exec's stdout pipe and is keeping it open). The signal is visible in the buffered stream; only EOF is missing. Resolved by the **completion timeout** rather than waiting out the full **idle timeout**. Distinct from a genuinely stuck **agent**, which has produced no output at all.
+An **agent** invocation that has emitted its **completion marker** but whose underlying process has not exited (typically because a spawned child -- a `gh`/git subprocess or long-lived MCP server -- inherited the exec's stdout pipe and is keeping it open). The marker is visible in the buffered stream; only EOF is missing. Resolved by the **completion timeout** rather than waiting out the full **idle timeout**. Distinct from a genuinely stuck **agent**, which has produced no output at all.
 _Avoid_: "stuck agent" (implies stuck _mid-work_, not done-but-not-exited), "zombie process", "lingering process", "hung sandbox"
 
+**Completion marker**:
+The substring whose appearance in the **agent**'s output arms the **completion timeout**. For the **iteration loop** it is the **completion signal** (ADR 0019); for a **one-shot run** with **structured output** it is the closing tag of the output block, e.g. `</plan>` (ADR 0021). A **one-shot run** without structured output has no completion marker.
+_Avoid_: "trigger", conflating with **completion signal** (which also ends the loop)
+
 **Completion timeout**:
-A silence-based grace window that takes over from the **idle timeout** once a **completion signal** is detected in the **agent**'s output. Reset by every subsequent output line so trailing data (token-usage events, terminal `result` events, **structured output** tags emitted after the signal) is still captured. On expiry the run resolves **successfully** with a warning that the process is hanging -- in contrast to **idle timeout** expiry, which fails the run. Configured via `completionTimeoutSeconds`; default 60 seconds. Independent of `idleTimeoutSeconds` -- they cover different phases.
+A silence-based grace window that takes over from the **idle timeout** once a **completion marker** is detected in the **agent**'s output. Reset by every subsequent output line so trailing data (token-usage events, terminal `result` events) is still captured. On expiry the run resolves **successfully** with a warning that the process is hanging -- in contrast to **idle timeout** expiry, which fails the run. Configured via `completionTimeoutSeconds`; default 60 seconds. Independent of `idleTimeoutSeconds` -- they cover different phases.
 _Avoid_: "grace period" (too generic), "post-completion timeout", "completion grace window", "drain timeout"
 
 **Structured output**:
-A schema-validated JSON payload emitted by the **agent** inside a caller-specified XML tag and returned to the caller of `run()`. Configured via `output: Output.object({ tag, schema })`. Orthogonal to the **completion signal** -- a run can use either, both, or neither. The caller owns the prompt-side instruction telling the agent to emit the tag; Sandcastle does not inject it, and `run()` errors early if the resolved prompt does not contain the configured tag.
+A schema-validated JSON payload emitted by the **agent** inside a caller-specified XML tag and returned to the caller of `run()`. Configured via `output: Output.object({ tag, schema })`. **One-shot run** only -- `runMany()` does not accept it, so it never coexists with a **completion signal**. Its closing tag is the run's **completion marker**. The caller owns the prompt-side instruction telling the agent to emit the tag; Sandcastle does not inject it, and `run()` errors early if the resolved prompt does not contain the configured tag.
 _Avoid_: "output payload", "result", "JSON output"
 
 **Output schema**:

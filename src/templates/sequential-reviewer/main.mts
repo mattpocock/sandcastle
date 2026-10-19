@@ -2,8 +2,7 @@
 //
 // This template drives a two-phase workflow per issue:
 //   Phase 1 (Implement): A sonnet agent picks an open issue, works on it
-//                        on a dedicated branch, commits the changes, and signals
-//                        completion.
+//                        on a dedicated branch, and commits the changes.
 //   Phase 2 (Review):    A second sonnet agent reviews the branch diff and either
 //                        approves it or makes corrections directly on the branch.
 //
@@ -69,16 +68,13 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     // A sonnet agent picks the next open issue, writes the
     // implementation (using RGR: Red → Green → Repeat → Refactor), and
     // commits the result.
-    //
-    // The agent signals completion via <promise>COMPLETE</promise> when done.
     // -----------------------------------------------------------------------
-    // One iteration so each outer pass implements a single issue on its own
-    // branch, then hands it to the reviewer. A higher value lets the agent
-    // drain the whole backlog onto this one branch in a single pass, which
-    // defeats the per-issue review.
+    // One-shot run() so each outer pass implements a single issue on its own
+    // branch, then hands it to the reviewer. Looping with runMany() would let
+    // the agent drain the whole backlog onto this one branch in a single
+    // pass, which defeats the per-issue review.
     const implement = await sandbox.run({
       name: "implementer",
-      maxIterations: 1,
       agent: sandcastle.claudeCode("claude-sonnet-4-6"),
       promptFile: "./.sandcastle/implement-prompt.md",
     });
@@ -102,7 +98,6 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     // -----------------------------------------------------------------------
     await sandbox.run({
       name: "reviewer",
-      maxIterations: 1,
       agent: sandcastle.claudeCode("claude-sonnet-4-6"),
       promptFile: "./.sandcastle/review-prompt.md",
       promptArgs: {

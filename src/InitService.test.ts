@@ -242,7 +242,9 @@ describe("InitService scaffold", () => {
     );
     expect(prompt).toContain("# ");
     expect(prompt).toContain("!`");
-    expect(prompt).toContain("<promise>COMPLETE</promise>");
+    // The blank template uses one-shot run(), so the skeleton must not ask
+    // the agent for a completion signal nothing is listening for.
+    expect(prompt).not.toContain("<promise>COMPLETE</promise>");
   });
 
   it("blank template produces skeleton prompt and main.mts", async () => {
@@ -252,7 +254,7 @@ describe("InitService scaffold", () => {
     const configDir = join(dir, ".sandcastle");
     const prompt = await readFile(join(configDir, "prompt.md"), "utf-8");
     expect(prompt).toContain("!`");
-    expect(prompt).toContain("<promise>COMPLETE</promise>");
+    expect(prompt).not.toContain("<promise>COMPLETE</promise>");
 
     const { access } = await import("node:fs/promises");
     await expect(access(join(configDir, "main.mts"))).resolves.toBeUndefined();
@@ -347,7 +349,7 @@ describe("InitService scaffold", () => {
     expect(mainTs).toContain('"@ai-hero/sandcastle"');
   });
 
-  it("simple-loop main.mts contains sandcastle.run() with expected options", async () => {
+  it("simple-loop main.mts contains runMany() with expected options", async () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "simple-loop" });
 
@@ -355,7 +357,7 @@ describe("InitService scaffold", () => {
       join(dir, ".sandcastle", "main.mts"),
       "utf-8",
     );
-    expect(mainTs).toContain("run(");
+    expect(mainTs).toContain("runMany(");
     expect(mainTs).toContain("maxIterations");
     expect(mainTs).toContain("3");
     // When scaffolded with default model, simple-loop uses claude-opus-4-8
@@ -542,12 +544,10 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
       );
-      const implementerSection = mainTs.slice(
-        mainTs.indexOf('name: "implementer"'),
-        mainTs.indexOf('name: "implementer"') + 200,
-      );
-      expect(implementerSection).toContain("maxIterations: 1");
-      expect(implementerSection).not.toContain("maxIterations: 100");
+      const idx = mainTs.indexOf('name: "implementer"');
+      const call = mainTs.slice(mainTs.lastIndexOf("await ", idx), idx);
+      expect(call).toContain("sandbox.run({");
+      expect(call).not.toContain("runMany");
     });
 
     it("main.mts stops the loop when the implementer produces no commits", async () => {
@@ -1168,7 +1168,7 @@ describe("InitService scaffold", () => {
       expect(mainTs).toContain("Promise.allSettled");
     });
 
-    it("main.mts has correct maxIterations: planner=1, implementer=100, reviewer=1, merger=1", async () => {
+    it("main.mts loops only the implementer: planner/reviewer/merger use run(), implementer uses runMany(100)", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
@@ -1176,33 +1176,22 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
       );
-      // Check planner maxIterations: 1 (near "planner" name)
-      const plannerSection = mainTs.slice(
-        mainTs.indexOf('name: "planner"') - 200,
-        mainTs.indexOf('name: "planner"') + 200,
-      );
-      expect(plannerSection).toContain("maxIterations: 1");
+      // The call expression (from `await` up to the `name:` field) for a phase.
+      const callFor = (name: string) => {
+        const idx = mainTs.indexOf(`name: "${name}"`);
+        return mainTs.slice(mainTs.lastIndexOf("await ", idx), idx);
+      };
+      const sectionAfter = (name: string) => {
+        const idx = mainTs.indexOf(`name: "${name}"`);
+        return mainTs.slice(idx, idx + 200);
+      };
 
-      // Check implementer maxIterations: 100
-      const implementerSection = mainTs.slice(
-        mainTs.indexOf('name: "implementer"') - 200,
-        mainTs.indexOf('name: "implementer"') + 200,
-      );
-      expect(implementerSection).toContain("maxIterations: 100");
-
-      // Check reviewer maxIterations: 1
-      const reviewerSection = mainTs.slice(
-        mainTs.indexOf('name: "reviewer"') - 200,
-        mainTs.indexOf('name: "reviewer"') + 200,
-      );
-      expect(reviewerSection).toContain("maxIterations: 1");
-
-      // Check merger maxIterations: 1
-      const mergerSection = mainTs.slice(
-        mainTs.indexOf('name: "merger"') - 200,
-        mainTs.indexOf('name: "merger"') + 200,
-      );
-      expect(mergerSection).toContain("maxIterations: 1");
+      expect(callFor("planner")).toContain("sandcastle.run({");
+      expect(callFor("implementer")).toContain("sandbox.runMany({");
+      expect(sectionAfter("implementer")).toContain("maxIterations: 100");
+      expect(callFor("reviewer")).toContain("sandbox.run({");
+      expect(callFor("merger")).toContain("sandcastle.run({");
+      expect(mainTs).not.toContain("maxIterations: 1,");
     });
 
     it("implement-prompt.md contains {{TASK_ID}}, {{ISSUE_TITLE}}, {{BRANCH}} prompt arguments", async () => {

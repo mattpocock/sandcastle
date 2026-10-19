@@ -671,13 +671,110 @@ describe("worktree.run()", () => {
         agent: claudeCode("claude-opus-4-8"),
         sandbox,
         prompt: "do something",
-        maxIterations: 1,
       });
 
-      expect(result.iterations.length).toBe(1);
+      expect(result).not.toHaveProperty("iterations");
       expect(typeof result.stdout).toBe("string");
       expect(Array.isArray(result.commits)).toBe(true);
       expect(result.branch).toBe("run-test");
+    } finally {
+      await ws.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("run() is one-shot: ignores the completion signal and runs exactly once", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-run-oneshot-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    let calls = 0;
+    const sandbox = makeRunTestProvider(async () => {
+      calls++;
+      return "done <promise>COMPLETE</promise>";
+    });
+
+    const ws = await createWorktree({
+      branchStrategy: { type: "branch", branch: "oneshot-test" },
+      cwd: hostDir,
+    });
+
+    try {
+      const result = await ws.run({
+        agent: claudeCode("claude-opus-4-8"),
+        sandbox,
+        prompt: "do something",
+        logging: { type: "file", path: join(hostDir, "oneshot.log") },
+      });
+      expect(calls).toBe(1);
+      expect(result).not.toHaveProperty("completionSignal");
+      expect(result).not.toHaveProperty("iterations");
+    } finally {
+      await ws.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("runMany() loops until the completion signal, like the pre-split run()", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-runmany-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    let calls = 0;
+    const sandbox = makeRunTestProvider(async () => {
+      calls++;
+      return calls === 2 ? "done <promise>COMPLETE</promise>" : "working";
+    });
+
+    const ws = await createWorktree({
+      branchStrategy: { type: "branch", branch: "runmany-test" },
+      cwd: hostDir,
+    });
+
+    try {
+      const result = await ws.runMany({
+        agent: claudeCode("claude-opus-4-8"),
+        sandbox,
+        prompt: "do something",
+        maxIterations: 5,
+        logging: { type: "file", path: join(hostDir, "runmany.log") },
+      });
+      expect(calls).toBe(2);
+      expect(result.iterations.length).toBe(2);
+      expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
+      expect(result.branch).toBe("runmany-test");
+    } finally {
+      await ws.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects options from the other half of the run()/runMany() split", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-run-guards-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    const sandbox = makeRunTestProvider();
+    const ws = await createWorktree({
+      branchStrategy: { type: "branch", branch: "guards-test" },
+      cwd: hostDir,
+    });
+    try {
+      await expect(
+        ws.run({
+          agent: claudeCode("claude-opus-4-8"),
+          sandbox,
+          prompt: "x",
+          maxIterations: 3,
+        } as any),
+      ).rejects.toThrow("worktree.run() does not accept `maxIterations`");
+      await expect(
+        ws.runMany({
+          agent: claudeCode("claude-opus-4-8"),
+          sandbox,
+          prompt: "x",
+          resumeSession: "abc",
+        } as any),
+      ).rejects.toThrow("worktree.runMany() does not accept `resumeSession`");
     } finally {
       await ws.close();
       await rm(hostDir, { recursive: true, force: true });
@@ -702,12 +799,11 @@ describe("worktree.run()", () => {
         agent: codex("gpt-test"),
         sandbox,
         prompt: "do something",
-        maxIterations: 1,
         logging: { type: "file", path: logPath },
       });
 
       // Sanity-check: orchestrator surfaced usage on the iteration.
-      expect(result.iterations[0]!.usage).toBeDefined();
+      expect(result.usage).toBeDefined();
 
       const log = await readFile(logPath, "utf-8");
       expect(log).toContain("Context window: 50k");
@@ -832,17 +928,16 @@ describe("worktree.run()", () => {
         }),
         sandbox,
         prompt: "do something",
-        maxIterations: 1,
         logging: { type: "file", path: logPath },
       });
 
-      expect(result.iterations[0]!.usage).toEqual({
+      expect(result.usage).toEqual({
         inputTokens: 50000,
         cacheCreationInputTokens: 0,
         cacheReadInputTokens: 0,
         outputTokens: 100,
       });
-      expect(result.iterations[0]!.sessionFilePath).toBeDefined();
+      expect(result.sessionFilePath).toBeDefined();
 
       const log = await readFile(logPath, "utf-8");
       expect(log).toContain("Context window: 50k");
@@ -876,7 +971,6 @@ describe("worktree.run()", () => {
         agent: claudeCode("claude-opus-4-8"),
         sandbox,
         prompt: "create a file",
-        maxIterations: 1,
       });
 
       // Worktree should still exist after run
@@ -915,7 +1009,6 @@ describe("worktree.run()", () => {
         agent: claudeCode("claude-opus-4-8"),
         sandbox,
         prompt: "create a file",
-        maxIterations: 1,
       });
 
       expect(result.commits.length).toBeGreaterThanOrEqual(1);
@@ -953,7 +1046,6 @@ describe("worktree.run()", () => {
         agent: claudeCode("claude-opus-4-8"),
         sandbox,
         prompt: "create a file",
-        maxIterations: 1,
       });
 
       // The result branch is the host's current branch (main), not the temp branch
@@ -1010,7 +1102,6 @@ describe("worktree.run()", () => {
         agent: claudeCode("claude-opus-4-8"),
         sandbox,
         prompt: "first",
-        maxIterations: 1,
       });
 
       // Second run() reuses the same worktree handle — the source branch must
@@ -1019,7 +1110,6 @@ describe("worktree.run()", () => {
         agent: claudeCode("claude-opus-4-8"),
         sandbox,
         prompt: "second",
-        maxIterations: 1,
       });
 
       const { stdout: log } = await execAsync("git log --format=%s -n 2 HEAD", {
@@ -1147,7 +1237,7 @@ describe("worktree.run()", () => {
         prompt: "do something else",
       });
 
-      expect(result.iterations.length).toBe(1);
+      expect(result).not.toHaveProperty("iterations");
       expect(result.branch).toBe("abort-reuse-test");
     } finally {
       await ws.close();

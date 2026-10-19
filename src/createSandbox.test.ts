@@ -289,12 +289,91 @@ describe("createSandbox", () => {
       const result = await sandbox.run({
         agent: testProvider,
         prompt: "do something",
-        maxIterations: 1,
       });
 
-      expect(result.iterations.length).toBe(1);
+      expect(result).not.toHaveProperty("iterations");
       expect(typeof result.stdout).toBe("string");
       expect(Array.isArray(result.commits)).toBe(true);
+    } finally {
+      await sandbox.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("sandbox.run() is one-shot: runs exactly once and reports no completion signal", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-oneshot-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    let calls = 0;
+    const sandbox = await createSandbox({
+      branch: "oneshot-branch",
+      sandbox: testSandbox,
+      cwd: hostDir,
+      _test: {
+        buildSandbox: (sandboxDir) =>
+          makeMockAgentLayer(sandboxDir, async () => {
+            calls++;
+            return "done <promise>COMPLETE</promise>";
+          }),
+      },
+    });
+
+    try {
+      const result = await sandbox.run({
+        agent: testProvider,
+        prompt: "do something",
+        logging: { type: "file", path: join(hostDir, "oneshot.log") },
+      });
+      expect(calls).toBe(1);
+      expect(result).not.toHaveProperty("completionSignal");
+      expect(result.stdout).toContain("done");
+    } finally {
+      await sandbox.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("sandbox.runMany() loops until the completion signal, like the pre-split run()", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-runmany-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    let calls = 0;
+    const sandbox = await createSandbox({
+      branch: "runmany-branch",
+      sandbox: testSandbox,
+      cwd: hostDir,
+      _test: {
+        buildSandbox: (sandboxDir) =>
+          makeMockAgentLayer(sandboxDir, async () => {
+            calls++;
+            return calls === 2 ? "done <promise>COMPLETE</promise>" : "working";
+          }),
+      },
+    });
+
+    try {
+      const result = await sandbox.runMany({
+        agent: testProvider,
+        prompt: "do something",
+        maxIterations: 5,
+        logging: { type: "file", path: join(hostDir, "runmany.log") },
+      });
+      expect(calls).toBe(2);
+      expect(result.iterations.length).toBe(2);
+      expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
+
+      // Without a signal it runs to the cap.
+      calls = 10;
+      const capped = await sandbox.runMany({
+        agent: testProvider,
+        prompt: "do something",
+        maxIterations: 3,
+        logging: { type: "file", path: join(hostDir, "runmany.log") },
+      });
+      expect(capped.iterations.length).toBe(3);
+      expect(capped.completionSignal).toBeUndefined();
     } finally {
       await sandbox.close();
       await rm(hostDir, { recursive: true, force: true });
@@ -325,12 +404,11 @@ describe("createSandbox", () => {
       const result = await sandbox.run({
         agent: codex("gpt-test"),
         prompt: "do something",
-        maxIterations: 1,
         logging: { type: "file", path: logPath },
       });
 
       // Sanity-check: orchestrator surfaced usage on the iteration.
-      expect(result.iterations[0]!.usage).toBeDefined();
+      expect(result.usage).toBeDefined();
 
       const log = await readFile(logPath, "utf-8");
       expect(log).toContain("Context window: 50k");
@@ -455,18 +533,17 @@ describe("createSandbox", () => {
       const result = await sandbox.run({
         agent: provider,
         prompt: "do something",
-        maxIterations: 1,
         logging: { type: "file", path: logPath },
       });
 
       // Usage was parsed out of the captured session JSONL.
-      expect(result.iterations[0]!.usage).toEqual({
+      expect(result.usage).toEqual({
         inputTokens: 50000,
         cacheCreationInputTokens: 0,
         cacheReadInputTokens: 0,
         outputTokens: 100,
       });
-      expect(result.iterations[0]!.sessionFilePath).toBeDefined();
+      expect(result.sessionFilePath).toBeDefined();
 
       const log = await readFile(logPath, "utf-8");
       expect(log).toContain("Context window: 50k");
@@ -479,7 +556,7 @@ describe("createSandbox", () => {
     }
   });
 
-  it("sandbox.run() rejects resumeSession with maxIterations > 1", async () => {
+  it("rejects options from the other half of the run()/runMany() split", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-resume-validate-"));
     await initRepo(hostDir);
     await commitFile(hostDir, "init.txt", "init", "initial commit");
@@ -495,16 +572,33 @@ describe("createSandbox", () => {
     });
 
     try {
+      // Untyped callers: a looping call left on run() must not silently
+      // degrade into a one-shot run.
       await expect(
         sandbox.run({
           agent: testProvider,
           prompt: "do something",
           maxIterations: 2,
+        } as any),
+      ).rejects.toThrow("sandbox.run() does not accept `maxIterations`");
+
+      await expect(
+        sandbox.run({
+          agent: testProvider,
+          prompt: "do something",
+          completionSignal: "DONE",
+        } as any),
+      ).rejects.toThrow("sandbox.run() does not accept `completionSignal`");
+
+      // resumeSession is run()-only; runMany() can't "resume then loop" (ADR 0011).
+      await expect(
+        sandbox.runMany({
+          agent: testProvider,
+          prompt: "do something",
+          maxIterations: 2,
           resumeSession: "abc-123",
-        }),
-      ).rejects.toThrow(
-        "resumeSession cannot be combined with maxIterations > 1",
-      );
+        } as any),
+      ).rejects.toThrow("sandbox.runMany() does not accept `resumeSession`");
 
       await expect(
         sandbox.run({
@@ -632,10 +726,9 @@ describe("createSandbox", () => {
           sessionStorage: { hostProjectsDir, sandboxProjectsDir },
         }),
         prompt: "do something",
-        maxIterations: 1,
       });
 
-      expect(first.iterations[0]!.sessionId).toBe(mockSessionId);
+      expect(first.sessionId).toBe(mockSessionId);
       expect(typeof first.resume).toBe("function");
       expect(typeof first.fork).toBe("function");
 
@@ -645,7 +738,7 @@ describe("createSandbox", () => {
       expect(capturedCommands.length).toBe(2);
       expect(capturedCommands[1]).toContain(`--resume '${mockSessionId}'`);
       // Resume runs exactly one iteration.
-      expect(second.iterations.length).toBe(1);
+      expect(second).not.toHaveProperty("iterations");
     } finally {
       await sandbox.close();
       await rm(hostDir, { recursive: true, force: true });
@@ -716,7 +809,6 @@ describe("createSandbox", () => {
       await sandbox.run({
         agent: testProvider,
         prompt: "do something",
-        maxIterations: 1,
         logging: { type: "file", path: logPath, verbose: true },
       });
 
@@ -790,7 +882,6 @@ describe("createSandbox", () => {
       await sandbox.run({
         agent: testProvider,
         prompt: "do something",
-        maxIterations: 1,
         logging: { type: "file", path: logPath },
       });
 
@@ -1131,7 +1222,6 @@ describe("createSandbox", () => {
       const result = await sandbox.run({
         agent: testProvider,
         prompt: "create a file",
-        maxIterations: 1,
       });
 
       expect(result.commits.length).toBeGreaterThanOrEqual(1);
@@ -1182,19 +1272,17 @@ describe("createSandbox", () => {
       const result1 = await sandbox.run({
         agent: testProvider,
         prompt: "implement feature",
-        maxIterations: 1,
         name: "Implementer",
       });
 
       const result2 = await sandbox.run({
         agent: testPiProvider,
         prompt: "review the code",
-        maxIterations: 1,
         name: "Reviewer",
       });
 
-      expect(result1.iterations.length).toBe(1);
-      expect(result2.iterations.length).toBe(1);
+      expect(result1).not.toHaveProperty("iterations");
+      expect(result2).not.toHaveProperty("iterations");
     } finally {
       await sandbox.close();
       await rm(hostDir, { recursive: true, force: true });
@@ -1230,13 +1318,11 @@ describe("createSandbox", () => {
       const result1 = await sandbox.run({
         agent: testProvider,
         prompt: "first run",
-        maxIterations: 1,
       });
 
       const result2 = await sandbox.run({
         agent: testProvider,
         prompt: "second run",
-        maxIterations: 1,
       });
 
       expect(result1.commits.length).toBeGreaterThanOrEqual(1);
@@ -1357,14 +1443,12 @@ describe("createSandbox", () => {
       await sandbox.run({
         agent: testProvider,
         prompt: "first run",
-        maxIterations: 1,
       });
       expect(createCallCount).toBe(1);
 
       await sandbox.run({
         agent: testProvider,
         prompt: "second run",
-        maxIterations: 1,
       });
       expect(createCallCount).toBe(1);
     } finally {
@@ -1469,7 +1553,6 @@ describe("createSandbox", () => {
       await sandbox.run({
         agent: testProvider,
         prompt: "create file",
-        maxIterations: 1,
       });
 
       // Verify file exists on host between runs
@@ -1483,7 +1566,6 @@ describe("createSandbox", () => {
       await sandbox.run({
         agent: testProvider,
         prompt: "verify file",
-        maxIterations: 1,
       });
     } finally {
       await sandbox.close();
@@ -1529,10 +1611,9 @@ describe("createSandbox", () => {
       const result = await sandbox.run({
         agent: testProvider,
         prompt: "create a file",
-        maxIterations: 1,
       });
 
-      expect(result.iterations.length).toBe(1);
+      expect(result).not.toHaveProperty("iterations");
 
       // Verify the worktree exists and is on the right branch
       const { stdout: branch } = await execAsync(
@@ -1591,14 +1672,12 @@ describe("createSandbox", () => {
       const result1 = await sandbox.run({
         agent: testProvider,
         prompt: "first run",
-        maxIterations: 1,
       });
       expect(result1.commits.length).toBeGreaterThanOrEqual(1);
 
       const result2 = await sandbox.run({
         agent: testProvider,
         prompt: "second run",
-        maxIterations: 1,
       });
       expect(result2.commits.length).toBeGreaterThanOrEqual(1);
 
@@ -1900,7 +1979,7 @@ describe("createSandbox", () => {
         prompt: "do something",
         signal: ac.signal,
       });
-      expect(result.iterations.length).toBe(1);
+      expect(result).not.toHaveProperty("iterations");
     } finally {
       await sandbox.close();
       await rm(hostDir, { recursive: true, force: true });
@@ -1973,7 +2052,7 @@ describe("createSandbox", () => {
         prompt: "should succeed",
         signal: new AbortController().signal,
       });
-      expect(result.iterations.length).toBe(1);
+      expect(result).not.toHaveProperty("iterations");
     } finally {
       await sandbox.close();
       await rm(hostDir, { recursive: true, force: true });

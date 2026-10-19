@@ -11,7 +11,12 @@ import {
 } from "./Display.js";
 import { resolveEnv } from "./EnvResolver.js";
 import { mergeProviderEnv } from "./mergeProviderEnv.js";
-import { orchestrate, type IterationResult } from "./Orchestrator.js";
+import {
+  orchestrate,
+  type IterationResult,
+  type IterationUsage,
+  type OrchestrateResult,
+} from "./Orchestrator.js";
 import { agentStreamEmitterLayer } from "./AgentStreamEmitter.js";
 import {
   type PromptArgs,
@@ -24,11 +29,15 @@ import { resolvePrompt } from "./PromptResolver.js";
 import { preprocessPrompt } from "./PromptPreprocessor.js";
 import type { LoggingOption, Timeouts } from "./run.js";
 import {
+  assertNoForeignRunOptions,
   buildAgentStreamHandler,
   buildCompletionMessage,
   buildContextWindowLines,
   buildLogFilename,
+  ONE_SHOT_COMPLETION_MESSAGE,
   printFileDisplayStartup,
+  RUN_MANY_ONLY_OPTIONS,
+  RUN_ONLY_OPTIONS,
 } from "./run.js";
 import {
   withSandboxLifecycle,
@@ -100,22 +109,18 @@ export interface CreateSandboxOptions {
 /**
  * Options accepted by `SandboxRunResult.resume()` / `.fork()`. Mirrors
  * `ResumeRunResultOptions` in `run.ts` — drops the fields owned by the
- * captured run (prompt, iteration count, resumeSession/forkSession bookkeeping).
+ * captured run (prompt, resumeSession/forkSession bookkeeping).
  *
- * Defined as the base interface that `SandboxRunOptions` extends — the
- * interface-extends shape is cheaper for the TS checker than
- * `Omit<SandboxRunOptions, ...>` (which forces a mapped-type computation
- * on every reference).
+ * Defined as the base interface that `SandboxRunOptions` and
+ * `SandboxRunManyOptions` extend — the interface-extends shape is cheaper for
+ * the TS checker than `Omit<SandboxRunOptions, ...>` (which forces a
+ * mapped-type computation on every reference).
  */
 export interface ResumeSandboxRunResultOptions {
   /** Key-value map for {{KEY}} placeholder substitution in prompts. */
   readonly promptArgs?: PromptArgs;
-  /** Substring(s) the agent emits to stop the iteration loop early. */
-  readonly completionSignal?: string | string[];
   /** Idle timeout in seconds. Default: 600. */
   readonly idleTimeoutSeconds?: number;
-  /** Grace window in seconds after a completion signal is observed but the agent process has not exited. See ADR 0019. Default: 60. */
-  readonly completionTimeoutSeconds?: number;
   /** Display name for this run. */
   readonly name?: string;
   /** Logging mode. */
@@ -132,6 +137,7 @@ export interface ResumeSandboxRunResultOptions {
   readonly signal?: AbortSignal;
 }
 
+/** Options for the one-shot `sandbox.run()`: exactly one agent invocation. */
 export interface SandboxRunOptions extends ResumeSandboxRunResultOptions {
   /** Agent provider to use (e.g. claudeCode("claude-opus-4-8")). */
   readonly agent: AgentProvider;
@@ -139,9 +145,7 @@ export interface SandboxRunOptions extends ResumeSandboxRunResultOptions {
   readonly prompt?: string;
   /** Path to a prompt file (mutually exclusive with prompt). */
   readonly promptFile?: string;
-  /** Maximum iterations to run (default: 1). */
-  readonly maxIterations?: number;
-  /** Resume a prior agent session by id. The session JSONL must exist on the host (captured by a prior `sandbox.run()`). Incompatible with `maxIterations > 1`. */
+  /** Resume a prior agent session by id. The session JSONL must exist on the host (captured by a prior `sandbox.run()`). */
   readonly resumeSession?: string;
   /**
    * When true alongside `resumeSession`, fork the session instead of mutating
@@ -155,7 +159,60 @@ export interface SandboxRunOptions extends ResumeSandboxRunResultOptions {
   readonly forkSession?: boolean;
 }
 
+/** Options for `sandbox.runMany()`: the iterate-until-signal-or-cap loop. */
+export interface SandboxRunManyOptions extends ResumeSandboxRunResultOptions {
+  /** Agent provider to use (e.g. claudeCode("claude-opus-4-8")). */
+  readonly agent: AgentProvider;
+  /** Inline prompt string (mutually exclusive with promptFile). */
+  readonly prompt?: string;
+  /** Path to a prompt file (mutually exclusive with prompt). */
+  readonly promptFile?: string;
+  /** Maximum iterations to run (default: 1). */
+  readonly maxIterations?: number;
+  /** Substring(s) the agent emits to stop the iteration loop early. Default: `"<promise>COMPLETE</promise>"`. */
+  readonly completionSignal?: string | string[];
+  /** Grace window in seconds after a completion signal is observed but the agent process has not exited. See ADR 0019. Default: 60. */
+  readonly completionTimeoutSeconds?: number;
+}
+
+/** Continue (or fork) the last captured session for exactly one iteration in the same sandbox. */
+export type ResumeSandboxRunResultFn = (
+  prompt: string,
+  options?: ResumeSandboxRunResultOptions,
+) => Promise<SandboxRunResult>;
+
+/** Result of the one-shot `sandbox.run()`. */
 export interface SandboxRunResult {
+  /** Agent session ID, or undefined when the provider does not report one. */
+  readonly sessionId?: string;
+  /** Absolute host path to the captured session JSONL, or undefined when capture is disabled or unsupported. */
+  readonly sessionFilePath?: string;
+  /** Token usage snapshot, or undefined when the provider does not report usage. */
+  readonly usage?: IterationUsage;
+  /** The agent's stdout. */
+  readonly stdout: string;
+  /** List of commits made by the agent during the run. */
+  readonly commits: { sha: string }[];
+  /** Path to the log file, if logging was drained to a file. */
+  readonly logFilePath?: string;
+  /**
+   * Continue the captured agent session for exactly one iteration inside
+   * the same long-lived sandbox. Present only when the provider supports
+   * resume (`sessionStorage` populated) and a session id was captured.
+   */
+  readonly resume?: ResumeSandboxRunResultFn;
+  /**
+   * Fork the captured agent session for exactly one iteration inside the
+   * same long-lived sandbox: the parent session JSONL is left intact and the
+   * child run gets its own session id. Present only when the provider
+   * supports resume (`sessionStorage` populated) and a session id was
+   * captured. See ADR 0018 for fork semantics.
+   */
+  readonly fork?: ResumeSandboxRunResultFn;
+}
+
+/** Result of `sandbox.runMany()`: the per-iteration loop result. */
+export interface SandboxRunManyResult {
   /** Per-iteration results (use `iterations.length` for the count). */
   readonly iterations: IterationResult[];
   /** The matched completion signal string, or undefined if none fired. */
@@ -166,26 +223,10 @@ export interface SandboxRunResult {
   readonly commits: { sha: string }[];
   /** Path to the log file, if logging was drained to a file. */
   readonly logFilePath?: string;
-  /**
-   * Continue the last captured agent session for exactly one iteration inside
-   * the same long-lived sandbox. Present only when the provider supports
-   * resume (`sessionStorage` populated) and a session id was captured.
-   */
-  readonly resume?: (
-    prompt: string,
-    options?: ResumeSandboxRunResultOptions,
-  ) => Promise<SandboxRunResult>;
-  /**
-   * Fork the last captured agent session for exactly one iteration inside the
-   * same long-lived sandbox: the parent session JSONL is left intact and the
-   * child run gets its own session id. Present only when the provider
-   * supports resume (`sessionStorage` populated) and a session id was
-   * captured. See ADR 0018 for fork semantics.
-   */
-  readonly fork?: (
-    prompt: string,
-    options?: ResumeSandboxRunResultOptions,
-  ) => Promise<SandboxRunResult>;
+  /** Resume the last iteration's session for exactly one iteration (one-shot result). */
+  readonly resume?: ResumeSandboxRunResultFn;
+  /** Fork the last iteration's session for exactly one iteration (one-shot result). */
+  readonly fork?: ResumeSandboxRunResultFn;
 }
 
 export interface SandboxInteractiveOptions {
@@ -226,8 +267,10 @@ export interface Sandbox {
   readonly branch: string;
   /** Host path to the worktree. */
   readonly worktreePath: string;
-  /** Invoke an agent inside the existing sandbox. */
+  /** Invoke an agent once (one iteration) inside the existing sandbox. */
   run(options: SandboxRunOptions): Promise<SandboxRunResult>;
+  /** Invoke an agent in a loop (up to `maxIterations`, stopping on the completion signal) inside the existing sandbox. */
+  runMany(options: SandboxRunManyOptions): Promise<SandboxRunManyResult>;
   /** Launch an interactive agent session inside the existing sandbox. */
   interactive(
     options: SandboxInteractiveOptions,
@@ -323,230 +366,298 @@ const buildSandboxHandle = (
   // as-is and let the lifecycle delete the temp branch normally.
   const mergeToHead = branchStrategy?.type === "merge-to-head";
 
+  /**
+   * Shared engine behind `sandbox.run()` and `sandbox.runMany()`. One-shot
+   * mode runs a single iteration with no completion signal (and therefore no
+   * completion-timeout trigger — `sandbox.run()` has no `output`); many mode
+   * is the pre-split loop.
+   */
+  const executeSandboxRun = async (
+    runOptions: ResumeSandboxRunResultOptions & {
+      readonly agent: AgentProvider;
+      readonly prompt?: string;
+      readonly promptFile?: string;
+      readonly completionTimeoutSeconds?: number;
+    },
+    mode:
+      | {
+          readonly kind: "one-shot";
+          readonly resumeSession?: string;
+          readonly forkSession?: boolean;
+        }
+      | {
+          readonly kind: "many";
+          readonly maxIterations: number;
+          readonly completionSignal?: string | string[];
+        },
+  ): Promise<{ result: OrchestrateResult; logFilePath?: string }> => {
+    // If signal is already aborted, reject immediately without any setup
+    runOptions.signal?.throwIfAborted();
+
+    const { agent: provider, prompt, promptFile } = runOptions;
+    const resumeSession =
+      mode.kind === "one-shot" ? mode.resumeSession : undefined;
+    const forkSession = mode.kind === "one-shot" ? mode.forkSession : undefined;
+
+    // Validate: forkSession only makes sense alongside resumeSession.
+    if (forkSession && !resumeSession) {
+      throw new Error(
+        "forkSession requires resumeSession. " +
+          "Use sandboxRunResult.fork(prompt) to fork the most recent captured session.",
+      );
+    }
+
+    // Validate: resumeSession file must exist on the host before launching.
+    if (resumeSession) {
+      await assertResumeSessionExists({
+        provider,
+        sandboxTag: ctx.providerTag,
+        hostRepoDir,
+        resumeSession,
+      });
+    }
+
+    const resolved = await Effect.runPromise(
+      resolvePrompt({ prompt, promptFile }).pipe(
+        Effect.provide(NodeContext.layer),
+      ),
+    );
+    const rawPrompt = resolved.text;
+    const isInlinePrompt = resolved.source === "inline";
+
+    const userArgs = runOptions.promptArgs ?? {};
+    const currentHostBranch = await Effect.runPromise(
+      WorktreeManager.getCurrentBranch(hostRepoDir),
+    );
+
+    const displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const silentDisplayLayer = SilentDisplay.layer(displayRef);
+
+    const resolvedPrompt = await Effect.runPromise(
+      Effect.gen(function* () {
+        if (isInlinePrompt) {
+          yield* validateNoArgsWithInlinePrompt(userArgs);
+          return rawPrompt;
+        }
+        yield* validateNoBuiltInArgOverride(userArgs);
+        const effectiveArgs = {
+          SOURCE_BRANCH: branch,
+          TARGET_BRANCH: currentHostBranch,
+          ...userArgs,
+        };
+        const builtInArgKeysSet = new Set<string>(BUILT_IN_PROMPT_ARG_KEYS);
+        return yield* substitutePromptArgs(
+          rawPrompt,
+          effectiveArgs,
+          builtInArgKeysSet,
+        );
+      }).pipe(Effect.provide(silentDisplayLayer)),
+    );
+
+    const resolvedLogging: LoggingOption = runOptions.logging ?? {
+      type: "file",
+      path: join(
+        hostRepoDir,
+        ".sandcastle",
+        "logs",
+        buildLogFilename(branch, undefined, runOptions.name),
+      ),
+    };
+
+    const runDisplayLayer =
+      resolvedLogging.type === "file"
+        ? (() => {
+            printFileDisplayStartup({
+              logPath: resolvedLogging.path,
+              agentName: runOptions.name,
+              branch,
+            });
+            return Layer.provide(
+              FileDisplay.layer(resolvedLogging.path),
+              NodeFileSystem.layer,
+            );
+          })()
+        : silentDisplayLayer;
+
+    const reuseFactoryLayer = Layer.succeed(SandboxFactory, {
+      withSandbox: (makeEffect) =>
+        makeEffect(
+          {
+            hostWorktreePath: worktreePath,
+            sandboxRepoPath: sandboxRepoDir,
+            applyToHost,
+            bindMountHandle,
+          },
+          sandbox,
+        ).pipe(
+          Effect.map((value) => ({
+            value,
+            preservedWorktreePath: undefined,
+          })),
+        ) as any,
+    });
+
+    const streamEmitterLayer = agentStreamEmitterLayer(
+      buildAgentStreamHandler(resolvedLogging),
+    );
+
+    const runLayer = Layer.mergeAll(
+      reuseFactoryLayer,
+      runDisplayLayer,
+      streamEmitterLayer,
+    );
+
+    let result;
+    try {
+      result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const display = yield* Display;
+          yield* display.intro(runOptions.name ?? "sandcastle");
+
+          const orchestrateResult = yield* orchestrate({
+            hostRepoDir,
+            prompt: resolvedPrompt,
+            branch: mergeToHead ? undefined : branch,
+            provider,
+            ...(mode.kind === "many"
+              ? {
+                  iterations: mode.maxIterations,
+                  completionSignal: mode.completionSignal,
+                }
+              : {
+                  iterations: 1,
+                  completionSignal: [],
+                  completionTimeoutTriggers: [],
+                  resumeSession,
+                  forkSession,
+                }),
+            idleTimeoutSeconds: runOptions.idleTimeoutSeconds,
+            completionTimeoutSeconds: runOptions.completionTimeoutSeconds,
+            name: runOptions.name,
+            signal: runOptions.signal,
+            skipPromptExpansion: isInlinePrompt,
+            timeouts,
+            keepSourceBranch: mergeToHead,
+          });
+
+          const completion =
+            mode.kind === "many"
+              ? buildCompletionMessage(
+                  orchestrateResult.completionSignal,
+                  orchestrateResult.iterations.length,
+                )
+              : ONE_SHOT_COMPLETION_MESSAGE;
+          yield* display.status(completion.message, completion.severity);
+
+          for (const line of buildContextWindowLines(
+            orchestrateResult.iterations,
+          )) {
+            yield* display.text(line);
+          }
+
+          return orchestrateResult;
+        }).pipe(Effect.provide(runLayer)),
+      );
+    } catch (error: unknown) {
+      // If the signal was aborted, surface its reason verbatim
+      runOptions.signal?.throwIfAborted();
+      throw error;
+    }
+
+    return {
+      result,
+      logFilePath:
+        resolvedLogging.type === "file" ? resolvedLogging.path : undefined,
+    };
+  };
+
+  /**
+   * Build `.resume()` / `.fork()` for a sandbox result. Exposed only when the
+   * provider supports session capture and a session id was actually
+   * captured. Both re-enter the same long-lived sandbox via the one-shot
+   * `sandboxHandle.run()` — container and worktree stay warm (ADR 0011).
+   */
+  const buildSandboxResumeAndFork = (
+    base: Omit<SandboxRunOptions, "resumeSession" | "forkSession">,
+    sessionId: string | undefined,
+  ):
+    | { resume: ResumeSandboxRunResultFn; fork: ResumeSandboxRunResultFn }
+    | Record<string, never> => {
+    if (!base.agent.sessionStorage || !sessionId) return {};
+    return {
+      resume: (nextPrompt, resumeOptions) =>
+        sandboxHandle.run({
+          ...base,
+          ...resumeOptions,
+          prompt: nextPrompt,
+          promptFile: undefined,
+          resumeSession: sessionId,
+        }),
+      fork: (nextPrompt, forkOptions) =>
+        sandboxHandle.run({
+          ...base,
+          ...forkOptions,
+          prompt: nextPrompt,
+          promptFile: undefined,
+          resumeSession: sessionId,
+          forkSession: true,
+        }),
+    };
+  };
+
   const sandboxHandle: Sandbox = {
     branch,
     worktreePath: worktreePath,
 
     run: async (runOptions: SandboxRunOptions): Promise<SandboxRunResult> => {
-      // If signal is already aborted, reject immediately without any setup
       runOptions.signal?.throwIfAborted();
-
-      const {
-        agent: provider,
-        prompt,
-        promptFile,
-        maxIterations = 1,
-      } = runOptions;
-
-      // Validate: resumeSession + maxIterations > 1 is not allowed.
-      if (runOptions.resumeSession && maxIterations > 1) {
-        throw new Error(
-          "resumeSession cannot be combined with maxIterations > 1. " +
-            "Resume applies to iteration 1 only; multi-iteration resume semantics are not supported.",
-        );
-      }
-
-      // Validate: forkSession only makes sense alongside resumeSession.
-      if (runOptions.forkSession && !runOptions.resumeSession) {
-        throw new Error(
-          "forkSession requires resumeSession. " +
-            "Use sandboxRunResult.fork(prompt) to fork the most recent captured session.",
-        );
-      }
-
-      // Validate: resumeSession file must exist on the host before launching.
-      if (runOptions.resumeSession) {
-        await assertResumeSessionExists({
-          provider,
-          sandboxTag: ctx.providerTag,
-          hostRepoDir,
-          resumeSession: runOptions.resumeSession,
-        });
-      }
-
-      const resolved = await Effect.runPromise(
-        resolvePrompt({ prompt, promptFile }).pipe(
-          Effect.provide(NodeContext.layer),
-        ),
+      assertNoForeignRunOptions(
+        runOptions,
+        RUN_MANY_ONLY_OPTIONS,
+        "sandbox.run()",
+        "sandbox.run() is one-shot since the run()/runMany() split — use sandbox.runMany() for the iteration loop and completion signal.",
       );
-      const rawPrompt = resolved.text;
-      const isInlinePrompt = resolved.source === "inline";
-
-      const userArgs = runOptions.promptArgs ?? {};
-      const currentHostBranch = await Effect.runPromise(
-        WorktreeManager.getCurrentBranch(hostRepoDir),
-      );
-
-      const displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
-      const silentDisplayLayer = SilentDisplay.layer(displayRef);
-
-      const resolvedPrompt = await Effect.runPromise(
-        Effect.gen(function* () {
-          if (isInlinePrompt) {
-            yield* validateNoArgsWithInlinePrompt(userArgs);
-            return rawPrompt;
-          }
-          yield* validateNoBuiltInArgOverride(userArgs);
-          const effectiveArgs = {
-            SOURCE_BRANCH: branch,
-            TARGET_BRANCH: currentHostBranch,
-            ...userArgs,
-          };
-          const builtInArgKeysSet = new Set<string>(BUILT_IN_PROMPT_ARG_KEYS);
-          return yield* substitutePromptArgs(
-            rawPrompt,
-            effectiveArgs,
-            builtInArgKeysSet,
-          );
-        }).pipe(Effect.provide(silentDisplayLayer)),
-      );
-
-      const resolvedLogging: LoggingOption = runOptions.logging ?? {
-        type: "file",
-        path: join(
-          hostRepoDir,
-          ".sandcastle",
-          "logs",
-          buildLogFilename(branch, undefined, runOptions.name),
-        ),
-      };
-
-      const runDisplayLayer =
-        resolvedLogging.type === "file"
-          ? (() => {
-              printFileDisplayStartup({
-                logPath: resolvedLogging.path,
-                agentName: runOptions.name,
-                branch,
-              });
-              return Layer.provide(
-                FileDisplay.layer(resolvedLogging.path),
-                NodeFileSystem.layer,
-              );
-            })()
-          : silentDisplayLayer;
-
-      const reuseFactoryLayer = Layer.succeed(SandboxFactory, {
-        withSandbox: (makeEffect) =>
-          makeEffect(
-            {
-              hostWorktreePath: worktreePath,
-              sandboxRepoPath: sandboxRepoDir,
-              applyToHost,
-              bindMountHandle,
-            },
-            sandbox,
-          ).pipe(
-            Effect.map((value) => ({
-              value,
-              preservedWorktreePath: undefined,
-            })),
-          ) as any,
+      const { result, logFilePath } = await executeSandboxRun(runOptions, {
+        kind: "one-shot",
+        resumeSession: runOptions.resumeSession,
+        forkSession: runOptions.forkSession,
       });
+      const only = result.iterations.at(-1);
+      return {
+        sessionId: only?.sessionId,
+        sessionFilePath: only?.sessionFilePath,
+        usage: only?.usage,
+        stdout: result.stdout,
+        commits: result.commits,
+        logFilePath,
+        ...buildSandboxResumeAndFork(runOptions, only?.sessionId),
+      };
+    },
 
-      const streamEmitterLayer = agentStreamEmitterLayer(
-        buildAgentStreamHandler(resolvedLogging),
+    runMany: async (
+      runOptions: SandboxRunManyOptions,
+    ): Promise<SandboxRunManyResult> => {
+      runOptions.signal?.throwIfAborted();
+      assertNoForeignRunOptions(
+        runOptions,
+        RUN_ONLY_OPTIONS,
+        "sandbox.runMany()",
+        "Session resume is one-shot — use sandbox.run(), or call .resume() on the runMany() result.",
       );
-
-      const runLayer = Layer.mergeAll(
-        reuseFactoryLayer,
-        runDisplayLayer,
-        streamEmitterLayer,
-      );
-
-      let result;
-      try {
-        result = await Effect.runPromise(
-          Effect.gen(function* () {
-            const display = yield* Display;
-            yield* display.intro(runOptions.name ?? "sandcastle");
-
-            const orchestrateResult = yield* orchestrate({
-              hostRepoDir,
-              iterations: maxIterations,
-              prompt: resolvedPrompt,
-              branch: mergeToHead ? undefined : branch,
-              provider,
-              completionSignal: runOptions.completionSignal,
-              idleTimeoutSeconds: runOptions.idleTimeoutSeconds,
-              completionTimeoutSeconds: runOptions.completionTimeoutSeconds,
-              name: runOptions.name,
-              resumeSession: runOptions.resumeSession,
-              forkSession: runOptions.forkSession,
-              signal: runOptions.signal,
-              skipPromptExpansion: isInlinePrompt,
-              timeouts,
-              keepSourceBranch: mergeToHead,
-            });
-
-            const completion = buildCompletionMessage(
-              orchestrateResult.completionSignal,
-              orchestrateResult.iterations.length,
-            );
-            yield* display.status(completion.message, completion.severity);
-
-            for (const line of buildContextWindowLines(
-              orchestrateResult.iterations,
-            )) {
-              yield* display.text(line);
-            }
-
-            return orchestrateResult;
-          }).pipe(Effect.provide(runLayer)),
-        );
-      } catch (error: unknown) {
-        // If the signal was aborted, surface its reason verbatim
-        runOptions.signal?.throwIfAborted();
-        throw error;
-      }
-
-      const baseResult: SandboxRunResult = {
+      const { maxIterations, completionSignal, ...base } = runOptions;
+      const { result, logFilePath } = await executeSandboxRun(runOptions, {
+        kind: "many",
+        maxIterations: maxIterations ?? 1,
+        completionSignal,
+      });
+      return {
         iterations: result.iterations,
         completionSignal: result.completionSignal,
         stdout: result.stdout,
         commits: result.commits,
-        logFilePath:
-          resolvedLogging.type === "file" ? resolvedLogging.path : undefined,
+        logFilePath,
+        ...buildSandboxResumeAndFork(base, result.iterations.at(-1)?.sessionId),
       };
-
-      // Expose .resume()/.fork() only when the provider supports session
-      // capture and a session id was actually captured on the last iteration.
-      // The functions re-enter the same long-lived sandbox by calling
-      // sandboxHandle.run() — container and worktree stay warm.
-      const lastIteration = result.iterations.at(-1);
-      if (provider.sessionStorage && lastIteration?.sessionId) {
-        const capturedSessionId = lastIteration.sessionId;
-        return {
-          ...baseResult,
-          resume: (
-            nextPrompt: string,
-            resumeOptions?: ResumeSandboxRunResultOptions,
-          ): Promise<SandboxRunResult> =>
-            sandboxHandle.run({
-              ...runOptions,
-              ...resumeOptions,
-              prompt: nextPrompt,
-              promptFile: undefined,
-              maxIterations: 1,
-              resumeSession: capturedSessionId,
-            }),
-          fork: (
-            nextPrompt: string,
-            forkOptions?: ResumeSandboxRunResultOptions,
-          ): Promise<SandboxRunResult> =>
-            sandboxHandle.run({
-              ...runOptions,
-              ...forkOptions,
-              prompt: nextPrompt,
-              promptFile: undefined,
-              maxIterations: 1,
-              resumeSession: capturedSessionId,
-              forkSession: true,
-            }),
-        };
-      }
-
-      return baseResult;
     },
 
     interactive: async (

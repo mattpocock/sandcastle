@@ -103,23 +103,55 @@ You can also [create your own provider](#custom-sandbox-providers) using `create
 
 ## API
 
-Sandcastle exports a programmatic `run()` function for use in scripts, CI pipelines, or custom tooling. The examples below use `docker()`, but any `SandboxProvider` works in its place.
+Sandcastle exports two programmatic entry points for use in scripts, CI pipelines, or custom tooling. The examples below use `docker()`, but any `SandboxProvider` works in its place.
+
+- **`run()`** invokes the agent **once** and returns a flat result. It supports [structured output](#structured-output) and [session resume](#session-resume).
+- **`runMany()`** runs the agent in a **loop** — up to `maxIterations` times, stopping early when the agent emits a [completion signal](#early-termination-with-promisecompletepromise). It returns per-iteration results.
 
 ```typescript
-import { run, claudeCode } from "@ai-hero/sandcastle";
+import { run, runMany, claudeCode } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 
+// One shot
 const result = await run({
   agent: claudeCode("claude-opus-4-8"),
   sandbox: docker(),
   promptFile: ".sandcastle/prompt.md",
 });
 
-console.log(result.iterations.length); // number of iterations executed
-console.log(result.iterations); // per-iteration results with optional sessionId
+console.log(result.sessionId); // agent session id (when the provider reports one)
 console.log(result.commits); // array of { sha } for commits created
 console.log(result.branch); // target branch name
+
+// Loop until the agent outputs <promise>COMPLETE</promise>, or 10 iterations
+const loop = await runMany({
+  agent: claudeCode("claude-opus-4-8"),
+  sandbox: docker(),
+  promptFile: ".sandcastle/prompt.md",
+  maxIterations: 10,
+});
+
+console.log(loop.iterations.length); // number of iterations executed
+console.log(loop.completionSignal); // matched signal, or undefined if the cap was hit
 ```
+
+#### Migrating from the pre-split `run()`
+
+Before this split, `run()` carried both jobs. Any call that used `maxIterations` or `completionSignal` — or read `result.iterations` / `result.completionSignal` — is a looping call: rename it to `runMany()` (same options, same result shape). Every other call stays on `run()`; read `result.sessionId` / `result.sessionFilePath` / `result.usage` instead of `result.iterations[0].…`. The same rename applies to `sandbox.run()` → `sandbox.runMany()` and `worktree.run()` → `worktree.runMany()`.
+
+```diff
+- const r = await run({ agent, sandbox, promptFile, maxIterations: 10 });
+- console.log(r.iterations.length, r.completionSignal);
++ const r = await runMany({ agent, sandbox, promptFile, maxIterations: 10 });
++ console.log(r.iterations.length, r.completionSignal);
+
+- const r = await run({ agent, sandbox, prompt, output });
+- console.log(r.iterations[0]?.sessionId);
++ const r = await run({ agent, sandbox, prompt, output });
++ console.log(r.sessionId);
+```
+
+`run()` throws if it receives `maxIterations` or `completionSignal` (so an untyped loop can't silently become a one-shot), and `runMany()` throws on `output` or `resumeSession`. `runMany()` defaults `maxIterations` to `1`, so the rename is always behaviour-preserving.
 
 ### All options
 
@@ -183,9 +215,6 @@ const result = await run({
     ISSUE_NUMBER: "42",
   },
 
-  // Maximum number of agent iterations to run before stopping. Default: 1
-  maxIterations: 5,
-
   // Display name for this run, shown as a prefix in log output.
   name: "fix-issue-42",
 
@@ -233,34 +262,52 @@ const result = await run({
   },
   // logging: { type: "stdout", verbose: true }, // OR terminal mode (verbose: raw lines to stdout)
 
-  // String (or array of strings) the agent emits to end the iteration loop early.
-  // Default: "<promise>COMPLETE</promise>"
-  completionSignal: "<promise>COMPLETE</promise>",
-
   // Idle timeout in seconds — resets whenever the agent produces output. Default: 600 (10 minutes)
   idleTimeoutSeconds: 600,
 
-  // Grace window in seconds after the agent emits a completion signal but
-  // before its process has exited (a "hanging process" — typically a spawned
-  // `gh`/git child or MCP server keeping stdout open). Resets on every
-  // subsequent output line so trailing data is still captured. Default: 60
-  completionTimeoutSeconds: 60,
-
   // Structured output — extract a typed payload from the agent's stdout.
-  // Requires maxIterations === 1 and the tag must appear in the prompt.
+  // The tag must appear in the prompt.
   // output: Output.object({ tag: "result", schema: z.object({ answer: z.number() }) }),
   // output: Output.string({ tag: "summary" }),
+
+  // Grace window in seconds after the closing `</tag>` of `output` appears
+  // but the agent process has not exited (a "hanging process" — typically a
+  // spawned `gh`/git child or MCP server keeping stdout open). Only applies
+  // when `output` is set. Default: 60
+  completionTimeoutSeconds: 60,
 });
 
-console.log(result.iterations.length); // number of iterations executed
-console.log(result.completionSignal); // matched signal string, or undefined if none fired
+console.log(result.sessionId); // agent session id, or undefined
+console.log(result.usage); // token usage, or undefined
 console.log(result.commits); // array of { sha } for commits created
 console.log(result.branch); // target branch name
 ```
 
+`runMany()` accepts the same options **except** `output` and `resumeSession`, plus the loop options:
+
+```typescript
+const loop = await runMany({
+  // ...every run() option above except output / resumeSession...
+
+  // Maximum number of agent iterations to run before stopping. Default: 1
+  maxIterations: 5,
+
+  // String (or array of strings) the agent emits to end the iteration loop early.
+  // Default: "<promise>COMPLETE</promise>"
+  completionSignal: "<promise>COMPLETE</promise>",
+
+  // Grace window in seconds after the agent emits a completion signal but
+  // before its process has exited. Default: 60
+  completionTimeoutSeconds: 60,
+});
+
+console.log(loop.iterations.length); // number of iterations executed
+console.log(loop.completionSignal); // matched signal string, or undefined if none fired
+```
+
 ### `createSandbox()` — reusable sandbox
 
-Use `createSandbox()` when you need to run multiple agents (or multiple rounds of the same agent) inside a single sandbox. It creates the sandbox once, and you call `sandbox.run()` as many times as you need. This avoids repeated container startup costs and keeps all runs on the same branch.
+Use `createSandbox()` when you need to run multiple agents (or multiple rounds of the same agent) inside a single sandbox. It creates the sandbox once, and you call `sandbox.run()` (one shot) or `sandbox.runMany()` (loop) as many times as you need. This avoids repeated container startup costs and keeps all runs on the same branch.
 
 Use `run()` instead when you only need a single one-shot invocation — it handles sandbox lifecycle automatically.
 
@@ -295,8 +342,8 @@ await using sandbox = await createSandbox({
   hooks: { sandbox: { onSandboxReady: [{ command: "npm install" }] } },
 });
 
-// Step 1: implement
-const implResult = await sandbox.run({
+// Step 1: implement (loop until <promise>COMPLETE</promise>, up to 5 iterations)
+const implResult = await sandbox.runMany({
   agent: claudeCode("claude-opus-4-8"),
   promptFile: ".sandcastle/implement.md",
   maxIterations: 5,
@@ -309,7 +356,7 @@ const reviewResult = await sandbox.run({
 });
 ```
 
-Commits from all `run()` calls accumulate on the same branch. The sandbox container stays alive between runs, so installed dependencies and build artifacts persist.
+Commits from all `run()` / `runMany()` calls accumulate on the same branch. The sandbox container stays alive between runs, so installed dependencies and build artifacts persist.
 
 `sandbox.exec()` lets the harness run shell commands directly in the same warm sandbox — handy for gating an implement step on a quick verification before kicking off the review:
 
@@ -320,7 +367,7 @@ await using sandbox = await createSandbox({
   hooks: { sandbox: { onSandboxReady: [{ command: "npm install" }] } },
 });
 
-await sandbox.run({
+await sandbox.runMany({
   agent: claudeCode("claude-opus-4-8"),
   promptFile: ".sandcastle/implement.md",
   maxIterations: 5,
@@ -375,7 +422,8 @@ if (closeResult.preservedWorktreePath) {
 | ----------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
 | `branch`                | string                                                                   | The branch the sandbox is on                                                                                              |
 | `worktreePath`          | string                                                                   | Host path to the worktree                                                                                                 |
-| `run(options)`          | `(SandboxRunOptions) => Promise<SandboxRunResult>`                       | Invoke an agent inside the existing sandbox                                                                               |
+| `run(options)`          | `(SandboxRunOptions) => Promise<SandboxRunResult>`                       | Invoke an agent once inside the existing sandbox                                                                          |
+| `runMany(options)`      | `(SandboxRunManyOptions) => Promise<SandboxRunManyResult>`               | Invoke an agent in a loop (until the completion signal or `maxIterations`) inside the existing sandbox                    |
 | `interactive(options)`  | `(SandboxInteractiveOptions) => Promise<SandboxInteractiveResult>`       | Launch an interactive session in the sandbox                                                                              |
 | `exec(cmd, options?)`   | `(command: string, options?: SandboxExecOptions) => Promise<ExecResult>` | Run a shell command in the sandbox. `cwd` defaults to the sandbox repo path. Non-zero `exitCode` is returned, not thrown. |
 | `close()`               | `() => Promise<CloseResult>`                                             | Tear down the container and sandbox                                                                                       |
@@ -383,32 +431,34 @@ if (closeResult.preservedWorktreePath) {
 
 #### `SandboxRunOptions`
 
-| Option                     | Type               | Default                       | Description                                                                                                                          |
-| -------------------------- | ------------------ | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `agent`                    | AgentProvider      | —                             | **Required.** Agent provider (e.g. `claudeCode("claude-opus-4-8")`)                                                                  |
-| `prompt`                   | string             | —                             | Inline prompt (mutually exclusive with `promptFile`)                                                                                 |
-| `promptFile`               | string             | —                             | Path to prompt file (mutually exclusive with `prompt`)                                                                               |
-| `promptArgs`               | PromptArgs         | —                             | Key-value map for `{{KEY}}` placeholder substitution                                                                                 |
-| `maxIterations`            | number             | `1`                           | Maximum iterations to run                                                                                                            |
-| `completionSignal`         | string \| string[] | `<promise>COMPLETE</promise>` | String(s) the agent emits to stop the iteration loop early                                                                           |
-| `idleTimeoutSeconds`       | number             | `600`                         | Idle timeout in seconds — resets on each agent output event                                                                          |
-| `completionTimeoutSeconds` | number             | `60`                          | Grace window after the completion signal is seen but the agent process hasn't exited                                                 |
-| `name`                     | string             | —                             | Display name for the run                                                                                                             |
-| `logging`                  | object             | file (auto-generated)         | `{ type: 'file', path }` or `{ type: 'stdout' }`                                                                                     |
-| `resumeSession`            | string             | —                             | Resume a prior session by ID for agents that support resume. Incompatible with `maxIterations > 1`. Session file must exist on host. |
-| `signal`                   | AbortSignal        | —                             | Cancels the run when aborted; handle stays usable afterward                                                                          |
+| Option               | Type          | Default               | Description                                                                                                 |
+| -------------------- | ------------- | --------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `agent`              | AgentProvider | —                     | **Required.** Agent provider (e.g. `claudeCode("claude-opus-4-8")`)                                         |
+| `prompt`             | string        | —                     | Inline prompt (mutually exclusive with `promptFile`)                                                        |
+| `promptFile`         | string        | —                     | Path to prompt file (mutually exclusive with `prompt`)                                                      |
+| `promptArgs`         | PromptArgs    | —                     | Key-value map for `{{KEY}}` placeholder substitution                                                        |
+| `idleTimeoutSeconds` | number        | `600`                 | Idle timeout in seconds — resets on each agent output event                                                 |
+| `name`               | string        | —                     | Display name for the run                                                                                    |
+| `logging`            | object        | file (auto-generated) | `{ type: 'file', path }` or `{ type: 'stdout' }`                                                            |
+| `resumeSession`      | string        | —                     | Resume a prior session by ID for agents that support resume. `run()` only. Session file must exist on host. |
+| `signal`             | AbortSignal   | —                     | Cancels the run when aborted; handle stays usable afterward                                                 |
+
+`SandboxRunManyOptions` takes the same fields except `resumeSession`, plus `maxIterations` (default `1`), `completionSignal` (default `<promise>COMPLETE</promise>`) and `completionTimeoutSeconds` (default `60`).
 
 #### `SandboxRunResult`
 
 | Field                      | Type                                                                                     | Description                                                                                                                         |
 | -------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `iterations`               | `IterationResult[]`                                                                      | Per-iteration results (use `.length` for the count)                                                                                 |
-| `completionSignal`         | string?                                                                                  | The matched completion signal string, or `undefined` if none fired                                                                  |
-| `stdout`                   | string                                                                                   | Combined agent output from all iterations                                                                                           |
+| `sessionId`                | string?                                                                                  | Agent session ID, or `undefined` if the provider does not emit one                                                                  |
+| `sessionFilePath`          | string?                                                                                  | Absolute host path to the captured session JSONL, or `undefined` when capture is off                                                |
+| `usage`                    | `IterationUsage`?                                                                        | Token usage snapshot, or `undefined` when unavailable                                                                               |
+| `stdout`                   | string                                                                                   | Agent output                                                                                                                        |
 | `commits`                  | `{ sha }[]`                                                                              | Commits created during the run                                                                                                      |
 | `logFilePath`              | string?                                                                                  | Path to the log file (only when logging to a file)                                                                                  |
 | `resume(prompt, options?)` | `(prompt: string, options?: ResumeSandboxRunResultOptions) => Promise<SandboxRunResult>` | Continue the captured session for one iteration inside the same warm sandbox. Present only when the provider captured a session id. |
 | `fork(prompt, options?)`   | `(prompt: string, options?: ResumeSandboxRunResultOptions) => Promise<SandboxRunResult>` | Fork the captured session for one iteration inside the same warm sandbox. The parent session is left intact (ADR 0018).             |
+
+`SandboxRunManyResult` replaces the session fields with `iterations: IterationResult[]` and `completionSignal?: string`; its `resume()` / `fork()` continue the **last** iteration's session and return a one-shot `SandboxRunResult`.
 
 #### `CloseResult`
 
@@ -442,11 +492,11 @@ await wt.interactive({
   prompt: "Explore the codebase and understand the bug.",
 });
 
-// Run an AFK agent in the worktree (sandbox is required)
-const result = await wt.run({
+// Run an AFK agent loop in the worktree (sandbox is required)
+const result = await wt.runMany({
   agent: claudeCode("claude-opus-4-8"),
   sandbox: docker({ imageName: "sandcastle:myrepo" }),
-  prompt: "Fix issue #42.",
+  prompt: "Fix issue #42. Output <promise>COMPLETE</promise> when done.",
   maxIterations: 3,
 });
 console.log(result.commits); // commits made during the run
@@ -465,9 +515,9 @@ await sandbox.close();
 // wt.close() cleans up the worktree
 ```
 
-`wt.close()` checks for uncommitted changes: if the worktree is dirty, it's preserved on disk; if clean, it's removed. `await using` calls `close()` automatically. The worktree persists after `run()`, `interactive()`, and `createSandbox()` complete, so you can hand it to another agent or inspect it.
+`wt.close()` checks for uncommitted changes: if the worktree is dirty, it's preserved on disk; if clean, it's removed. `await using` calls `close()` automatically. The worktree persists after `run()`, `runMany()`, `interactive()`, and `createSandbox()` complete, so you can hand it to another agent or inspect it.
 
-With `branchStrategy: { type: "merge-to-head" }`, each `wt.run()` / `wt.interactive()` merges the agent's commits back to the host's current branch before returning, and the worktree's source branch is preserved across calls so subsequent ones can reuse the same handle. (This differs from top-level `run()`, where the temp branch is deleted after the merge.)
+With `branchStrategy: { type: "merge-to-head" }`, each `wt.run()` / `wt.runMany()` / `wt.interactive()` merges the agent's commits back to the host's current branch before returning, and the worktree's source branch is preserved across calls so subsequent ones can reuse the same handle. (This differs from top-level `run()`, where the temp branch is deleted after the merge.)
 
 **Split ownership**: When a sandbox is created via `wt.createSandbox()`, `sandbox.close()` tears down the container only — the worktree remains. `wt.close()` is responsible for worktree cleanup. This differs from the top-level `createSandbox()`, where `sandbox.close()` owns both container and worktree.
 
@@ -481,15 +531,16 @@ With `branchStrategy: { type: "merge-to-head" }`, each `wt.run()` / `wt.interact
 
 #### `Worktree`
 
-| Property / Method        | Type                                                                  | Description                                         |
-| ------------------------ | --------------------------------------------------------------------- | --------------------------------------------------- |
-| `branch`                 | string                                                                | The branch the worktree is on                       |
-| `worktreePath`           | string                                                                | Host path to the worktree                           |
-| `run(options)`           | `(options: WorktreeRunOptions) => Promise<WorktreeRunResult>`         | Run an AFK agent in the worktree (sandbox required) |
-| `interactive(options)`   | `(options: WorktreeInteractiveOptions) => Promise<InteractiveResult>` | Run an interactive agent session in the worktree    |
-| `createSandbox(options)` | `(options: WorktreeCreateSandboxOptions) => Promise<Sandbox>`         | Create a long-lived sandbox backed by this worktree |
-| `close()`                | `() => Promise<CloseResult>`                                          | Clean up the worktree (preserves if dirty)          |
-| `[Symbol.asyncDispose]`  | `() => Promise<void>`                                                 | Auto cleanup via `await using`                      |
+| Property / Method        | Type                                                                  | Description                                              |
+| ------------------------ | --------------------------------------------------------------------- | -------------------------------------------------------- |
+| `branch`                 | string                                                                | The branch the worktree is on                            |
+| `worktreePath`           | string                                                                | Host path to the worktree                                |
+| `run(options)`           | `(options: WorktreeRunOptions) => Promise<WorktreeRunResult>`         | Run an AFK agent once in the worktree (sandbox required) |
+| `runMany(options)`       | `(options: WorktreeRunManyOptions) => Promise<WorktreeRunManyResult>` | Run an AFK agent loop in the worktree (sandbox required) |
+| `interactive(options)`   | `(options: WorktreeInteractiveOptions) => Promise<InteractiveResult>` | Run an interactive agent session in the worktree         |
+| `createSandbox(options)` | `(options: WorktreeCreateSandboxOptions) => Promise<Sandbox>`         | Create a long-lived sandbox backed by this worktree      |
+| `close()`                | `() => Promise<CloseResult>`                                          | Clean up the worktree (preserves if dirty)               |
+| `[Symbol.asyncDispose]`  | `() => Promise<void>`                                                 | Auto cleanup via `await using`                           |
 
 #### `WorktreeInteractiveOptions`
 
@@ -507,34 +558,36 @@ With `branchStrategy: { type: "merge-to-head" }`, each `wt.run()` / `wt.interact
 
 #### `WorktreeRunOptions`
 
-| Option                     | Type                   | Default | Description                                                                                                                          |
-| -------------------------- | ---------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `agent`                    | AgentProvider          | —       | **Required.** Agent provider                                                                                                         |
-| `sandbox`                  | SandboxProvider        | —       | **Required.** Sandbox provider (AFK agents must be sandboxed)                                                                        |
-| `prompt`                   | string                 | —       | Inline prompt (mutually exclusive with `promptFile`)                                                                                 |
-| `promptFile`               | string                 | —       | Path to prompt file                                                                                                                  |
-| `maxIterations`            | number                 | 1       | Maximum iterations to run                                                                                                            |
-| `completionSignal`         | string \| string[]     | —       | Substring(s) to stop the iteration loop early                                                                                        |
-| `idleTimeoutSeconds`       | number                 | 600     | Idle timeout in seconds                                                                                                              |
-| `completionTimeoutSeconds` | number                 | 60      | Grace window after completion signal is seen but agent process hasn't exited                                                         |
-| `name`                     | string                 | —       | Optional run name                                                                                                                    |
-| `logging`                  | LoggingOption          | file    | Logging mode                                                                                                                         |
-| `hooks`                    | SandboxHooks           | —       | Lifecycle hooks (`host.*`, `sandbox.*`)                                                                                              |
-| `promptArgs`               | PromptArgs             | —       | Key-value map for `{{KEY}}` placeholder substitution                                                                                 |
-| `env`                      | Record<string, string> | —       | Environment variables to inject into the sandbox                                                                                     |
-| `resumeSession`            | string                 | —       | Resume a prior session by ID for agents that support resume. Incompatible with `maxIterations > 1`. Session file must exist on host. |
-| `signal`                   | AbortSignal            | —       | Cancel the run when aborted. Kills the in-flight agent subprocess; the worktree is preserved on disk. Rejects with `signal.reason`.  |
+| Option               | Type                   | Default | Description                                                                                                                         |
+| -------------------- | ---------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `agent`              | AgentProvider          | —       | **Required.** Agent provider                                                                                                        |
+| `sandbox`            | SandboxProvider        | —       | **Required.** Sandbox provider (AFK agents must be sandboxed)                                                                       |
+| `prompt`             | string                 | —       | Inline prompt (mutually exclusive with `promptFile`)                                                                                |
+| `promptFile`         | string                 | —       | Path to prompt file                                                                                                                 |
+| `idleTimeoutSeconds` | number                 | 600     | Idle timeout in seconds                                                                                                             |
+| `name`               | string                 | —       | Optional run name                                                                                                                   |
+| `logging`            | LoggingOption          | file    | Logging mode                                                                                                                        |
+| `hooks`              | SandboxHooks           | —       | Lifecycle hooks (`host.*`, `sandbox.*`)                                                                                             |
+| `promptArgs`         | PromptArgs             | —       | Key-value map for `{{KEY}}` placeholder substitution                                                                                |
+| `env`                | Record<string, string> | —       | Environment variables to inject into the sandbox                                                                                    |
+| `resumeSession`      | string                 | —       | Resume a prior session by ID for agents that support resume. `run()` only. Session file must exist on host.                         |
+| `signal`             | AbortSignal            | —       | Cancel the run when aborted. Kills the in-flight agent subprocess; the worktree is preserved on disk. Rejects with `signal.reason`. |
+
+`WorktreeRunManyOptions` takes the same fields except `resumeSession`, plus `maxIterations` (default `1`), `completionSignal` (default `<promise>COMPLETE</promise>`) and `completionTimeoutSeconds` (default `60`).
 
 #### `WorktreeRunResult`
 
-| Property           | Type                | Description                                            |
-| ------------------ | ------------------- | ------------------------------------------------------ |
-| `iterations`       | `IterationResult[]` | Per-iteration results (use `.length` for the count)    |
-| `completionSignal` | string              | The matched completion signal, or undefined            |
-| `stdout`           | string              | Combined stdout output from all agent iterations       |
-| `commits`          | { sha: string }[]   | List of commits made by the agent during the run       |
-| `branch`           | string              | The branch name the agent worked on                    |
-| `logFilePath`      | string              | Path to the log file, if logging was drained to a file |
+| Property          | Type              | Description                                            |
+| ----------------- | ----------------- | ------------------------------------------------------ |
+| `sessionId`       | string?           | Agent session ID, or undefined                         |
+| `sessionFilePath` | string?           | Host path to the captured session JSONL, or undefined  |
+| `usage`           | `IterationUsage`? | Token usage snapshot, or undefined                     |
+| `stdout`          | string            | Agent output                                           |
+| `commits`         | { sha: string }[] | List of commits made by the agent during the run       |
+| `branch`          | string            | The branch name the agent worked on                    |
+| `logFilePath`     | string            | Path to the log file, if logging was drained to a file |
+
+`WorktreeRunManyResult` replaces the session fields with `iterations: IterationResult[]` and `completionSignal?: string`.
 
 #### `WorktreeCreateSandboxOptions`
 
@@ -642,20 +695,20 @@ Passing `SOURCE_BRANCH` or `TARGET_BRANCH` in `promptArgs` is an error — built
 
 ### Early termination with `<promise>COMPLETE</promise>`
 
-When the agent outputs `<promise>COMPLETE</promise>`, the orchestrator stops the iteration loop early. This is a convention you document in your prompt for the agent to follow — the engine never injects it.
+`runMany()` stops its iteration loop early when the agent outputs `<promise>COMPLETE</promise>`. This is a convention you document in your prompt for the agent to follow — the engine never injects it.
 
-This is useful for task-based workflows where the agent should stop once it has finished, rather than running all remaining iterations.
+This is useful for task-based workflows where the agent should stop once it has finished, rather than running all remaining iterations. The one-shot `run()` has no loop to end, so it does **not** watch for a completion signal — don't ask a `run()` agent to emit one.
 
-You can override the default signal by passing `completionSignal` to `run()`. It accepts a single string or an array of strings:
+You can override the default signal by passing `completionSignal` to `runMany()`. It accepts a single string or an array of strings:
 
 ```ts
-await run({
+await runMany({
   // ...
   completionSignal: "DONE",
 });
 
 // Or pass multiple signals — the loop stops on the first match:
-await run({
+await runMany({
   // ...
   completionSignal: ["TASK_COMPLETE", "TASK_ABORTED"],
 });
@@ -663,24 +716,34 @@ await run({
 
 Tell the agent to output your chosen string(s) in the prompt, and the orchestrator will stop when it detects any of them. The matched signal is returned as `result.completionSignal`.
 
-#### Hanging processes after the completion signal
+#### Hanging processes after the agent finishes
 
-The agent process is expected to exit shortly after emitting the completion signal. When a child it spawned — a `gh`/git subprocess, a long-lived MCP server, etc. — inherits the agent's stdout pipe and keeps it open, the parent process can linger long past its logical end. Sandcastle would otherwise wait for the full `idleTimeoutSeconds` and fail with `AgentIdleTimeoutError`, throwing away the commits the agent already made.
+The agent process is expected to exit shortly after it finishes. When a child it spawned — a `gh`/git subprocess, a long-lived MCP server, etc. — inherits the agent's stdout pipe and keeps it open, the parent process can linger long past its logical end. Sandcastle would otherwise wait for the full `idleTimeoutSeconds` and fail with `AgentIdleTimeoutError`, throwing away the commits the agent already made.
 
-Instead, once the completion signal is observed in the output buffer, Sandcastle swaps in a short **completion timeout** (default 60 s). When it expires, the run resolves successfully with a warning that the process was hanging; `result.commits` and `result.completionSignal` are populated as if the process had exited cleanly. The timer resets on every subsequent output line, so trailing data emitted after the signal — token-usage events, terminal `result` events, a structured-output `<tag>` — is still captured.
+Instead, once a **completion marker** is observed in the output buffer, Sandcastle swaps in a short **completion timeout** (default 60 s). When it expires, the run resolves successfully with a warning that the process was hanging; `result.commits` (and, for `runMany()`, `result.completionSignal`) are populated as if the process had exited cleanly. The timer resets on every subsequent output line, so trailing data — token-usage events, terminal `result` events — is still captured.
+
+The completion marker depends on the entry point:
+
+| Entry point              | Completion marker                                                 |
+| ------------------------ | ----------------------------------------------------------------- |
+| `runMany()`              | The completion signal (ADR 0019)                                  |
+| `run()` with `output`    | The closing tag of the output block, e.g. `</plan>`               |
+| `run()` without `output` | **None** — a hanging process rides `idleTimeoutSeconds` and fails |
+
+If you rely on hang protection for a one-shot agent that has no structured output, call `runMany()` (it defaults to one iteration) and have the prompt emit the completion signal.
 
 A clean process exit always wins the race, so healthy runs gain zero added latency. The completion timeout only matters when the process hangs.
 
 Tune the window with `completionTimeoutSeconds`:
 
 ```ts
-await run({
+await runMany({
   // ...
   completionTimeoutSeconds: 30, // shorter grace window
 });
 ```
 
-This is independent of `idleTimeoutSeconds`. They cover different phases: `idleTimeoutSeconds` runs **before** any signal is seen (genuinely stuck agent → fail); `completionTimeoutSeconds` runs **after** the signal is seen (hanging process → succeed with warning). See [ADR 0019](docs/adr/0019-completion-timeout-for-hanging-process.md).
+This is independent of `idleTimeoutSeconds`. They cover different phases: `idleTimeoutSeconds` runs **before** any marker is seen (genuinely stuck agent → fail); `completionTimeoutSeconds` runs **after** it is seen (hanging process → succeed with warning). See [ADR 0019](docs/adr/0019-completion-timeout-for-hanging-process.md) and [ADR 0021](docs/adr/0021-run-completion-timeout-on-output-closing-tag.md).
 
 ### Structured output
 
@@ -708,7 +771,7 @@ console.log(result.output.summary); // typed as string
 console.log(result.output.score); // typed as number
 ```
 
-`Output.string({ tag })` extracts the tag contents as a plain string (trimmed, no JSON parsing). Both helpers require `maxIterations` to be `1` (the default). The resolved prompt must contain the configured opening tag literal.
+`Output.string({ tag })` extracts the tag contents as a plain string (trimmed, no JSON parsing). Structured output is `run()`-only — `runMany()` does not accept `output`. The resolved prompt must contain the configured opening tag literal. The closing tag (`</result>` above) also arms the [completion timeout](#hanging-processes-after-the-agent-finishes), so a process that hangs after emitting its answer is force-completed instead of failing on idle.
 
 When extraction or validation fails, `run()` throws a `StructuredOutputError`. Alongside `tag`, `rawMatched`, `cause`, `commits`, `branch`, and `preservedWorktreePath`, the error carries the `sessionId` (and `sessionFilePath`, when the session was captured) of the run that produced the bad output.
 
@@ -832,39 +895,63 @@ Removes the Podman image.
 
 ### `RunOptions`
 
-| Option                     | Type               | Default                       | Description                                                                                                                                                                                                                  |
-| -------------------------- | ------------------ | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agent`                    | AgentProvider      | —                             | **Required.** Agent provider (e.g. `claudeCode("claude-opus-4-8")`, `pi("claude-sonnet-4-6")`, `codex("gpt-5.4")`, `cursor("composer-2")`, `opencode("opencode/big-pickle")`, `copilot("claude-sonnet-4.5")`)                |
-| `sandbox`                  | SandboxProvider    | —                             | **Required.** Sandbox provider (e.g. `docker()`, `podman()`, `docker({ imageName: "sandcastle:local" })`)                                                                                                                    |
-| `cwd`                      | string             | `process.cwd()`               | Host repo directory — anchor for `.sandcastle/` artifacts and git operations. Relative paths resolve against `process.cwd()`.                                                                                                |
-| `prompt`                   | string             | —                             | Inline prompt (mutually exclusive with `promptFile`)                                                                                                                                                                         |
-| `promptFile`               | string             | —                             | Path to prompt file (mutually exclusive with `prompt`). Resolves against `process.cwd()`, **not** `cwd`.                                                                                                                     |
-| `maxIterations`            | number             | `1`                           | Maximum iterations to run                                                                                                                                                                                                    |
-| `hooks`                    | SandboxHooks       | —                             | Lifecycle hooks (`host.*`, `sandbox.*`)                                                                                                                                                                                      |
-| `name`                     | string             | —                             | Display name for the run, shown as a prefix in log output                                                                                                                                                                    |
-| `promptArgs`               | PromptArgs         | —                             | Key-value map for `{{KEY}}` placeholder substitution                                                                                                                                                                         |
-| `branchStrategy`           | BranchStrategy     | per-provider default          | Branch strategy: `{ type: 'head' }`, `{ type: 'merge-to-head' }`, or `{ type: 'branch', branch: '…' }`                                                                                                                       |
-| `copyToWorktree`           | string[]           | —                             | Host-relative file paths to copy into the sandbox before start (not supported with `branchStrategy: { type: 'head' }`)                                                                                                       |
-| `logging`                  | object             | file (auto-generated)         | `{ type: 'file', path }` or `{ type: 'stdout' }`                                                                                                                                                                             |
-| `completionSignal`         | string \| string[] | `<promise>COMPLETE</promise>` | String or array of strings the agent emits to stop the iteration loop early                                                                                                                                                  |
-| `idleTimeoutSeconds`       | number             | `600`                         | Idle timeout in seconds — resets on each agent output event                                                                                                                                                                  |
-| `completionTimeoutSeconds` | number             | `60`                          | Grace window in seconds after the completion signal is observed but the agent process has not exited (hanging process). See [Hanging processes after the completion signal](#hanging-processes-after-the-completion-signal). |
-| `resumeSession`            | string             | —                             | Resume a prior session by ID for agents that support resume. Incompatible with `maxIterations > 1`. Session file must exist on host.                                                                                         |
-| `signal`                   | AbortSignal        | —                             | Cancel the run when aborted. Kills the in-flight agent subprocess and cancels lifecycle hooks; the worktree is preserved on disk. Rejects with `signal.reason`.                                                              |
-| `timeouts`                 | Timeouts           | —                             | Override default timeouts for built-in lifecycle steps: `copyToWorktreeMs` (60 000), `gitSetupMs` (10 000), `commitCollectionMs` (30 000), `mergeToHostMs` (30 000).                                                         |
-| `output`                   | OutputDefinition   | —                             | Structured output definition (`Output.object(…)` or `Output.string(…)`). Requires `maxIterations === 1`. See [Structured output](#structured-output).                                                                        |
+| Option                     | Type             | Default               | Description                                                                                                                                                                                                                  |
+| -------------------------- | ---------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent`                    | AgentProvider    | —                     | **Required.** Agent provider (e.g. `claudeCode("claude-opus-4-8")`, `pi("claude-sonnet-4-6")`, `codex("gpt-5.4")`, `cursor("composer-2")`, `opencode("opencode/big-pickle")`, `copilot("claude-sonnet-4.5")`)                |
+| `sandbox`                  | SandboxProvider  | —                     | **Required.** Sandbox provider (e.g. `docker()`, `podman()`, `docker({ imageName: "sandcastle:local" })`)                                                                                                                    |
+| `cwd`                      | string           | `process.cwd()`       | Host repo directory — anchor for `.sandcastle/` artifacts and git operations. Relative paths resolve against `process.cwd()`.                                                                                                |
+| `prompt`                   | string           | —                     | Inline prompt (mutually exclusive with `promptFile`)                                                                                                                                                                         |
+| `promptFile`               | string           | —                     | Path to prompt file (mutually exclusive with `prompt`). Resolves against `process.cwd()`, **not** `cwd`.                                                                                                                     |
+| `hooks`                    | SandboxHooks     | —                     | Lifecycle hooks (`host.*`, `sandbox.*`)                                                                                                                                                                                      |
+| `name`                     | string           | —                     | Display name for the run, shown as a prefix in log output                                                                                                                                                                    |
+| `promptArgs`               | PromptArgs       | —                     | Key-value map for `{{KEY}}` placeholder substitution                                                                                                                                                                         |
+| `branchStrategy`           | BranchStrategy   | per-provider default  | Branch strategy: `{ type: 'head' }`, `{ type: 'merge-to-head' }`, or `{ type: 'branch', branch: '…' }`                                                                                                                       |
+| `copyToWorktree`           | string[]         | —                     | Host-relative file paths to copy into the sandbox before start (not supported with `branchStrategy: { type: 'head' }`)                                                                                                       |
+| `logging`                  | object           | file (auto-generated) | `{ type: 'file', path }` or `{ type: 'stdout' }`                                                                                                                                                                             |
+| `idleTimeoutSeconds`       | number           | `600`                 | Idle timeout in seconds — resets on each agent output event                                                                                                                                                                  |
+| `completionTimeoutSeconds` | number           | `60`                  | Grace window in seconds after the `output` closing tag is observed but the agent process has not exited (hanging process). Only applies with `output`. See [Hanging processes](#hanging-processes-after-the-agent-finishes). |
+| `resumeSession`            | string           | —                     | Resume a prior session by ID for agents that support resume. Session file must exist on host.                                                                                                                                |
+| `signal`                   | AbortSignal      | —                     | Cancel the run when aborted. Kills the in-flight agent subprocess and cancels lifecycle hooks; the worktree is preserved on disk. Rejects with `signal.reason`.                                                              |
+| `timeouts`                 | Timeouts         | —                     | Override default timeouts for built-in lifecycle steps: `copyToWorktreeMs` (60 000), `gitSetupMs` (10 000), `commitCollectionMs` (30 000), `mergeToHostMs` (30 000).                                                         |
+| `output`                   | OutputDefinition | —                     | Structured output definition (`Output.object(…)` or `Output.string(…)`). See [Structured output](#structured-output).                                                                                                        |
+
+### `RunManyOptions`
+
+Every `RunOptions` field except `output` and `resumeSession`, plus:
+
+| Option                     | Type               | Default                       | Description                                                                                                            |
+| -------------------------- | ------------------ | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `maxIterations`            | number             | `1`                           | Maximum iterations to run                                                                                              |
+| `completionSignal`         | string \| string[] | `<promise>COMPLETE</promise>` | String or array of strings the agent emits to stop the iteration loop early                                            |
+| `completionTimeoutSeconds` | number             | `60`                          | Grace window in seconds after the completion signal is observed but the agent process has not exited (hanging process) |
 
 ### `RunResult`
 
-| Field              | Type                | Description                                                        |
-| ------------------ | ------------------- | ------------------------------------------------------------------ |
-| `iterations`       | `IterationResult[]` | Per-iteration results (use `.length` for the count)                |
-| `completionSignal` | string?             | The matched completion signal string, or `undefined` if none fired |
-| `stdout`           | string              | Agent output                                                       |
-| `commits`          | `{ sha }[]`         | Commits created during the run                                     |
-| `branch`           | string              | Target branch name                                                 |
-| `logFilePath`      | string?             | Path to the log file (only when logging to a file)                 |
-| `output`           | T?                  | Typed structured output (only present when `output` option is set) |
+| Field                   | Type              | Description                                                                          |
+| ----------------------- | ----------------- | ------------------------------------------------------------------------------------ |
+| `sessionId`             | string?           | Agent session ID, or `undefined` if the provider does not emit one                   |
+| `sessionFilePath`       | string?           | Absolute host path to the captured session JSONL, or `undefined` when capture is off |
+| `usage`                 | `IterationUsage`? | Token usage snapshot, or `undefined` when unavailable                                |
+| `stdout`                | string            | Agent output                                                                         |
+| `commits`               | `{ sha }[]`       | Commits created during the run                                                       |
+| `branch`                | string            | Target branch name                                                                   |
+| `logFilePath`           | string?           | Path to the log file (only when logging to a file)                                   |
+| `preservedWorktreePath` | string?           | Host path to the preserved worktree, when it had uncommitted changes                 |
+| `output`                | T?                | Typed structured output (only present when `output` option is set)                   |
+| `resume` / `fork`       | function?         | Continue / fork the session for one iteration — see below                            |
+
+### `RunManyResult`
+
+| Field                   | Type                | Description                                                                             |
+| ----------------------- | ------------------- | --------------------------------------------------------------------------------------- |
+| `iterations`            | `IterationResult[]` | Per-iteration results (use `.length` for the count)                                     |
+| `completionSignal`      | string?             | The matched completion signal string, or `undefined` if none fired                      |
+| `stdout`                | string              | Combined agent output from all iterations                                               |
+| `commits`               | `{ sha }[]`         | Commits created during the run                                                          |
+| `branch`                | string              | Target branch name                                                                      |
+| `logFilePath`           | string?             | Path to the log file (only when logging to a file)                                      |
+| `preservedWorktreePath` | string?             | Host path to the preserved worktree, when it had uncommitted changes                    |
+| `resume` / `fork`       | function?           | Continue / fork the **last** iteration's session for one iteration; returns `RunResult` |
 
 ### `IterationResult`
 
@@ -904,7 +991,7 @@ const result = await run({
 });
 ```
 
-You can also continue the last captured session from a result:
+You can also continue the last captured session from a result (`run()` or `runMany()` — either way, `.resume()` runs exactly one iteration and returns a one-shot `RunResult`):
 
 ```typescript
 const first = await run({
@@ -922,9 +1009,8 @@ Before the sandbox starts, Sandcastle validates that the session file exists on 
 
 Constraints:
 
-- `resumeSession` is incompatible with `maxIterations > 1` (throws before sandbox creation).
+- `resumeSession` is a `run()` option — `runMany()` rejects it, because "resume then loop" has no well-defined meaning (ADR 0011).
 - The provider's host session file must exist (throws before sandbox creation).
-- Only iteration 1 receives the resume flag; subsequent iterations (if any) start fresh.
 - Providers without resume support reject `resumeSession`.
 
 ### Session fork
