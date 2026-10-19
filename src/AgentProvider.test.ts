@@ -451,6 +451,95 @@ describe("pi factory", () => {
     ]);
   });
 
+  it("parseStreamLine extracts usage from agent_end event", () => {
+    const provider = pi("claude-sonnet-4-6");
+    const line = JSON.stringify({
+      type: "agent_end",
+      messages: [
+        { role: "user", content: [{ type: "text", text: "Do the thing" }] },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "Done" }],
+          usage: {
+            input: 3,
+            output: 4,
+            cacheRead: 0,
+            cacheWrite: 2132,
+            totalTokens: 2139,
+          },
+        },
+      ],
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "result", result: "Done" },
+      {
+        type: "usage",
+        usage: {
+          inputTokens: 3,
+          cacheCreationInputTokens: 2132,
+          cacheReadInputTokens: 0,
+          outputTokens: 4,
+        },
+      },
+    ]);
+  });
+
+  it("parseStreamLine sums usage across every assistant message", () => {
+    const provider = pi("claude-sonnet-4-6");
+    const usage = (input: number, cacheRead: number) => ({
+      input,
+      output: 1,
+      cacheRead,
+      cacheWrite: 0,
+      totalTokens: input + cacheRead + 1,
+    });
+    const line = JSON.stringify({
+      type: "agent_end",
+      messages: [
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "first" }],
+          usage: usage(10, 100),
+        },
+        { role: "user", content: [{ type: "text", text: "more" }] },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "second" }],
+          usage: usage(20, 200),
+        },
+      ],
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "result", result: "second" },
+      {
+        type: "usage",
+        usage: {
+          inputTokens: 30,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 300,
+          outputTokens: 2,
+        },
+      },
+    ]);
+  });
+
+  it("parseStreamLine omits usage when agent_end has no parseable usage", () => {
+    const provider = pi("claude-sonnet-4-6");
+    const line = JSON.stringify({
+      type: "agent_end",
+      messages: [
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "Done" }],
+          usage: { input: "lots", output: 4 },
+        },
+      ],
+    });
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "result", result: "Done" },
+    ]);
+  });
+
   it("parseStreamLine extracts session id from session header line", () => {
     const provider = pi("claude-sonnet-4-6");
     const line = JSON.stringify({
