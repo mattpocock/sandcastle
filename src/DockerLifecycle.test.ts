@@ -10,7 +10,7 @@ vi.mock("node:child_process", async (importOriginal) => {
   };
 });
 
-import { execFile } from "node:child_process";
+import { execFile, type ChildProcess } from "node:child_process";
 import { startContainer, buildImage } from "./DockerLifecycle.js";
 
 const mockExecFile = vi.mocked(execFile);
@@ -288,6 +288,67 @@ describe("startContainer", () => {
     );
     const runArgs = runCall![1] as string[];
     expect(runArgs).not.toContain("--cpus");
+  });
+
+  type ExecCb = (error: Error | null, stdout: string, stderr: string) => void;
+  // execFile mock must return a ChildProcess; these tests never touch it.
+  const execReturn = undefined as unknown as ChildProcess;
+
+  it("passes --memory and --memory-swap when memory is provided", async () => {
+    mockExecFile.mockImplementation((_cmd, _args, _opts, cb) => {
+      (cb as ExecCb)(null, "", "");
+      return execReturn;
+    });
+
+    await Effect.runPromise(startContainer("ctr", "img", {}, { memory: "2g" }));
+
+    const runCall = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    );
+    expect(runCall).toBeDefined();
+    const runArgs = runCall![1] as string[];
+    const memIdx = runArgs.indexOf("--memory");
+    expect(memIdx).toBeGreaterThan(-1);
+    expect(runArgs[memIdx + 1]).toBe("2g");
+    const swapIdx = runArgs.indexOf("--memory-swap");
+    expect(swapIdx).toBeGreaterThan(-1);
+    expect(runArgs[swapIdx + 1]).toBe("2g");
+  });
+
+  it("passes --pids-limit when pidsLimit is provided", async () => {
+    mockExecFile.mockImplementation((_cmd, _args, _opts, cb) => {
+      (cb as ExecCb)(null, "", "");
+      return execReturn;
+    });
+
+    await Effect.runPromise(
+      startContainer("ctr", "img", {}, { pidsLimit: 256 }),
+    );
+
+    const runCall = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    );
+    const runArgs = runCall![1] as string[];
+    const idx = runArgs.indexOf("--pids-limit");
+    expect(idx).toBeGreaterThan(-1);
+    expect(runArgs[idx + 1]).toBe("256");
+  });
+
+  it("does not pass memory or pids flags when omitted", async () => {
+    mockExecFile.mockImplementation((_cmd, _args, _opts, cb) => {
+      (cb as ExecCb)(null, "", "");
+      return execReturn;
+    });
+
+    await Effect.runPromise(startContainer("ctr", "img", {}));
+
+    const runCall = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    );
+    const runArgs = runCall![1] as string[];
+    expect(runArgs).not.toContain("--memory");
+    expect(runArgs).not.toContain("--memory-swap");
+    expect(runArgs).not.toContain("--pids-limit");
   });
 
   it("uses -v format with formatVolumeMount for volume mounts", async () => {

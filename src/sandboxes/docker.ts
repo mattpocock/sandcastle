@@ -121,6 +121,28 @@ export interface DockerOptions {
    * When omitted, no `--cpus` flag is added and the container is unconstrained.
    */
   readonly cpus?: number;
+  /**
+   * Limit the memory available to the container, via `--memory`.
+   *
+   * Accepts Docker memory strings:
+   *
+   * - `"2g"` → `--memory 2g --memory-swap 2g`
+   * - `"512m"` → `--memory 512m --memory-swap 512m`
+   *
+   * `--memory-swap` is set to the same value, making this a hard cap with no
+   * swap headroom. When omitted, no memory flags are added and the container
+   * is unconstrained.
+   */
+  readonly memory?: string;
+  /**
+   * Limit the number of processes in the container, via `--pids-limit`.
+   *
+   * - `256` → `--pids-limit 256`
+   *
+   * Useful against fork bombs in untrusted workloads. When omitted, no
+   * `--pids-limit` flag is added.
+   */
+  readonly pidsLimit?: number;
 }
 
 /**
@@ -193,6 +215,8 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
             groups: options?.groups,
             devices: options?.devices,
             cpus: options?.cpus,
+            memory: options?.memory,
+            pidsLimit: options?.pidsLimit,
             selinuxLabel,
           },
         ),
