@@ -65,6 +65,8 @@ export interface BindMountSandboxHandle {
 
 /** Options passed to a bind-mount provider's `create` function. */
 export interface BindMountCreateOptions {
+  /** Aborted when sandbox creation is interrupted or times out. */
+  readonly signal?: AbortSignal;
   /** Host-side path to the worktree directory. */
   readonly worktreePath: string;
   /** Host-side path to the original repo root. */
