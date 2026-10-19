@@ -917,12 +917,14 @@ export const createSandbox = async (
       Effect.gen(function* () {
         const hostRepoDir = yield* resolveCwd(options.cwd);
 
-        yield* WorktreeManager.pruneStale(hostRepoDir).pipe(
-          Effect.catchAll(() => Effect.void),
-        );
+        yield* WorktreeManager.pruneStale(
+          hostRepoDir,
+          options.timeouts?.worktreePruneMs,
+        ).pipe(Effect.catchAll(() => Effect.void));
         const { path: worktreePath } = yield* WorktreeManager.create(
           hostRepoDir,
           { branch, baseBranch: options.baseBranch },
+          options.timeouts?.worktreeCreateMs,
         );
 
         const prepared = yield* Effect.gen(function* () {

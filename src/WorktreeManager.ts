@@ -295,6 +295,7 @@ export const create = (
     baseBranch?: string;
     name?: string;
   },
+  timeoutMs: number = WORKTREE_TIMEOUT_MS,
 ): Effect.Effect<
   WorktreeInfo,
   WorktreeError | WorktreeTimeoutError,
@@ -416,11 +417,11 @@ export const create = (
     return { path: worktreePath, branch };
   }).pipe(
     withTimeout(
-      WORKTREE_TIMEOUT_MS,
+      timeoutMs,
       () =>
         new WorktreeTimeoutError({
-          message: `Worktree creation timed out after ${WORKTREE_TIMEOUT_MS}ms`,
-          timeoutMs: WORKTREE_TIMEOUT_MS,
+          message: `Worktree creation timed out after ${timeoutMs}ms`,
+          timeoutMs,
           path: repoDir,
           operation: "create",
         }),
@@ -460,6 +461,7 @@ export const remove = (
  */
 export const pruneStale = (
   repoDir: string,
+  timeoutMs: number = WORKTREE_TIMEOUT_MS,
 ): Effect.Effect<
   void,
   WorktreeError | WorktreeTimeoutError,
@@ -526,11 +528,11 @@ export const pruneStale = (
     }
   }).pipe(
     withTimeout(
-      WORKTREE_TIMEOUT_MS,
+      timeoutMs,
       () =>
         new WorktreeTimeoutError({
-          message: `Worktree prune timed out after ${WORKTREE_TIMEOUT_MS}ms`,
-          timeoutMs: WORKTREE_TIMEOUT_MS,
+          message: `Worktree prune timed out after ${timeoutMs}ms`,
+          timeoutMs,
           path: repoDir,
           operation: "prune",
         }),

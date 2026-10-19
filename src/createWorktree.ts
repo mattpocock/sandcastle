@@ -233,13 +233,15 @@ export const createWorktree = async (
 
   const { hostRepoDir, worktreeInfo } = await Effect.gen(function* () {
     const hostRepoDir = yield* resolveCwd(options.cwd);
-    yield* WorktreeManager.pruneStale(hostRepoDir).pipe(
-      Effect.catchAll(() => Effect.void),
+    yield* WorktreeManager.pruneStale(
+      hostRepoDir,
+      options.timeouts?.worktreePruneMs,
+    ).pipe(Effect.catchAll(() => Effect.void));
+    const info = yield* WorktreeManager.create(
+      hostRepoDir,
+      { branch, baseBranch },
+      options.timeouts?.worktreeCreateMs,
     );
-    const info = yield* WorktreeManager.create(hostRepoDir, {
-      branch,
-      baseBranch,
-    });
     if (options.copyToWorktree && options.copyToWorktree.length > 0) {
       yield* copyToWorktree(
         options.copyToWorktree,
