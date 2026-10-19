@@ -1,8 +1,9 @@
-export type FailedStep = "commits" | "diff" | "untracked";
+export type FailedStep = "previousDiff" | "commits" | "diff" | "untracked";
 
 export interface RecoveryInput {
   readonly patchDir: string;
   readonly failedStep: FailedStep;
+  readonly hasPreviousDiff?: boolean;
   readonly hasCommits: boolean;
   readonly hasDiff: boolean;
   readonly hasUntracked: boolean;
@@ -14,8 +15,15 @@ export interface RecoveryInput {
  * Pure function: takes failure state, returns formatted terminal output.
  */
 export const buildRecoveryMessage = (input: RecoveryInput): string => {
-  const { patchDir, failedStep, hasCommits, hasDiff, hasUntracked, branch } =
-    input;
+  const {
+    patchDir,
+    failedStep,
+    hasPreviousDiff,
+    hasCommits,
+    hasDiff,
+    hasUntracked,
+    branch,
+  } = input;
 
   // When --branch is set, commands run inside .sandcastle/worktree,
   // so patch paths need ../../ prefix to reach repo root
@@ -23,6 +31,12 @@ export const buildRecoveryMessage = (input: RecoveryInput): string => {
 
   // Determine the step number for the failed step
   const steps: { key: FailedStep; label: string; has: boolean }[] = [];
+  if (hasPreviousDiff)
+    steps.push({
+      key: "previousDiff",
+      label: "previously synced uncommitted changes",
+      has: true,
+    });
   if (hasCommits)
     steps.push({ key: "commits", label: "committed changes", has: true });
   if (hasDiff)
@@ -68,7 +82,7 @@ export const buildRecoveryMessage = (input: RecoveryInput): string => {
       lines.push(formatCommandBlock(remaining));
     }
   } else {
-    // diff or untracked failure — print remaining commands from failed step onward
+    // Print remaining commands from the failed step onward.
     const remaining = buildRemainingCommands(
       cmdPatchDir,
       steps.slice(failedIndex),
@@ -89,8 +103,10 @@ const buildRemainingCommands = (
   const commands: string[] = [];
   for (const step of steps) {
     if (!step.has) continue;
-    if (step.key === "commits") {
-      commands.push(`git am --3way ${patchDir}/*.patch`);
+    if (step.key === "previousDiff") {
+      commands.push(`git apply --reverse ${patchDir}/previous.diff`);
+    } else if (step.key === "commits") {
+      commands.push(`git am --3way ${patchDir}/[0-9]*.patch`);
     } else if (step.key === "diff") {
       commands.push(`git apply ${patchDir}/changes.patch`);
     } else if (step.key === "untracked") {

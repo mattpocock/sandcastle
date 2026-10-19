@@ -311,6 +311,8 @@ const reviewResult = await sandbox.run({
 
 Commits from all `run()` calls accumulate on the same branch. The sandbox container stays alive between runs, so installed dependencies and build artifacts persist.
 
+Isolated providers also sync staged and unstaged changes back to the host worktree after each run. Later runs can update, revert, or commit those changes. Conflicting host edits stop synchronization and leave patches in `.sandcastle/patches/` with recovery commands; earlier sync steps may already have succeeded.
+
 `sandbox.exec()` lets the harness run shell commands directly in the same warm sandbox — handy for gating an implement step on a quick verification before kicking off the review:
 
 ```typescript

@@ -10,7 +10,8 @@
  *
  * Three-prong extraction within each phase:
  * 1. Committed changes: `git format-patch` + `git am --3way`
- * 2. Uncommitted changes (staged + unstaged): `git diff HEAD` + `git apply`
+ * 2. Uncommitted changes (staged + unstaged): replace the previously synced
+ *    `git diff --binary HEAD` with the current one using `git apply`
  * 3. Untracked files: `git ls-files --others` + `copyFileOut` each file
  */
 
@@ -36,6 +37,9 @@ import { SyncError } from "./errors.js";
  * and never crosses to the host — sync-out ships commits, not refs. ADR 0017.
  */
 export const SYNC_BASE_REF = "refs/sandcastle/sync-base";
+
+/** Patch blob for the uncommitted changes currently applied on the host. */
+const SYNC_DIFF_REF = "refs/sandcastle/sync-diff";
 
 /**
  * Execute a command on the host side, returning stdout.
@@ -248,12 +252,26 @@ export const syncOut = (
 
     const hasCommits = base !== sandboxHead;
 
-    // Check for uncommitted changes
-    const diffResult = yield* execSandbox(handle, "git diff HEAD", {
+    // Keep the previous successful diff separately from the commit base. The
+    // host still has those uncommitted changes, so applying another full HEAD
+    // diff would reapply them (and git am would encounter a dirty worktree).
+    const previousDiffRef = yield* execSandbox(
+      handle,
+      `git rev-parse --verify --quiet ${SYNC_DIFF_REF}`,
+      { cwd: worktreePath },
+    );
+    const previousDiff =
+      previousDiffRef.exitCode === 0
+        ? (yield* execOk(handle, `git cat-file blob ${SYNC_DIFF_REF}`, {
+            cwd: worktreePath,
+          })).stdout
+        : "";
+    const diffResult = yield* execOk(handle, "git diff --binary HEAD", {
       cwd: worktreePath,
     });
-    const hasDiff =
-      diffResult.exitCode === 0 && diffResult.stdout.trim().length > 0;
+    const replaceDiff = hasCommits || previousDiff !== diffResult.stdout;
+    const hasPreviousDiff = replaceDiff && previousDiff.length > 0;
+    const hasDiff = replaceDiff && diffResult.stdout.trim().length > 0;
 
     // Check for untracked files
     const lsFilesResult = yield* execSandbox(
@@ -272,7 +290,7 @@ export const syncOut = (
       : [];
 
     // Nothing to sync
-    if (!hasCommits && !hasDiff && !hasUntracked) {
+    if (!hasCommits && !hasPreviousDiff && !hasDiff && !hasUntracked) {
       return;
     }
 
@@ -281,6 +299,18 @@ export const syncOut = (
     const relativePatchDir = join(".sandcastle", "patches", basename(patchDir));
 
     const nonEmptyPatches: string[] = [];
+
+    // Save the old diff too, before undoing anything on the host. On failure
+    // both versions remain available alongside the usual recovery artifacts.
+    if (hasPreviousDiff) {
+      yield* Effect.tryPromise({
+        try: () => writeFile(join(patchDir, "previous.diff"), previousDiff),
+        catch: (e) =>
+          new SyncError({
+            message: `Failed to save previous diff: ${String(e)}`,
+          }),
+      });
+    }
 
     // Save committed patches
     if (hasCommits) {
@@ -323,7 +353,9 @@ export const syncOut = (
       }
     }
 
-    // Save uncommitted diff
+    // Save uncommitted diff. Also store the snapshot as a Git blob, but only
+    // point the tracking ref at it after the patch actually lands on the host.
+    let diffBlob: string | undefined;
     if (hasDiff) {
       const diffPath = join(patchDir, "changes.patch");
       yield* Effect.tryPromise({
@@ -333,6 +365,28 @@ export const syncOut = (
             message: `Failed to write diff patch: ${e instanceof Error ? e.message : String(e)}`,
           }),
       });
+      const snapshotPath = (yield* execOk(
+        handle,
+        "mktemp -t sandcastle-diff-XXXXXX",
+      )).stdout.trim();
+      try {
+        // Hash the exact saved patch rather than running git diff again: the
+        // marker must describe what was applied even if the sandbox changes.
+        yield* Effect.tryPromise({
+          try: () => handle.copyIn(diffPath, snapshotPath),
+          catch: (e) =>
+            new SyncError({
+              message: `Failed to save diff snapshot: ${String(e)}`,
+            }),
+        });
+        diffBlob = (yield* execOk(
+          handle,
+          `git hash-object -w "${snapshotPath}"`,
+          { cwd: worktreePath },
+        )).stdout.trim();
+      } finally {
+        yield* execSandbox(handle, `rm -f "${snapshotPath}"`);
+      }
     }
 
     // Save untracked files
@@ -357,8 +411,26 @@ export const syncOut = (
     // --- Phase 2: Apply from saved directory ---
     let failedStep: FailedStep | undefined;
 
+    // Undo only the patch Sandcastle previously applied. git apply is atomic
+    // and refuses conflicting host edits; unrelated host changes survive.
+    if (hasPreviousDiff) {
+      const reverseResult = yield* Effect.either(
+        execHost(
+          `git apply --reverse "${join(patchDir, "previous.diff")}"`,
+          hostRepoDir,
+        ),
+      );
+      if (reverseResult._tag === "Left") {
+        failedStep = "previousDiff";
+      } else {
+        yield* execOk(handle, `git update-ref -d ${SYNC_DIFF_REF}`, {
+          cwd: worktreePath,
+        });
+      }
+    }
+
     // Apply committed patches
-    if (nonEmptyPatches.length > 0) {
+    if (!failedStep && nonEmptyPatches.length > 0) {
       const abortResult = yield* Effect.either(
         execHost("git am --abort", hostRepoDir),
       );
@@ -380,6 +452,10 @@ export const syncOut = (
       );
       if (applyResult._tag === "Left") {
         failedStep = "diff";
+      } else {
+        yield* execOk(handle, `git update-ref ${SYNC_DIFF_REF} ${diffBlob!}`, {
+          cwd: worktreePath,
+        });
       }
     }
 
@@ -409,11 +485,15 @@ export const syncOut = (
     }
 
     // Advance the sync-base ref whenever commits were actually shipped (or
-    // there were none new to ship in this slice). Skipped only when `git am`
-    // itself failed — those commits never landed on the host, and the next
-    // run must retry from the same base. Diff/untracked failures don't undo
+    // there were none new to ship in this slice). Skipped when reversing the
+    // previous diff or `git am` failed — those commits never landed on the
+    // host, and the next run must retry from the same base. Later failures don't undo
     // the commits that already landed; the ref must move so we don't re-emit.
-    if (hasCommits && failedStep !== "commits") {
+    if (
+      hasCommits &&
+      failedStep !== "previousDiff" &&
+      failedStep !== "commits"
+    ) {
       yield* execOk(handle, `git update-ref ${SYNC_BASE_REF} ${sandboxHead}`, {
         cwd: worktreePath,
       });
@@ -424,6 +504,7 @@ export const syncOut = (
       const msg = buildRecoveryMessage({
         patchDir: relativePatchDir,
         failedStep,
+        hasPreviousDiff,
         hasCommits: nonEmptyPatches.length > 0,
         hasDiff,
         hasUntracked,
