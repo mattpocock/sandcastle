@@ -1,5 +1,12 @@
 # @ai-hero/sandcastle
 
+## 0.12.1
+
+### Patch Changes
+
+- 5999abe: Fix the Codex `.env.example` template written by `sandcastle init`: it now uses `CODEX_API_KEY` (the only API-key variable `codex exec` reads from the environment) instead of `OPENAI_KEY`, which nothing read.
+- c70820f: Fix README Quick start: correct the mislabelled `// 3.` comment to `// 4.` under step 4, and reword step 3 to copy `.sandcastle/.env.example` to `.sandcastle/.env` before filling in values, matching the command order.
+
 ## 0.12.0
 
 ### Minor Changes
