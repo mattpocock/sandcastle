@@ -39,7 +39,7 @@ const isTransientExecError = (err: ExecError | GitSetupTimeoutError): boolean =>
   err.exitCode !== undefined &&
   TRANSIENT_EXEC_EXIT_CODES.has(err.exitCode);
 
-const execOk = (
+export const execOk = (
   sandbox: SandboxService,
   command: string,
   options?: { cwd?: string; sudo?: boolean },
