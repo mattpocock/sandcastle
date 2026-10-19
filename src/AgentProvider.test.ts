@@ -416,6 +416,45 @@ describe("pi factory", () => {
     ]);
   });
 
+  it.each([
+    ["bash", { command: "npm test" }, "npm test"],
+    ["read", { path: "src/index.ts" }, "src/index.ts"],
+    ["edit", { path: "src/index.ts" }, "src/index.ts"],
+    ["write", { path: "src/new.ts" }, "src/new.ts"],
+    ["grep", { pattern: "TODO" }, "TODO"],
+    ["find", { pattern: "**/*.ts" }, "**/*.ts"],
+    ["ls", { path: "src" }, "src"],
+  ])(
+    "parseStreamLine extracts Pi 0.84 lowercase %s tool calls",
+    (toolName, args, expectedArgs) => {
+      const provider = pi("claude-sonnet-4-6");
+      const line = JSON.stringify({
+        type: "tool_execution_start",
+        toolCallId: `call-${toolName}`,
+        toolName,
+        args,
+      });
+
+      expect(provider.parseStreamLine(line)).toEqual([
+        { type: "tool_call", name: toolName, args: expectedArgs },
+      ]);
+    },
+  );
+
+  it("parseStreamLine preserves a Pi 0.84 ls call with no path", () => {
+    const provider = pi("claude-sonnet-4-6");
+    const line = JSON.stringify({
+      type: "tool_execution_start",
+      toolCallId: "call-ls",
+      toolName: "ls",
+      args: {},
+    });
+
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "tool_call", name: "ls", args: "." },
+    ]);
+  });
+
   it("parseStreamLine skips non-allowlisted tools", () => {
     const provider = pi("claude-sonnet-4-6");
     const line = JSON.stringify({
