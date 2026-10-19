@@ -424,7 +424,7 @@ const buildSandboxHandle = (
                 NodeFileSystem.layer,
               );
             })()
-          : silentDisplayLayer;
+          : ClackDisplay.layer;
 
       const reuseFactoryLayer = Layer.succeed(SandboxFactory, {
         withSandbox: (makeEffect) =>

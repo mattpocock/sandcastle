@@ -1,3 +1,4 @@
+import * as clack from "@clack/prompts";
 import { exec } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import {
@@ -12,7 +13,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { Effect, Layer } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { claudeCode, codex, pi } from "./AgentProvider.js";
 import { createSandbox, type CreateSandboxOptions } from "./createSandbox.js";
 import type { SandboxService } from "./SandboxFactory.js";
@@ -300,6 +301,108 @@ describe("createSandbox", () => {
       await rm(hostDir, { recursive: true, force: true });
     }
   });
+
+  it.each([
+    { label: "without verbose raw output", verbose: false },
+    { label: "with verbose raw output", verbose: true },
+  ])(
+    "sandbox.run() streams parsed agent text and tool calls in terminal mode $label",
+    async ({ verbose }) => {
+      const hostDir = await mkdtemp(join(tmpdir(), "sandbox-terminal-"));
+      await initRepo(hostDir);
+      await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+      const textLine = JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [{ type: "text", text: "streamed agent text" }],
+        },
+      });
+      const toolLine = JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [
+            { type: "tool_use", name: "Bash", input: { command: "npm test" } },
+          ],
+        },
+      });
+      const resultLine = JSON.stringify({
+        type: "result",
+        result: "streamed agent text",
+      });
+
+      const messageSpy = vi
+        .spyOn(clack.log, "message")
+        .mockImplementation(() => {});
+      const stepSpy = vi.spyOn(clack.log, "step").mockImplementation(() => {});
+      const stdoutWriteSpy = vi
+        .spyOn(process.stdout, "write")
+        .mockImplementation(() => true);
+      vi.spyOn(clack.log, "info").mockImplementation(() => {});
+      vi.spyOn(clack.log, "success").mockImplementation(() => {});
+      vi.spyOn(clack.log, "warning").mockImplementation(() => {});
+      vi.spyOn(clack.log, "error").mockImplementation(() => {});
+
+      const sandbox = await createSandbox({
+        branch: "terminal-streaming-branch",
+        sandbox: testSandbox,
+        cwd: hostDir,
+        _test: {
+          buildSandbox: (sandboxDir) => {
+            const real = makeLocalSandbox(sandboxDir);
+            return {
+              exec: (command, options) => {
+                if (command.startsWith("claude ") && options?.onLine) {
+                  const onLine = options.onLine;
+                  return Effect.sync(() => {
+                    for (const line of [textLine, toolLine, resultLine]) {
+                      onLine(line);
+                    }
+                    return {
+                      stdout: [textLine, toolLine, resultLine].join("\n"),
+                      stderr: "",
+                      exitCode: 0,
+                    };
+                  });
+                }
+                return real.exec(command, options);
+              },
+              copyIn: real.copyIn,
+              copyFileOut: real.copyFileOut,
+            };
+          },
+        },
+      });
+
+      try {
+        await sandbox.run({
+          agent: testProvider,
+          prompt: "do something",
+          maxIterations: 1,
+          logging: verbose
+            ? { type: "stdout", verbose: true }
+            : { type: "stdout" },
+        });
+
+        expect(messageSpy).toHaveBeenCalledWith("streamed agent text");
+        expect(stepSpy).toHaveBeenCalledWith(expect.stringContaining("Bash"));
+        expect(stepSpy).toHaveBeenCalledWith(
+          expect.stringContaining("npm test"),
+        );
+        for (const line of [textLine, toolLine, resultLine]) {
+          if (verbose) {
+            expect(stdoutWriteSpy).toHaveBeenCalledWith(`${line}\n`);
+          } else {
+            expect(stdoutWriteSpy).not.toHaveBeenCalledWith(`${line}\n`);
+          }
+        }
+      } finally {
+        await sandbox.close();
+        await rm(hostDir, { recursive: true, force: true });
+        vi.restoreAllMocks();
+      }
+    },
+  );
 
   it("sandbox.run() emits 'Context window: NNNk' line when an iteration has usage", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
