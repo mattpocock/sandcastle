@@ -748,7 +748,7 @@ const parseCodexStreamLine = (line: string): ParsedStreamEvent[] => {
 
 /** Options for the codex agent provider. */
 export interface CodexOptions {
-  readonly effort?: "low" | "medium" | "high" | "xhigh";
+  readonly effort?: "low" | "medium" | "high" | "xhigh" | "max";
   /** Environment variables injected by this agent provider. */
   readonly env?: Record<string, string>;
   /** When false, session capture is disabled. Default: true. */
