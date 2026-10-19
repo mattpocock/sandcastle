@@ -85,6 +85,12 @@ export interface CreateSandboxOptions {
   readonly copyToWorktree?: string[];
   /** Override default timeouts for built-in lifecycle steps. Unset keys keep their defaults. */
   readonly timeouts?: Timeouts;
+  /**
+   * Environment variables contributed by the agent provider (e.g. API keys,
+   * base URLs, provider-selection flags). Merged into the sandbox env by
+   * `mergeProviderEnv`, taking precedence over `sandbox.env`.
+   */
+  readonly agentProviderEnv?: Record<string, string>;
   /** @internal Test-only overrides to bypass the sandbox provider. */
   readonly _test?: {
     readonly buildSandbox?: (sandboxDir: string) => SandboxService;
@@ -713,6 +719,12 @@ export interface CreateSandboxFromWorktreeOptions {
   readonly hooks?: SandboxHooks;
   readonly copyToWorktree?: string[];
   readonly timeouts?: Timeouts;
+  /**
+   * Environment variables contributed by the agent provider (e.g. API keys,
+   * base URLs, provider-selection flags). Merged into the sandbox env by
+   * `mergeProviderEnv`, taking precedence over `sandbox.env`.
+   */
+  readonly agentProviderEnv?: Record<string, string>;
   /** Forwarded to the Sandbox handle. Set by `createWorktree` so the handle
    *  can route run()/interactive() correctly: for `merge-to-head`, each call
    *  merges back to the host's current branch and the worktree's source
@@ -776,7 +788,7 @@ export const createSandboxFromWorktree = async (
     );
     const env = mergeProviderEnv({
       resolvedEnv,
-      agentProviderEnv: {},
+      agentProviderEnv: options.agentProviderEnv ?? {},
       sandboxProviderEnv: options.sandbox.env,
     });
 
@@ -965,7 +977,7 @@ export const createSandbox = async (
             const resolvedEnv = yield* resolveEnv(hostRepoDir);
             const env = mergeProviderEnv({
               resolvedEnv,
-              agentProviderEnv: {},
+              agentProviderEnv: options.agentProviderEnv ?? {},
               sandboxProviderEnv: options.sandbox.env,
             });
 
