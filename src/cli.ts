@@ -1,4 +1,5 @@
 import { Command, Options } from "@effect/cli";
+import { DEFAULT_STATE_DIR } from "./resolveCwd.js";
 import { FileSystem } from "@effect/platform";
 import { Effect, Option } from "effect";
 import * as clack from "@clack/prompts";
@@ -62,7 +63,7 @@ const defaultUidBuildArgs = (): Record<string, string> => {
 
 // --- Config directory check ---
 
-const CONFIG_DIR = ".sandcastle";
+const CONFIG_DIR = DEFAULT_STATE_DIR;
 
 const requireConfigDir = (
   cwd: string,

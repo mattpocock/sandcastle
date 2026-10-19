@@ -165,9 +165,16 @@ const result = await run({
   }),
 
   // Host repo directory — replaces process.cwd() as the anchor for
-  // .sandcastle/ artifacts (worktrees, logs, env, patches) and git operations.
+  // the state directory (worktrees, logs, env, patches) and git operations.
   // Relative paths resolve against process.cwd(). Defaults to process.cwd().
   cwd: "../other-repo",
+
+  // State directory — where Sandcastle reads/writes its gitignored runtime
+  // artifacts: .env, worktrees/, and the default logs/ location.
+  // Relative paths resolve against cwd; absolute paths are used verbatim.
+  // Defaults to ".sandcastle". Useful when embedding Sandcastle under another
+  // tool that owns the per-repo directory name (e.g. ".mytool.local").
+  stateDir: ".sandcastle",
 
   // Branch strategy — controls how the agent's changes relate to branches.
   // Defaults to { type: "head" } for bind-mount and { type: "merge-to-head" } for isolated providers.

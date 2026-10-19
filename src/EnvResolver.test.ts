@@ -5,11 +5,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { resolveEnv } from "./EnvResolver.js";
+import { resolveStateDir } from "./resolveCwd.js";
 
 const makeDir = () => mkdtemp(join(tmpdir(), "env-resolver-"));
 
-const runResolveEnv = (dir: string) =>
-  Effect.runPromise(resolveEnv(dir).pipe(Effect.provide(NodeContext.layer)));
+// `resolveEnv` takes an already-resolved absolute state dir, so the test helper
+// resolves it the same way the entry points do.
+const runResolveEnv = (dir: string, stateDir = ".sandcastle") =>
+  Effect.runPromise(
+    resolveEnv(resolveStateDir(dir, stateDir)).pipe(
+      Effect.provide(NodeContext.layer),
+    ),
+  );
 
 describe("resolveEnv", () => {
   it("returns all key-value pairs from .sandcastle/.env", async () => {
@@ -104,6 +111,26 @@ describe("resolveEnv", () => {
     const dir = await makeDir();
     const env = await runResolveEnv(dir);
     expect(env).toEqual({});
+  });
+
+  it("reads .env from a custom relative stateDir", async () => {
+    const dir = await makeDir();
+    await mkdir(join(dir, ".mytool.local"));
+    await writeFile(
+      join(dir, ".mytool.local", ".env"),
+      "CUSTOM_KEY=custom-val\n",
+    );
+    // The default .sandcastle dir does not exist, so only the override resolves.
+    const env = await runResolveEnv(dir, ".mytool.local");
+    expect(env).toEqual({ CUSTOM_KEY: "custom-val" });
+  });
+
+  it("reads .env from an absolute stateDir, ignoring the repo dir", async () => {
+    const repoDir = await makeDir();
+    const stateDir = await makeDir();
+    await writeFile(join(stateDir, ".env"), "ABS_KEY=abs-val\n");
+    const env = await runResolveEnv(repoDir, stateDir);
+    expect(env).toEqual({ ABS_KEY: "abs-val" });
   });
 
   it("ignores comments and blank lines in .sandcastle/.env", async () => {
@@ -201,10 +228,7 @@ describe("resolveEnv", () => {
   it("unescapes \\n in double-quoted values", async () => {
     const dir = await makeDir();
     await mkdir(join(dir, ".sandcastle"));
-    await writeFile(
-      join(dir, ".sandcastle", ".env"),
-      'KEY="line1\\nline2"\n',
-    );
+    await writeFile(join(dir, ".sandcastle", ".env"), 'KEY="line1\\nline2"\n');
 
     const env = await runResolveEnv(dir);
     expect(env["KEY"]).toBe("line1\nline2");
@@ -213,10 +237,7 @@ describe("resolveEnv", () => {
   it("does not unescape \\n in single-quoted values", async () => {
     const dir = await makeDir();
     await mkdir(join(dir, ".sandcastle"));
-    await writeFile(
-      join(dir, ".sandcastle", ".env"),
-      "KEY='line1\\nline2'\n",
-    );
+    await writeFile(join(dir, ".sandcastle", ".env"), "KEY='line1\\nline2'\n");
 
     const env = await runResolveEnv(dir);
     expect(env["KEY"]).toBe("line1\\nline2");
@@ -225,10 +246,7 @@ describe("resolveEnv", () => {
   it("preserves internal whitespace in double-quoted values", async () => {
     const dir = await makeDir();
     await mkdir(join(dir, ".sandcastle"));
-    await writeFile(
-      join(dir, ".sandcastle", ".env"),
-      'KEY="  spaced  "\n',
-    );
+    await writeFile(join(dir, ".sandcastle", ".env"), 'KEY="  spaced  "\n');
 
     const env = await runResolveEnv(dir);
     expect(env["KEY"]).toBe("  spaced  ");
@@ -251,10 +269,7 @@ describe("resolveEnv", () => {
   it("handles escaped backslash before n in double-quoted values", async () => {
     const dir = await makeDir();
     await mkdir(join(dir, ".sandcastle"));
-    await writeFile(
-      join(dir, ".sandcastle", ".env"),
-      'KEY="a\\\\nb"\n',
-    );
+    await writeFile(join(dir, ".sandcastle", ".env"), 'KEY="a\\\\nb"\n');
 
     const env = await runResolveEnv(dir);
     // \\n in the file → literal backslash + literal n (not a newline)

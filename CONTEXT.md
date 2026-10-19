@@ -161,7 +161,7 @@ The CLI command that scaffolds the **config directory** in a **host** repo.
 _Avoid_: "create", "bootstrap", "new"
 
 **Config directory**:
-The `.sandcastle/` directory in a **host** repo containing sandbox configuration.
+The directory in a **host** repo where Sandcastle reads/writes its gitignored runtime artifacts (`.env`, `worktrees/`, default `logs/`). Defaults to `.sandcastle/`, overridable per call via the `stateDir` option.
 _Avoid_: ".sandcastle folder", "sandcastle dir"
 
 **Issue tracker**:

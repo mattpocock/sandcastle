@@ -167,6 +167,12 @@ export class SandboxConfig extends Context.Tag("SandboxConfig")<
   {
     readonly env: Record<string, string>;
     readonly hostRepoDir: string;
+    /**
+     * Resolved absolute state directory for Sandcastle's gitignored runtime
+     * artifacts (`worktrees/`, `.env`, default `logs/`). Resolved once at the
+     * entry point via `resolveStateDir`; consumers use it directly.
+     */
+    readonly stateDir: string;
     /** Paths relative to the host repo root to copy into the worktree before sandbox start. */
     readonly copyToWorktree?: string[];
     /** When specified, the run name is included in the auto-generated branch and worktree names. */
@@ -294,6 +300,7 @@ export const WorktreeDockerSandboxFactory = {
       const {
         env,
         hostRepoDir,
+        stateDir,
         copyToWorktree: copyPaths,
         name,
         sandboxProvider,
@@ -315,7 +322,7 @@ export const WorktreeDockerSandboxFactory = {
 
       /** Prune stale worktrees (best-effort), then create a fresh one. */
       const pruneAndCreate = () =>
-        WorktreeManager.pruneStale(hostRepoDir).pipe(
+        WorktreeManager.pruneStale(hostRepoDir, stateDir).pipe(
           Effect.catchAll((e) =>
             Effect.sync(() => {
               console.error(
@@ -326,8 +333,11 @@ export const WorktreeDockerSandboxFactory = {
           ),
           Effect.andThen(
             branch
-              ? WorktreeManager.create(hostRepoDir, { branch, baseBranch })
-              : WorktreeManager.create(hostRepoDir, { name }),
+              ? WorktreeManager.create(hostRepoDir, stateDir, {
+                  branch,
+                  baseBranch,
+                })
+              : WorktreeManager.create(hostRepoDir, stateDir, { name }),
           ),
           Effect.provideService(FileSystem.FileSystem, fileSystem),
         );
