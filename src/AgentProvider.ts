@@ -1149,6 +1149,98 @@ export const copilot = (
 });
 
 // ---------------------------------------------------------------------------
+// Devin agent provider
+// ---------------------------------------------------------------------------
+
+/**
+ * Devin's `-p` mode emits plain text to stdout; there is no structured JSON
+ * stream. Every non-empty line is surfaced as a `text` event for live display.
+ * Tool calls and session IDs are not available in the stdout stream.
+ *
+ * Lines prefixed with "[log] " are forwarded by devin-wrapper from the Devin
+ * log file to keep the idle timer alive during silent tool-use phases. They
+ * are surfaced as `tool_call` events (so they appear in the display but are
+ * not included in the final text output) rather than `text` events.
+ */
+const parseDevinStreamLine = (line: string): ParsedStreamEvent[] => {
+  if (!line.trim()) return [];
+  if (line.startsWith("[log] ")) {
+    return [{ type: "tool_call", name: "log", args: line.slice(6) }];
+  }
+  return [{ type: "text", text: line }];
+};
+
+/** Options for the Devin agent provider. */
+export interface DevinOptions {
+  /** Environment variables injected by this agent provider. */
+  readonly env?: Record<string, string>;
+}
+
+/**
+ * Agent provider for the Devin CLI (`devin -p`).
+ *
+ * Auth: Devin authenticates via `~/.local/share/devin/credentials.toml`.
+ * `buildPrintCommand` writes this file from `DEVIN_API_KEY` before each
+ * invocation so the agent can authenticate inside the sandbox without
+ * interactive login. The install script is not used (it ends with an
+ * interactive `devin setup` wizard); the binary is installed directly from
+ * the release tarball in the Dockerfile instead.
+ *
+ * Resume: Devin's `-p` stdout stream does not emit a session ID, so session
+ * capture and resume are not supported. `captureSessions` is false, matching
+ * the cursor and copilot providers.
+ */
+export const devin = (
+  model: string,
+  options?: DevinOptions,
+): AgentProvider => ({
+  name: "devin",
+  env: options?.env ?? {},
+  captureSessions: false,
+
+  buildPrintCommand({
+    prompt,
+    dangerouslySkipPermissions,
+  }: AgentCommandOptions): PrintCommand {
+    const bypassFlag = dangerouslySkipPermissions
+      ? " --permission-mode dangerous"
+      : "";
+    // Write credentials.toml from DEVIN_SESSION_TOKEN before each invocation.
+    // DEVIN_SESSION_TOKEN is the windsurf_api_key value from the host's
+    // ~/.local/share/devin/credentials.toml — the CLI uses OAuth session tokens,
+    // not API keys. No interactive login is required inside the sandbox.
+    // Note: \\n in the printf format string must be 4 backslashes in TS source so
+    // the template literal emits the two-character sequence \n that printf interprets.
+    const setupCredentials =
+      `mkdir -p ~/.local/share/devin && ` +
+      `printf 'windsurf_api_key = "%s"\\napi_server_url = "https://server.codeium.com"\\ndevin_webapp_host = "app.devin.ai"\\ndevin_api_url = "https://api.devin.ai"\\n' "$DEVIN_SESSION_TOKEN" > ~/.local/share/devin/credentials.toml`;
+    // Write the prompt to a unique temp file via stdin to avoid the Linux
+    // ARG_MAX limit (E2BIG) when a large prompt is inlined as a shell argument.
+    // mktemp gives each concurrent run its own file; the trap cleans it up even
+    // on failure. devin -p panics when given no inline prompt and stdin is not a
+    // tty, so --prompt-file is the only supported path for non-argv delivery.
+    return {
+      command:
+        `${setupCredentials} && ` +
+        `PROMPT_FILE=$(mktemp) && trap 'rm -f "$PROMPT_FILE"' EXIT && ` +
+        `cat > "$PROMPT_FILE" && ` +
+        `devin-wrapper -p --prompt-file "$PROMPT_FILE" --model ${shellEscape(model)}${bypassFlag}`,
+      stdin: prompt,
+    };
+  },
+
+  buildInteractiveArgs({ prompt }: AgentCommandOptions): string[] {
+    const args = ["devin", "--model", model];
+    if (prompt) args.push("--", prompt);
+    return args;
+  },
+
+  parseStreamLine(line: string): ParsedStreamEvent[] {
+    return parseDevinStreamLine(line);
+  },
+});
+
+// ---------------------------------------------------------------------------
 // Claude Code agent provider
 // ---------------------------------------------------------------------------
 
