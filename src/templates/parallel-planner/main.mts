@@ -39,15 +39,14 @@ const planSchema = z.object({
 const MAX_ITERATIONS = 10;
 
 // Hooks run inside the sandbox before the agent starts each iteration.
-// npm install ensures the sandbox always has fresh dependencies.
+// The install hook ensures the sandbox always has fresh dependencies.
 const hooks = {
   sandbox: { onSandboxReady: [{ command: "npm install" }] },
 };
 
-// Copy node_modules from the host into the worktree before each sandbox
-// starts. Avoids a full npm install from scratch; the hook above handles
-// platform-specific binaries and any packages added since the last copy.
-const copyToWorktree = ["node_modules"];
+// Isolate node_modules from the host bind mount so in-container installs
+// don't overwrite host platform-specific binaries.
+const sandboxProvider = docker({ isolatedPaths: ["node_modules"] });
 
 // ---------------------------------------------------------------------------
 // Main loop
@@ -67,7 +66,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // -------------------------------------------------------------------------
   const plan = await sandcastle.run({
     hooks,
-    sandbox: docker(),
+    sandbox: sandboxProvider,
     name: "planner",
     // One iteration is enough: the planner just needs to read and reason,
     // not write code. (Structured output requires maxIterations: 1.)
@@ -109,9 +108,8 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     issues.map((issue) =>
       sandcastle.run({
         hooks,
-        copyToWorktree,
         // Each agent starts on its own branch via branchStrategy on run().
-        sandbox: docker(),
+        sandbox: sandboxProvider,
         branchStrategy: { type: "branch", branch: issue.branch },
         name: "implementer",
         // Give each agent plenty of room to implement and iterate on tests.
@@ -184,7 +182,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // -------------------------------------------------------------------------
   await sandcastle.run({
     hooks,
-    sandbox: docker(),
+    sandbox: sandboxProvider,
     name: "merger",
     maxIterations: 1,
     // Sonnet is sufficient for merge conflict resolution.

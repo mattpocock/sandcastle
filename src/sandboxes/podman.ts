@@ -13,6 +13,7 @@ import {
   type StdioOptions,
 } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { posix } from "node:path";
 import { createInterface } from "node:readline";
 import {
   createBindMountSandboxProvider,
@@ -76,6 +77,16 @@ export interface PodmanOptions {
   readonly mounts?: readonly MountConfig[];
   /** Environment variables injected by this provider. Merged at launch time with env resolver and agent provider env. */
   readonly env?: Record<string, string>;
+  /**
+   * Paths inside the mounted workspace that should be isolated from the host bind-mount.
+   *
+   * Each path is mounted as an anonymous volume at `<workspace>/<path>`, which
+   * prevents container-side installs from mutating host files (for example,
+   * `node_modules` on macOS/Windows hosts using Linux containers).
+   *
+   * Values must be relative paths like `"node_modules"` or `".next/cache"`.
+   */
+  readonly isolatedPaths?: readonly string[];
   /**
    * Podman network(s) to attach the container to.
    *
@@ -176,7 +187,17 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
 
       // Build volume mount strings with optional SELinux label (internal + user mounts)
       const allMounts = [...createOptions.mounts, ...userMounts];
-      const volumeMounts = allMounts.map((m) =>
+      const volumeMounts = allMounts.map((m) => ({
+        hostPath: m.hostPath,
+        sandboxPath: m.sandboxPath,
+        readonly: m.readonly,
+      }));
+      const isolatedVolumeMounts = resolveIsolatedVolumeMounts(
+        options?.isolatedPaths,
+        worktreePath,
+      );
+      const containerVolumeMounts = [...volumeMounts, ...isolatedVolumeMounts];
+      const volumeMountArgs = containerVolumeMounts.map((m) =>
         formatVolumeMount(m, selinuxLabel),
       );
 
@@ -197,7 +218,7 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
         "-e",
         `${key}=${value}`,
       ]);
-      const volumeArgs = volumeMounts.flatMap((v) => ["-v", v]);
+      const volumeArgs = volumeMountArgs.flatMap((v) => ["-v", v]);
       const usernsArgs = userns
         ? [`--userns=keep-id:uid=${containerUid},gid=${containerGid}`]
         : [];
@@ -290,7 +311,7 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
       // instead of tripping Node's MaxListenersExceededWarning.
       const removeContainerSync = () => {
         try {
-          execFileSync("podman", ["rm", "-f", containerName], {
+          execFileSync("podman", ["rm", "-f", "-v", containerName], {
             stdio: "ignore",
             timeout: 5000,
           });
@@ -440,7 +461,7 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
         close: async (): Promise<void> => {
           unregisterShutdown();
           await new Promise<void>((resolve, reject) => {
-            execFile("podman", ["rm", "-f", containerName], (error) => {
+            execFile("podman", ["rm", "-f", "-v", containerName], (error) => {
               if (error) {
                 reject(new Error(`podman rm failed: ${error.message}`));
               } else {
@@ -478,6 +499,46 @@ const podmanMachineError = () =>
   new Error(
     "Podman Machine is not running. Run 'podman machine init && podman machine start' first.",
   );
+
+const resolveIsolatedVolumeMounts = (
+  isolatedPaths: readonly string[] | undefined,
+  worktreePath: string,
+): Array<{ sandboxPath: string; anonymous: true }> => {
+  if (!isolatedPaths || isolatedPaths.length === 0) return [];
+
+  const resolved = new Set<string>();
+
+  for (const rawPath of isolatedPaths) {
+    const trimmed = rawPath.trim();
+    const normalized = trimmed
+      .replace(/\\/g, "/")
+      .replace(/^\.\//, "")
+      .replace(/\/+$/, "");
+
+    if (!normalized) {
+      throw new Error("isolatedPaths entries must not be empty");
+    }
+    if (normalized.startsWith("/") || /^[A-Za-z]:\//.test(normalized)) {
+      throw new Error(
+        `isolatedPaths entry must be relative: '${rawPath}'. Example: 'node_modules'`,
+      );
+    }
+
+    const segments = normalized.split("/");
+    if (segments.some((s) => s === "" || s === "." || s === "..")) {
+      throw new Error(
+        `isolatedPaths entry contains invalid path segments: '${rawPath}'`,
+      );
+    }
+
+    resolved.add(posix.join(worktreePath, ...segments));
+  }
+
+  return [...resolved].map((sandboxPath) => ({
+    sandboxPath,
+    anonymous: true as const,
+  }));
+};
 
 const checkPodmanMachine = (): Promise<void> =>
   new Promise<void>((resolve, reject) => {

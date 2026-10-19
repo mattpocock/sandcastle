@@ -291,7 +291,7 @@ import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 
 await using sandbox = await createSandbox({
   branch: "agent/fix-42",
-  sandbox: docker(),
+  sandbox: docker({ isolatedPaths: ["node_modules"] }),
   hooks: { sandbox: { onSandboxReady: [{ command: "npm install" }] } },
 });
 
@@ -311,12 +311,14 @@ const reviewResult = await sandbox.run({
 
 Commits from all `run()` calls accumulate on the same branch. The sandbox container stays alive between runs, so installed dependencies and build artifacts persist.
 
+If you install dependencies inside Docker/Podman hooks, use `isolatedPaths: ["node_modules"]` on the sandbox provider so Linux container installs do not overwrite host platform-specific binaries (for example, `@esbuild/darwin-arm64` on macOS hosts).
+
 `sandbox.exec()` lets the harness run shell commands directly in the same warm sandbox — handy for gating an implement step on a quick verification before kicking off the review:
 
 ```typescript
 await using sandbox = await createSandbox({
   branch: "agent/fix-42",
-  sandbox: docker(),
+  sandbox: docker({ isolatedPaths: ["node_modules"] }),
   hooks: { sandbox: { onSandboxReady: [{ command: "npm install" }] } },
 });
 
@@ -455,7 +457,7 @@ console.log(result.commits); // commits made during the run
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 
 await using sandbox = await wt.createSandbox({
-  sandbox: docker(),
+  sandbox: docker({ isolatedPaths: ["node_modules"] }),
   hooks: { sandbox: { onSandboxReady: [{ command: "npm install" }] } },
 });
 
@@ -767,7 +769,7 @@ Select a template during `sandcastle init` when prompted, or re-run init in a fr
 
 Scaffolds the `.sandcastle/` config directory and builds the container image. This is the first command you run in a new repo. You choose a sandbox provider (Docker or Podman) during init — selecting Podman writes a `Containerfile` instead of `Dockerfile` and uses `sandcastle podman build-image` for the build step.
 
-Init detects your host package manager (npm, pnpm, yarn, or bun) from a `packageManager` field or lockfile, defaulting to npm. Templates whose `main` file imports a host dependency — the planner templates import [Zod](https://zod.dev) for their `<plan>` output schema — prompt you to install it with that package manager when it isn't already in your `package.json`, so the first `npx tsx .sandcastle/main.ts` doesn't fail with `ERR_MODULE_NOT_FOUND`.
+Init detects your host package manager (npm, pnpm, yarn, or bun) from a `packageManager` field or lockfile, defaulting to npm. Non-blank templates use that package manager for their sandbox dependency install hook (`npm install`, `pnpm install`, `yarn install`, or `bun install`) and include the needed package-manager tooling in the generated Dockerfile or Containerfile. Templates whose `main` file imports a host dependency — the planner templates import [Zod](https://zod.dev) for their `<plan>` output schema — also prompt you to install it with that package manager when it isn't already in your `package.json`, so the first `npx tsx .sandcastle/main.ts` doesn't fail with `ERR_MODULE_NOT_FOUND`.
 
 Every interactive prompt has a paired `--flag` so the entire init can run non-interactively (e.g. in CI or a scripted setup). When stdin is not a TTY and a required flag is missing, init fails fast with a clear error rather than wedging on a prompt.
 
