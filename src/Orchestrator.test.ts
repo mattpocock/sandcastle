@@ -3180,7 +3180,27 @@ describe("Session capture integration", () => {
             // Create a bind-mount handle backed by filesystem copy
             const handle: BindMountSandboxHandle = {
               worktreePath: sandboxBaseDir,
-              exec: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
+              // This handle is filesystem-backed ("the sandbox IS the
+              // filesystem"), so run commands for real — captureToHost locates
+              // the session JSONL via `find`, which must see the files written
+              // under sandboxProjectsDir.
+              exec: async (command) => {
+                try {
+                  const { stdout, stderr } = await execAsync(command);
+                  return { stdout, stderr, exitCode: 0 };
+                } catch (err) {
+                  const e = err as {
+                    stdout?: string;
+                    stderr?: string;
+                    code?: number;
+                  };
+                  return {
+                    stdout: e.stdout ?? "",
+                    stderr: e.stderr ?? "",
+                    exitCode: typeof e.code === "number" ? e.code : 1,
+                  };
+                }
+              },
               copyFileIn: async (hostPath, sandboxPath) => {
                 await mkdir(join(sandboxPath, ".."), { recursive: true });
                 await copyFile(hostPath, sandboxPath);
@@ -3508,7 +3528,27 @@ describe("Session capture integration", () => {
           () => {
             const handle: BindMountSandboxHandle = {
               worktreePath: sandboxBaseDir,
-              exec: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
+              // This handle is filesystem-backed ("the sandbox IS the
+              // filesystem"), so run commands for real — captureToHost locates
+              // the session JSONL via `find`, which must see the files written
+              // under sandboxProjectsDir.
+              exec: async (command) => {
+                try {
+                  const { stdout, stderr } = await execAsync(command);
+                  return { stdout, stderr, exitCode: 0 };
+                } catch (err) {
+                  const e = err as {
+                    stdout?: string;
+                    stderr?: string;
+                    code?: number;
+                  };
+                  return {
+                    stdout: e.stdout ?? "",
+                    stderr: e.stderr ?? "",
+                    exitCode: typeof e.code === "number" ? e.code : 1,
+                  };
+                }
+              },
               copyFileIn: async (hostPath, sandboxPath) => {
                 await mkdir(join(sandboxPath, ".."), { recursive: true });
                 await copyFile(hostPath, sandboxPath);
