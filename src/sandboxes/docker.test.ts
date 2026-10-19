@@ -14,7 +14,7 @@ vi.mock("node:child_process", async () => {
   };
 });
 
-import { execFile } from "node:child_process";
+import { execFile, type ChildProcess } from "node:child_process";
 import { writeFileSync, mkdtempSync, unlinkSync, rmdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -191,6 +191,39 @@ describe("docker()", () => {
     )?.[1] as string[];
 
     expect(runArgs).not.toContain("--group-add");
+
+    await handle.close();
+  });
+
+  it("passes --cap-drop flags to docker run in order", async () => {
+    mockExecFile.mockImplementation((_command, _args, ...args) => {
+      const callback = args.at(-1);
+      if (typeof callback === "function") callback(null, "", "");
+      // The mocked child process is never consumed by the provider.
+      const child = {} as unknown as ChildProcess;
+      return child;
+    });
+
+    const provider = docker({ capDrop: ["DAC_OVERRIDE", "FOWNER"] });
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    const runArgs = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    )?.[1] as string[];
+
+    const firstIdx = runArgs.indexOf("--cap-drop");
+    expect(firstIdx).toBeGreaterThan(-1);
+    expect(runArgs[firstIdx + 1]).toBe("DAC_OVERRIDE");
+    const secondIdx = runArgs.indexOf("--cap-drop", firstIdx + 1);
+    expect(secondIdx).toBeGreaterThan(-1);
+    expect(runArgs[secondIdx + 1]).toBe("FOWNER");
 
     await handle.close();
   });
