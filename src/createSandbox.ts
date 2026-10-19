@@ -798,7 +798,12 @@ export const createSandboxFromWorktree = async (
         worktreeOrRepoPath: worktreePath,
       });
     } else {
-      startEffect = resolveGitMounts(join(hostRepoDir, ".git")).pipe(
+      // Resolve git mounts from the worktree we mount into the sandbox, not
+      // from `hostRepoDir`. When the host repo is itself a linked worktree,
+      // `hostRepoDir/.git` is a pointer file whose identity mount can't be
+      // remapped for Windows (#996). The worktree resolves to the same parent
+      // `.git` dir either way.
+      startEffect = resolveGitMounts(join(worktreePath, ".git")).pipe(
         Effect.provide(NodeFileSystem.layer),
         Effect.catchAll(() => Effect.succeed([])),
         // Patch git mounts for Windows worktree compatibility (ADR-0006)
@@ -984,7 +989,12 @@ export const createSandbox = async (
                     env,
                     worktreeOrRepoPath: worktreePath,
                   })
-                : resolveGitMounts(join(hostRepoDir, ".git")).pipe(
+                : // Resolve git mounts from the worktree we mount into the
+                  // sandbox, not from `hostRepoDir`. When the host repo is
+                  // itself a linked worktree, `hostRepoDir/.git` is a pointer
+                  // file whose identity mount can't be remapped for Windows
+                  // (#996). The worktree resolves to the same parent `.git` dir.
+                  resolveGitMounts(join(worktreePath, ".git")).pipe(
                     Effect.provide(NodeFileSystem.layer),
                     Effect.catchAll(() => Effect.succeed([])),
                     // Patch git mounts for Windows worktree compatibility (ADR-0006)

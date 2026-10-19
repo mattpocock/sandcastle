@@ -316,11 +316,17 @@ export const interactive = async (
         );
         return startResult.handle;
       } else {
-        const gitPath = join(hostRepoDir, ".git");
-        const rawGitMounts = yield* resolveGitMounts(gitPath);
         const worktreeOrRepoPath = isHeadMode
           ? hostRepoDir
           : worktreeInfo!.path;
+        // Resolve git mounts from the path we actually mount into the sandbox
+        // (and patch against), not unconditionally from `hostRepoDir`. In
+        // worktree mode, when the host repo is itself a linked worktree,
+        // `hostRepoDir/.git` is a pointer file whose identity mount can't be
+        // remapped for Windows (#996); the worktree resolves to the same parent
+        // `.git` dir either way. In head mode this is still `hostRepoDir`.
+        const gitPath = join(worktreeOrRepoPath, ".git");
+        const rawGitMounts = yield* resolveGitMounts(gitPath);
         const gitMounts = yield* patchGitMountsForWindows(
           rawGitMounts,
           worktreeOrRepoPath,

@@ -619,7 +619,13 @@ export const WorktreeDockerSandboxFactory = {
                     : Effect.void,
                 ),
                 Effect.andThen(
-                  resolveGitMounts(join(hostRepoDir, ".git")).pipe(
+                  // Resolve git mounts from the worktree we actually mount into
+                  // the sandbox, not from `hostRepoDir`. When the host repo is
+                  // itself a linked worktree, `hostRepoDir/.git` is a pointer
+                  // file whose identity mount can't be remapped for Windows
+                  // (#996). The worktree's own `.git` resolves to the same
+                  // parent `.git` dir either way.
+                  resolveGitMounts(join(worktreeInfo.path, ".git")).pipe(
                     Effect.provideService(FileSystem.FileSystem, fileSystem),
                     Effect.mapError(
                       (e) =>
