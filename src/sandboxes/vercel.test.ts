@@ -28,6 +28,15 @@ describe("vercel()", () => {
     expect(provider.tag).toBe("isolated");
   });
 
+  it("accepts persistent and fetch pass-through options", () => {
+    // Should not throw
+    const provider = vercel({
+      persistent: false,
+      fetch: globalThis.fetch,
+    });
+    expect(provider.tag).toBe("isolated");
+  });
+
   it("accepts an env option", () => {
     const provider = vercel({ env: { VERCEL_VAR: "value" } });
     expect(provider.tag).toBe("isolated");
