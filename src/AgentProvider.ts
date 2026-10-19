@@ -1,5 +1,12 @@
-import { mkdir, readFile, rm, writeFile, access } from "node:fs/promises";
-import { dirname, join, posix } from "node:path";
+import {
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+  access,
+} from "node:fs/promises";
+import { dirname, join, posix, relative } from "node:path";
 import { tmpdir } from "node:os";
 import {
   claudeHostSessionPath,
@@ -147,15 +154,13 @@ const parseCursorToolCallStarted = (
   const tc = toolCall as Record<string, unknown>;
 
   const readToolCall = tc.readToolCall as
-    | { args?: { path?: unknown } }
-    | undefined;
+    { args?: { path?: unknown } } | undefined;
   if (readToolCall?.args && typeof readToolCall.args.path === "string") {
     return [{ type: "tool_call", name: "Read", args: readToolCall.args.path }];
   }
 
   const writeToolCall = tc.writeToolCall as
-    | { args?: { path?: unknown } }
-    | undefined;
+    { args?: { path?: unknown } } | undefined;
   if (writeToolCall?.args && typeof writeToolCall.args.path === "string") {
     return [
       { type: "tool_call", name: "Write", args: writeToolCall.args.path },
@@ -915,8 +920,7 @@ const parseOpenCodeStreamLine = (line: string): ParsedStreamEvent[] => {
     if (obj.type === "tool_use" && part?.type === "tool") {
       if (typeof part.tool !== "string") return [];
       const state = part.state as
-        | { status?: string; input?: Record<string, unknown> }
-        | undefined;
+        { status?: string; input?: Record<string, unknown> } | undefined;
       if (state?.status !== "completed") return [];
       const input = state.input;
       if (!input) return [];
@@ -1147,6 +1151,437 @@ export const copilot = (
     return parseCopilotStreamLine(line);
   },
 });
+
+// ---------------------------------------------------------------------------
+// Muse agent provider
+// ---------------------------------------------------------------------------
+
+/**
+ * Muse `exec --json` passes the prompt as a positional argument or via
+ * `--prompt-file`. Linux caps argv at ~128 KiB (ARG_MAX), so guard the
+ * positional form the same way Cursor/Copilot do.
+ */
+const MUSE_PRINT_PROMPT_MAX_BYTES = 120 * 1024;
+
+function assertMusePrintPromptFitsArgv(prompt: string): void {
+  const n = Buffer.byteLength(prompt, "utf8");
+  if (n > MUSE_PRINT_PROMPT_MAX_BYTES) {
+    throw new Error(
+      `Muse print-mode prompt is ${n} bytes (max ${MUSE_PRINT_PROMPT_MAX_BYTES} bytes). Muse exec accepts the prompt as a command-line argument; shorten the prompt or split the work. Sandcastle writes large prompts via --prompt-file where supported.`,
+    );
+  }
+}
+
+/**
+ * Parse one line of `muse exec` JSONL output.
+ *
+ * Verified against the binary's AgentRunEvent variants (TextDelta,
+ * ReasoningDelta, ProviderToolCallStarted/Completed, AssistantMessageCommitted)
+ * and the existing provider parsers. The shape is intentionally permissive:
+ * - Text deltas may appear as `text_delta` / `reasoning_delta` with `delta`.
+ * - Committed messages carry `text` on `assistant_message_committed`.
+ * - Tool calls are signalled via `provider_tool_call_started` with
+ *   `tool_name` + `arguments` (or `input`). Only allowlisted tools surface.
+ * - Session id may be `session`/`session_id`/`sessionId` at top level.
+ * - Generic `assistant`/`result`/`error` shapes are handled defensively.
+ */
+/**
+ * Mutable state threaded through `parseMuseStreamLine` so the provider can
+ * reassemble the final assistant text from fragmented `run.output.delta`
+ * events. Muse's terminal event (`task.lifecycle.completed`) carries no text,
+ * so the accumulated deltas are surfaced as the `result` event there — the
+ * same "synthesize a result from the terminal event" pattern Codex uses.
+ */
+interface MuseStreamState {
+  accumulatedText: string;
+}
+
+const parseMuseStreamLine = (
+  line: string,
+  state: MuseStreamState,
+): ParsedStreamEvent[] => {
+  if (!line.startsWith("{")) return [];
+  let obj: Record<string, unknown>;
+  try {
+    obj = JSON.parse(line) as Record<string, unknown>;
+  } catch {
+    return [];
+  }
+
+  // muse exec envelope uses payload_type/payload (run.output.delta etc.)
+  if (
+    typeof (obj as any).payload_type === "string" &&
+    typeof (obj as any).payload === "object" &&
+    (obj as any).payload !== null
+  ) {
+    const pt = (obj as any).payload_type as string;
+    const payload = (obj as any).payload as Record<string, unknown>;
+    if (pt === "run.output.delta" && typeof payload.text === "string") {
+      state.accumulatedText += payload.text as string;
+      return [{ type: "text", text: payload.text as string }];
+    }
+    if (pt === "run.output.delta" && typeof payload.delta === "string") {
+      state.accumulatedText += payload.delta as string;
+      return [{ type: "text", text: payload.delta as string }];
+    }
+    // Terminal event. Muse carries no text here — surface the accumulated
+    // deltas as the result so the Orchestrator's "last result wins" buffer
+    // holds the complete assistant output (see ADR 0019 / Codex pattern).
+    if (pt === "task.lifecycle.completed") {
+      const result = state.accumulatedText;
+      state.accumulatedText = "";
+      return [{ type: "result", result }];
+    }
+  }
+
+  // Text deltas (streaming)
+  if (
+    (obj.type === "text_delta" || obj.type === "reasoning_delta") &&
+    typeof (obj as any).delta === "string"
+  ) {
+    return [{ type: "text", text: (obj as any).delta as string }];
+  }
+  if (obj.type === "textDelta" && typeof (obj as any).textDelta === "string") {
+    return [{ type: "text", text: (obj as any).textDelta as string }];
+  }
+
+  // Committed assistant message — also surface as result (last wins)
+  if (
+    (obj.type === "assistant_message_committed" ||
+      obj.type === "assistantMessageCommitted") &&
+    typeof (obj as any).text === "string" &&
+    ((obj as any).text as string).length > 0
+  ) {
+    const text = (obj as any).text as string;
+    return [
+      { type: "text", text },
+      { type: "result", result: text },
+    ];
+  }
+
+  // Generic assistant message like Claude
+  if (
+    obj.type === "assistant" &&
+    Array.isArray((obj as any).message?.content)
+  ) {
+    return parseStreamJsonLine(line);
+  }
+
+  // Generic result
+  if (obj.type === "result" && typeof (obj as any).result === "string") {
+    return [{ type: "result", result: (obj as any).result as string }];
+  }
+
+  if (
+    obj.type === "final_summary" &&
+    typeof (obj as any).summary === "string"
+  ) {
+    return [{ type: "result", result: (obj as any).summary as string }];
+  }
+
+  // Tool call started
+  if (
+    obj.type === "provider_tool_call_started" ||
+    obj.type === "tool_call" ||
+    obj.type === "tool.execution_start"
+  ) {
+    const rawName =
+      ((obj as any).tool_name as unknown) ??
+      (obj as any).toolName ??
+      (obj as any).name;
+    if (typeof rawName !== "string") return [];
+    const toolName = rawName === "bash" ? "Bash" : rawName;
+    const argField = TOOL_ARG_FIELDS[toolName];
+    if (argField === undefined) return [];
+    const args =
+      ((obj as any).arguments as Record<string, unknown> | undefined) ??
+      (obj as any).args ??
+      (obj as any).input;
+    if (!args || typeof args !== "object") return [];
+    const argValue = (args as Record<string, unknown>)[argField];
+    if (typeof argValue !== "string") return [];
+    return [{ type: "tool_call", name: toolName, args: argValue }];
+  }
+
+  // Session id — various spellings observed across CLIs
+  if (typeof (obj as any).session_id === "string") {
+    return [
+      { type: "session_id", sessionId: (obj as any).session_id as string },
+    ];
+  }
+  if (typeof (obj as any).sessionId === "string") {
+    return [
+      { type: "session_id", sessionId: (obj as any).sessionId as string },
+    ];
+  }
+  if (obj.type === "session" && typeof (obj as any).id === "string") {
+    return [{ type: "session_id", sessionId: (obj as any).id as string }];
+  }
+  if (
+    obj.type === "system" &&
+    (obj as any).subtype === "init" &&
+    typeof (obj as any).session_id === "string"
+  ) {
+    return [
+      { type: "session_id", sessionId: (obj as any).session_id as string },
+    ];
+  }
+
+  // Errors on stdout — surface as result for Orchestrator fallback
+  if (obj.type === "error" || obj.type === "agent_error") {
+    const msg = extractErrorMessage(obj);
+    return msg ? [{ type: "result", result: msg }] : [];
+  }
+
+  // Fallback: try Claude-shaped parser for any remaining assistant/result lines
+  const fallback = parseStreamJsonLine(line);
+  if (fallback.length > 0) return fallback;
+
+  return [];
+};
+
+/** Muse's reasoning-effort flag values. Mirrors `muse exec --help`. */
+export type MuseReasoningEffort =
+  "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "ultra";
+
+export interface MuseOptions {
+  /** Reasoning effort level. Maps to the CLI's --reasoning-effort flag. */
+  readonly reasoningEffort?: MuseReasoningEffort;
+  /** Environment variables injected by this agent provider. */
+  readonly env?: Record<string, string>;
+  /** When false, session capture is disabled. Default: true. */
+  readonly captureSessions?: boolean;
+  /** Override Muse session directories for tests or non-standard installs. */
+  readonly sessionStorage?: {
+    readonly hostSessionsDir?: string;
+    readonly sandboxSessionsDir?: string;
+  };
+  /** Base URL override — maps to --base-url. */
+  readonly baseUrl?: string;
+}
+
+const museHostSessionsDir = (home: string): string =>
+  join(home, ".local", "share", "muse", "sessions");
+const museSandboxSessionsDir = posix.join(
+  "/home/agent",
+  ".local",
+  "share",
+  "muse",
+  "sessions",
+);
+
+/**
+ * Rewrite a Muse session JSONL string, replacing `cwd` fields that match
+ * `fromCwd` with `toCwd`. Shares the shape with Codex/Pi narrowly-scoped
+ * rewrites but tolerant of Muse's envelope (top-level `cwd` or
+ * `session_meta.payload.cwd`). Pure function — no file I/O.
+ */
+export const transferMuseSession = (
+  jsonl: string,
+  fromCwd: string,
+  toCwd: string,
+): string => {
+  if (jsonl === "") return "";
+  return jsonl
+    .split("\n")
+    .map((line) => {
+      if (line === "") return line;
+      try {
+        const entry = JSON.parse(line) as Record<string, unknown>;
+        if (typeof entry.cwd === "string" && entry.cwd === fromCwd) {
+          entry.cwd = toCwd;
+        }
+        if (
+          entry.type === "session_meta" &&
+          typeof entry.payload === "object" &&
+          entry.payload !== null &&
+          typeof (entry.payload as { cwd?: unknown }).cwd === "string" &&
+          (entry.payload as { cwd: string }).cwd === fromCwd
+        ) {
+          (entry.payload as { cwd: string }).cwd = toCwd;
+        }
+        return JSON.stringify(entry);
+      } catch {
+        return line;
+      }
+    })
+    .join("\n");
+};
+
+const findMuseSessionPath = async (
+  rootDir: string,
+  id: string,
+): Promise<string | undefined> => {
+  const visit = async (dir: string): Promise<string | undefined> => {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return undefined;
+    }
+    for (const entry of entries) {
+      const child = join(dir, entry.name);
+      if (
+        entry.isFile() &&
+        entry.name.includes(id) &&
+        entry.name.endsWith(".jsonl")
+      ) {
+        return child;
+      }
+      if (entry.isDirectory()) {
+        const found = await visit(child);
+        if (found) return found;
+      }
+    }
+    return undefined;
+  };
+  return visit(rootDir);
+};
+
+export const findMuseSessionOnHost = async (
+  id: string,
+  sessionsDir?: string,
+): Promise<HostSessionLookup> => {
+  const root = sessionsDir ?? museHostSessionsDir(process.env.HOME ?? "~");
+  const path = await findMuseSessionPath(root, id);
+  return { path, searchedRoot: root };
+};
+
+export interface MuseSessionLocation {
+  readonly path: string;
+  readonly relativePath: string;
+}
+
+export const locateMuseHostSession = async (
+  id: string,
+  sessionsDir?: string,
+): Promise<MuseSessionLocation> => {
+  const root = sessionsDir ?? museHostSessionsDir(process.env.HOME ?? "~");
+  const path = await findMuseSessionPath(root, id);
+  if (!path) throw new Error(`session ${id} not found in ${root}`);
+  return { path, relativePath: relative(root, path) };
+};
+
+export const locateMuseSandboxSession = async (
+  id: string,
+  handle: Pick<BindMountSandboxHandle, "exec">,
+  sessionsDir: string,
+): Promise<MuseSessionLocation> => {
+  const result = await handle.exec(
+    `find ${JSON.stringify(sessionsDir)} -type f -name ${JSON.stringify(
+      `*${id}*.jsonl`,
+    )} -print -quit`,
+  );
+  const path = result.stdout.trim().split("\n")[0];
+  if (result.exitCode !== 0 || !path) {
+    throw new Error(`session ${id} not found in ${sessionsDir}`);
+  }
+  return { path, relativePath: posix.relative(sessionsDir, path) };
+};
+
+const makeMuseSessionStorage = (options?: MuseOptions): AgentSessionStorage => {
+  const hostSessionsDir = options?.sessionStorage?.hostSessionsDir;
+  const sandboxSessionsDir =
+    options?.sessionStorage?.sandboxSessionsDir ?? museSandboxSessionsDir;
+
+  const capturedPaths = new Map<string, string>();
+
+  return {
+    hostSessionFilePath: (_cwd, id) => capturedPaths.get(id),
+    existsOnHost: async (_cwd, id) => {
+      const found = await findMuseSessionOnHost(id, hostSessionsDir);
+      return found.path !== undefined;
+    },
+    readHostSession: async (_cwd, id) => {
+      const found = await findMuseSessionOnHost(id, hostSessionsDir);
+      if (!found.path) return undefined;
+      return readFile(found.path, "utf-8");
+    },
+    captureToHost: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
+      const located = await locateMuseSandboxSession(
+        sessionId,
+        handle,
+        sandboxSessionsDir,
+      );
+      const jsonl = await readSandboxFile(handle, located.path, "muse-cap");
+      const rewritten = transferMuseSession(jsonl, sandboxCwd, hostCwd);
+      const root =
+        hostSessionsDir ?? museHostSessionsDir(process.env.HOME ?? "~");
+      const target = join(root, located.relativePath);
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, rewritten);
+      capturedPaths.set(sessionId, target);
+    },
+    resumeIntoSandbox: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
+      const located = await locateMuseHostSession(sessionId, hostSessionsDir);
+      const jsonl = await readFile(located.path, "utf-8");
+      const rewritten = transferMuseSession(jsonl, hostCwd, sandboxCwd);
+      const target = posix.join(sandboxSessionsDir, located.relativePath);
+      await writeSandboxFile(handle, target, rewritten, "muse-res");
+    },
+    findByIdOnHost: (id) => findMuseSessionOnHost(id, hostSessionsDir),
+  };
+};
+
+export const muse = (
+  model: string,
+  options?: MuseOptions,
+): AgentProvider & { readonly sessionStorage: AgentSessionStorage } => {
+  // Per-provider-instance accumulator so the terminal `task.lifecycle.completed`
+  // event can surface the full assistant text as a `result` event. A fresh
+  // provider instance (per `muse(model, options)` call) starts with empty state.
+  const museStreamState: MuseStreamState = { accumulatedText: "" };
+  return {
+    name: "muse",
+    env: options?.env ?? {},
+    captureSessions: options?.captureSessions ?? true,
+    sessionStorage: makeMuseSessionStorage(options),
+
+    buildPrintCommand({
+      prompt,
+      dangerouslySkipPermissions,
+      resumeSession,
+    }: AgentCommandOptions): PrintCommand {
+      assertMusePrintPromptFitsArgv(prompt);
+      const effortFlag = options?.reasoningEffort
+        ? ` --reasoning-effort ${options.reasoningEffort}`
+        : "";
+      const baseUrlFlag = options?.baseUrl
+        ? ` --base-url ${shellEscape(options.baseUrl)}`
+        : "";
+      const yoloFlag = dangerouslySkipPermissions ? " --yolo" : "";
+      const sessionFlag = resumeSession
+        ? ` --session-id ${shellEscape(resumeSession)}`
+        : "";
+      return {
+        command: `muse exec --json --model ${shellEscape(model)}${effortFlag}${baseUrlFlag}${yoloFlag}${sessionFlag} ${shellEscape(prompt)}`,
+      };
+    },
+
+    buildInteractiveArgs({
+      prompt,
+      dangerouslySkipPermissions,
+    }: AgentCommandOptions): string[] {
+      const args = ["muse", "--model", model];
+      if (options?.reasoningEffort) {
+        args.push("--reasoning-effort", options.reasoningEffort);
+      }
+      if (options?.baseUrl) {
+        args.push("--base-url", options.baseUrl);
+      }
+      if (dangerouslySkipPermissions) args.push("--yolo");
+      if (prompt) args.push(prompt);
+      return args;
+    },
+
+    parseStreamLine(line: string): ParsedStreamEvent[] {
+      return parseMuseStreamLine(line, museStreamState);
+    },
+  };
+};
+
+/** Alias for symmetry with `claudeCode` — same provider, distinct import name. */
+export const museCode = muse;
 
 // ---------------------------------------------------------------------------
 // Claude Code agent provider

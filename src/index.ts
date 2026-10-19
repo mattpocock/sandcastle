@@ -42,6 +42,12 @@ export {
   findClaudeSessionOnHost,
   findCodexSessionOnHost,
 } from "./SessionStore.js";
+export {
+  transferMuseSession,
+  findMuseSessionOnHost,
+  locateMuseHostSession,
+  locateMuseSandboxSession,
+} from "./AgentProvider.js";
 export type { HostSessionLookup } from "./SessionStore.js";
 export type { SandboxHooks } from "./SandboxLifecycle.js";
 export type { MountConfig } from "./MountConfig.js";
@@ -57,6 +63,8 @@ export {
   codex,
   copilot,
   cursor,
+  muse,
+  museCode,
   opencode,
   pi,
 } from "./AgentProvider.js";
@@ -68,6 +76,8 @@ export type {
   CodexOptions,
   CopilotOptions,
   CursorOptions,
+  MuseOptions,
+  MuseReasoningEffort,
   OpenCodeOptions,
   PiOptions,
 } from "./AgentProvider.js";
