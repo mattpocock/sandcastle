@@ -3,6 +3,7 @@ import { exec } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import {
+  appendFile,
   copyFile,
   mkdir,
   mkdtemp,
@@ -17,6 +18,8 @@ import { describe, expect, it } from "vitest";
 import { Display, type DisplayEntry, SilentDisplay } from "./Display.js";
 import { makeLocalSandbox } from "./testSandbox.js";
 import { orchestrate } from "./Orchestrator.js";
+import { withAgentFallback } from "./AgentFallback.js";
+import { buildRoleAgent } from "./RoleAgents.js";
 import { substitutePromptArgs } from "./PromptArgumentSubstitution.js";
 import {
   claudeCode,
@@ -2500,6 +2503,174 @@ describe("Orchestrator Display integration", () => {
     expect(exitResult._tag).toBe("Success");
   }, 10_000);
 
+  it.each([
+    "current session",
+    "other session",
+    "stale session",
+    "missing session",
+    "stops growing",
+    "completion while growing",
+    "aborted while growing",
+    "truncated session",
+    "probe failure",
+    "probe hangs",
+  ])(
+    "uses persisted Codex activity without stdout: %s",
+    async (activity) => {
+      const hostDir = await mkdtemp(join(tmpdir(), "orch-codex-activity-"));
+      const sessions = await mkdtemp(
+        join(tmpdir(), "codex sessions 'activity-"),
+      );
+      try {
+        await initRepo(hostDir);
+        await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+        const id = randomUUID();
+        const sessionDir = join(sessions, "2026", "10", "12");
+        await mkdir(sessionDir, { recursive: true });
+        const file = join(sessionDir, `rollout-fixture-${id}.jsonl`);
+        if (activity !== "missing session") await writeFile(file, "initial\n");
+        const controller = new AbortController();
+        let probes = 0;
+        let finished = false;
+        const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) => {
+          const real = makeLocalSandbox(dir);
+          return {
+            ...real,
+            exec: (command, options) => {
+              if (command.startsWith("node -e ")) probes++;
+              if (
+                command.startsWith("node -e ") &&
+                activity === "probe failure"
+              )
+                return Effect.succeed({
+                  stdout: "999999",
+                  stderr: "probe unavailable",
+                  exitCode: 1,
+                });
+              if (command.startsWith("node -e ") && activity === "probe hangs")
+                return Effect.never;
+              if (!command.startsWith("codex ") || !options?.onLine)
+                return real.exec(command, options);
+              return Effect.gen(function* () {
+                options.onLine!(
+                  JSON.stringify({ type: "thread.started", thread_id: id }),
+                );
+                // Replay #7's observation: the rollout advances, stdout does not.
+                for (
+                  let i = 0;
+                  i < (activity === "stops growing" ? 24 : 12);
+                  i++
+                ) {
+                  yield* Effect.sleep("120 millis");
+                  if (
+                    activity === "current session" ||
+                    activity === "other session" ||
+                    activity === "completion while growing" ||
+                    activity === "aborted while growing" ||
+                    (activity === "stops growing" && i < 3)
+                  )
+                    yield* Effect.promise(() =>
+                      appendFile(
+                        activity === "other session"
+                          ? join(sessionDir, "rollout-fixture-unrelated.jsonl")
+                          : file,
+                        "private session content <promise>COMPLETE</promise>\n",
+                      ),
+                    );
+                  if (activity === "truncated session")
+                    yield* Effect.promise(() => writeFile(file, ""));
+                  if (activity === "aborted while growing" && i === 3)
+                    controller.abort("fixture abort");
+                  if (activity === "completion while growing" && i === 3)
+                    options.onLine!(
+                      JSON.stringify({
+                        type: "item.completed",
+                        item: {
+                          type: "agent_message",
+                          text: "done <promise>COMPLETE</promise>",
+                        },
+                      }),
+                    );
+                  if (activity === "completion while growing" && i === 8)
+                    return yield* Effect.never;
+                }
+                finished = true;
+                options.onLine!(
+                  JSON.stringify({
+                    type: "item.completed",
+                    item: {
+                      type: "agent_message",
+                      text: "done <promise>COMPLETE</promise>",
+                    },
+                  }),
+                );
+                return { stdout: "", stderr: "", exitCode: 0 };
+              });
+            },
+          };
+        });
+        const events: AgentStreamEvent[] = [];
+        const result = await Effect.runPromise(
+          orchestrate({
+            provider: codexFactory("test-model", {
+              captureSessions: false,
+              sessionStorage: { sandboxSessionsDir: sessions },
+            }),
+            hostRepoDir: hostDir,
+            iterations: 1,
+            prompt: "test",
+            idleTimeoutSeconds: 0.8,
+            completionTimeoutSeconds: 0.25,
+            signal: controller.signal,
+          }).pipe(
+            Effect.provide(
+              Layer.merge(
+                factoryLayer,
+                Layer.merge(
+                  SilentDisplay.layer(
+                    Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]),
+                  ),
+                  agentStreamEmitterLayer((e) => events.push(e)),
+                ),
+              ),
+            ),
+            Effect.exit,
+          ),
+        );
+        if (
+          activity === "current session" ||
+          activity === "completion while growing"
+        )
+          expect(result._tag).toBe("Success");
+        else {
+          expect(result._tag).toBe("Failure");
+          if (result._tag === "Failure")
+            if (activity === "aborted while growing")
+              expect(Cause.squash(result.cause)).toBe("fixture abort");
+            else
+              expect(Cause.squash(result.cause)).toBeInstanceOf(
+                AgentIdleTimeoutError,
+              );
+        }
+        if (activity === "current session") expect(finished).toBe(true);
+        if (
+          activity === "completion while growing" ||
+          activity === "aborted while growing"
+        ) {
+          expect(finished).toBe(false);
+          const probesAtExit = probes;
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          expect(probes).toBe(probesAtExit);
+        }
+        expect(JSON.stringify(events)).not.toContain("private session content");
+      } finally {
+        await rm(hostDir, { recursive: true, force: true });
+        await rm(sessions, { recursive: true, force: true });
+      }
+    },
+    15_000,
+  );
+
   it("logs periodic idle warnings every IDLE_WARNING_INTERVAL_MS of inactivity", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "orch-idle-warn-"));
 
@@ -4124,4 +4295,183 @@ describe("Orchestrator completion timeout (hanging process)", () => {
       warnEntries.some((e) => /hang|completion timeout/i.test(e.message)),
     ).toBe(true);
   }, 10_000);
+});
+
+describe("provider fallback", () => {
+  const codexProvider = codexFactory("gpt-6.1-sol");
+  const chained = withAgentFallback(
+    {
+      agent: codexProvider,
+      target: { provider: "codex", model: "gpt-6.1-sol" },
+    },
+    [
+      {
+        agent: testProvider,
+        target: { provider: "claudeCode", model: "test-model" },
+      },
+    ],
+  );
+  const toolCallLine = JSON.stringify({
+    type: "item.started",
+    item: { type: "command_execution", command: "git status" },
+  });
+  const setup = async (
+    codexBehaviour: (onLine?: (line: string) => void) => {
+      stdout: string;
+      stderr: string;
+      exitCode: number;
+    },
+    claudeExit = 0,
+  ) => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-fallback-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+    const calls: string[] = [];
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) => {
+      const real = makeLocalSandbox(dir);
+      return {
+        exec: (command, options) => {
+          if (command.startsWith("codex ")) {
+            calls.push("codex");
+            return Effect.succeed(codexBehaviour(options?.onLine));
+          }
+          if (command.startsWith("claude ")) {
+            calls.push("claude");
+            const out =
+              claudeExit === 0
+                ? toStreamJson("All done. <promise>COMPLETE</promise>")
+                : "";
+            for (const line of out.split("\n"))
+              if (line) options?.onLine?.(line);
+            return Effect.succeed({
+              stdout: out,
+              stderr: claudeExit === 0 ? "" : "503 Service Unavailable",
+              exitCode: claudeExit,
+            });
+          }
+          return real.exec(command, options);
+        },
+        copyIn: (h, s) => real.copyIn(h, s),
+        copyFileOut: (s, h) => real.copyFileOut(s, h),
+      };
+    });
+    const run = () =>
+      Effect.runPromiseExit(
+        orchestrate({
+          provider: chained,
+          hostRepoDir: hostDir,
+          iterations: 1,
+          prompt: "do some work",
+        }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      );
+    return { run, calls };
+  };
+
+  it("falls back on a classified provider failure before any tool call and records attempts", async () => {
+    const { run, calls } = await setup(() => ({
+      stdout: "",
+      stderr: "error: 429 Too Many Requests (rate limit)",
+      exitCode: 1,
+    }));
+    const exit = await run();
+    expect(exit._tag).toBe("Success");
+    expect(calls).toEqual(["codex", "claude"]);
+    if (exit._tag === "Success") {
+      expect(exit.value.completionSignal).toBe("<promise>COMPLETE</promise>");
+      expect(exit.value.iterations[0]!.provider).toBe("claude-code");
+      expect(exit.value.iterations[0]!.providerAttempts).toEqual([
+        {
+          provider: "codex",
+          model: "gpt-6.1-sol",
+          outcome: "fell-back",
+          reason: "rate-limit",
+        },
+        { provider: "claudeCode", model: "test-model", outcome: "succeeded" },
+      ]);
+    }
+  });
+
+  it("does not fall back for an unclassified failure", async () => {
+    const { run, calls } = await setup(() => ({
+      stdout: "",
+      stderr: "TypeError: cannot read properties of undefined",
+      exitCode: 1,
+    }));
+    const exit = await run();
+    expect(exit._tag).toBe("Failure");
+    expect(calls).toEqual(["codex"]);
+  });
+
+  it("never falls back after the agent made a tool call", async () => {
+    const { run, calls } = await setup((onLine) => {
+      onLine?.(toolCallLine);
+      return {
+        stdout: toolCallLine,
+        stderr: "rate limit exceeded",
+        exitCode: 1,
+      };
+    });
+    const exit = await run();
+    expect(exit._tag).toBe("Failure");
+    expect(calls).toEqual(["codex"]);
+  });
+
+  it("reports every attempt when the whole chain fails", async () => {
+    const { run, calls } = await setup(
+      () => ({ stdout: "", stderr: "not logged in", exitCode: 1 }),
+      1,
+    );
+    const exit = await run();
+    expect(calls).toEqual(["codex", "claude"]);
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      const err = Cause.squash(exit.cause);
+      expect(err).toBeInstanceOf(AgentError);
+      if (err instanceof AgentError)
+        expect(err.message).toContain(
+          "Provider attempts: codex/gpt-6.1-sol fell-back (authentication) -> claudeCode/test-model failed (unavailable)",
+        );
+    }
+  });
+});
+
+describe("credential scope", () => {
+  it("runs a role-configured agent without other providers' credential variables", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-scope-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+    const commands: string[] = [];
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) => {
+      const real = makeLocalSandbox(dir);
+      return {
+        exec: (command, options) => {
+          if (command.includes("claude --print")) {
+            commands.push(command);
+            const out = toStreamJson("Done. <promise>COMPLETE</promise>");
+            for (const line of out.split("\n")) options?.onLine?.(line);
+            return Effect.succeed({ stdout: out, stderr: "", exitCode: 0 });
+          }
+          return real.exec(command, options);
+        },
+        copyIn: (h, s) => real.copyIn(h, s),
+        copyFileOut: (s, h) => real.copyFileOut(s, h),
+      };
+    });
+    const exit = await Effect.runPromiseExit(
+      orchestrate({
+        provider: buildRoleAgent({
+          provider: "claudeCode",
+          model: "test-model",
+        }),
+        hostRepoDir: hostDir,
+        iterations: 1,
+        prompt: "do some work",
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+    );
+    expect(exit._tag).toBe("Success");
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatch(/^env (-u [A-Z_]+ )+claude --print/);
+    expect(commands[0]).toContain("-u OPENAI_API_KEY");
+    expect(commands[0]).not.toContain("-u ANTHROPIC_API_KEY");
+  });
 });

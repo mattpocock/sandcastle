@@ -11,7 +11,8 @@ import { setupTerminalCleanup } from "./terminalCleanup.js";
 // If the process exits via a signal handler that calls process.exit() directly
 // (e.g. the Ctrl-C handler in SandboxFactory), clack's own cleanup is
 // bypassed, leaving the terminal broken. This exit hook fixes that.
-setupTerminalCleanup();
+// Updates emits machine-readable JSON and never changes terminal mode.
+if (process.argv[2] !== "updates") setupTerminalCleanup();
 
 const mainLayer = Layer.merge(NodeContext.layer, ClackDisplay.layer);
 

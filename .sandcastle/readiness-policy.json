@@ -1,0 +1,58 @@
+{
+  "repository": "hanhnghh/sandcastle",
+  "holdLabels": ["readiness:hold"],
+  "context": {
+    "parentIssue": 1,
+    "contractHash": "6d474227ca4d9792ab87f53ebc1c27c230f150600c42134e08f154e713f3861d"
+  },
+  "issues": {
+    "2": {
+      "contractHash": "f07dbbeb056f72216287bcaffaded84fdb13ae2a35b6859b1aa3a39558a967b2",
+      "kind": "implementation",
+      "dependencies": {},
+      "gates": ["integration"]
+    },
+    "3": {
+      "contractHash": "12b716962ac0340211f0d9bb4b7fe7f394da377cd4b0434f47e6e705a46cb4d1",
+      "kind": "implementation",
+      "dependencies": {
+        "hanhnghh/sandcastle#2": "refs/heads/sandcastle/issue-2"
+      },
+      "gates": ["integration"]
+    },
+    "4": {
+      "contractHash": "d109bd1a3160e75e6ed1db7547bdb1f840f8a7efb85e477d521c1499b5276f78",
+      "kind": "implementation",
+      "dependencies": {
+        "hanhnghh/sandcastle#2": "refs/heads/sandcastle/issue-2"
+      },
+      "gates": ["integration"]
+    },
+    "5": {
+      "contractHash": "d8a50bd0d69c54fefe28243759f9212cda1cdcca82cfb5202f02883dfb23bcf9",
+      "kind": "implementation",
+      "dependencies": {
+        "hanhnghh/sandcastle#2": "refs/heads/sandcastle/issue-2"
+      },
+      "gates": ["integration"]
+    },
+    "6": {
+      "contractHash": "21b0074989a95e628727b9ab20c9fe0ea192616427a709741b0a7860bf1db604",
+      "kind": "implementation",
+      "dependencies": {
+        "hanhnghh/sandcastle#3": "refs/heads/sandcastle/issue-3",
+        "hanhnghh/sandcastle#4": "refs/heads/sandcastle/issue-4",
+        "hanhnghh/sandcastle#5": "refs/heads/sandcastle/issue-5"
+      },
+      "gates": ["integration"]
+    },
+    "7": {
+      "contractHash": "cd14ff3abc41ee3835ef2dd651e6c7b6e5ed48c10a71963ad5326675bc977ebe",
+      "kind": "implementation",
+      "dependencies": {
+        "hanhnghh/sandcastle#6": "refs/heads/sandcastle/issue-6"
+      },
+      "gates": ["integration"]
+    }
+  }
+}

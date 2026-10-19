@@ -23,6 +23,7 @@
 
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { execFile } from "node:child_process";
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -52,6 +53,14 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
 
   // Generate a unique branch name for this iteration.
   const branch = `sandcastle/sequential-reviewer/${Date.now()}`;
+  const reviewBaseSha = await new Promise<string>((resolve, reject) => {
+    execFile(
+      "git",
+      ["rev-parse", "HEAD"],
+      { encoding: "utf8" },
+      (error, stdout) => (error ? reject(error) : resolve(stdout.trim())),
+    );
+  });
 
   // Create a single sandbox that both the implementer and reviewer share.
   // This gives both agents a real, named branch that persists across phases.
@@ -107,6 +116,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
       promptFile: "./.sandcastle/review-prompt.md",
       promptArgs: {
         BRANCH: branch,
+        REVIEW_BASE_SHA: reviewBaseSha,
       },
     });
 

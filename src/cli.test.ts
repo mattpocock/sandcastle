@@ -1,5 +1,5 @@
 import { exec } from "node:child_process";
-import { mkdtemp, readdir, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -30,12 +30,25 @@ const runCli = (args: string, cwd: string) =>
   execAsync(`node ${cliPath} ${args}`, { cwd });
 
 describe("sandcastle CLI", () => {
+  it("offers an operator command requiring an explicit host project", async () => {
+    const { stdout } = await runCli("operator --help", process.cwd());
+    expect(stdout).toContain("$ operator --cwd");
+    expect(stdout).toContain("--cwd");
+    expect(stdout).toContain("--port");
+    await expect(runCli("operator --port 0", process.cwd())).rejects.toThrow();
+  });
+  it("offers a dashboard command with host directory and port options", async () => {
+    const { stdout } = await runCli("dashboard --help", process.cwd());
+    expect(stdout).toContain("--port");
+    expect(stdout).toContain("--cwd");
+  });
   it("shows help with --help flag", async () => {
     const { stdout } = await runCli("--help", process.cwd());
     expect(stdout).toContain("sandcastle");
     expect(stdout).toContain("docker");
     expect(stdout).toContain("init");
-    expect(stdout).not.toContain("run");
+    expect(stdout).not.toMatch(/- run(?:\s|$)/);
+    await expect(runCli("run", process.cwd())).rejects.toThrow();
     expect(stdout).not.toContain("interactive");
     // build-image and remove-image are namespaced under docker, not top-level
     expect(stdout).toContain("docker build-image");
@@ -76,6 +89,13 @@ describe("sandcastle CLI", () => {
   it("init --help exposes --agent flag", async () => {
     const { stdout } = await runCli("init --help", process.cwd());
     expect(stdout).toContain("--agent");
+  });
+
+  it("init --help exposes the codex-afk profile and login controls", async () => {
+    const { stdout } = await runCli("init --help", process.cwd());
+    expect(stdout).toContain("--profile");
+    expect(stdout).toContain("--codex-login");
+    expect(stdout).toContain("--codegraph-version");
   });
 
   it("init --help exposes --model flag", async () => {
@@ -241,6 +261,35 @@ describe("sandcastle CLI", () => {
     const entries = await readdir(join(hostDir, ".sandcastle"));
     expect(entries).toContain("Dockerfile");
     expect(entries).toContain("prompt.md");
+  });
+
+  it("init --profile codex-afk scaffolds both integrations without other selection flags", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const { stdout } = await runCli(
+      "init --profile codex-afk --codex-login false --install-template-deps false --build-image false",
+      hostDir,
+    );
+
+    expect(stdout).toContain("Init complete");
+    const main = await readFile(
+      join(hostDir, ".sandcastle", "main.mts"),
+      "utf8",
+    );
+    const dockerfile = await readFile(
+      join(hostDir, ".sandcastle", "Dockerfile"),
+      "utf8",
+    );
+    expect(main).toContain("CODEX_HOME_HOST");
+    expect(main).toContain("prepareCodeGraphCache");
+    expect(main).toContain('runtime.agent("implementer"');
+    const roles = JSON.parse(
+      await readFile(join(hostDir, ".sandcastle", "roles.json"), "utf8"),
+    );
+    expect(roles.roles.implementer.model).toBe("gpt-5.6-sol");
+    expect(dockerfile).toContain("@colbymchenry/codegraph@1.5.0");
   });
 
   it("init without --agent fails fast with a clear non-interactive error message", async () => {

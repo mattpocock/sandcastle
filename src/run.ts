@@ -364,7 +364,7 @@ export interface RunOptions<A extends AgentProvider = AgentProvider> {
   readonly logging?: LoggingOption;
   /** Substring(s) the agent emits to stop the iteration loop early. Matched via `includes` against agent output. (default: `"<promise>COMPLETE</promise>"`) */
   readonly completionSignal?: string | string[];
-  /** Idle timeout in seconds. If the agent produces no output for this long, it fails. Default: 600 (10 minutes) */
+  /** Idle timeout in seconds without stdout or provider-reported session growth. Default: 600 (10 minutes). Session activity never extends post-completion grace. */
   readonly idleTimeoutSeconds?: number;
   /**
    * Grace window in seconds after a completion signal is observed in the

@@ -3,3 +3,16 @@ dist
 .env.*
 .vercel
 .claude/settings.local.json
+
+# Private self-hosting runtime state; never commit subscription credentials.
+.sandcastle/codex-home/
+.sandcastle/cache/
+.sandcastle/logs/
+.sandcastle/runs/
+.sandcastle/worktrees/
+.sandcastle/locks/
+.sandcastle/.env
+.codegraph/
+
+# Private staged runtime installations, rollback backups and npm auth references.
+.sandcastle/updates/

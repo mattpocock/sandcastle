@@ -21,6 +21,7 @@ import {
   type HostSessionLookup,
 } from "./SessionStore.js";
 import type { BindMountSandboxHandle } from "./SandboxProvider.js";
+import { codexActivityCommand } from "./codexActivity.js";
 
 const fileExists = async (path: string): Promise<boolean> => {
   try {
@@ -267,8 +268,17 @@ export interface AgentProvider {
   readonly env: Record<string, string>;
   /** When true, session capture is enabled for this provider. Default: true for Claude Code, false for others. */
   readonly captureSessions: boolean;
+  /** Maximum resolved prompt length in UTF-16 code units. Omitted when the provider declares no transport limit; never causes truncation. */
+  readonly maxPromptCharacters?: number;
   /** Provider-owned storage and transfer behavior for resumable agent sessions. */
   readonly sessionStorage?: AgentSessionStorage;
+  /**
+   * Optional read-only command, run inside the sandbox for the active session.
+   * Stdout must contain only a nonnegative, monotonically increasing byte count.
+   * Growth supplements stdout for idle detection, never completion or success.
+   * Missing/failed probes and the first baseline sample do not count as activity.
+   */
+  buildActivityCommand?(sessionId: string): string;
   buildPrintCommand(options: AgentCommandOptions): PrintCommand;
   buildInteractiveArgs?(options: AgentCommandOptions): string[];
   parseStreamLine(line: string): ParsedStreamEvent[];
@@ -775,9 +785,15 @@ export const codex = (
   options?: CodexOptions,
 ): AgentProvider & { readonly sessionStorage: AgentSessionStorage } => ({
   name: "codex",
+  maxPromptCharacters: 1_048_576,
   env: options?.env ?? {},
   captureSessions: options?.captureSessions ?? true,
   sessionStorage: makeCodexSessionStorage(options),
+  buildActivityCommand: (sessionId) =>
+    codexActivityCommand(
+      sessionId,
+      options?.sessionStorage?.sandboxSessionsDir,
+    ),
 
   buildPrintCommand({
     prompt,

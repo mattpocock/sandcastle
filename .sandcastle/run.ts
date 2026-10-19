@@ -1,159 +1,79 @@
-import * as sandcastle from "@ai-hero/sandcastle";
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { execFile } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  openSync,
+  closeSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 
-const MAX_ITERATIONS = 10;
-const MAX_PARALLEL = 4;
+const repository = "hanhnghh/sandcastle";
+process.env.GH_REPO = repository;
+process.env.CODEX_HOME = `${process.cwd()}/.sandcastle/codex-home`;
 
-for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
-  console.log(`\n=== Iteration ${iteration}/${MAX_ITERATIONS} ===\n`);
-
-  // Phase 1: Plan — orchestrator agent analyzes issues and picks parallelizable work
-  const plan = await sandcastle.run({
-    sandbox: docker(),
-    name: "Planner",
-    agent: sandcastle.claudeCode("claude-opus-4-8"),
-    promptFile: "./.sandcastle/plan-prompt.md",
-  });
-
-  const planMatch = plan.stdout.match(/<plan>([\s\S]*?)<\/plan>/);
-  if (!planMatch) {
-    throw new Error(
-      "Orchestrator did not produce a <plan> tag.\n\n" + plan.stdout,
+function command(file: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      file,
+      args,
+      { encoding: "utf8", timeout: 30_000, maxBuffer: 1024 * 1024 },
+      (error, stdout) => (error ? reject(error) : resolve(stdout.trim())),
     );
-  }
-
-  const { issues } = JSON.parse(planMatch[1]) as {
-    issues: { number: number; title: string; branch: string }[];
-  };
-
-  if (issues.length === 0) {
-    console.log("No issues to work on. Exiting.");
-    break;
-  }
-
-  console.log(
-    `Planning complete. ${issues.length} issue(s) to work in parallel:`,
-  );
-  for (const issue of issues) {
-    console.log(`  #${issue.number}: ${issue.title} → ${issue.branch}`);
-  }
-
-  // Phase 2: Execute + Review — implement then review each branch, max 4 in parallel
-  let running = 0;
-  const queue: (() => void)[] = [];
-  const acquire = () =>
-    running < MAX_PARALLEL
-      ? (running++, Promise.resolve())
-      : new Promise<void>((resolve) => queue.push(resolve));
-  const release = () => {
-    running--;
-    const next = queue.shift();
-    if (next) {
-      running++;
-      next();
-    }
-  };
-
-  const settled = await Promise.allSettled(
-    issues.map(async (issue) => {
-      await acquire();
-      try {
-        await using sandbox = await sandcastle.createSandbox({
-          sandbox: docker(),
-          branch: issue.branch,
-          copyToWorktree: ["node_modules"],
-          hooks: {
-            sandbox: {
-              onSandboxReady: [{ command: "npm install && npm run build" }],
-            },
-          },
-        });
-
-        const result = await sandbox.run({
-          name: "Implementer #" + issue.number,
-          agent: sandcastle.claudeCode("claude-opus-4-8"),
-          promptFile: "./.sandcastle/implement-prompt.md",
-          promptArgs: {
-            TASK_ID: String(issue.number),
-            ISSUE_TITLE: issue.title,
-            BRANCH: issue.branch,
-          },
-        });
-
-        if (result.commits.length > 0) {
-          await sandbox.run({
-            name: "Reviewer #" + issue.number,
-            agent: sandcastle.claudeCode("claude-opus-4-8"),
-            promptFile: "./.sandcastle/review-prompt.md",
-            promptArgs: {
-              TASK_ID: String(issue.number),
-              ISSUE_TITLE: issue.title,
-              BRANCH: issue.branch,
-            },
-          });
-        }
-
-        return result;
-      } finally {
-        release();
-      }
-    }),
-  );
-
-  for (const [i, outcome] of settled.entries()) {
-    if (outcome.status === "rejected") {
-      console.error(
-        `  ✗ #${issues[i].number} (${issues[i].branch}) failed: ${outcome.reason}`,
-      );
-    }
-  }
-
-  const completedIssues = settled
-    .map((outcome, i) => ({ outcome, issue: issues[i] }))
-    .filter(
-      (
-        entry,
-      ): entry is {
-        outcome: PromiseFulfilledResult<
-          Awaited<ReturnType<typeof sandcastle.run>>
-        >;
-        issue: (typeof issues)[number];
-      } =>
-        entry.outcome.status === "fulfilled" &&
-        entry.outcome.value.commits.length > 0,
-    )
-    .map((entry) => entry.issue);
-
-  const completedBranches = completedIssues.map((i) => i.branch);
-
-  console.log(
-    `\nExecution complete. ${completedBranches.length} branch(es) with commits:`,
-  );
-  for (const branch of completedBranches) {
-    console.log(`  ${branch}`);
-  }
-
-  if (completedBranches.length === 0) {
-    console.log("No commits produced. Nothing to merge.");
-    continue;
-  }
-
-  // Phase 3: Merge — one agent merges all branches together
-  await sandcastle.run({
-    sandbox: docker(),
-    name: "Merger",
-    maxIterations: 10,
-    agent: sandcastle.claudeCode("claude-opus-4-8"),
-    promptFile: "./.sandcastle/merge-prompt.md",
-    promptArgs: {
-      BRANCHES: completedBranches.map((b) => `- ${b}`).join("\n"),
-      ISSUES: completedIssues
-        .map((i) => `- #${i.number}: ${i.title}`)
-        .join("\n"),
-    },
   });
-
-  console.log("\nBranches merged.");
 }
 
-console.log("\nAll done.");
+await command("codex", ["login", "status"]).catch(() => {
+  throw new Error(
+    'Project subscription auth is missing. Complete CODEX_HOME="$PWD/.sandcastle/codex-home" codex login before starting Sandcastle.',
+  );
+});
+await command("gh", ["api", `repos/${repository}`, "--jq", ".full_name"]);
+await command("docker", ["image", "inspect", "sandcastle-selfhost:local"]);
+if (await command("git", ["status", "--porcelain"])) {
+  throw new Error(
+    "Commit the intended self-host baseline before starting Sandcastle.",
+  );
+}
+
+// Host gh's credential stays in memory; no API key or token-bearing .env file.
+process.env.GH_TOKEN = await command("gh", [
+  "auth",
+  "token",
+  "--hostname",
+  "github.com",
+]);
+process.env.GITHUB_TOKEN = process.env.GH_TOKEN;
+delete process.env.OPENAI_API_KEY;
+delete process.env.CODEX_API_KEY;
+mkdirSync(".sandcastle/locks", { recursive: true, mode: 0o700 });
+const lockFile = ".sandcastle/locks/selfhost.json";
+if (existsSync(lockFile)) {
+  const { pid } = JSON.parse(readFileSync(lockFile, "utf8"));
+  try {
+    process.kill(pid, 0);
+    throw new Error(
+      `Self-host runner PID ${pid} is already alive. Do not start a second controller.`,
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+    rmSync(lockFile);
+  }
+}
+const lock = openSync(lockFile, "wx", 0o600);
+writeFileSync(
+  lock,
+  JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }),
+);
+closeSync(lock);
+try {
+  await import("./main.js");
+} finally {
+  if (
+    existsSync(lockFile) &&
+    JSON.parse(readFileSync(lockFile, "utf8")).pid === process.pid
+  ) {
+    rmSync(lockFile);
+  }
+}

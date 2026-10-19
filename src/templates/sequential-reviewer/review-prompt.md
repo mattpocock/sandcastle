@@ -4,13 +4,25 @@ Review the code changes on branch `{{BRANCH}}` and improve code clarity, consist
 
 # CONTEXT
 
-## Branch diff
+## Task change inventory
 
-!`git diff {{TARGET_BRANCH}}...{{BRANCH}}`
+Immutable review baseline: `{{REVIEW_BASE_SHA}}`.
+
+!`git diff --stat {{REVIEW_BASE_SHA}}...{{BRANCH}}`
+
+!`git diff --name-status {{REVIEW_BASE_SHA}}...{{BRANCH}}`
 
 ## Commits on this branch
 
-!`git log {{TARGET_BRANCH}}..{{BRANCH}} --oneline`
+!`git log -n 20 {{REVIEW_BASE_SHA}}..{{BRANCH}} --oneline`
+
+Review every changed file and every originating task acceptance criterion.
+Read the full diff per file or small group using
+`git diff {{REVIEW_BASE_SHA}}...{{BRANCH}} -- <paths>`, then callers/code/tests as
+needed. Paginate large diffs without reducing scope; inspect remaining commits
+as needed. Verify opaque generated artifacts through producer, script/hash/schema
+and consumer evidence instead of dumping encoded data into input. Keep a file/AC
+coverage ledger; missing coverage keeps review incomplete.
 
 # REVIEW PROCESS
 

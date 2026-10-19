@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "projectType": "node",
+  "packageManager": "npm",
+  "bootstrap": {
+    "command": "npm ci"
+  },
+  "cache": {
+    "hostPath": ".sandcastle/cache/npm",
+    "sandboxPath": "/home/agent/.npm"
+  },
+  "rootPackage": {
+    "cwd": ".",
+    "focusedTestHint": "npm test -- <affected-test-files> --run",
+    "branchChecks": ["npm run typecheck", "npm run build"],
+    "authoritativeGates": [
+      "npm run typecheck",
+      "npm test",
+      "npm run build",
+      "node --test scripts/agent-map.browser.test.mjs"
+    ]
+  }
+}
