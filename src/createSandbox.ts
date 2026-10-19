@@ -524,6 +524,7 @@ const buildSandboxHandle = (
           ): Promise<SandboxRunResult> =>
             sandboxHandle.run({
               ...runOptions,
+              promptArgs: undefined,
               ...resumeOptions,
               prompt: nextPrompt,
               promptFile: undefined,
@@ -536,6 +537,7 @@ const buildSandboxHandle = (
           ): Promise<SandboxRunResult> =>
             sandboxHandle.run({
               ...runOptions,
+              promptArgs: undefined,
               ...forkOptions,
               prompt: nextPrompt,
               promptFile: undefined,
