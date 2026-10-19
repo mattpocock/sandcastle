@@ -1,0 +1,22 @@
+import { run, claudeCode } from "@ai-hero/sandcastle";
+import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+
+const r = await run({
+  agent: claudeCode("claude-opus-4-8"),
+  sandbox: docker(),
+  prompt: "do it",
+});
+
+console.log(r.iterations.length);
+if (r.completionSignal) {
+  console.log("done");
+}
+for (const it of r.iterations) {
+  console.log(it.usage);
+}
+
+const { iterations, commits } = await run({
+  agent: claudeCode("claude-opus-4-8"),
+  sandbox: docker(),
+  prompt: "again",
+});

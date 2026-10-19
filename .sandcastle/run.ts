@@ -139,7 +139,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   }
 
   // Phase 3: Merge — one agent merges all branches together
-  await sandcastle.run({
+  await sandcastle.runMany({
     sandbox: docker(),
     name: "Merger",
     maxIterations: 10,

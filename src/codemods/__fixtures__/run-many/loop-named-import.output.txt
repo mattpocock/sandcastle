@@ -1,0 +1,11 @@
+import { claudeCode, runMany } from "@ai-hero/sandcastle";
+import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+
+const result = await runMany({
+  agent: claudeCode("claude-opus-4-8"),
+  sandbox: docker(),
+  promptFile: "./.sandcastle/prompt.md",
+  maxIterations: 10,
+});
+
+console.log(result.iterations.length, result.completionSignal);

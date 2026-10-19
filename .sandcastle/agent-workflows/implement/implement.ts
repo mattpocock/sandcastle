@@ -12,7 +12,10 @@ try {
     safeSh(`gh issue view ${ISSUE_NUMBER} --comments`) ||
     `Issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}`;
 
-  const result = await sandcastle.run({
+  // runMany() (one iteration by default) rather than run(): prompt.md ends
+  // with <promise>COMPLETE</promise>, and only runMany() watches for it to
+  // force-complete a hanging agent process (ADR 0019/0021).
+  const result = await sandcastle.runMany({
     name: `implement-#${ISSUE_NUMBER}`,
     agent: claudeAgent(),
     sandbox: noSandbox(),

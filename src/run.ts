@@ -87,7 +87,121 @@ ${raw}
 Emit only a corrected <${error.tag}> block. Do not change files or run commands.`;
 };
 
-/** Default maximum number of iterations for a run. */
+/**
+ * Validate `output.maxRetries` at entry: it must be a non-negative integer,
+ * and retries require a provider that supports session resumption. Fails at
+ * the earliest possible point — the issue is fully determined by the inputs
+ * and does not depend on the agent's output. See issue #825.
+ *
+ * @internal
+ */
+export const assertOutputRetriesSupported = (
+  output: OutputDefinition | undefined,
+  provider: AgentProvider,
+): void => {
+  const outputMaxRetries = output?.maxRetries ?? 0;
+  if (outputMaxRetries < 0 || !Number.isInteger(outputMaxRetries)) {
+    throw new Error(
+      "output.maxRetries must be a non-negative integer. " +
+        `Received: ${outputMaxRetries}`,
+    );
+  }
+  if (outputMaxRetries > 0 && !provider.sessionStorage) {
+    throw new Error(
+      `output.maxRetries requires an agent provider that supports session resumption. ` +
+        `The "${provider.name}" provider does not. ` +
+        `Use claudeCode, codex, or pi, or set maxRetries to 0.`,
+    );
+  }
+};
+
+/**
+ * Validate that the resolved prompt contains the output's opening tag — the
+ * caller owns the instruction telling the agent to emit it (ADR 0010).
+ *
+ * @internal
+ */
+export const assertOutputTagInPrompt = (
+  output: OutputDefinition | undefined,
+  rawPrompt: string,
+): void => {
+  if (output && !rawPrompt.includes(`<${output.tag}>`)) {
+    throw new Error(
+      `output tag <${output.tag}> not found in the resolved prompt. ` +
+        "The caller must instruct the agent to emit the configured tag.",
+    );
+  }
+};
+
+/**
+ * Completion-timeout triggers for a one-shot run: the output's closing tag,
+ * or none without `output` (ADR 0021).
+ *
+ * @internal
+ */
+export const oneShotCompletionTimeoutTriggers = (
+  output: OutputDefinition | undefined,
+): readonly string[] => (output ? [`</${output.tag}>`] : []);
+
+/**
+ * Extract structured output from a one-shot result, retrying via `retry`
+ * (which resumes the failed session with a feedback prompt) while
+ * `output.maxRetries` allows. Shared by `run()`, `sandbox.run()` and
+ * `wt.run()`. See issue #825.
+ *
+ * @internal
+ */
+export const extractOutputWithRetries = async <
+  R extends {
+    readonly stdout: string;
+    readonly commits: { sha: string }[];
+    readonly preservedWorktreePath?: string;
+    readonly sessionId?: string;
+    readonly sessionFilePath?: string;
+  },
+>(
+  result: R,
+  output: OutputDefinition,
+  context: { readonly branch: string },
+  retry: (
+    feedbackPrompt: string,
+    sessionId: string,
+    retryOutput: OutputDefinition,
+  ) => Promise<R & { output: unknown }>,
+): Promise<R & { output: unknown }> => {
+  const outputMaxRetries = output.maxRetries ?? 0;
+  try {
+    const value = await extractStructuredOutput(result.stdout, output, {
+      commits: result.commits,
+      branch: context.branch,
+      preservedWorktreePath: result.preservedWorktreePath,
+      // Carry the session id onto the error so a caller can resume the same
+      // session to re-emit corrected output.
+      sessionId: result.sessionId,
+      sessionFilePath: result.sessionFilePath,
+    });
+    return { ...result, output: value };
+  } catch (error) {
+    // Built-in retry: when maxRetries > 0 and the agent emitted a session id
+    // we can resume, recurse with a token-efficient feedback prompt. Each
+    // retry decrements maxRetries so the recursion terminates.
+    if (
+      error instanceof StructuredOutputError &&
+      outputMaxRetries > 0 &&
+      error.sessionId !== undefined
+    ) {
+      const retriesRemainingAfter = outputMaxRetries - 1;
+      return retry(
+        buildStructuredOutputRetryFeedback(error, retriesRemainingAfter),
+        error.sessionId,
+        { ...output, maxRetries: retriesRemainingAfter },
+      );
+    }
+    throw error;
+  }
+};
+
+/** Default maximum number of iterations for `runMany()`. */
 export const DEFAULT_MAX_ITERATIONS = 1;
 
 /** Replace characters that are invalid or problematic in file paths with dashes. */
@@ -151,7 +265,8 @@ export interface RunSummaryRowsOptions {
   readonly name?: string;
   readonly agentName: string;
   readonly sandboxName: string;
-  readonly maxIterations: number;
+  /** Iteration cap for `runMany()`. Omitted for one-shot `run()`, which drops the row. */
+  readonly maxIterations?: number;
   readonly branch: string;
 }
 
@@ -165,12 +280,14 @@ export const buildRunSummaryRows = (
 ): Record<string, string> => ({
   Agent: options.name ?? options.agentName,
   Sandbox: options.sandboxName,
-  "Max iterations": String(options.maxIterations),
+  ...(options.maxIterations !== undefined
+    ? { "Max iterations": String(options.maxIterations) }
+    : {}),
   Branch: options.branch,
 });
 
 /**
- * Build the completion status message for a run, used in both terminal mode
+ * Build the completion status message for a `runMany()` loop, used in both terminal mode
  * and log-to-file mode to record the final outcome.
  */
 export const buildCompletionMessage = (
@@ -329,7 +446,12 @@ export interface Timeouts {
   readonly mergeToHostMs?: number;
 }
 
-export interface RunOptions<A extends AgentProvider = AgentProvider> {
+/**
+ * Options shared by `run()` and `runMany()`. Everything here is about *where*
+ * and *how* the agent runs; the two entry points differ only in how many
+ * iterations they drive and what they return.
+ */
+export interface BaseRunOptions<A extends AgentProvider = AgentProvider> {
   /** Agent provider to use (e.g. claudeCode("claude-opus-4-8")) */
   readonly agent: A;
   /** Sandbox provider (e.g. docker({ imageName: "sandcastle:myrepo" })). */
@@ -354,29 +476,14 @@ export interface RunOptions<A extends AgentProvider = AgentProvider> {
    * `promptFile` to avoid ambiguity.
    */
   readonly promptFile?: string;
-  /** Maximum iterations to run (default: 1) */
-  readonly maxIterations?: number;
   /** Lifecycle hooks grouped by execution location (host or sandbox). */
   readonly hooks?: SandboxHooks;
   /** Key-value map for {{KEY}} placeholder substitution in prompts */
   readonly promptArgs?: PromptArgs;
   /** Logging mode (default: { type: 'file' } with auto-generated path under .sandcastle/logs/) */
   readonly logging?: LoggingOption;
-  /** Substring(s) the agent emits to stop the iteration loop early. Matched via `includes` against agent output. (default: `"<promise>COMPLETE</promise>"`) */
-  readonly completionSignal?: string | string[];
   /** Idle timeout in seconds. If the agent produces no output for this long, it fails. Default: 600 (10 minutes) */
   readonly idleTimeoutSeconds?: number;
-  /**
-   * Grace window in seconds after a completion signal is observed in the
-   * agent's output. The agent process is expected to exit shortly after
-   * emitting the signal; if it does not (typically because a spawned child —
-   * a `gh`/git subprocess or long-lived MCP server — keeps stdout open),
-   * Sandcastle force-completes the iteration with a warning. Resets on every
-   * subsequent output line so trailing data (token-usage events, terminal
-   * `result` events, structured-output tags) is still captured. Independent
-   * of `idleTimeoutSeconds`. Default: 60.
-   */
-  readonly completionTimeoutSeconds?: number;
   /** Optional name for the run, shown as a prefix in log output */
   readonly name?: string;
   /** Paths relative to the host repo root to copy into the worktree before sandbox start. */
@@ -384,7 +491,38 @@ export interface RunOptions<A extends AgentProvider = AgentProvider> {
   /** Branch strategy — controls how the agent's changes relate to branches.
    * Defaults to { type: "head" } for bind-mount providers and { type: "merge-to-head" } for isolated providers. */
   readonly branchStrategy?: BranchStrategy;
-  /** Resume a prior Claude Code session by ID. The session JSONL must exist on the host. Incompatible with maxIterations > 1. */
+  /**
+   * An `AbortSignal` that cancels the run when aborted.
+   *
+   * - If `signal.aborted` is already `true` at entry, the call rejects
+   *   immediately without doing any setup work.
+   * - Aborting mid-iteration kills the in-flight agent subprocess.
+   * - Phase boundaries (between iterations) also check the signal.
+   * - The rejected promise surfaces `signal.reason` via
+   *   `signal.throwIfAborted()` — no Sandcastle-specific wrapping.
+   * - The worktree is preserved on disk after abort (error-path behavior).
+   */
+  readonly signal?: AbortSignal;
+  /** Override default timeouts for built-in lifecycle steps. Unset keys keep their defaults. */
+  readonly timeouts?: Timeouts;
+}
+
+/** Options for the one-shot `run()`: exactly one agent invocation. */
+export interface RunOptions<
+  A extends AgentProvider = AgentProvider,
+> extends BaseRunOptions<A> {
+  /**
+   * Grace window in seconds after the closing tag of the `output` block
+   * (`</tag>`) is observed in the agent's output. If the agent process does
+   * not exit (typically because a spawned child — a `gh`/git subprocess or
+   * long-lived MCP server — keeps stdout open), Sandcastle force-completes the
+   * run with a warning. Resets on every subsequent output line. Only applies
+   * when `output` is set — without it, `run()` has no completion marker to
+   * watch for and relies on `idleTimeoutSeconds` alone. See ADR 0021.
+   * Default: 60.
+   */
+  readonly completionTimeoutSeconds?: number;
+  /** Resume a prior agent session by ID. The session JSONL must exist on the host. */
   readonly resumeSession?: string;
   /**
    * When true alongside `resumeSession`, fork the session instead of mutating
@@ -396,34 +534,43 @@ export interface RunOptions<A extends AgentProvider = AgentProvider> {
    */
   readonly forkSession?: boolean;
   /**
-   * An `AbortSignal` that cancels the run when aborted.
-   *
-   * - If `signal.aborted` is already `true` at entry, `run()` rejects
-   *   immediately without doing any setup work.
-   * - Aborting mid-iteration kills the in-flight agent subprocess.
-   * - Phase boundaries (between iterations) also check the signal.
-   * - The rejected promise surfaces `signal.reason` via
-   *   `signal.throwIfAborted()` — no Sandcastle-specific wrapping.
-   * - The worktree is preserved on disk after abort (error-path behavior).
-   */
-  readonly signal?: AbortSignal;
-  /** Override default timeouts for built-in lifecycle steps. Unset keys keep their defaults. */
-  readonly timeouts?: Timeouts;
-  /**
    * Structured output definition. When provided, the agent's stdout is
-   * scanned for the configured XML tag after the iteration completes, and the
+   * scanned for the configured XML tag after the run completes, and the
    * result is parsed/validated and returned on `RunResult.output`.
    *
    * Use `Output.object({ tag, schema })` for JSON+schema or
    * `Output.string({ tag })` for raw string extraction.
    *
-   * Constraints:
-   * - `maxIterations` must be `1` (the default).
-   * - The resolved prompt must contain the configured opening tag literal.
+   * The resolved prompt must contain the configured opening tag literal.
+   * `output` is `run()`-only — `runMany()` does not accept it.
    *
    * See ADR 0010 for design rationale.
    */
   readonly output?: OutputDefinition;
+}
+
+/**
+ * Options for `runMany()`: the iterate-until-signal-or-cap loop. Identical
+ * to the pre-split `run()` loop options, so migrating is a rename.
+ */
+export interface RunManyOptions<
+  A extends AgentProvider = AgentProvider,
+> extends BaseRunOptions<A> {
+  /** Maximum iterations to run (default: 1) */
+  readonly maxIterations?: number;
+  /** Substring(s) the agent emits to stop the iteration loop early. Matched via `includes` against agent output. (default: `"<promise>COMPLETE</promise>"`) */
+  readonly completionSignal?: string | string[];
+  /**
+   * Grace window in seconds after a completion signal is observed in the
+   * agent's output. The agent process is expected to exit shortly after
+   * emitting the signal; if it does not (typically because a spawned child —
+   * a `gh`/git subprocess or long-lived MCP server — keeps stdout open),
+   * Sandcastle force-completes the iteration with a warning. Resets on every
+   * subsequent output line so trailing data (token-usage events, terminal
+   * `result` events) is still captured. Independent of `idleTimeoutSeconds`.
+   * Default: 60.
+   */
+  readonly completionTimeoutSeconds?: number;
 }
 
 export type { IterationResult, IterationUsage } from "./Orchestrator.js";
@@ -436,10 +583,50 @@ export type ResumeRunResultOptions = Omit<
   | "promptFile"
   | "resumeSession"
   | "forkSession"
-  | "maxIterations"
 >;
 
+/** Continue (or fork) the last captured agent session for exactly one iteration. */
+export type ResumeRunResultFn = (
+  prompt: string,
+  options?: ResumeRunResultOptions,
+) => Promise<RunResult>;
+
+/** Result of the one-shot `run()`. */
 export interface RunResult {
+  /** Agent session ID, or undefined when the provider does not report one. */
+  readonly sessionId?: string;
+  /** Absolute host path to the captured session JSONL, or undefined when capture is disabled or unsupported. */
+  readonly sessionFilePath?: string;
+  /** Token usage snapshot, or undefined when the provider does not report usage. */
+  readonly usage?: IterationUsage;
+  /** The agent's stdout. */
+  readonly stdout: string;
+  /** List of commits made by the agent during the run, each identified by its SHA. */
+  readonly commits: { sha: string }[];
+  /** The branch name the agent worked on inside the sandbox. */
+  readonly branch: string;
+  /** Path to the log file, if logging was drained to a file. */
+  readonly logFilePath?: string;
+  /** Host path to the preserved worktree, set when the run succeeded but the worktree had uncommitted changes. */
+  readonly preservedWorktreePath?: string;
+  /** Continue the captured agent session for exactly one iteration. */
+  readonly resume?: ResumeRunResultFn;
+  /**
+   * Fork the captured agent session for exactly one iteration: the parent
+   * session JSONL is left intact and the child run gets its own session id,
+   * enabling fan-out patterns where multiple children diverge from a single
+   * parent.
+   *
+   * Sessions only: fork isolates the agent session, not the branch or
+   * sandbox. Safe concurrent fan-out (`Promise.all([r.fork(a), r.fork(b)])`)
+   * requires the caller to give each fork a distinct `branch` — `head` and
+   * `merge-to-head` are not safe for concurrent forks. See ADR 0018.
+   */
+  readonly fork?: ResumeRunResultFn;
+}
+
+/** Result of `runMany()`: the per-iteration loop result. */
+export interface RunManyResult {
   /** Per-iteration results (use `iterations.length` for the count). */
   readonly iterations: IterationResult[];
   /** The matched completion signal string, or undefined if no signal fired before the iteration limit. */
@@ -454,55 +641,76 @@ export interface RunResult {
   readonly logFilePath?: string;
   /** Host path to the preserved worktree, set when the run succeeded but the worktree had uncommitted changes. */
   readonly preservedWorktreePath?: string;
-  /** Continue the last captured agent session for exactly one iteration.
-   *  Present only when the provider supports resume (`sessionStorage` populated). */
-  readonly resume?: (
-    prompt: string,
-    options?: ResumeRunResultOptions,
-  ) => Promise<RunResult>;
   /**
-   * Fork the last captured agent session for exactly one iteration: the
-   * parent session JSONL is left intact and the child run gets its own
-   * session id, enabling fan-out patterns where multiple children diverge
-   * from a single parent. Present only when the provider supports resume
-   * (`sessionStorage` populated).
-   *
-   * Sessions only: fork isolates the agent session, not the branch or
-   * sandbox. Safe concurrent fan-out (`Promise.all([r.fork(a), r.fork(b)])`)
-   * requires the caller to give each fork a distinct `branch` — `head` and
-   * `merge-to-head` are not safe for concurrent forks. See ADR 0018.
+   * Continue the last iteration's captured agent session for exactly one
+   * iteration. Always returns a one-shot `RunResult` (ADR 0011).
    */
-  readonly fork?: (
-    prompt: string,
-    options?: ResumeRunResultOptions,
-  ) => Promise<RunResult>;
+  readonly resume?: ResumeRunResultFn;
+  /**
+   * Fork the last iteration's captured agent session for exactly one
+   * iteration. Always returns a one-shot `RunResult`. See ADR 0018.
+   */
+  readonly fork?: ResumeRunResultFn;
 }
 
-/** Overload: with `Output.object`, returns `RunResult` with typed `output: T`. */
-export function run<T, A extends AgentProvider>(
-  options: RunOptions<A> & { output: OutputObjectDefinition<T> },
-): Promise<RunResult & { output: T }>;
-/** Overload: with `Output.string`, returns `RunResult` with `output: string`. */
-export function run<A extends AgentProvider>(
-  options: RunOptions<A> & { output: OutputStringDefinition },
-): Promise<RunResult & { output: string }>;
-/** Overload: without `output`, returns the standard `RunResult`. */
-export function run<A extends AgentProvider>(
-  options: RunOptions<A>,
-): Promise<RunResult>;
-export async function run(
-  options: RunOptions,
-): Promise<RunResult & { output?: unknown }> {
+/**
+ * Throw a migration error when a caller passes options that belong to the
+ * other half of the `run()`/`runMany()` split. TypeScript already rejects
+ * these at compile time; this guard catches untyped (JS / spread / `as any`)
+ * callers so a loop never silently degrades into a one-shot run.
+ *
+ * @internal
+ */
+export const assertNoForeignRunOptions = (
+  options: object,
+  forbidden: readonly string[],
+  callName: string,
+  hint: string,
+): void => {
+  const record = options as Record<string, unknown>;
+  for (const key of forbidden) {
+    if (record[key] !== undefined) {
+      throw new Error(`${callName} does not accept \`${key}\`. ${hint}`);
+    }
+  }
+};
+
+/** @internal Options only `runMany()` accepts. */
+export const RUN_MANY_ONLY_OPTIONS = [
+  "maxIterations",
+  "completionSignal",
+] as const;
+/** @internal Options only `run()` accepts. */
+export const RUN_ONLY_OPTIONS = ["output", "resumeSession"] as const;
+
+/** Internal: what `executeRun` should drive. */
+type RunMode =
+  | {
+      readonly kind: "one-shot";
+      readonly output?: OutputDefinition;
+      readonly resumeSession?: string;
+      readonly forkSession?: boolean;
+    }
+  | {
+      readonly kind: "many";
+      readonly maxIterations: number;
+      readonly completionSignal?: string | string[];
+    };
+
+/**
+ * Shared engine behind `run()` and `runMany()`: validates, resolves the
+ * prompt/env/logging, then calls the internal `orchestrate()` with either one
+ * iteration and no completion signal (one-shot) or N iterations and the
+ * configured signal (many). Neither public function wraps the other (#562).
+ */
+const executeRun = async (
+  options: BaseRunOptions & { readonly completionTimeoutSeconds?: number },
+  mode: RunMode,
+): Promise<{ result: OrchestrateResult; logFilePath?: string }> => {
   // If signal is already aborted, reject immediately without any setup
   options.signal?.throwIfAborted();
 
-  const {
-    prompt,
-    promptFile,
-    maxIterations = DEFAULT_MAX_ITERATIONS,
-    hooks,
-    agent: provider,
-  } = options;
+  const { prompt, promptFile, hooks, agent: provider } = options;
 
   // Derive branch strategy: explicit option > default based on provider tag
   const branchStrategy: BranchStrategy =
@@ -531,49 +739,20 @@ export async function run(
     );
   }
 
-  // Validate: resumeSession + maxIterations > 1 is not allowed
-  if (options.resumeSession && maxIterations > 1) {
-    throw new Error(
-      "resumeSession cannot be combined with maxIterations > 1. " +
-        "Resume applies to iteration 1 only; multi-iteration resume semantics are not supported.",
-    );
-  }
+  const output = mode.kind === "one-shot" ? mode.output : undefined;
+  const resumeSession =
+    mode.kind === "one-shot" ? mode.resumeSession : undefined;
 
   // Validate: forkSession only makes sense alongside resumeSession.
   // It is wired internally by RunResult.fork() and never set on its own.
-  if (options.forkSession && !options.resumeSession) {
+  if (mode.kind === "one-shot" && mode.forkSession && !resumeSession) {
     throw new Error(
       "forkSession requires resumeSession. " +
         "Use RunResult.fork(prompt) to fork the last captured session.",
     );
   }
 
-  // Validate: output requires maxIterations === 1
-  if (options.output && maxIterations !== 1) {
-    throw new Error(
-      "output requires maxIterations to be 1. " +
-        "Structured output is only supported for single-iteration runs.",
-    );
-  }
-
-  // Validate: output.maxRetries requires a provider that supports session
-  // resumption. Fail at the earliest possible point — the issue is fully
-  // determined by the inputs to run() and does not depend on the agent's
-  // output. See issue #825.
-  const outputMaxRetries = options.output?.maxRetries ?? 0;
-  if (outputMaxRetries < 0 || !Number.isInteger(outputMaxRetries)) {
-    throw new Error(
-      "output.maxRetries must be a non-negative integer. " +
-        `Received: ${outputMaxRetries}`,
-    );
-  }
-  if (outputMaxRetries > 0 && !provider.sessionStorage) {
-    throw new Error(
-      `output.maxRetries requires an agent provider that supports session resumption. ` +
-        `The "${provider.name}" provider does not. ` +
-        `Use claudeCode, codex, or pi, or set maxRetries to 0.`,
-    );
-  }
+  assertOutputRetriesSupported(output, provider);
 
   // Extract explicit branch when in branch mode
   const branch: string | undefined =
@@ -584,12 +763,12 @@ export async function run(
   );
 
   // Validate: resumeSession file must exist on the host
-  if (options.resumeSession) {
+  if (resumeSession) {
     await assertResumeSessionExists({
       provider,
       sandboxTag: options.sandbox.tag,
       hostRepoDir,
-      resumeSession: options.resumeSession,
+      resumeSession,
     });
   }
 
@@ -602,16 +781,7 @@ export async function run(
   const rawPrompt = resolved.text;
   const isInlinePrompt = resolved.source === "inline";
 
-  // Validate: output tag must appear in the resolved prompt
-  if (options.output) {
-    const openTag = `<${options.output.tag}>`;
-    if (!rawPrompt.includes(openTag)) {
-      throw new Error(
-        `output tag <${options.output.tag}> not found in the resolved prompt. ` +
-          "The caller must instruct the agent to emit the configured tag.",
-      );
-    }
-  }
+  assertOutputTagInPrompt(output, rawPrompt);
 
   const agentName = provider.name;
 
@@ -705,7 +875,7 @@ export async function run(
       name: options.name,
       agentName,
       sandboxName: options.sandbox.name,
-      maxIterations,
+      maxIterations: mode.kind === "many" ? mode.maxIterations : undefined,
       branch: resolvedBranch,
     });
     yield* d.summary("Sandcastle Run", rows);
@@ -740,26 +910,26 @@ export async function run(
 
     const orchestrateResult = yield* orchestrate({
       hostRepoDir,
-      iterations: maxIterations,
       hooks,
       prompt: resolvedPrompt,
       branch: orchestrateBranch,
       provider,
-      completionSignal: options.completionSignal,
+      ...oneShotOrManyOrchestrateOptions(mode),
       idleTimeoutSeconds: options.idleTimeoutSeconds,
       completionTimeoutSeconds: options.completionTimeoutSeconds,
       name: options.name,
-      resumeSession: options.resumeSession,
-      forkSession: options.forkSession,
       signal: options.signal,
       skipPromptExpansion: isInlinePrompt,
       timeouts: options.timeouts,
     });
 
-    const completion = buildCompletionMessage(
-      orchestrateResult.completionSignal,
-      orchestrateResult.iterations.length,
-    );
+    const completion =
+      mode.kind === "many"
+        ? buildCompletionMessage(
+            orchestrateResult.completionSignal,
+            orchestrateResult.iterations.length,
+          )
+        : ONE_SHOT_COMPLETION_MESSAGE;
     yield* d.status(completion.message, completion.severity);
 
     for (const line of buildContextWindowLines(orchestrateResult.iterations)) {
@@ -798,97 +968,205 @@ export async function run(
     throw error;
   }
 
-  const baseResult = {
-    ...result,
+  return {
+    result,
     logFilePath:
       resolvedLogging.type === "file" ? resolvedLogging.path : undefined,
-    resume: async (
-      prompt: string,
-      resumeOptions?: ResumeRunResultOptions,
-    ): Promise<RunResult> => {
-      const lastIteration = result.iterations.at(-1);
-      if (!lastIteration?.sessionId) {
-        throw new Error("Cannot resume: no sessionId was captured");
+  };
+};
+
+/** Status line printed when a one-shot `run()` finishes. */
+export const ONE_SHOT_COMPLETION_MESSAGE: {
+  readonly message: string;
+  readonly severity: Severity;
+} = { message: "Run complete.", severity: "success" };
+
+/**
+ * Map a run mode onto the orchestrator's iteration/signal options.
+ *
+ * - one-shot: one iteration, no completion signal. The completion-timeout
+ *   grace window is triggered by the structured-output closing tag (`</tag>`)
+ *   when `output` is set, and by nothing otherwise (ADR 0021).
+ * - many: N iterations, the configured (or default) completion signal, which
+ *   also triggers the grace window (ADR 0019).
+ */
+const oneShotOrManyOrchestrateOptions = (
+  mode: RunMode,
+): {
+  iterations: number;
+  completionSignal?: string | string[];
+  completionTimeoutTriggers?: readonly string[];
+  resumeSession?: string;
+  forkSession?: boolean;
+} =>
+  mode.kind === "many"
+    ? {
+        iterations: mode.maxIterations,
+        completionSignal: mode.completionSignal,
       }
-      return run({
-        ...options,
-        ...resumeOptions,
-        prompt,
-        promptFile: undefined,
-        maxIterations: 1,
-        resumeSession: lastIteration.sessionId,
-      });
-    },
-    fork: async (
-      prompt: string,
-      forkOptions?: ResumeRunResultOptions,
-    ): Promise<RunResult> => {
-      const lastIteration = result.iterations.at(-1);
-      if (!lastIteration?.sessionId) {
-        throw new Error("Cannot fork: no sessionId was captured");
-      }
-      return run({
-        ...options,
-        ...forkOptions,
-        prompt,
-        promptFile: undefined,
-        maxIterations: 1,
-        resumeSession: lastIteration.sessionId,
-        forkSession: true,
-      });
-    },
+    : {
+        iterations: 1,
+        completionSignal: [],
+        completionTimeoutTriggers: oneShotCompletionTimeoutTriggers(
+          mode.output,
+        ),
+        resumeSession: mode.resumeSession,
+        forkSession: mode.forkSession,
+      };
+
+/** Flatten a single-iteration orchestrator result into a `RunResult` body. */
+const flattenOneShot = (
+  result: OrchestrateResult,
+  logFilePath: string | undefined,
+): Omit<RunResult, "resume" | "fork"> => {
+  const only = result.iterations.at(-1);
+  return {
+    sessionId: only?.sessionId,
+    sessionFilePath: only?.sessionFilePath,
+    usage: only?.usage,
+    stdout: result.stdout,
+    commits: result.commits,
+    branch: result.branch,
+    logFilePath,
+    preservedWorktreePath: result.preservedWorktreePath,
+  };
+};
+
+/**
+ * Build `.resume()` / `.fork()` for a result. Both always call the one-shot
+ * `run()` (ADR 0011) with the caller's base options, so a `runMany()` result
+ * resumes as a single iteration of its last session.
+ */
+const buildResumeAndFork = (
+  baseOptions: RunOptions,
+  sessionId: string | undefined,
+): { resume: ResumeRunResultFn; fork: ResumeRunResultFn } => ({
+  resume: async (prompt, resumeOptions) => {
+    if (!sessionId) {
+      throw new Error("Cannot resume: no sessionId was captured");
+    }
+    return run({
+      ...baseOptions,
+      ...resumeOptions,
+      prompt,
+      promptFile: undefined,
+      resumeSession: sessionId,
+    });
+  },
+  fork: async (prompt, forkOptions) => {
+    if (!sessionId) {
+      throw new Error("Cannot fork: no sessionId was captured");
+    }
+    return run({
+      ...baseOptions,
+      ...forkOptions,
+      prompt,
+      promptFile: undefined,
+      resumeSession: sessionId,
+      forkSession: true,
+    });
+  },
+});
+
+/** Overload: with `Output.object`, returns `RunResult` with typed `output: T`. */
+export function run<T, A extends AgentProvider>(
+  options: RunOptions<A> & { output: OutputObjectDefinition<T> },
+): Promise<RunResult & { output: T }>;
+/** Overload: with `Output.string`, returns `RunResult` with `output: string`. */
+export function run<A extends AgentProvider>(
+  options: RunOptions<A> & { output: OutputStringDefinition },
+): Promise<RunResult & { output: string }>;
+/** Overload: without `output`, returns the standard `RunResult`. */
+export function run<A extends AgentProvider>(
+  options: RunOptions<A>,
+): Promise<RunResult>;
+/**
+ * Run an agent exactly once (one iteration) and return a flat result.
+ *
+ * For the iterate-until-signal loop, use `runMany()`.
+ */
+export async function run(
+  options: RunOptions,
+): Promise<RunResult & { output?: unknown }> {
+  options.signal?.throwIfAborted();
+  assertNoForeignRunOptions(
+    options,
+    RUN_MANY_ONLY_OPTIONS,
+    "run()",
+    "run() is one-shot since the run()/runMany() split — use runMany() for the iteration loop and completion signal.",
+  );
+
+  const { result, logFilePath } = await executeRun(options, {
+    kind: "one-shot",
+    output: options.output,
+    resumeSession: options.resumeSession,
+    forkSession: options.forkSession,
+  });
+
+  const flat = flattenOneShot(result, logFilePath);
+  const baseResult: RunResult = {
+    ...flat,
+    ...buildResumeAndFork(options, flat.sessionId),
   };
 
-  // Extract structured output after the iteration completes (separate pass from completion signal)
+  // Extract structured output after the run completes
   if (options.output) {
-    // Structured output runs are single-iteration, so the last iteration is the
-    // one that produced this stdout. Carry its session id onto the error so a
-    // caller can resume the same session to re-emit corrected output.
-    const lastIteration = baseResult.iterations.at(-1);
-    try {
-      const output = await extractStructuredOutput(
-        baseResult.stdout,
-        options.output,
-        {
-          commits: baseResult.commits,
-          branch: baseResult.branch,
-          preservedWorktreePath: baseResult.preservedWorktreePath,
-          sessionId: lastIteration?.sessionId,
-          sessionFilePath: lastIteration?.sessionFilePath,
-        },
-      );
-      return { ...baseResult, output };
-    } catch (error) {
-      // Built-in retry: when maxRetries > 0 and the agent emitted a session id
-      // we can resume, recurse with a token-efficient feedback prompt. Each
-      // retry decrements maxRetries so the recursion terminates. See issue
-      // #825.
-      if (
-        error instanceof StructuredOutputError &&
-        outputMaxRetries > 0 &&
-        error.sessionId !== undefined
-      ) {
-        const retriesRemainingAfter = outputMaxRetries - 1;
-        const retryOutput = {
-          ...options.output,
-          maxRetries: retriesRemainingAfter,
-        };
-        return run({
+    return extractOutputWithRetries(
+      baseResult,
+      options.output,
+      { branch: baseResult.branch },
+      (retryPrompt, sessionId, retryOutput) =>
+        run({
           ...options,
-          prompt: buildStructuredOutputRetryFeedback(
-            error,
-            retriesRemainingAfter,
-          ),
+          prompt: retryPrompt,
           promptFile: undefined,
           promptArgs: undefined,
-          resumeSession: error.sessionId,
+          resumeSession: sessionId,
           forkSession: false,
           output: retryOutput,
-        } as RunOptions);
-      }
-      throw error;
-    }
+        } as RunOptions) as Promise<RunResult & { output: unknown }>,
+    );
   }
 
   return baseResult;
+}
+
+/**
+ * Run an agent in a loop: up to `maxIterations` iterations, stopping early
+ * when the agent emits a completion signal. Returns per-iteration results.
+ *
+ * This is the pre-split `run()` loop, unchanged — migrating a looping
+ * `run({ maxIterations, completionSignal, ... })` call is a rename to
+ * `runMany({ ... })`. Structured `output` and `resumeSession` are
+ * `run()`-only.
+ */
+export async function runMany<A extends AgentProvider>(
+  options: RunManyOptions<A>,
+): Promise<RunManyResult> {
+  options.signal?.throwIfAborted();
+  assertNoForeignRunOptions(
+    options,
+    RUN_ONLY_OPTIONS,
+    "runMany()",
+    "Structured output and session resume are one-shot — use run(), or call .resume() on the runMany() result.",
+  );
+
+  const { maxIterations, completionSignal, ...baseOptions } = options;
+
+  const { result, logFilePath } = await executeRun(options, {
+    kind: "many",
+    maxIterations: maxIterations ?? DEFAULT_MAX_ITERATIONS,
+    completionSignal,
+  });
+
+  return {
+    iterations: result.iterations,
+    completionSignal: result.completionSignal,
+    stdout: result.stdout,
+    commits: result.commits,
+    branch: result.branch,
+    logFilePath,
+    preservedWorktreePath: result.preservedWorktreePath,
+    ...buildResumeAndFork(baseOptions, result.iterations.at(-1)?.sessionId),
+  };
 }

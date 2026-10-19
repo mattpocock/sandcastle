@@ -1,0 +1,14 @@
+import { run, type RunOptions } from "@ai-hero/sandcastle";
+
+declare const opts: RunOptions;
+
+// TODO(sandcastle-codemod): options aren't an object literal, so the codemod can't tell whether this call loops — if it passes maxIterations/completionSignal, rename it to runMany().
+const a = await run(opts);
+console.log(a.iterations.length);
+
+// TODO(sandcastle-codemod): options include a spread, so the codemod can't tell whether this call loops — if the spread carries maxIterations/completionSignal, rename it to runMany().
+const b = await run({ ...opts, prompt: "x" });
+console.log(b.completionSignal);
+
+const c = await run({ ...opts, prompt: "y" });
+console.log(c.commits);

@@ -1,0 +1,19 @@
+import { run, Output, claudeCode } from "@ai-hero/sandcastle";
+import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+
+const plan = await run({
+  agent: claudeCode("claude-opus-4-8"),
+  sandbox: docker(),
+  prompt: "emit <plan>",
+  output: Output.string({ tag: "plan" }),
+  completionTimeoutSeconds: 30,
+});
+
+// TODO(sandcastle-codemod): this call mixes the loop option maxIterations with the run()-only resumeSession, and runMany() rejects resumeSession. Split the loop from the one-shot part by hand.
+const resumed = await run({
+  agent: claudeCode("claude-opus-4-8"),
+  sandbox: docker(),
+  prompt: "continue",
+  resumeSession: "abc",
+  maxIterations: 3,
+});

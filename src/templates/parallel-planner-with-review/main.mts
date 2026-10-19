@@ -6,9 +6,9 @@
 //                               listing unblocked issues with branch names.
 //   Phase 2 (Execute + Review): For each issue, a sandbox is created via
 //                               createSandbox(). The implementer runs first
-//                               (100 iterations). If it produces commits, a
+//                               (runMany, up to 100 iterations). If it produces commits, a
 //                               reviewer runs in the same sandbox on the same
-//                               branch (1 iteration). All issue pipelines run
+//                               branch (one-shot run). All issue pipelines run
 //                               concurrently via Promise.allSettled().
 //   Phase 3 (Merge):            A single agent merges all completed branches
 //                               into the current branch.
@@ -74,9 +74,8 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     hooks,
     sandbox: docker(),
     name: "planner",
-    // One iteration is enough: the planner just needs to read and reason,
-    // not write code. (Structured output requires maxIterations: 1.)
-    maxIterations: 1,
+    // run() is one-shot: the planner just needs to read and reason, not
+    // write code. (Structured output is run()-only.)
     // Opus for planning: dependency analysis benefits from deeper reasoning.
     agent: sandcastle.claudeCode("claude-opus-4-8"),
     promptFile: "./.sandcastle/plan-prompt.md",
@@ -122,7 +121,9 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
 
       try {
         // Run the implementer
-        const implement = await sandbox.run({
+        // runMany() loops until the agent emits <promise>COMPLETE</promise>
+        // or maxIterations is reached.
+        const implement = await sandbox.runMany({
           name: "implementer",
           maxIterations: 100,
           agent: sandcastle.claudeCode("claude-sonnet-4-6"),
@@ -138,7 +139,6 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
         if (implement.commits.length > 0) {
           const review = await sandbox.run({
             name: "reviewer",
-            maxIterations: 1,
             agent: sandcastle.claudeCode("claude-sonnet-4-6"),
             promptFile: "./.sandcastle/review-prompt.md",
             promptArgs: {
@@ -147,7 +147,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
           });
 
           // Merge commits from both runs so the merge phase sees all of them.
-          // Each sandbox.run() only returns commits from its own run.
+          // Each run only returns commits from its own invocation.
           return {
             ...review,
             commits: [...implement.commits, ...review.commits],
@@ -209,7 +209,6 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     hooks,
     sandbox: docker(),
     name: "merger",
-    maxIterations: 1,
     agent: sandcastle.claudeCode("claude-sonnet-4-6"),
     promptFile: "./.sandcastle/merge-prompt.md",
     promptArgs: {

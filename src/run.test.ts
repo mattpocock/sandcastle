@@ -18,7 +18,10 @@ import {
   formatContextWindowSize,
   printFileDisplayStartup,
   run,
+  runMany,
   sanitizeBranchForFilename,
+  type RunManyOptions,
+  type RunManyResult,
   type RunOptions,
   type RunResult,
 } from "./run.js";
@@ -157,11 +160,9 @@ describe("buildCompletionMessage", () => {
   });
 });
 
-describe("RunResult", () => {
+describe("RunResult (one-shot, flat)", () => {
   it("includes logFilePath when logging to a file", () => {
     const result: RunResult = {
-      iterations: [{ sessionId: undefined }],
-      completionSignal: undefined,
       stdout: "",
       commits: [],
       branch: "main",
@@ -172,8 +173,6 @@ describe("RunResult", () => {
 
   it("allows logFilePath to be absent when logging to stdout", () => {
     const result: RunResult = {
-      iterations: [{ sessionId: undefined }],
-      completionSignal: undefined,
       stdout: "",
       commits: [],
       branch: "main",
@@ -181,8 +180,51 @@ describe("RunResult", () => {
     expect(result.logFilePath).toBeUndefined();
   });
 
-  it("carries sessionId in iterations for Claude Code runs", () => {
+  it("carries sessionId, sessionFilePath and usage at the top level", () => {
     const result: RunResult = {
+      sessionId: "abc-123",
+      sessionFilePath:
+        "/home/user/.claude/projects/-home-user-repo/abc-123.jsonl",
+      usage: {
+        inputTokens: 1,
+        cacheCreationInputTokens: 2,
+        cacheReadInputTokens: 3,
+        outputTokens: 4,
+      },
+      stdout: "",
+      commits: [],
+      branch: "main",
+    };
+    expect(result.sessionId).toBe("abc-123");
+    expect(result.sessionFilePath).toContain("abc-123.jsonl");
+    expect(result.usage?.outputTokens).toBe(4);
+  });
+
+  it("has no iterations[] or completionSignal", () => {
+    const result: RunResult = { stdout: "", commits: [], branch: "main" };
+    // @ts-expect-error — iterations[] is runMany()-only
+    expect(result.iterations).toBeUndefined();
+    // @ts-expect-error — completionSignal is runMany()-only
+    expect(result.completionSignal).toBeUndefined();
+  });
+
+  it("allows fork as an optional sibling of resume on the type", () => {
+    // Compile-time shape check: fork takes (prompt, options?) and returns
+    // Promise<RunResult>, matching resume. Mirrors ADR 0018.
+    const result: RunResult = {
+      sessionId: "abc-123",
+      stdout: "",
+      commits: [],
+      branch: "main",
+      fork: async () => ({ stdout: "", commits: [], branch: "main" }),
+    };
+    expect(typeof result.fork).toBe("function");
+  });
+});
+
+describe("RunManyResult", () => {
+  it("carries per-iteration sessionIds", () => {
+    const result: RunManyResult = {
       iterations: [{ sessionId: "abc-123" }, { sessionId: "def-456" }],
       completionSignal: undefined,
       stdout: "",
@@ -194,62 +236,43 @@ describe("RunResult", () => {
     expect(result.iterations[1]!.sessionId).toBe("def-456");
   });
 
-  it("has undefined sessionId for non-Claude agent iterations", () => {
-    const result: RunResult = {
-      iterations: [{ sessionId: undefined }],
-      completionSignal: undefined,
-      stdout: "",
-      commits: [],
-      branch: "main",
-    };
-    expect(result.iterations[0]!.sessionId).toBeUndefined();
-  });
-
-  it("carries sessionFilePath when session capture is enabled", () => {
-    const result: RunResult = {
-      iterations: [
-        {
-          sessionId: "abc-123",
-          sessionFilePath:
-            "/home/user/.claude/projects/-home-user-repo/abc-123.jsonl",
-        },
-      ],
-      completionSignal: undefined,
-      stdout: "",
-      commits: [],
-      branch: "main",
-    };
-    expect(result.iterations[0]!.sessionFilePath).toContain("abc-123.jsonl");
-  });
-
-  it("has undefined sessionFilePath when capture is disabled", () => {
-    const result: RunResult = {
-      iterations: [{ sessionId: "abc-123", sessionFilePath: undefined }],
-      completionSignal: undefined,
-      stdout: "",
-      commits: [],
-      branch: "main",
-    };
-    expect(result.iterations[0]!.sessionFilePath).toBeUndefined();
-  });
-
-  it("allows fork as an optional sibling of resume on the type", () => {
-    // Compile-time shape check: fork takes (prompt, options?) and returns
-    // Promise<RunResult>, matching resume. Mirrors ADR 0018.
-    const result: RunResult = {
+  it("resume/fork return the one-shot RunResult shape (ADR 0011)", () => {
+    const result: RunManyResult = {
       iterations: [{ sessionId: "abc-123" }],
-      completionSignal: undefined,
       stdout: "",
       commits: [],
       branch: "main",
-      fork: async () => ({
-        iterations: [],
-        stdout: "",
-        commits: [],
-        branch: "main",
-      }),
+      resume: async () => ({ stdout: "", commits: [], branch: "main" }),
     };
-    expect(typeof result.fork).toBe("function");
+    expect(typeof result.resume).toBe("function");
+  });
+});
+
+describe("RunManyOptions", () => {
+  it("does not accept output or resumeSession", () => {
+    const base = {
+      agent: claudeCode("claude-opus-4-8"),
+      sandbox: testSandbox,
+    };
+    // @ts-expect-error — structured output is run()-only
+    const a: RunManyOptions = { ...base, output: Output.string({ tag: "x" }) };
+    // @ts-expect-error — resumeSession is run()-only
+    const b: RunManyOptions = { ...base, resumeSession: "abc" };
+    expect(a).toBeDefined();
+    expect(b).toBeDefined();
+  });
+
+  it("RunOptions does not accept maxIterations or completionSignal", () => {
+    const base = {
+      agent: claudeCode("claude-opus-4-8"),
+      sandbox: testSandbox,
+    };
+    // @ts-expect-error — the loop is runMany()-only
+    const a: RunOptions = { ...base, maxIterations: 3 };
+    // @ts-expect-error — the completion signal is runMany()-only
+    const b: RunOptions = { ...base, completionSignal: "DONE" };
+    expect(a).toBeDefined();
+    expect(b).toBeDefined();
   });
 });
 
@@ -415,22 +438,58 @@ describe("signal (AbortSignal)", () => {
   });
 });
 
-describe("resumeSession validation", () => {
-  it("throws when resumeSession is set with maxIterations > 1", async () => {
+describe("run()/runMany() migration guards (untyped callers)", () => {
+  it("run() rejects maxIterations so a loop never silently becomes one-shot", async () => {
     await expect(
       run({
         agent: claudeCode("claude-opus-4-8"),
         sandbox: testSandbox,
         prompt: "test",
         branchStrategy: { type: "head" },
-        resumeSession: "abc-123",
-        maxIterations: 2,
-      }),
-    ).rejects.toThrow(
-      "resumeSession cannot be combined with maxIterations > 1",
-    );
+        maxIterations: 5,
+      } as RunOptions),
+    ).rejects.toThrow(/run\(\) does not accept `maxIterations`.*runMany\(\)/);
   });
 
+  it("run() rejects completionSignal", async () => {
+    await expect(
+      run({
+        agent: claudeCode("claude-opus-4-8"),
+        sandbox: testSandbox,
+        prompt: "test",
+        branchStrategy: { type: "head" },
+        completionSignal: "DONE",
+      } as RunOptions),
+    ).rejects.toThrow("run() does not accept `completionSignal`");
+  });
+
+  it("runMany() rejects resumeSession (no resume-then-loop, ADR 0011)", async () => {
+    await expect(
+      runMany({
+        agent: claudeCode("claude-opus-4-8"),
+        sandbox: testSandbox,
+        prompt: "test",
+        branchStrategy: { type: "head" },
+        resumeSession: "abc-123",
+        maxIterations: 2,
+      } as RunManyOptions),
+    ).rejects.toThrow("runMany() does not accept `resumeSession`");
+  });
+
+  it("runMany() rejects output (structured output is run()-only)", async () => {
+    await expect(
+      runMany({
+        agent: claudeCode("claude-opus-4-8"),
+        sandbox: testSandbox,
+        prompt: "emit <result>...</result>",
+        branchStrategy: { type: "head" },
+        output: Output.object({ tag: "result", schema: mockSchema() }),
+      } as RunManyOptions),
+    ).rejects.toThrow("runMany() does not accept `output`");
+  });
+});
+
+describe("resumeSession validation", () => {
   it("throws when resumeSession file does not exist on host", async () => {
     await expect(
       run({
@@ -443,9 +502,7 @@ describe("resumeSession validation", () => {
     ).rejects.toThrow('resumeSession "nonexistent-session-id" not found');
   });
 
-  it("allows resumeSession with maxIterations = 1 (default)", async () => {
-    // This should fail for a different reason (missing session file),
-    // not the maxIterations validation
+  it("validates the session file before any setup", async () => {
     await expect(
       run({
         agent: claudeCode("claude-opus-4-8"),
@@ -549,6 +606,16 @@ describe("buildRunSummaryRows", () => {
     expect(rows["Sandbox"]).toBe("docker");
     expect(rows["Max iterations"]).toBe("5");
     expect(rows["Branch"]).toBe("sandcastle/issue-160");
+  });
+
+  it("omits the Max iterations row for one-shot run() (no maxIterations)", () => {
+    const rows = buildRunSummaryRows({
+      agentName: "claude-code",
+      sandboxName: "docker",
+      branch: "main",
+    });
+    expect(rows).not.toHaveProperty("Max iterations");
+    expect(Object.keys(rows)).toEqual(["Agent", "Sandbox", "Branch"]);
   });
 
   it("does not include a Model row", () => {
@@ -964,32 +1031,6 @@ const mockSchema = () => ({
 });
 
 describe("structured output entry-time validation", () => {
-  it("throws when output is set with maxIterations !== 1", async () => {
-    await expect(
-      run({
-        agent: claudeCode("claude-opus-4-8"),
-        sandbox: testSandbox,
-        prompt: "emit <result>...</result>",
-        branchStrategy: { type: "head" },
-        output: Output.object({ tag: "result", schema: mockSchema() }),
-        maxIterations: 2,
-      }),
-    ).rejects.toThrow("output requires maxIterations to be 1");
-  });
-
-  it("allows output with maxIterations = 1 (default)", async () => {
-    // Should pass maxIterations check and fail later for a different reason
-    await expect(
-      run({
-        agent: claudeCode("claude-opus-4-8"),
-        sandbox: testSandbox,
-        prompt: "emit <result>...</result>",
-        branchStrategy: { type: "head" },
-        output: Output.object({ tag: "result", schema: mockSchema() }),
-      }),
-    ).rejects.not.toThrow("output requires maxIterations to be 1");
-  });
-
   it("throws when output tag is not in the resolved prompt", async () => {
     await expect(
       run({
@@ -1083,7 +1124,7 @@ describe("structured output error carries the failed session id", () => {
     }),
   });
 
-  it("threads iterations[].sessionId onto StructuredOutputError", async () => {
+  it("threads the flat sessionId onto StructuredOutputError", async () => {
     // captureSessions: false keeps the session id from the stream without
     // attempting to transfer a (nonexistent) session file off the sandbox.
     try {
@@ -1502,4 +1543,242 @@ describe("output.maxRetries end-to-end", () => {
       }),
     ).rejects.toBeInstanceOf(StructuredOutputError);
   });
+});
+
+describe("run() / runMany() end-to-end", () => {
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    consoleSpy.mockRestore();
+  });
+
+  /** A bind-mount sandbox whose agent exec streams `stages[n]` on the n-th
+   *  agent invocation. With `hangAfter`, the agent exec never resolves after
+   *  streaming its lines — simulating a child process holding stdout open
+   *  (ADR 0019). */
+  const scriptedAgentSandbox = (
+    stages: string[][],
+    opts: { hangAfter?: boolean } = {},
+  ) => {
+    let agentCalls = 0;
+    const sandbox = createBindMountSandboxProvider({
+      name: "scripted-agent",
+      create: async () => ({
+        worktreePath: process.cwd(),
+        exec: async (
+          _command: string,
+          options?: { onLine?: (line: string) => void },
+        ) => {
+          if (options?.onLine) {
+            const stage = stages[Math.min(agentCalls, stages.length - 1)]!;
+            agentCalls += 1;
+            for (const line of stage) options.onLine(line);
+            if (opts.hangAfter) {
+              return new Promise<never>(() => {});
+            }
+          }
+          return { stdout: "", stderr: "", exitCode: 0 };
+        },
+        copyFileIn: async () => {},
+        copyFileOut: async () => {},
+        close: async () => {},
+      }),
+    });
+    return { sandbox, agentCalls: () => agentCalls };
+  };
+
+  const init = (sessionId: string) =>
+    `{"type":"system","subtype":"init","session_id":"${sessionId}"}`;
+  const resultLine = (text: string) =>
+    JSON.stringify({ type: "result", result: text });
+  const logging = (name: string) =>
+    ({
+      type: "file",
+      path: join(mkdtempSync(join(tmpdir(), "sandcastle-e2e-")), `${name}.log`),
+    }) as const;
+
+  it("run() returns a flat result: sessionId at the top level, no iterations[]", async () => {
+    const { sandbox, agentCalls } = scriptedAgentSandbox([
+      [
+        init("sess-flat"),
+        resultLine("did the thing <promise>COMPLETE</promise>"),
+      ],
+    ]);
+
+    const result = await run({
+      agent: claudeCode("claude-opus-4-8", { captureSessions: false }),
+      sandbox,
+      prompt: "do the thing",
+      branchStrategy: { type: "head" },
+      logging: logging("flat"),
+    });
+
+    expect(agentCalls()).toBe(1);
+    expect(result.sessionId).toBe("sess-flat");
+    expect(result.stdout).toContain("did the thing");
+    expect(result).not.toHaveProperty("iterations");
+    expect(result).not.toHaveProperty("completionSignal");
+    expect(typeof result.resume).toBe("function");
+    expect(typeof result.fork).toBe("function");
+  });
+
+  it("run() does not mention or wait for a completion signal in its log", async () => {
+    const { sandbox } = scriptedAgentSandbox([[init("s"), resultLine("ok")]]);
+    const log = logging("no-signal");
+    await run({
+      agent: claudeCode("claude-opus-4-8", { captureSessions: false }),
+      sandbox,
+      prompt: "x",
+      branchStrategy: { type: "head" },
+      logging: log,
+    });
+    const text = readFileSync(log.path, "utf-8");
+    expect(text).toContain("Run complete.");
+    expect(text).not.toContain("without completion signal");
+    expect(text).not.toContain("Max iterations");
+  });
+
+  it("runMany() stops early on the completion signal (parity with pre-split run())", async () => {
+    const { sandbox, agentCalls } = scriptedAgentSandbox([
+      [init("it-1"), resultLine("still working")],
+      [init("it-2"), resultLine("all done <promise>COMPLETE</promise>")],
+      [init("it-3"), resultLine("should never run")],
+    ]);
+
+    const result = await runMany({
+      agent: claudeCode("claude-opus-4-8", { captureSessions: false }),
+      sandbox,
+      prompt: "work the backlog",
+      branchStrategy: { type: "head" },
+      maxIterations: 5,
+      logging: logging("early-exit"),
+    });
+
+    expect(agentCalls()).toBe(2);
+    expect(result.iterations.map((i) => i.sessionId)).toEqual(["it-1", "it-2"]);
+    expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
+  });
+
+  it("runMany() runs to maxIterations when no signal fires, and honours a custom signal array", async () => {
+    const { sandbox, agentCalls } = scriptedAgentSandbox([
+      [init("x"), resultLine("<promise>COMPLETE</promise> is not my signal")],
+    ]);
+
+    const result = await runMany({
+      agent: claudeCode("claude-opus-4-8", { captureSessions: false }),
+      sandbox,
+      prompt: "work",
+      branchStrategy: { type: "head" },
+      maxIterations: 3,
+      completionSignal: ["TASK_DONE", "TASK_ABORTED"],
+      logging: logging("cap"),
+    });
+
+    expect(agentCalls()).toBe(3);
+    expect(result.iterations.length).toBe(3);
+    expect(result.completionSignal).toBeUndefined();
+  });
+
+  it("runMany() defaults to a single iteration (mechanical rename of run())", async () => {
+    const { sandbox, agentCalls } = scriptedAgentSandbox([
+      [init("only"), resultLine("no signal")],
+    ]);
+    const result = await runMany({
+      agent: claudeCode("claude-opus-4-8", { captureSessions: false }),
+      sandbox,
+      prompt: "x",
+      branchStrategy: { type: "head" },
+      logging: logging("default-one"),
+    });
+    expect(agentCalls()).toBe(1);
+    expect(result.iterations.length).toBe(1);
+  });
+
+  it("run() with output force-completes on the closing tag when the agent hangs (ADR 0021)", async () => {
+    const { sandbox } = scriptedAgentSandbox(
+      [[init("hang-out"), resultLine('<answer>{"answer":7}</answer>')]],
+      { hangAfter: true },
+    );
+
+    const start = Date.now();
+    const result = await run({
+      agent: claudeCode("claude-opus-4-8", { captureSessions: false }),
+      sandbox,
+      prompt: "emit <answer>",
+      branchStrategy: { type: "head" },
+      output: Output.object({ tag: "answer", schema: mockSchema() }),
+      completionTimeoutSeconds: 0.2,
+      idleTimeoutSeconds: 30,
+      logging: logging("hang-output"),
+    });
+
+    expect(result.output).toEqual({ answer: 7 });
+    expect(result.sessionId).toBe("hang-out");
+    expect(Date.now() - start).toBeLessThan(5_000);
+  }, 10_000);
+
+  it("run() with output does NOT start the grace window on the opening tag alone", async () => {
+    const { sandbox } = scriptedAgentSandbox(
+      [[init("half"), resultLine('<answer>{"answer":')]],
+      { hangAfter: true },
+    );
+
+    await expect(
+      run({
+        agent: claudeCode("claude-opus-4-8", { captureSessions: false }),
+        sandbox,
+        prompt: "emit <answer>",
+        branchStrategy: { type: "head" },
+        output: Output.object({ tag: "answer", schema: mockSchema() }),
+        completionTimeoutSeconds: 0.05,
+        idleTimeoutSeconds: 0.4,
+        logging: logging("half-tag"),
+      }),
+    ).rejects.toThrow(/idle/i);
+  }, 10_000);
+
+  it("run() WITHOUT output has no completion trigger: a hang after the old signal rides the idle timeout", async () => {
+    // Documents the known gap (ADR 0021): one-shot run() no longer watches
+    // for <promise>COMPLETE</promise>, so a hanging process fails on idle.
+    const { sandbox } = scriptedAgentSandbox(
+      [[init("gap"), resultLine("done <promise>COMPLETE</promise>")]],
+      { hangAfter: true },
+    );
+
+    await expect(
+      run({
+        agent: claudeCode("claude-opus-4-8", { captureSessions: false }),
+        sandbox,
+        prompt: "x",
+        branchStrategy: { type: "head" },
+        completionTimeoutSeconds: 0.05,
+        idleTimeoutSeconds: 0.4,
+        logging: logging("gap"),
+      }),
+    ).rejects.toThrow(/idle/i);
+  }, 10_000);
+
+  it("runMany() keeps signal-based hang protection (ADR 0019)", async () => {
+    const { sandbox } = scriptedAgentSandbox(
+      [[init("hang-many"), resultLine("done <promise>COMPLETE</promise>")]],
+      { hangAfter: true },
+    );
+
+    const result = await runMany({
+      agent: claudeCode("claude-opus-4-8", { captureSessions: false }),
+      sandbox,
+      prompt: "x",
+      branchStrategy: { type: "head" },
+      maxIterations: 3,
+      completionTimeoutSeconds: 0.2,
+      idleTimeoutSeconds: 30,
+      logging: logging("hang-many"),
+    });
+
+    expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
+    expect(result.iterations.length).toBe(1);
+  }, 10_000);
 });

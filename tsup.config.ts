@@ -24,7 +24,9 @@ export default defineConfig({
   clean: true,
   dts: true,
   treeshake: true,
-  external: ["@vercel/sandbox", "@daytona/sdk"],
+  // `typescript` is loaded on demand by `sandcastle codemod` from the
+  // caller's project — never bundled (optional peer dependency).
+  external: ["@vercel/sandbox", "@daytona/sdk", "typescript"],
   define: {
     __SANDCASTLE_VERSION__: JSON.stringify(pkg.version),
   },
