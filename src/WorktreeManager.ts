@@ -4,6 +4,7 @@ import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { join, normalize } from "node:path";
 import { WorktreeError, WorktreeTimeoutError, withTimeout } from "./errors.js";
+import { hostGitEnv } from "./hostGitEnv.js";
 
 const WORKTREE_TIMEOUT_MS = 30_000;
 
@@ -53,7 +54,7 @@ const execGit = (
     execFile(
       "git",
       args,
-      { cwd, env: { ...process.env, LC_ALL: "C" } },
+      { cwd, env: { ...hostGitEnv(), LC_ALL: "C" } },
       (error, stdout, stderr) => {
         if (error) {
           resume(
