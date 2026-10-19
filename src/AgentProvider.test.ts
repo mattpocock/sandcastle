@@ -1202,13 +1202,24 @@ describe("opencode factory", () => {
     expect(provider).not.toHaveProperty("dockerfileTemplate");
   });
 
-  it("buildPrintCommand includes the model and prompt in command (no stdin)", () => {
+  it("buildPrintCommand transports the prompt unchanged through stdin", () => {
     const provider = opencode("opencode/big-pickle");
-    const { command, stdin } = provider.buildPrintCommand(opts("do something"));
+    const prompt =
+      "quotes: ' and \"; newline:\nUnicode: 🏰; shell: $HOME && exit";
+    const { command, stdin } = provider.buildPrintCommand(opts(prompt));
     expect(command).toContain("opencode run");
     expect(command).toContain("opencode/big-pickle");
-    expect(command).toContain("'do something'");
-    expect(stdin).toBeUndefined();
+    expect(command).not.toContain(prompt);
+    expect(stdin).toBe(prompt);
+  });
+
+  it("buildPrintCommand keeps a 150,000-byte prompt out of the command", () => {
+    const provider = opencode("opencode/big-pickle");
+    const prompt = "x".repeat(150_000);
+    const { command, stdin } = provider.buildPrintCommand(opts(prompt));
+
+    expect(Buffer.byteLength(command, "utf8")).toBeLessThan(1024);
+    expect(stdin).toBe(prompt);
   });
 
   it("buildPrintCommand includes --format json so the parser receives JSON events", () => {
@@ -1233,12 +1244,6 @@ describe("opencode factory", () => {
       dangerouslySkipPermissions: false,
     });
     expect(command).not.toContain("--dangerously-skip-permissions");
-  });
-
-  it("buildPrintCommand shell-escapes the prompt", () => {
-    const provider = opencode("opencode/big-pickle");
-    const { command } = provider.buildPrintCommand(opts("it's a test"));
-    expect(command).toContain("'it'\\''s a test'");
   });
 
   it("buildPrintCommand shell-escapes the model", () => {
@@ -1335,6 +1340,15 @@ describe("opencode factory", () => {
     const provider = opencode("opencode/big-pickle");
     const args = provider.buildInteractiveArgs!(opts("do something"));
     expect(args).not.toContain("--agent");
+  });
+
+  it("buildInteractiveArgs rejects prompts larger than the argv-safe limit", () => {
+    const provider = opencode("opencode/big-pickle");
+    const prompt = "x".repeat(120 * 1024 + 1);
+
+    expect(() => provider.buildInteractiveArgs!(opts(prompt))).toThrow(
+      "OpenCode interactive prompt is 122881 bytes (max 122880 bytes). Shorten the prompt or use non-interactive run().",
+    );
   });
 
   it("parseStreamLine extracts session id from step_start", () => {
