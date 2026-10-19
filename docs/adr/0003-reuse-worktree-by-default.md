@@ -21,11 +21,22 @@ Remove `throwOnDuplicateWorktree` from `run()`, `createSandbox()`, `SandboxFacto
 
 On the **reuse path**, Sandcastle additionally **fast-forwards the worktree from `origin` when, and only when, it is safe**:
 
-- `git fetch origin <branch>`, then `git merge --ff-only`.
-- The refresh runs **only** when the worktree is clean (no uncommitted changes) **and** the local branch is strictly behind `origin/<branch>` (a fast-forward is possible).
+- `git fetch origin refs/heads/<branch>`, then `git merge --ff-only FETCH_HEAD`.
+- The refresh runs **only** when the worktree is clean (no uncommitted changes) **and** the local branch is strictly behind the fetched branch tip (a fast-forward is possible).
 - If the worktree is **dirty**, or the branch has **diverged** (unpushed commits — not fast-forwardable), or the **fetch fails** (e.g. offline), the refresh is skipped, the worktree is reused as-is, and Sandcastle logs why. A failed fetch is non-fatal; it never breaks the run.
 
 This refresh is the **default** — there is no opt-in flag. The only behaviour it changes versus pure reuse is "a clean, strictly-behind worktree now fast-forwards," which is the obviously-correct outcome; every case where reuse-as-is matters (unpushed commits, uncommitted work) is explicitly left untouched. Unpushed commits and branch drift against origin still do not count as "dirty" — they are normal for a long-lived named branch, and a diverged branch is reused exactly as it was.
+
+The merge target is the tip just fetched into `FETCH_HEAD`. A single-branch
+clone (including the default for `--depth 1`) can have a fetch refspec that
+updates only `origin/main`; fetching another branch still succeeds but leaves
+`origin/<branch>` absent or stale. Custom refspecs can also store the fetched
+branch in a different namespace. As documented in [git-fetch](https://git-scm.com/docs/git-fetch#_configured_remote_tracking_branches),
+an explicit source determines what is fetched while the configured refspec
+determines which tracking refs are updated. Using `FETCH_HEAD` works with those
+mappings without changing the caller's configuration. The fully qualified
+source also disambiguates branches from tags with the same name. A failed
+fetch still returns before the merge, so an earlier `FETCH_HEAD` is never used.
 
 The rejected alternatives:
 

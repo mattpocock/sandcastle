@@ -193,8 +193,10 @@ const listWorktrees = (
   );
 
 /**
- * On the clean-reuse path, fetches `origin/<branch>` into the worktree and
- * fast-forwards local HEAD. Skipped silently (with an explanatory log) when:
+ * On the clean-reuse path, fetches `<branch>` from origin into the worktree
+ * and fast-forwards local HEAD to FETCH_HEAD. The remote-tracking ref may be
+ * absent or stale when the clone has a restricted fetch refspec. Skipped
+ * silently (with an explanatory log) when:
  *
  * - HEAD is not attached to `<branch>` — a mid-rebase worktree paused at an
  *   `edit`/`exec`/`break` instruction has a clean working tree but a detached
@@ -202,7 +204,7 @@ const listWorktrees = (
  *   silently advance HEAD past the pause and break `git rebase --continue`;
  * - the fetch fails (no `origin`, unreachable network, branch missing on
  *   origin) — the worktree is reused as-is, never breaking the run; or
- * - the local branch has diverged from `origin/<branch>` (unpushed commits +
+ * - the local branch has diverged from the fetched branch (unpushed commits +
  *   moved origin), in which case `--ff-only` refuses and the unpushed work
  *   is preserved exactly as it was.
  *
@@ -233,7 +235,7 @@ const fastForwardFromOrigin = (
     }
     const fetchResult = yield* Effect.either(
       execGit(
-        [...NO_CONFIG_LOCK_FLAGS, "fetch", "origin", branch],
+        [...NO_CONFIG_LOCK_FLAGS, "fetch", "origin", `refs/heads/${branch}`],
         worktreePath,
       ),
     );
@@ -249,7 +251,7 @@ const fastForwardFromOrigin = (
     );
     const mergeResult = yield* Effect.either(
       execGit(
-        [...NO_CONFIG_LOCK_FLAGS, "merge", "--ff-only", `origin/${branch}`],
+        [...NO_CONFIG_LOCK_FLAGS, "merge", "--ff-only", "FETCH_HEAD"],
         worktreePath,
       ),
     );
