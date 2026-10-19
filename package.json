@@ -87,13 +87,17 @@
   },
   "peerDependencies": {
     "@daytona/sdk": "^0.164.0",
-    "@vercel/sandbox": ">=1.0.0"
+    "@vercel/sandbox": ">=1.0.0",
+    "typescript": ">=5.0.0"
   },
   "peerDependenciesMeta": {
     "@vercel/sandbox": {
       "optional": true
     },
     "@daytona/sdk": {
+      "optional": true
+    },
+    "typescript": {
       "optional": true
     }
   },

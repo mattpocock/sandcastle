@@ -87,7 +87,7 @@ A single invocation of the **agent** inside the **sandbox**, producing at most o
 _Avoid_: "run" (ambiguous with the JS `run()` function), "cycle", "loop"
 
 **One-shot run**:
-Exactly one **iteration**, driven by `run()` (or `sandbox.run()` / `worktree.run()`). Returns a flat result -- `sessionId`, `usage`, `commits`, etc. at the top level, no `iterations[]`. Has no **completion signal**. The only entry point that accepts **structured output** and `resumeSession`. `.resume()` / `.fork()` always produce a **one-shot run**, whatever produced the result (ADR 0011).
+Exactly one **iteration**, driven by `run()` (or `sandbox.run()` / `worktree.run()`). Returns a flat result -- `sessionId`, `usage`, `commits`, etc. at the top level, no `iterations[]`. Has no **completion signal**. The only kind of run that accepts **structured output** and `resumeSession`. `.resume()` / `.fork()` always produce a **one-shot run**, whatever produced the result (ADR 0011).
 _Avoid_: "single run", "single-iteration run()" (pre-split wording)
 
 **Iteration loop**:

@@ -87,6 +87,120 @@ ${raw}
 Emit only a corrected <${error.tag}> block. Do not change files or run commands.`;
 };
 
+/**
+ * Validate `output.maxRetries` at entry: it must be a non-negative integer,
+ * and retries require a provider that supports session resumption. Fails at
+ * the earliest possible point — the issue is fully determined by the inputs
+ * and does not depend on the agent's output. See issue #825.
+ *
+ * @internal
+ */
+export const assertOutputRetriesSupported = (
+  output: OutputDefinition | undefined,
+  provider: AgentProvider,
+): void => {
+  const outputMaxRetries = output?.maxRetries ?? 0;
+  if (outputMaxRetries < 0 || !Number.isInteger(outputMaxRetries)) {
+    throw new Error(
+      "output.maxRetries must be a non-negative integer. " +
+        `Received: ${outputMaxRetries}`,
+    );
+  }
+  if (outputMaxRetries > 0 && !provider.sessionStorage) {
+    throw new Error(
+      `output.maxRetries requires an agent provider that supports session resumption. ` +
+        `The "${provider.name}" provider does not. ` +
+        `Use claudeCode, codex, or pi, or set maxRetries to 0.`,
+    );
+  }
+};
+
+/**
+ * Validate that the resolved prompt contains the output's opening tag — the
+ * caller owns the instruction telling the agent to emit it (ADR 0010).
+ *
+ * @internal
+ */
+export const assertOutputTagInPrompt = (
+  output: OutputDefinition | undefined,
+  rawPrompt: string,
+): void => {
+  if (output && !rawPrompt.includes(`<${output.tag}>`)) {
+    throw new Error(
+      `output tag <${output.tag}> not found in the resolved prompt. ` +
+        "The caller must instruct the agent to emit the configured tag.",
+    );
+  }
+};
+
+/**
+ * Completion-timeout triggers for a one-shot run: the output's closing tag,
+ * or none without `output` (ADR 0021).
+ *
+ * @internal
+ */
+export const oneShotCompletionTimeoutTriggers = (
+  output: OutputDefinition | undefined,
+): readonly string[] => (output ? [`</${output.tag}>`] : []);
+
+/**
+ * Extract structured output from a one-shot result, retrying via `retry`
+ * (which resumes the failed session with a feedback prompt) while
+ * `output.maxRetries` allows. Shared by `run()`, `sandbox.run()` and
+ * `wt.run()`. See issue #825.
+ *
+ * @internal
+ */
+export const extractOutputWithRetries = async <
+  R extends {
+    readonly stdout: string;
+    readonly commits: { sha: string }[];
+    readonly preservedWorktreePath?: string;
+    readonly sessionId?: string;
+    readonly sessionFilePath?: string;
+  },
+>(
+  result: R,
+  output: OutputDefinition,
+  context: { readonly branch: string },
+  retry: (
+    feedbackPrompt: string,
+    sessionId: string,
+    retryOutput: OutputDefinition,
+  ) => Promise<R & { output: unknown }>,
+): Promise<R & { output: unknown }> => {
+  const outputMaxRetries = output.maxRetries ?? 0;
+  try {
+    const value = await extractStructuredOutput(result.stdout, output, {
+      commits: result.commits,
+      branch: context.branch,
+      preservedWorktreePath: result.preservedWorktreePath,
+      // Carry the session id onto the error so a caller can resume the same
+      // session to re-emit corrected output.
+      sessionId: result.sessionId,
+      sessionFilePath: result.sessionFilePath,
+    });
+    return { ...result, output: value };
+  } catch (error) {
+    // Built-in retry: when maxRetries > 0 and the agent emitted a session id
+    // we can resume, recurse with a token-efficient feedback prompt. Each
+    // retry decrements maxRetries so the recursion terminates.
+    if (
+      error instanceof StructuredOutputError &&
+      outputMaxRetries > 0 &&
+      error.sessionId !== undefined
+    ) {
+      const retriesRemainingAfter = outputMaxRetries - 1;
+      return retry(
+        buildStructuredOutputRetryFeedback(error, retriesRemainingAfter),
+        error.sessionId,
+        { ...output, maxRetries: retriesRemainingAfter },
+      );
+    }
+    throw error;
+  }
+};
+
 /** Default maximum number of iterations for `runMany()`. */
 export const DEFAULT_MAX_ITERATIONS = 1;
 
@@ -638,24 +752,7 @@ const executeRun = async (
     );
   }
 
-  // Validate: output.maxRetries requires a provider that supports session
-  // resumption. Fail at the earliest possible point — the issue is fully
-  // determined by the inputs to run() and does not depend on the agent's
-  // output. See issue #825.
-  const outputMaxRetries = output?.maxRetries ?? 0;
-  if (outputMaxRetries < 0 || !Number.isInteger(outputMaxRetries)) {
-    throw new Error(
-      "output.maxRetries must be a non-negative integer. " +
-        `Received: ${outputMaxRetries}`,
-    );
-  }
-  if (outputMaxRetries > 0 && !provider.sessionStorage) {
-    throw new Error(
-      `output.maxRetries requires an agent provider that supports session resumption. ` +
-        `The "${provider.name}" provider does not. ` +
-        `Use claudeCode, codex, or pi, or set maxRetries to 0.`,
-    );
-  }
+  assertOutputRetriesSupported(output, provider);
 
   // Extract explicit branch when in branch mode
   const branch: string | undefined =
@@ -684,16 +781,7 @@ const executeRun = async (
   const rawPrompt = resolved.text;
   const isInlinePrompt = resolved.source === "inline";
 
-  // Validate: output tag must appear in the resolved prompt
-  if (output) {
-    const openTag = `<${output.tag}>`;
-    if (!rawPrompt.includes(openTag)) {
-      throw new Error(
-        `output tag <${output.tag}> not found in the resolved prompt. ` +
-          "The caller must instruct the agent to emit the configured tag.",
-      );
-    }
-  }
+  assertOutputTagInPrompt(output, rawPrompt);
 
   const agentName = provider.name;
 
@@ -919,7 +1007,9 @@ const oneShotOrManyOrchestrateOptions = (
     : {
         iterations: 1,
         completionSignal: [],
-        completionTimeoutTriggers: mode.output ? [`</${mode.output.tag}>`] : [],
+        completionTimeoutTriggers: oneShotCompletionTimeoutTriggers(
+          mode.output,
+        ),
         resumeSession: mode.resumeSession,
         forkSession: mode.forkSession,
       };
@@ -1021,52 +1111,21 @@ export async function run(
 
   // Extract structured output after the run completes
   if (options.output) {
-    const outputMaxRetries = options.output.maxRetries ?? 0;
-    try {
-      const output = await extractStructuredOutput(
-        baseResult.stdout,
-        options.output,
-        {
-          commits: baseResult.commits,
-          branch: baseResult.branch,
-          preservedWorktreePath: baseResult.preservedWorktreePath,
-          // Carry the session id onto the error so a caller can resume the
-          // same session to re-emit corrected output.
-          sessionId: baseResult.sessionId,
-          sessionFilePath: baseResult.sessionFilePath,
-        },
-      );
-      return { ...baseResult, output };
-    } catch (error) {
-      // Built-in retry: when maxRetries > 0 and the agent emitted a session id
-      // we can resume, recurse with a token-efficient feedback prompt. Each
-      // retry decrements maxRetries so the recursion terminates. See issue
-      // #825.
-      if (
-        error instanceof StructuredOutputError &&
-        outputMaxRetries > 0 &&
-        error.sessionId !== undefined
-      ) {
-        const retriesRemainingAfter = outputMaxRetries - 1;
-        const retryOutput = {
-          ...options.output,
-          maxRetries: retriesRemainingAfter,
-        };
-        return run({
+    return extractOutputWithRetries(
+      baseResult,
+      options.output,
+      { branch: baseResult.branch },
+      (retryPrompt, sessionId, retryOutput) =>
+        run({
           ...options,
-          prompt: buildStructuredOutputRetryFeedback(
-            error,
-            retriesRemainingAfter,
-          ),
+          prompt: retryPrompt,
           promptFile: undefined,
           promptArgs: undefined,
-          resumeSession: error.sessionId,
+          resumeSession: sessionId,
           forkSession: false,
           output: retryOutput,
-        } as RunOptions);
-      }
-      throw error;
-    }
+        } as RunOptions) as Promise<RunResult & { output: unknown }>,
+    );
   }
 
   return baseResult;

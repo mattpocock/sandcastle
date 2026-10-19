@@ -5,7 +5,7 @@ Resolves the deferred design tracked in issue #562 (grill session 2026-05-29). `
 - **`run()`** — exactly one **iteration**. No `maxIterations`, no `completionSignal`. Returns a slim, flat `RunResult` (`sessionId`, `sessionFilePath`, `usage`, `stdout`, `commits`, `branch`, `logFilePath`, `preservedWorktreePath`, `output?`, `resume`, `fork`). Accepts `output` and `resumeSession`.
 - **`runMany()`** — the pre-split loop, unchanged: `maxIterations` (default `1`), `completionSignal` (default `<promise>COMPLETE</promise>`), `completionTimeoutSeconds`. Returns the fat `RunManyResult` (`iterations[]`, `completionSignal?`, …). Does not accept `output` or `resumeSession`.
 
-The split is mirrored on `createSandbox()` (`sandbox.run()` / `sandbox.runMany()`) and `createWorktree()` (`wt.run()` / `wt.runMany()`). `interactive()` and `wt.interactive()` are untouched.
+The split is mirrored on `createSandbox()` (`sandbox.run()` / `sandbox.runMany()`) and `createWorktree()` (`wt.run()` / `wt.runMany()`). The one-shot `sandbox.run()` / `wt.run()` also gain structured `output` (with `maxRetries`, which resumes inside the same sandbox/worktree), so every one-shot entry point has the same contract. `interactive()` and `wt.interactive()` are untouched.
 
 ## Decisions
 
@@ -25,6 +25,6 @@ The split is mirrored on `createSandbox()` (`sandbox.run()` / `sandbox.runMany()
 
 ## Consequences
 
-- Every looping caller must rename `run` → `runMany` (and `sandbox.run` / `wt.run` likewise). Every one-shot caller that read `result.iterations[0].x` reads `result.x`.
+- Every looping caller must rename `run` → `runMany` (and `sandbox.run` / `wt.run` likewise). Every one-shot caller that read `result.iterations[0].x` reads `result.x`. The package ships a codemod for this — `sandcastle codemod run-many <paths…>` — which renames looping calls and imports, flattens common one-shot result access, and leaves `// TODO(sandcastle-codemod)` comments where it can't decide statically. It loads the caller's own `typescript` (optional peer dependency) rather than bundling a parser.
 - `StructuredOutputError`'s `sessionId` / `sessionFilePath` now come from the flat result.
 - `run()`'s log no longer prints "Max iterations" or "without completion signal"; it prints `Run complete.`

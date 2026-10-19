@@ -153,6 +153,17 @@ Before this split, `run()` carried both jobs. Any call that used `maxIterations`
 
 `run()` throws if it receives `maxIterations` or `completionSignal` (so an untyped loop can't silently become a one-shot), and `runMany()` throws on `output` or `resumeSession`. `runMany()` defaults `maxIterations` to `1`, so the rename is always behaviour-preserving.
 
+A codemod does the rename for you. It uses your project's `typescript` (an optional peer dependency):
+
+```sh
+npx sandcastle codemod run-many .sandcastle --dry-run   # preview
+npx sandcastle codemod run-many .sandcastle scripts     # files, directories or globs
+# without typescript installed locally:
+npx -p typescript -p @ai-hero/sandcastle sandcastle codemod run-many .sandcastle
+```
+
+It renames looping `run()` / `sandbox.run()` / `wt.run()` calls (those passing `maxIterations`, `completionSignal`, or `completionTimeoutSeconds` without `output`) and the import, drops a no-op `maxIterations: 1` next to `output` / `resumeSession`, rewrites `r.iterations.at(-1)?.sessionId` (and `[0]`, `.sessionFilePath`, `.usage`, `.length`) on calls that stay one-shot, and leaves a `// TODO(sandcastle-codemod): …` comment wherever it can't decide statically — options passed as a variable or spread, `typeof run` types, and other `iterations` / `completionSignal` reads.
+
 ### All options
 
 ```typescript
@@ -431,19 +442,21 @@ if (closeResult.preservedWorktreePath) {
 
 #### `SandboxRunOptions`
 
-| Option               | Type          | Default               | Description                                                                                                 |
-| -------------------- | ------------- | --------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `agent`              | AgentProvider | —                     | **Required.** Agent provider (e.g. `claudeCode("claude-opus-4-8")`)                                         |
-| `prompt`             | string        | —                     | Inline prompt (mutually exclusive with `promptFile`)                                                        |
-| `promptFile`         | string        | —                     | Path to prompt file (mutually exclusive with `prompt`)                                                      |
-| `promptArgs`         | PromptArgs    | —                     | Key-value map for `{{KEY}}` placeholder substitution                                                        |
-| `idleTimeoutSeconds` | number        | `600`                 | Idle timeout in seconds — resets on each agent output event                                                 |
-| `name`               | string        | —                     | Display name for the run                                                                                    |
-| `logging`            | object        | file (auto-generated) | `{ type: 'file', path }` or `{ type: 'stdout' }`                                                            |
-| `resumeSession`      | string        | —                     | Resume a prior session by ID for agents that support resume. `run()` only. Session file must exist on host. |
-| `signal`             | AbortSignal   | —                     | Cancels the run when aborted; handle stays usable afterward                                                 |
+| Option                     | Type             | Default               | Description                                                                                                                   |
+| -------------------------- | ---------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `agent`                    | AgentProvider    | —                     | **Required.** Agent provider (e.g. `claudeCode("claude-opus-4-8")`)                                                           |
+| `prompt`                   | string           | —                     | Inline prompt (mutually exclusive with `promptFile`)                                                                          |
+| `promptFile`               | string           | —                     | Path to prompt file (mutually exclusive with `prompt`)                                                                        |
+| `promptArgs`               | PromptArgs       | —                     | Key-value map for `{{KEY}}` placeholder substitution                                                                          |
+| `idleTimeoutSeconds`       | number           | `600`                 | Idle timeout in seconds — resets on each agent output event                                                                   |
+| `name`                     | string           | —                     | Display name for the run                                                                                                      |
+| `logging`                  | object           | file (auto-generated) | `{ type: 'file', path }` or `{ type: 'stdout' }`                                                                              |
+| `resumeSession`            | string           | —                     | Resume a prior session by ID for agents that support resume. `run()` only. Session file must exist on host.                   |
+| `signal`                   | AbortSignal      | —                     | Cancels the run when aborted; handle stays usable afterward                                                                   |
+| `output`                   | OutputDefinition | —                     | Structured output, same as top-level `run()` (typed `result.output`, `maxRetries` resumes in the same sandbox). `run()` only. |
+| `completionTimeoutSeconds` | number           | `60`                  | Grace window after the `output` closing tag is seen but the agent process hasn't exited. Only with `output`.                  |
 
-`SandboxRunManyOptions` takes the same fields except `resumeSession`, plus `maxIterations` (default `1`), `completionSignal` (default `<promise>COMPLETE</promise>`) and `completionTimeoutSeconds` (default `60`).
+`SandboxRunManyOptions` takes the same fields except `resumeSession` and `output`, plus `maxIterations` (default `1`), `completionSignal` (default `<promise>COMPLETE</promise>`) and `completionTimeoutSeconds` (default `60`).
 
 #### `SandboxRunResult`
 
@@ -558,22 +571,24 @@ With `branchStrategy: { type: "merge-to-head" }`, each `wt.run()` / `wt.runMany(
 
 #### `WorktreeRunOptions`
 
-| Option               | Type                   | Default | Description                                                                                                                         |
-| -------------------- | ---------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `agent`              | AgentProvider          | —       | **Required.** Agent provider                                                                                                        |
-| `sandbox`            | SandboxProvider        | —       | **Required.** Sandbox provider (AFK agents must be sandboxed)                                                                       |
-| `prompt`             | string                 | —       | Inline prompt (mutually exclusive with `promptFile`)                                                                                |
-| `promptFile`         | string                 | —       | Path to prompt file                                                                                                                 |
-| `idleTimeoutSeconds` | number                 | 600     | Idle timeout in seconds                                                                                                             |
-| `name`               | string                 | —       | Optional run name                                                                                                                   |
-| `logging`            | LoggingOption          | file    | Logging mode                                                                                                                        |
-| `hooks`              | SandboxHooks           | —       | Lifecycle hooks (`host.*`, `sandbox.*`)                                                                                             |
-| `promptArgs`         | PromptArgs             | —       | Key-value map for `{{KEY}}` placeholder substitution                                                                                |
-| `env`                | Record<string, string> | —       | Environment variables to inject into the sandbox                                                                                    |
-| `resumeSession`      | string                 | —       | Resume a prior session by ID for agents that support resume. `run()` only. Session file must exist on host.                         |
-| `signal`             | AbortSignal            | —       | Cancel the run when aborted. Kills the in-flight agent subprocess; the worktree is preserved on disk. Rejects with `signal.reason`. |
+| Option                     | Type                   | Default | Description                                                                                                                         |
+| -------------------------- | ---------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `agent`                    | AgentProvider          | —       | **Required.** Agent provider                                                                                                        |
+| `sandbox`                  | SandboxProvider        | —       | **Required.** Sandbox provider (AFK agents must be sandboxed)                                                                       |
+| `prompt`                   | string                 | —       | Inline prompt (mutually exclusive with `promptFile`)                                                                                |
+| `promptFile`               | string                 | —       | Path to prompt file                                                                                                                 |
+| `idleTimeoutSeconds`       | number                 | 600     | Idle timeout in seconds                                                                                                             |
+| `name`                     | string                 | —       | Optional run name                                                                                                                   |
+| `logging`                  | LoggingOption          | file    | Logging mode                                                                                                                        |
+| `hooks`                    | SandboxHooks           | —       | Lifecycle hooks (`host.*`, `sandbox.*`)                                                                                             |
+| `promptArgs`               | PromptArgs             | —       | Key-value map for `{{KEY}}` placeholder substitution                                                                                |
+| `env`                      | Record<string, string> | —       | Environment variables to inject into the sandbox                                                                                    |
+| `resumeSession`            | string                 | —       | Resume a prior session by ID for agents that support resume. `run()` only. Session file must exist on host.                         |
+| `signal`                   | AbortSignal            | —       | Cancel the run when aborted. Kills the in-flight agent subprocess; the worktree is preserved on disk. Rejects with `signal.reason`. |
+| `output`                   | OutputDefinition       | —       | Structured output, same as top-level `run()` (typed `result.output`). `run()` only.                                                 |
+| `completionTimeoutSeconds` | number                 | 60      | Grace window after the `output` closing tag is seen but the agent process hasn't exited. Only with `output`.                        |
 
-`WorktreeRunManyOptions` takes the same fields except `resumeSession`, plus `maxIterations` (default `1`), `completionSignal` (default `<promise>COMPLETE</promise>`) and `completionTimeoutSeconds` (default `60`).
+`WorktreeRunManyOptions` takes the same fields except `resumeSession` and `output`, plus `maxIterations` (default `1`), `completionSignal` (default `<promise>COMPLETE</promise>`) and `completionTimeoutSeconds` (default `60`).
 
 #### `WorktreeRunResult`
 
@@ -730,7 +745,7 @@ The completion marker depends on the entry point:
 | `run()` with `output`    | The closing tag of the output block, e.g. `</plan>`               |
 | `run()` without `output` | **None** — a hanging process rides `idleTimeoutSeconds` and fails |
 
-If you rely on hang protection for a one-shot agent that has no structured output, call `runMany()` (it defaults to one iteration) and have the prompt emit the completion signal.
+The same applies to `sandbox.run()` / `wt.run()` (one-shot) and `sandbox.runMany()` / `wt.runMany()` (loop). If you rely on hang protection for a one-shot agent that has no structured output, call `runMany()` (it defaults to one iteration) and have the prompt emit the completion signal.
 
 A clean process exit always wins the race, so healthy runs gain zero added latency. The completion timeout only matters when the process hangs.
 
@@ -771,7 +786,7 @@ console.log(result.output.summary); // typed as string
 console.log(result.output.score); // typed as number
 ```
 
-`Output.string({ tag })` extracts the tag contents as a plain string (trimmed, no JSON parsing). Structured output is `run()`-only — `runMany()` does not accept `output`. The resolved prompt must contain the configured opening tag literal. The closing tag (`</result>` above) also arms the [completion timeout](#hanging-processes-after-the-agent-finishes), so a process that hangs after emitting its answer is force-completed instead of failing on idle.
+`Output.string({ tag })` extracts the tag contents as a plain string (trimmed, no JSON parsing). Structured output works on every one-shot entry point — `run()`, `sandbox.run()` and `wt.run()` — and on none of the loops: `runMany()` does not accept `output`. The resolved prompt must contain the configured opening tag literal. The closing tag (`</result>` above) also arms the [completion timeout](#hanging-processes-after-the-agent-finishes), so a process that hangs after emitting its answer is force-completed instead of failing on idle.
 
 When extraction or validation fails, `run()` throws a `StructuredOutputError`. Alongside `tag`, `rawMatched`, `cause`, `commits`, `branch`, and `preservedWorktreePath`, the error carries the `sessionId` (and `sessionFilePath`, when the session was captured) of the run that produced the bad output.
 

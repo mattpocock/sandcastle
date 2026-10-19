@@ -1,4 +1,4 @@
-import { Command, Options } from "@effect/cli";
+import { Args, Command, Options } from "@effect/cli";
 import { FileSystem } from "@effect/platform";
 import { Effect, Option } from "effect";
 import * as clack from "@clack/prompts";
@@ -35,6 +35,7 @@ import type {
 } from "./InitService.js";
 import { ConfigDirError, InitError } from "./errors.js";
 import { VERSION } from "./version.js";
+import { runRunManyCodemod } from "./codemods/runCodemod.js";
 
 // --- Shared options ---
 
@@ -679,6 +680,65 @@ const podmanCommand = Command.make("podman", {}, () =>
   Command.withSubcommands([podmanBuildImageCommand, podmanRemoveImageCommand]),
 );
 
+// --- Codemod commands ---
+
+const codemodRunManyCommand = Command.make(
+  "run-many",
+  {
+    paths: Args.text({ name: "paths" }).pipe(
+      Args.withDescription(
+        "Files, directories or globs to migrate (node_modules/dist are skipped)",
+      ),
+      Args.atLeast(1),
+    ),
+    dryRun: Options.boolean("dry-run").pipe(
+      Options.withDescription("Report what would change without writing files"),
+    ),
+  },
+  ({ paths, dryRun }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const reports = yield* Effect.tryPromise({
+        try: () => runRunManyCodemod({ paths, cwd: process.cwd(), dryRun }),
+        catch: (e) =>
+          new InitError({
+            message: e instanceof Error ? e.message : String(e),
+          }),
+      });
+      let todoCount = 0;
+      for (const r of reports) {
+        todoCount += r.todos.length;
+        const verb = r.changed
+          ? dryRun
+            ? "would update"
+            : "updated"
+          : "needs review";
+        yield* d.status(`${verb}: ${r.file}`, r.changed ? "success" : "warn");
+        for (const t of r.todos) yield* d.status(`  TODO: ${t}`, "warn");
+      }
+      yield* d.status(
+        reports.length === 0
+          ? "No pre-split run() calls found."
+          : `${reports.filter((r) => r.changed).length} file(s) ${dryRun ? "would change" : "changed"}; ${todoCount} TODO(s) left as // TODO(sandcastle-codemod) comments.`,
+        todoCount > 0 ? "warn" : "success",
+      );
+    }),
+).pipe(
+  Command.withDescription(
+    "Migrate pre-split run({ maxIterations, completionSignal }) calls to runMany()",
+  ),
+);
+
+const codemodCommand = Command.make("codemod", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    yield* d.status(
+      "Source migrations. Use --help to see available codemods.",
+      "info",
+    );
+  }),
+).pipe(Command.withSubcommands([codemodRunManyCommand]));
+
 // --- Root command ---
 
 const rootCommand = Command.make("sandcastle", {}, () =>
@@ -690,7 +750,12 @@ const rootCommand = Command.make("sandcastle", {}, () =>
 );
 
 export const sandcastle = rootCommand.pipe(
-  Command.withSubcommands([initCommand, dockerCommand, podmanCommand]),
+  Command.withSubcommands([
+    initCommand,
+    dockerCommand,
+    podmanCommand,
+    codemodCommand,
+  ]),
 );
 
 export const cli = Command.run(sandcastle, {

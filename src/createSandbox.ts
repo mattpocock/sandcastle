@@ -30,6 +30,10 @@ import { preprocessPrompt } from "./PromptPreprocessor.js";
 import type { LoggingOption, Timeouts } from "./run.js";
 import {
   assertNoForeignRunOptions,
+  assertOutputRetriesSupported,
+  assertOutputTagInPrompt,
+  extractOutputWithRetries,
+  oneShotCompletionTimeoutTriggers,
   buildAgentStreamHandler,
   buildCompletionMessage,
   buildContextWindowLines,
@@ -61,6 +65,11 @@ import type {
   ExecResult,
 } from "./SandboxProvider.js";
 import { startSandbox } from "./startSandbox.js";
+import type {
+  OutputDefinition,
+  OutputObjectDefinition,
+  OutputStringDefinition,
+} from "./Output.js";
 import { syncOut } from "./syncOut.js";
 import * as WorktreeManager from "./WorktreeManager.js";
 import { copyToWorktree } from "./CopyToWorktree.js";
@@ -157,6 +166,19 @@ export interface SandboxRunOptions extends ResumeSandboxRunResultOptions {
    * @internal
    */
   readonly forkSession?: boolean;
+  /**
+   * Structured output definition — same contract as top-level `run()`'s
+   * `output` (ADR 0010). The resolved prompt must contain the opening tag;
+   * the parsed value is returned on `result.output`. `output.maxRetries`
+   * resumes the failed session inside the same warm sandbox.
+   */
+  readonly output?: OutputDefinition;
+  /**
+   * Grace window in seconds after the `output` closing tag (`</tag>`) is
+   * observed but the agent process has not exited (ADR 0021). Only applies
+   * when `output` is set. Default: 60.
+   */
+  readonly completionTimeoutSeconds?: number;
 }
 
 /** Options for `sandbox.runMany()`: the iterate-until-signal-or-cap loop. */
@@ -267,6 +289,14 @@ export interface Sandbox {
   readonly branch: string;
   /** Host path to the worktree. */
   readonly worktreePath: string;
+  /** Invoke an agent once inside the existing sandbox. With `Output.object`, `output` is typed. */
+  run<T>(
+    options: SandboxRunOptions & { output: OutputObjectDefinition<T> },
+  ): Promise<SandboxRunResult & { output: T }>;
+  /** Invoke an agent once with `Output.string` — `output` is a string. */
+  run(
+    options: SandboxRunOptions & { output: OutputStringDefinition },
+  ): Promise<SandboxRunResult & { output: string }>;
   /** Invoke an agent once (one iteration) inside the existing sandbox. */
   run(options: SandboxRunOptions): Promise<SandboxRunResult>;
   /** Invoke an agent in a loop (up to `maxIterations`, stopping on the completion signal) inside the existing sandbox. */
@@ -384,6 +414,7 @@ const buildSandboxHandle = (
           readonly kind: "one-shot";
           readonly resumeSession?: string;
           readonly forkSession?: boolean;
+          readonly output?: OutputDefinition;
         }
       | {
           readonly kind: "many";
@@ -398,6 +429,8 @@ const buildSandboxHandle = (
     const resumeSession =
       mode.kind === "one-shot" ? mode.resumeSession : undefined;
     const forkSession = mode.kind === "one-shot" ? mode.forkSession : undefined;
+    const output = mode.kind === "one-shot" ? mode.output : undefined;
+    assertOutputRetriesSupported(output, provider);
 
     // Validate: forkSession only makes sense alongside resumeSession.
     if (forkSession && !resumeSession) {
@@ -424,6 +457,7 @@ const buildSandboxHandle = (
     );
     const rawPrompt = resolved.text;
     const isInlinePrompt = resolved.source === "inline";
+    assertOutputTagInPrompt(output, rawPrompt);
 
     const userArgs = runOptions.promptArgs ?? {};
     const currentHostBranch = await Effect.runPromise(
@@ -527,7 +561,8 @@ const buildSandboxHandle = (
               : {
                   iterations: 1,
                   completionSignal: [],
-                  completionTimeoutTriggers: [],
+                  completionTimeoutTriggers:
+                    oneShotCompletionTimeoutTriggers(output),
                   resumeSession,
                   forkSession,
                 }),
@@ -578,7 +613,7 @@ const buildSandboxHandle = (
    * `sandboxHandle.run()` — container and worktree stay warm (ADR 0011).
    */
   const buildSandboxResumeAndFork = (
-    base: Omit<SandboxRunOptions, "resumeSession" | "forkSession">,
+    base: Omit<SandboxRunOptions, "resumeSession" | "forkSession" | "output">,
     sessionId: string | undefined,
   ):
     | { resume: ResumeSandboxRunResultFn; fork: ResumeSandboxRunResultFn }
@@ -609,7 +644,9 @@ const buildSandboxHandle = (
     branch,
     worktreePath: worktreePath,
 
-    run: async (runOptions: SandboxRunOptions): Promise<SandboxRunResult> => {
+    run: (async (
+      runOptions: SandboxRunOptions,
+    ): Promise<SandboxRunResult & { output?: unknown }> => {
       runOptions.signal?.throwIfAborted();
       assertNoForeignRunOptions(
         runOptions,
@@ -621,18 +658,38 @@ const buildSandboxHandle = (
         kind: "one-shot",
         resumeSession: runOptions.resumeSession,
         forkSession: runOptions.forkSession,
+        output: runOptions.output,
       });
       const only = result.iterations.at(-1);
-      return {
+      // Resume/fork continue the session with a fresh prompt, so they don't
+      // inherit this call's `output` (its tag wouldn't be in the new prompt).
+      const { output, ...resumeBase } = runOptions;
+      const baseResult: SandboxRunResult = {
         sessionId: only?.sessionId,
         sessionFilePath: only?.sessionFilePath,
         usage: only?.usage,
         stdout: result.stdout,
         commits: result.commits,
         logFilePath,
-        ...buildSandboxResumeAndFork(runOptions, only?.sessionId),
+        ...buildSandboxResumeAndFork(resumeBase, only?.sessionId),
       };
-    },
+      if (!output) return baseResult;
+      return extractOutputWithRetries(
+        baseResult,
+        output,
+        { branch },
+        (retryPrompt, sessionId, retryOutput) =>
+          sandboxHandle.run({
+            ...runOptions,
+            prompt: retryPrompt,
+            promptFile: undefined,
+            promptArgs: undefined,
+            resumeSession: sessionId,
+            forkSession: false,
+            output: retryOutput,
+          }) as Promise<SandboxRunResult & { output: unknown }>,
+      );
+    }) as Sandbox["run"],
 
     runMany: async (
       runOptions: SandboxRunManyOptions,

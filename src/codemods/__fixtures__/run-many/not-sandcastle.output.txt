@@ -1,0 +1,6 @@
+import { run } from "./my-runner";
+
+const job = { run: (o: unknown) => o };
+
+await run({ agent: "x", maxIterations: 3 });
+job.run({ agent: "y", maxIterations: 3 });

@@ -31,6 +31,10 @@ import { createSandboxFromWorktree } from "./createSandbox.js";
 import type { InteractiveResult } from "./interactive.js";
 import {
   assertNoForeignRunOptions,
+  assertOutputRetriesSupported,
+  assertOutputTagInPrompt,
+  extractOutputWithRetries,
+  oneShotCompletionTimeoutTriggers,
   buildAgentStreamHandler,
   buildCompletionMessage,
   buildContextWindowLines,
@@ -51,6 +55,11 @@ import { agentStreamEmitterLayer } from "./AgentStreamEmitter.js";
 import { resolveEnv } from "./EnvResolver.js";
 import { mergeProviderEnv } from "./mergeProviderEnv.js";
 import { startSandbox } from "./startSandbox.js";
+import type {
+  OutputDefinition,
+  OutputObjectDefinition,
+  OutputStringDefinition,
+} from "./Output.js";
 import { syncOut } from "./syncOut.js";
 import * as WorktreeManager from "./WorktreeManager.js";
 import { copyToWorktree } from "./CopyToWorktree.js";
@@ -162,6 +171,18 @@ export interface WorktreeBaseRunOptions {
 export interface WorktreeRunOptions extends WorktreeBaseRunOptions {
   /** Resume a prior agent session by ID. The session JSONL must exist on the host. */
   readonly resumeSession?: string;
+  /**
+   * Structured output definition — same contract as top-level `run()`'s
+   * `output` (ADR 0010). The resolved prompt must contain the opening tag;
+   * the parsed value is returned on `result.output`.
+   */
+  readonly output?: OutputDefinition;
+  /**
+   * Grace window in seconds after the `output` closing tag (`</tag>`) is
+   * observed but the agent process has not exited (ADR 0021). Only applies
+   * when `output` is set. Default: 60.
+   */
+  readonly completionTimeoutSeconds?: number;
 }
 
 /** Options for `worktree.runMany()`: the iterate-until-signal-or-cap loop. */
@@ -231,6 +252,12 @@ export interface Worktree {
   /** Host path to the worktree (worktree). */
   readonly worktreePath: string;
   /** Run an AFK agent once (one iteration) in this worktree with a required sandbox. */
+  run<T>(
+    options: WorktreeRunOptions & { output: OutputObjectDefinition<T> },
+  ): Promise<WorktreeRunResult & { output: T }>;
+  run(
+    options: WorktreeRunOptions & { output: OutputStringDefinition },
+  ): Promise<WorktreeRunResult & { output: string }>;
   run(options: WorktreeRunOptions): Promise<WorktreeRunResult>;
   /** Run an AFK agent in a loop (up to `maxIterations`, stopping on the completion signal) in this worktree. */
   runMany(options: WorktreeRunManyOptions): Promise<WorktreeRunManyResult>;
@@ -538,7 +565,11 @@ export const createWorktree = async (
       readonly completionTimeoutSeconds?: number;
     },
     mode:
-      | { readonly kind: "one-shot"; readonly resumeSession?: string }
+      | {
+          readonly kind: "one-shot";
+          readonly resumeSession?: string;
+          readonly output?: OutputDefinition;
+        }
       | {
           readonly kind: "many";
           readonly maxIterations: number;
@@ -552,6 +583,8 @@ export const createWorktree = async (
     const sandboxProvider = opts.sandbox;
     const resumeSession =
       mode.kind === "one-shot" ? mode.resumeSession : undefined;
+    const output = mode.kind === "one-shot" ? mode.output : undefined;
+    assertOutputRetriesSupported(output, provider);
 
     if (resumeSession) {
       await assertResumeSessionExists({
@@ -567,6 +600,7 @@ export const createWorktree = async (
       const resolved = yield* resolvePrompt({ prompt, promptFile });
       const rawPrompt = resolved.text;
       const isInlinePrompt = resolved.source === "inline";
+      assertOutputTagInPrompt(output, rawPrompt);
 
       // 2. Resolve env vars
       const resolvedEnv = yield* resolveEnv(hostRepoDir);
@@ -726,7 +760,8 @@ export const createWorktree = async (
             : {
                 iterations: 1,
                 completionSignal: [],
-                completionTimeoutTriggers: [],
+                completionTimeoutTriggers:
+                  oneShotCompletionTimeoutTriggers(output),
                 resumeSession,
               }),
           hooks,
@@ -791,7 +826,7 @@ export const createWorktree = async (
 
   const worktreeRun = async (
     opts: WorktreeRunOptions,
-  ): Promise<WorktreeRunResult> => {
+  ): Promise<WorktreeRunResult & { output?: unknown }> => {
     opts.signal?.throwIfAborted();
     assertNoForeignRunOptions(
       opts,
@@ -802,9 +837,10 @@ export const createWorktree = async (
     const result = await executeWorktreeRun(opts, {
       kind: "one-shot",
       resumeSession: opts.resumeSession,
+      output: opts.output,
     });
     const only = result.iterations.at(-1);
-    return {
+    const baseResult: WorktreeRunResult = {
       sessionId: only?.sessionId,
       sessionFilePath: only?.sessionFilePath,
       usage: only?.usage,
@@ -813,6 +849,21 @@ export const createWorktree = async (
       branch: result.branch,
       logFilePath: result.logFilePath,
     };
+    if (!opts.output) return baseResult;
+    return extractOutputWithRetries(
+      baseResult,
+      opts.output,
+      { branch: baseResult.branch },
+      (retryPrompt, sessionId, retryOutput) =>
+        worktreeRun({
+          ...opts,
+          prompt: retryPrompt,
+          promptFile: undefined,
+          promptArgs: undefined,
+          resumeSession: sessionId,
+          output: retryOutput,
+        }) as Promise<WorktreeRunResult & { output: unknown }>,
+    );
   };
 
   const worktreeRunMany = async (
@@ -859,7 +910,7 @@ export const createWorktree = async (
   return {
     branch: worktreeInfo.branch,
     worktreePath: worktreeInfo.path,
-    run: worktreeRun,
+    run: worktreeRun as Worktree["run"],
     runMany: worktreeRunMany,
     interactive: worktreeInteractive,
     createSandbox: worktreeCreateSandbox,

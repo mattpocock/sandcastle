@@ -22,6 +22,8 @@ import {
   type BindMountSandboxHandle,
 } from "./SandboxProvider.js";
 import { encodeProjectPath } from "./SessionStore.js";
+import { Output, StructuredOutputError } from "./Output.js";
+import { z } from "zod";
 import { testIsolated } from "./sandboxes/test-isolated.js";
 import { makeLocalSandbox } from "./testSandbox.js";
 
@@ -333,6 +335,126 @@ describe("createSandbox", () => {
       await rm(hostDir, { recursive: true, force: true });
     }
   });
+
+  it("sandbox.run() supports structured output (typed result.output)", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-output-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const sandbox = await createSandbox({
+      branch: "output-branch",
+      sandbox: testSandbox,
+      cwd: hostDir,
+      _test: {
+        buildSandbox: (sandboxDir) =>
+          makeMockAgentLayer(
+            sandboxDir,
+            async () => 'Plan: <plan>{"steps":["a","b"]}</plan>',
+          ),
+      },
+    });
+
+    try {
+      const result = await sandbox.run({
+        agent: testProvider,
+        prompt: "emit <plan>",
+        output: Output.object({
+          tag: "plan",
+          schema: z.object({ steps: z.array(z.string()) }),
+        }),
+        logging: { type: "file", path: join(hostDir, "output.log") },
+      });
+      const steps: string[] = result.output.steps;
+      expect(steps).toEqual(["a", "b"]);
+
+      // Missing opening tag in the prompt fails before the agent runs.
+      await expect(
+        sandbox.run({
+          agent: testProvider,
+          prompt: "no tag here",
+          output: Output.string({ tag: "plan" }),
+        }),
+      ).rejects.toThrow("output tag <plan> not found in the resolved prompt");
+
+      // Bad payload surfaces as StructuredOutputError.
+      await expect(
+        sandbox.run({
+          agent: testProvider,
+          prompt: "emit <plan>",
+          output: Output.object({
+            tag: "plan",
+            schema: z.object({ nope: z.number() }),
+          }),
+          logging: { type: "file", path: join(hostDir, "output.log") },
+        }),
+      ).rejects.toBeInstanceOf(StructuredOutputError);
+
+      // output is run()-only.
+      await expect(
+        sandbox.runMany({
+          agent: testProvider,
+          prompt: "emit <plan>",
+          output: Output.string({ tag: "plan" }),
+        } as any),
+      ).rejects.toThrow("sandbox.runMany() does not accept `output`");
+    } finally {
+      await sandbox.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("sandbox.run() with output force-completes on the closing tag when the agent hangs (ADR 0021)", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-output-hang-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const sandbox = await createSandbox({
+      branch: "output-hang-branch",
+      sandbox: testSandbox,
+      cwd: hostDir,
+      _test: {
+        buildSandbox: (sandboxDir) => {
+          const real = makeLocalSandbox(sandboxDir);
+          return {
+            ...real,
+            exec: (command, options) => {
+              if (command.startsWith("claude ") && options?.onLine) {
+                const onLine = options.onLine;
+                return Effect.gen(function* () {
+                  for (const line of toStreamJson("<answer>42</answer>").split(
+                    "\n",
+                  )) {
+                    onLine(line);
+                  }
+                  // A child process keeps stdout open — never resolves.
+                  yield* Effect.never;
+                  return { stdout: "", stderr: "", exitCode: 0 };
+                });
+              }
+              return real.exec(command, options);
+            },
+          };
+        },
+      },
+    });
+
+    try {
+      const start = Date.now();
+      const result = await sandbox.run({
+        agent: testProvider,
+        prompt: "emit <answer>",
+        output: Output.string({ tag: "answer" }),
+        completionTimeoutSeconds: 0.2,
+        idleTimeoutSeconds: 30,
+        logging: { type: "file", path: join(hostDir, "hang.log") },
+      });
+      expect(result.output).toBe("42");
+      expect(Date.now() - start).toBeLessThan(5_000);
+    } finally {
+      await sandbox.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  }, 10_000);
 
   it("sandbox.runMany() loops until the completion signal, like the pre-split run()", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-runmany-"));

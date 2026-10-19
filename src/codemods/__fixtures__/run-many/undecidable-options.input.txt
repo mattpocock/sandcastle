@@ -1,0 +1,12 @@
+import { run, type RunOptions } from "@ai-hero/sandcastle";
+
+declare const opts: RunOptions;
+
+const a = await run(opts);
+console.log(a.iterations.length);
+
+const b = await run({ ...opts, prompt: "x" });
+console.log(b.completionSignal);
+
+const c = await run({ ...opts, prompt: "y" });
+console.log(c.commits);

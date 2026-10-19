@@ -1,0 +1,25 @@
+import { run, claudeCode } from "@ai-hero/sandcastle";
+import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+
+const r = await run({
+  agent: claudeCode("claude-opus-4-8"),
+  sandbox: docker(),
+  prompt: "do it",
+});
+
+console.log(1);
+// TODO(sandcastle-codemod): run() is one-shot and no longer reports `r.completionSignal` — use runMany() if this call needs the loop.
+if (r.completionSignal) {
+  console.log("done");
+}
+// TODO(sandcastle-codemod): one-shot run() has no `r.iterations` — read `r.sessionId` / `.sessionFilePath` / `.usage` directly, or switch the call to runMany().
+for (const it of r.iterations) {
+  console.log(it.usage);
+}
+
+// TODO(sandcastle-codemod): one-shot run() no longer returns iterations/completionSignal — destructure sessionId/sessionFilePath/usage instead, or switch the call to runMany().
+const { iterations, commits } = await run({
+  agent: claudeCode("claude-opus-4-8"),
+  sandbox: docker(),
+  prompt: "again",
+});

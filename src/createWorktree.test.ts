@@ -29,6 +29,8 @@ import {
 } from "./SandboxProvider.js";
 import { encodeProjectPath } from "./SessionStore.js";
 import { makeLocalSandbox } from "./testSandbox.js";
+import { Output } from "./Output.js";
+import { z } from "zod";
 
 const execAsync = promisify(exec);
 
@@ -748,6 +750,104 @@ describe("worktree.run()", () => {
       await rm(hostDir, { recursive: true, force: true });
     }
   });
+
+  it("run() supports structured output (typed result.output)", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-run-output-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const sandbox = makeRunTestProvider(
+      async () => '<plan>{"steps":["x"]}</plan>',
+    );
+    const ws = await createWorktree({
+      branchStrategy: { type: "branch", branch: "output-test" },
+      cwd: hostDir,
+    });
+
+    try {
+      const result = await ws.run({
+        agent: claudeCode("claude-opus-4-8"),
+        sandbox,
+        prompt: "emit <plan>",
+        output: Output.object({
+          tag: "plan",
+          schema: z.object({ steps: z.array(z.string()) }),
+        }),
+        logging: { type: "file", path: join(hostDir, "out.log") },
+      });
+      const steps: string[] = result.output.steps;
+      expect(steps).toEqual(["x"]);
+      expect(result.branch).toBe("output-test");
+
+      await expect(
+        ws.run({
+          agent: claudeCode("claude-opus-4-8"),
+          sandbox,
+          prompt: "no tag",
+          output: Output.string({ tag: "plan" }),
+        }),
+      ).rejects.toThrow("output tag <plan> not found in the resolved prompt");
+    } finally {
+      await ws.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("run() with output force-completes on the closing tag when the agent hangs (ADR 0021)", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-run-output-hang-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const hangingProvider = createBindMountSandboxProvider({
+      name: "hanging",
+      create: async (options) => ({
+        worktreePath: options.worktreePath,
+        exec: async (
+          command: string,
+          execOptions?: { cwd?: string; onLine?: (line: string) => void },
+        ): Promise<ExecResult> => {
+          if (command.startsWith("claude ")) {
+            for (const line of toStreamJson("<answer>7</answer>").split("\n")) {
+              execOptions?.onLine?.(line);
+            }
+            return new Promise<never>(() => {});
+          }
+          const stdout = execSync(command, {
+            cwd: execOptions?.cwd ?? options.worktreePath,
+            encoding: "utf-8",
+            stdio: ["pipe", "pipe", "pipe"],
+          });
+          return { stdout, stderr: "", exitCode: 0 };
+        },
+        copyFileIn: async () => {},
+        copyFileOut: async () => {},
+        close: async () => {},
+      }),
+    });
+
+    const ws = await createWorktree({
+      branchStrategy: { type: "branch", branch: "hang-test" },
+      cwd: hostDir,
+    });
+
+    try {
+      const start = Date.now();
+      const result = await ws.run({
+        agent: claudeCode("claude-opus-4-8"),
+        sandbox: hangingProvider,
+        prompt: "emit <answer>",
+        output: Output.string({ tag: "answer" }),
+        completionTimeoutSeconds: 0.2,
+        idleTimeoutSeconds: 30,
+        logging: { type: "file", path: join(hostDir, "hang.log") },
+      });
+      expect(result.output).toBe("7");
+      expect(Date.now() - start).toBeLessThan(5_000);
+    } finally {
+      await ws.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  }, 10_000);
 
   it("rejects options from the other half of the run()/runMany() split", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "ws-run-guards-"));
