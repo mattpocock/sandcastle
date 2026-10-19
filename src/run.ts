@@ -33,7 +33,11 @@ import {
 } from "./AgentStreamEmitter.js";
 import type { SandboxHooks } from "./SandboxLifecycle.js";
 import { mergeProviderEnv } from "./mergeProviderEnv.js";
-import { generateTempBranchName, getCurrentBranch } from "./WorktreeManager.js";
+import {
+  generateTempBranchName,
+  getCurrentBranch,
+  type UncommittedChangesPolicy,
+} from "./WorktreeManager.js";
 import {
   type PromptArgs,
   substitutePromptArgs,
@@ -410,6 +414,23 @@ export interface RunOptions<A extends AgentProvider = AgentProvider> {
   /** Override default timeouts for built-in lifecycle steps. Unset keys keep their defaults. */
   readonly timeouts?: Timeouts;
   /**
+   * What to do with the worktree when the run ends with uncommitted changes
+   * still in it.
+   *
+   * - `"preserve-worktree"` (default) — the worktree is left on disk so the
+   *   work can still be reviewed, its path is reported on `preservedWorktreePath`
+   *   and on the errors that carry it, and how to review or remove it is
+   *   printed. This is what you want when you are there to look at it.
+   * - `"remove-worktree"` — the worktree is removed anyway, nothing is
+   *   reported as preserved, and nothing is left on disk. This is what you want
+   *   for a long-running unattended process, where preserved worktrees are
+   *   never reviewed, are never collected by the prune that runs before each
+   *   new worktree (its criterion is "git no longer knows this directory", not
+   *   "this directory is old"), and so accumulate one full copy of the
+   *   repository per dirty run, for good.
+   */
+  readonly onUncommittedChanges?: UncommittedChangesPolicy;
+  /**
    * Structured output definition. When provided, the agent's stdout is
    * scanned for the configured XML tag after the iteration completes, and the
    * result is parsed/validated and returned on `RunResult.output`.
@@ -682,6 +703,7 @@ export async function run(
         hooks,
         signal: options.signal,
         timeouts: options.timeouts,
+        onUncommittedChanges: options.onUncommittedChanges,
       }),
       NodeFileSystem.layer,
       displayLayer,

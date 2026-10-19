@@ -292,6 +292,35 @@ describe("RunOptions", () => {
     expect(opts.idleTimeoutSeconds).toBeUndefined();
   });
 
+  it("allows onUncommittedChanges to be specified", () => {
+    const opts: RunOptions = {
+      agent: claudeCode("claude-opus-4-8"),
+      sandbox: testSandbox,
+      prompt: "test",
+      onUncommittedChanges: "remove-worktree",
+    };
+    expect(opts.onUncommittedChanges).toBe("remove-worktree");
+  });
+
+  it("allows onUncommittedChanges to be omitted (worktree is preserved, as today)", () => {
+    const opts: RunOptions = {
+      agent: claudeCode("claude-opus-4-8"),
+      sandbox: testSandbox,
+      prompt: "test",
+    };
+    expect(opts.onUncommittedChanges).toBeUndefined();
+  });
+
+  it("does not accept a boolean for onUncommittedChanges", () => {
+    const _opts: RunOptions = {
+      agent: claudeCode("claude-opus-4-8"),
+      sandbox: testSandbox,
+      prompt: "test",
+      // @ts-expect-error the choice is a named value, not a flag
+      onUncommittedChanges: true,
+    };
+  });
+
   it("allows name to be specified", () => {
     const opts: RunOptions = {
       agent: claudeCode("claude-opus-4-8"),

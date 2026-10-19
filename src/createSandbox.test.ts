@@ -21,6 +21,7 @@ import {
   createIsolatedSandboxProvider,
   type BindMountSandboxHandle,
 } from "./SandboxProvider.js";
+import type { RunOptions } from "./run.js";
 import { encodeProjectPath } from "./SessionStore.js";
 import { testIsolated } from "./sandboxes/test-isolated.js";
 import { makeLocalSandbox } from "./testSandbox.js";
@@ -1010,6 +1011,51 @@ describe("createSandbox", () => {
     await rm(sandbox.worktreePath, { recursive: true, force: true });
     await execAsync(`git worktree prune`, { cwd: hostDir });
     await rm(hostDir, { recursive: true, force: true });
+  });
+
+  it("sandbox.close() removes a dirty worktree when onUncommittedChanges is remove-worktree", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const sandbox = await createSandbox({
+      branch: "test-dirty-close-removed",
+      sandbox: testSandbox,
+      cwd: hostDir,
+      onUncommittedChanges: "remove-worktree",
+      _test: {
+        buildSandbox: (sandboxDir) => makeLocalSandbox(sandboxDir),
+      },
+    });
+
+    // Make the worktree dirty — the case the policy is about.
+    await writeFile(join(sandbox.worktreePath, "dirty.txt"), "uncommitted");
+
+    const closeResult = await sandbox.close();
+
+    // Nothing was preserved, so nothing is reported as preserved.
+    expect(closeResult.preservedWorktreePath).toBeUndefined();
+    expect(existsSync(sandbox.worktreePath)).toBe(false);
+    // No directory is left behind under .sandcastle/worktrees/ either.
+    const worktreesDir = join(hostDir, ".sandcastle", "worktrees");
+    expect(existsSync(worktreesDir) ? readdirSync(worktreesDir) : []).toEqual(
+      [],
+    );
+
+    await rm(hostDir, { recursive: true, force: true });
+  });
+
+  it("createSandbox() takes the same choice, by the same name and values, as run() (type check)", () => {
+    // The switch has to be the same one on both public doors, or turning it on
+    // covers one road and leaves the other accumulating worktrees.
+    type SameValues =
+      CreateSandboxOptions["onUncommittedChanges"] extends RunOptions["onUncommittedChanges"]
+        ? RunOptions["onUncommittedChanges"] extends CreateSandboxOptions["onUncommittedChanges"]
+          ? true
+          : false
+        : false;
+    const sameValues: SameValues = true;
+    expect(sameValues).toBe(true);
   });
 
   it("Symbol.asyncDispose works via await using", async () => {
