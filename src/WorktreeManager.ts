@@ -8,6 +8,23 @@ import { WorktreeError, WorktreeTimeoutError, withTimeout } from "./errors.js";
 const WORKTREE_TIMEOUT_MS = 30_000;
 
 /**
+ * Serializes every worktree-mutating git op (`create` → `git worktree add`,
+ * `remove` → `git worktree remove`, `pruneStale` → `git worktree prune` +
+ * orphan sweep) through a single in-process permit.
+ *
+ * `git worktree` add/remove/prune mutate the SHARED `.git/worktrees/` admin tree
+ * and are NOT safe to run concurrently on one repo. When parallel callers (e.g.
+ * several `createSandbox()` runs, or a dispose racing a sibling's create) overlap,
+ * one caller's `prune` treats another's in-flight `add` as stale and deletes its
+ * admin dir, breaking that sibling mid-run (mattpocock/sandcastle#849, #642).
+ *
+ * The guarded ops are milliseconds long, so serializing them costs ~zero
+ * wall-clock. The expensive onSandboxReady hooks (e.g. dependency install) run
+ * OUTSIDE this lock in createSandbox(), so concurrency there is preserved.
+ */
+const worktreeMutationLock = Effect.unsafeMakeSemaphore(1);
+
+/**
  * Git global flags that prevent `git worktree add -b` from writing upstream
  * tracking config to `.git/config`. Without these, a user's global
  * `branch.autoSetupMerge` or `push.autoSetupRemote` can cause a config write
@@ -345,6 +362,11 @@ export const create = (
           } else {
             yield* fastForwardFromOrigin(collision.path, branch);
           }
+          // Ensure a reused worktree is locked too (born-locked covers fresh
+          // adds; reuse bypasses that). Best-effort: ignore "already locked".
+          yield* execGit(["worktree", "lock", collision.path], repoDir).pipe(
+            Effect.catchAll(() => Effect.void),
+          );
           // git reports forward slashes even on Windows; return a
           // platform-native path so downstream join/fs calls stay consistent.
           return { path: normalize(collision.path), branch };
@@ -360,8 +382,23 @@ export const create = (
           }),
         );
       }
+      // `--lock` makes the worktree born locked: with bind-mount providers the
+      // worktree is mounted at a container path (e.g. /home/agent/workspace)
+      // while the shared `.git` is mounted host-identical, so the admin
+      // back-pointer resolves to a path NOT present in any sibling's container.
+      // A `git worktree prune` run inside ANY concurrent box (or its tooling)
+      // would otherwise see every sibling as "gitdir points to non-existent
+      // location" and delete it from the shared `.git`, killing live runs
+      // (mattpocock/sandcastle#849). A locked worktree is skipped by prune.
       yield* execGit(
-        [...NO_CONFIG_LOCK_FLAGS, "worktree", "add", worktreePath, branch],
+        [
+          ...NO_CONFIG_LOCK_FLAGS,
+          "worktree",
+          "add",
+          "--lock",
+          worktreePath,
+          branch,
+        ],
         repoDir,
       ).pipe(
         Effect.catchAll((e) => {
@@ -371,6 +408,7 @@ export const create = (
                 ...NO_CONFIG_LOCK_FLAGS,
                 "worktree",
                 "add",
+                "--lock",
                 "-b",
                 branch,
                 worktreePath,
@@ -388,6 +426,7 @@ export const create = (
           ...NO_CONFIG_LOCK_FLAGS,
           "worktree",
           "add",
+          "--lock",
           "-b",
           branch,
           worktreePath,
@@ -425,6 +464,7 @@ export const create = (
           operation: "create",
         }),
     ),
+    worktreeMutationLock.withPermits(1),
   );
 
 /**
@@ -449,10 +489,60 @@ export const remove = (
 ): Effect.Effect<void, WorktreeError> => {
   // Derive the main repo dir: worktreePath = <repoDir>/.sandcastle/worktrees/<name>
   const repoDir = join(worktreePath, "..", "..", "..");
-  return execGit(["worktree", "remove", "--force", worktreePath], repoDir).pipe(
-    Effect.asVoid,
-  );
+  // Worktrees are created `--lock`ed (see create); a single `--force` refuses a
+  // locked worktree ("use 'remove -f -f' to override or unlock first"), so pass
+  // it twice to tear down regardless of lock state.
+  return execGit(
+    ["worktree", "remove", "--force", "--force", worktreePath],
+    repoDir,
+  ).pipe(Effect.asVoid, worktreeMutationLock.withPermits(1));
 };
+
+/**
+ * Unlocks worktrees that are locked but whose directory is genuinely gone, so
+ * the `git worktree prune` below can reclaim them.
+ *
+ * Worktrees are born locked (see `create`) so that a `git worktree prune` run
+ * from inside a sibling container cannot delete them. The cost is that prune
+ * also stops reclaiming worktrees that really are dead, e.g. after a crash
+ * deleted the directory. Unlocking those first restores that.
+ *
+ * Absence on disk is a safe signal *here* specifically because `pruneStale`
+ * runs host-side, where a live sibling's directory does exist. The failure this
+ * lock defends against is a raw `git worktree prune` inside a container, where
+ * siblings only *look* absent; that path never reaches this function.
+ */
+const unlockDeadWorktrees = (
+  repoDir: string,
+): Effect.Effect<void, WorktreeError, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const list = yield* execGit(["worktree", "list", "--porcelain"], repoDir);
+
+    // Porcelain output is blank-line separated records, each starting with
+    // `worktree <path>`; a locked worktree carries a `locked` line.
+    for (const record of list.split("\n\n")) {
+      const lines = record.split("\n");
+      const path = lines
+        .find((line) => line.startsWith("worktree "))
+        ?.slice("worktree ".length)
+        .trim();
+      if (!path) continue;
+      if (
+        !lines.some((line) => line === "locked" || line.startsWith("locked "))
+      )
+        continue;
+
+      const stillThere = yield* fs
+        .exists(path)
+        .pipe(Effect.catchAll(() => Effect.succeed(true)));
+      if (stillThere) continue;
+
+      yield* execGit(["worktree", "unlock", path], repoDir).pipe(
+        Effect.catchAll(() => Effect.void),
+      );
+    }
+  });
 
 /**
  * Prunes stale git worktree metadata and removes orphaned directories under
@@ -468,7 +558,10 @@ export const pruneStale = (
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
 
-    // Let git clean up metadata for worktrees whose directories are gone
+    // Let git clean up metadata for worktrees whose directories are gone.
+    // Born-locked worktrees are skipped by prune, so release the dead ones
+    // first; live siblings stay locked and survive.
+    yield* unlockDeadWorktrees(repoDir);
     yield* execGit(["worktree", "prune"], repoDir);
 
     const worktreesDir = join(repoDir, ".sandcastle", "worktrees");
@@ -535,4 +628,5 @@ export const pruneStale = (
           operation: "prune",
         }),
     ),
+    worktreeMutationLock.withPermits(1),
   );

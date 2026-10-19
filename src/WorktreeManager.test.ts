@@ -13,7 +13,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import {
@@ -720,6 +720,54 @@ describe("WorktreeManager.remove", () => {
     await run(remove(path));
 
     // After removal, the worktree should not appear in git worktree list
+    const { stdout } = await execAsync("git worktree list --porcelain", {
+      cwd: repoDir,
+    });
+    expect(stdout).not.toContain(path);
+  });
+});
+
+describe("WorktreeManager worktree locking", () => {
+  it("creates worktrees locked so a concurrent prune cannot delete them", async () => {
+    const repoDir = await setupRepo();
+    const { path } = await run(create(repoDir));
+
+    const { stdout } = await execAsync("git worktree list --porcelain", {
+      cwd: repoDir,
+    });
+    // git canonicalizes worktree paths (on macOS /var resolves to /private/var),
+    // so match on the directory name rather than the full path.
+    const name = path.split(sep).pop();
+    const record = stdout
+      .split("\n\n")
+      .find((r) => r.split("\n")[0]?.endsWith(`${sep}${name}`));
+    expect(record).toMatch(/^locked/m);
+
+    await run(remove(path));
+  });
+
+  it("survives a prune run while the worktree is live", async () => {
+    const repoDir = await setupRepo();
+    const { path } = await run(create(repoDir));
+
+    // A bare prune is what an agent's tooling runs from inside a sibling box,
+    // where this worktree's directory is not in the mount namespace.
+    await execAsync("git worktree prune", { cwd: repoDir });
+
+    const { stdout } = await execAsync("git worktree list --porcelain", {
+      cwd: repoDir,
+    });
+    expect(stdout).toContain(path);
+
+    await run(remove(path));
+  });
+
+  it("removes a locked worktree despite the lock", async () => {
+    const repoDir = await setupRepo();
+    const { path } = await run(create(repoDir));
+
+    await run(remove(path));
+
     const { stdout } = await execAsync("git worktree list --porcelain", {
       cwd: repoDir,
     });
