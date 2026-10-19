@@ -87,6 +87,9 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
             windowsVerbatimArguments: isWindows,
           });
 
+          proc.stdout!.setEncoding("utf8");
+          proc.stderr!.setEncoding("utf8");
+
           if (opts?.stdin !== undefined) {
             proc.stdin!.write(opts.stdin);
             proc.stdin!.end();
@@ -105,8 +108,8 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
               stdoutTail.push(line);
               onLine(line);
             });
-            proc.stderr!.on("data", (chunk: Buffer) => {
-              stderrTail.push(chunk.toString());
+            proc.stderr!.on("data", (chunk: string) => {
+              stderrTail.push(chunk);
             });
             proc.on("close", (code) => {
               resolve({
@@ -118,11 +121,11 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
           } else {
             const stdoutChunks: string[] = [];
             const stderrChunks: string[] = [];
-            proc.stdout!.on("data", (chunk: Buffer) => {
-              stdoutChunks.push(chunk.toString());
+            proc.stdout!.on("data", (chunk: string) => {
+              stdoutChunks.push(chunk);
             });
-            proc.stderr!.on("data", (chunk: Buffer) => {
-              stderrChunks.push(chunk.toString());
+            proc.stderr!.on("data", (chunk: string) => {
+              stderrChunks.push(chunk);
             });
             proc.on("close", (code) => {
               resolve({
