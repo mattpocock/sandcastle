@@ -35,7 +35,7 @@ describe("resolveGitMounts", () => {
     expect(mounts).toEqual([{ hostPath: gitDir, sandboxPath: gitDir }]);
   });
 
-  it("returns both mounts when .git is a worktree file", async () => {
+  it("mounts only shared metadata when .git is a worktree file", async () => {
     const parentRepoDir = await makeTempDir();
     const parentGitDir = join(parentRepoDir, ".git");
     await mkdir(parentGitDir);
@@ -50,7 +50,6 @@ describe("resolveGitMounts", () => {
     const mounts = await run(gitFile);
 
     expect(mounts).toEqual([
-      { hostPath: gitFile, sandboxPath: gitFile },
       { hostPath: parentGitDir, sandboxPath: parentGitDir },
     ]);
   });

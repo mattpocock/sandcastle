@@ -70,11 +70,16 @@ and `startSandbox`. It:
 6. Adds (or replaces) a mount for the corrected `.git` file at
    `SANDBOX_REPO_DIR/.git`.
 
-The function handles both scenarios:
-- **Host repo is a worktree** — replaces the `.git` file mount already in
-  `gitMounts` from `resolveGitMounts`.
-- **Sandcastle-created worktree** — adds a new overlay mount, since the `.git`
-  file is part of the worktree directory mount rather than a separate entry.
+For a valid worktree pointer, `resolveGitMounts` returns only the shared parent
+`.git` directory. The workspace directory mount already includes its `.git`
+file, so that pointer does not need a second identity mount at its host path.
+This also avoids leaking an unrelated host checkout's pointer into the mount
+list when Sandcastle creates a new sandbox from an existing linked worktree.
+
+In both head mode and Sandcastle-created worktree mode, the patcher adds an
+overlay for the **active workspace's** pointer. It still supports replacing an
+explicit pointer mount if one is supplied. The original host pointer is never
+rewritten.
 
 ### Rejected alternatives
 

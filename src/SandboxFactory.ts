@@ -279,12 +279,13 @@ export const resolveGitMounts = (
     }
     const gitdirPath = match[1]!;
     // gitdirPath is like /path/to/repo/.git/worktrees/<name>
-    // Mount both the .git file and the parent .git directory
+    // The workspace directory mount already supplies its .git pointer file.
+    // Mounting the host pointer separately is redundant and, when creating a
+    // sandbox from another linked worktree, leaves an unrelated host path that
+    // the Windows patcher cannot remap. Only the shared metadata is needed;
+    // the patcher adds an overlay for the active workspace's pointer on Windows.
     const parentGitDir = resolve(gitdirPath, "..", "..");
-    return [
-      { hostPath: gitPath, sandboxPath: gitPath },
-      { hostPath: parentGitDir, sandboxPath: parentGitDir },
-    ];
+    return [{ hostPath: parentGitDir, sandboxPath: parentGitDir }];
   });
 
 export const WorktreeDockerSandboxFactory = {
