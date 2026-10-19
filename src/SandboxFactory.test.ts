@@ -2,7 +2,14 @@ import { Effect, Exit, Layer, Ref } from "effect";
 import { NodeFileSystem } from "@effect/platform-node";
 import { exec } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, mkdir, readdir, writeFile, rm } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  readdir,
+  writeFile,
+  rm,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -226,6 +233,18 @@ describe("WorktreeDockerSandboxFactory", () => {
       hostPath: `${hostRepoDir}/.git`,
       sandboxPath: `${hostRepoDir}/.git`,
     });
+
+    const adminGitdirMounts = opts.mounts.filter(
+      (m: { sandboxPath: string }) =>
+        m.sandboxPath.includes("/.git/worktrees/") &&
+        m.sandboxPath.endsWith("/gitdir"),
+    );
+    expect(adminGitdirMounts).toHaveLength(1);
+    const adminGitdirMount = adminGitdirMounts[0]!;
+    expect(adminGitdirMount).toBeDefined();
+    expect(await readFile(adminGitdirMount.hostPath, "utf-8")).toBe(
+      `${SANDBOX_REPO_DIR}/.git\n`,
+    );
   });
 
   it("removes the worktree after the effect completes (clean state)", async () => {
