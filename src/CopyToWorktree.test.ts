@@ -1,5 +1,12 @@
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import {
+  mkdtemp,
+  rm,
+  writeFile,
+  mkdir,
+  chmod,
+  readFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Exit } from "effect";
@@ -103,12 +110,7 @@ describe("copyToWorktree", () => {
     try {
       const customTimeout = 500;
       const exitPromise = Effect.runPromiseExit(
-        copyToWorktree(
-          ["big-file.txt"],
-          hostDir,
-          worktreeDir,
-          customTimeout,
-        ),
+        copyToWorktree(["big-file.txt"], hostDir, worktreeDir, customTimeout),
       );
 
       // Advance past the custom timeout
@@ -147,6 +149,90 @@ describe("copyToWorktree", () => {
     } finally {
       await rm(hostDir, { recursive: true, force: true });
       await rm(worktreeDir, { recursive: true, force: true });
+    }
+  });
+
+  // Regression: the copy used to run under `Effect.async` with no canceler, so
+  // a timeout failed the Effect while leaving `cp` alive. The orphan kept
+  // writing into a worktree the caller was already tearing down, recreating a
+  // directory git could no longer see. Both tests shadow the real `cp` with a
+  // shim, since the library invokes it unqualified via PATH.
+  it("kills the running cp when the timeout fires", async () => {
+    if (process.platform === "win32") return; // POSIX shell shim
+    const hostDir = await mkdtemp(join(tmpdir(), "cw-test-"));
+    const worktreeDir = await mkdtemp(join(tmpdir(), "cw-wt-"));
+    const shimDir = await mkdtemp(join(tmpdir(), "cw-shim-"));
+    const logPath = join(shimDir, "cp.log");
+
+    await writeFile(join(hostDir, "file.txt"), "content");
+
+    // A cp that outlives the timeout, recording whether it was signalled or
+    // ran to completion.
+    await writeFile(
+      join(shimDir, "cp"),
+      `#!/bin/sh\ntrap 'printf killed >> "${logPath}"; exit 143' TERM\n` +
+        `sleep 5 &\nwait $!\nprintf completed >> "${logPath}"\n`,
+    );
+    await chmod(join(shimDir, "cp"), 0o755);
+
+    const originalPath = process.env.PATH;
+    process.env.PATH = `${shimDir}:${originalPath ?? ""}`;
+    try {
+      const exit = await Effect.runPromiseExit(
+        copyToWorktree(["file.txt"], hostDir, worktreeDir, 200),
+      );
+      expect(Exit.isFailure(exit)).toBe(true);
+
+      // Give the signalled child a moment to record its fate.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(await readFile(logPath, "utf8")).toBe("killed");
+    } finally {
+      if (originalPath === undefined) delete process.env.PATH;
+      else process.env.PATH = originalPath;
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(worktreeDir, { recursive: true, force: true });
+      await rm(shimDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not start the cp -R fallback after the timeout has fired", async () => {
+    if (process.platform === "win32") return; // POSIX shell shim
+    const hostDir = await mkdtemp(join(tmpdir(), "cw-test-"));
+    const worktreeDir = await mkdtemp(join(tmpdir(), "cw-wt-"));
+    const shimDir = await mkdtemp(join(tmpdir(), "cw-shim-"));
+    const logPath = join(shimDir, "cp.log");
+
+    await writeFile(join(hostDir, "file.txt"), "content");
+
+    // The copy-on-write attempt fails, but only after the timeout has already
+    // failed the Effect. Its callback must not spawn the fallback.
+    await writeFile(
+      join(shimDir, "cp"),
+      `#!/bin/sh\nprintf '%s\\n' "$*" >> "${logPath}"\n` +
+        `case "$*" in *--reflink=auto*|*-cR*) sleep 1; exit 1;; esac\nexit 0\n`,
+    );
+    await chmod(join(shimDir, "cp"), 0o755);
+
+    const originalPath = process.env.PATH;
+    process.env.PATH = `${shimDir}:${originalPath ?? ""}`;
+    try {
+      const exit = await Effect.runPromiseExit(
+        copyToWorktree(["file.txt"], hostDir, worktreeDir, 200),
+      );
+      expect(Exit.isFailure(exit)).toBe(true);
+
+      // Wait past the point where the failing attempt's callback fires.
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const invocations = (await readFile(logPath, "utf8"))
+        .split("\n")
+        .filter((line) => line.trim() !== "");
+      expect(invocations).toHaveLength(1);
+    } finally {
+      if (originalPath === undefined) delete process.env.PATH;
+      else process.env.PATH = originalPath;
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(worktreeDir, { recursive: true, force: true });
+      await rm(shimDir, { recursive: true, force: true });
     }
   });
 });

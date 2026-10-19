@@ -39,31 +39,54 @@ export const copyToWorktree = (
       }
       const dest = join(worktreePath, relativePath);
       yield* Effect.async<void, CopyToWorktreeError>((resume) => {
-        execFile("cp", [...cowFlags, src, dest], (error) => {
+        // One controller covers both the copy-on-write attempt and its
+        // fallback. Interruption (e.g. the timeout below) kills whichever
+        // child is running and stops the fallback from ever starting;
+        // without it an orphaned `cp` keeps writing into a worktree the
+        // caller has already begun tearing down.
+        const controller = new AbortController();
+        const { signal } = controller;
+
+        execFile("cp", [...cowFlags, src, dest], { signal }, (error) => {
+          if (signal.aborted) {
+            return;
+          }
           if (error) {
             // Fall back to a regular copy if copy-on-write is not supported
-            execFile("cp", ["-R", src, dest], (fallbackError, _, stderr) => {
-              if (fallbackError) {
-                resume(
-                  Effect.fail(
-                    new CopyToWorktreeError({
-                      message: `Failed to copy ${relativePath} to worktree: ${stderr || fallbackError.message}`,
-                      path: relativePath,
-                      stderr: stderr || fallbackError.message,
-                      exitCode:
-                        typeof fallbackError.code === "number"
-                          ? fallbackError.code
-                          : null,
-                    }),
-                  ),
-                );
-              } else {
-                resume(Effect.succeed(undefined));
-              }
-            });
+            execFile(
+              "cp",
+              ["-R", src, dest],
+              { signal },
+              (fallbackError, _, stderr) => {
+                if (signal.aborted) {
+                  return;
+                }
+                if (fallbackError) {
+                  resume(
+                    Effect.fail(
+                      new CopyToWorktreeError({
+                        message: `Failed to copy ${relativePath} to worktree: ${stderr || fallbackError.message}`,
+                        path: relativePath,
+                        stderr: stderr || fallbackError.message,
+                        exitCode:
+                          typeof fallbackError.code === "number"
+                            ? fallbackError.code
+                            : null,
+                      }),
+                    ),
+                  );
+                } else {
+                  resume(Effect.succeed(undefined));
+                }
+              },
+            );
           } else {
             resume(Effect.succeed(undefined));
           }
+        });
+
+        return Effect.sync(() => {
+          controller.abort();
         });
       });
     }
