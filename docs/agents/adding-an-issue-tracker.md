@@ -106,4 +106,4 @@ For a new issue tracker `foo`:
 - [ ] `FOO_TOOLS` Dockerfile-snippet constant in `src/InitService.ts`.
 - [ ] Tests in `src/InitService.test.ts` covering: entry is listed by `listIssueTrackers`, `getIssueTracker("foo")` returns the entry with the expected `templateArgs`, `.env.example` includes the token line, generated prompts contain the substituted commands.
 - [ ] Changeset in `.changeset/` (patch, since pre-1.0). See [`CLAUDE.md`](../../CLAUDE.md).
-- [ ] `README.md` update if the public-facing list of supported issue trackers is mentioned there.
+- [ ] `docs/guide/` update if the public-facing list of supported issue trackers is mentioned there.
