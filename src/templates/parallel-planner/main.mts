@@ -69,9 +69,8 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     hooks,
     sandbox: docker(),
     name: "planner",
-    // One iteration is enough: the planner just needs to read and reason,
-    // not write code. (Structured output requires maxIterations: 1.)
-    maxIterations: 1,
+    // run() is one-shot: the planner just needs to read and reason, not
+    // write code. (Structured output is run()-only.)
     // Opus for planning: dependency analysis benefits from deeper reasoning.
     agent: sandcastle.claudeCode("claude-opus-4-8"),
     promptFile: "./.sandcastle/plan-prompt.md",
@@ -107,10 +106,12 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // -------------------------------------------------------------------------
   const settled = await Promise.allSettled(
     issues.map((issue) =>
-      sandcastle.run({
+      // runMany() loops until the agent emits <promise>COMPLETE</promise> or
+      // maxIterations is reached.
+      sandcastle.runMany({
         hooks,
         copyToWorktree,
-        // Each agent starts on its own branch via branchStrategy on run().
+        // Each agent starts on its own branch via branchStrategy on runMany().
         sandbox: docker(),
         branchStrategy: { type: "branch", branch: issue.branch },
         name: "implementer",
@@ -148,9 +149,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
       (
         entry,
       ): entry is {
-        outcome: PromiseFulfilledResult<
-          Awaited<ReturnType<typeof sandcastle.run>>
-        >;
+        outcome: PromiseFulfilledResult<sandcastle.RunManyResult>;
         issue: (typeof issues)[number];
       } =>
         entry.outcome.status === "fulfilled" &&
@@ -186,7 +185,6 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     hooks,
     sandbox: docker(),
     name: "merger",
-    maxIterations: 1,
     // Sonnet is sufficient for merge conflict resolution.
     agent: sandcastle.claudeCode("claude-sonnet-4-6"),
     promptFile: "./.sandcastle/merge-prompt.md",

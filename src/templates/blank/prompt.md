@@ -6,7 +6,3 @@
 # Task
 
 <!-- Describe what the agent should do. -->
-
-# Done
-
-<!-- When the task is complete, output <promise>COMPLETE</promise> to signal early termination. -->

@@ -1,0 +1,20 @@
+import { run, Output, claudeCode } from "@ai-hero/sandcastle";
+import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+
+const plan = await run({
+  agent: claudeCode("claude-opus-4-8"),
+  sandbox: docker(),
+  prompt: "emit <plan>",
+  // Structured output requires maxIterations: 1.
+  maxIterations: 1,
+  output: Output.string({ tag: "plan" }),
+  completionTimeoutSeconds: 30,
+});
+
+const resumed = await run({
+  agent: claudeCode("claude-opus-4-8"),
+  sandbox: docker(),
+  prompt: "continue",
+  resumeSession: "abc",
+  maxIterations: 3,
+});

@@ -51,5 +51,3 @@ If you find improvements to make:
 3. Commit describing the refinements
 
 If the code is already clean and well-structured, do nothing.
-
-Once complete, output <promise>COMPLETE</promise>.

@@ -1,0 +1,40 @@
+import * as sandcastle from "@ai-hero/sandcastle";
+import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+
+type ImplResult = Awaited<ReturnType<typeof sandcastle.run>>;
+
+const merge = await sandcastle.run({
+  sandbox: docker(),
+  agent: sandcastle.claudeCode("claude-opus-4-8"),
+  promptFile: "./.sandcastle/merge-prompt.md",
+  maxIterations: 10,
+});
+
+await using sandbox = await sandcastle.createSandbox({
+  branch: "agent/fix-42",
+  sandbox: docker(),
+});
+
+const implement = await sandbox.run({
+  name: "implementer",
+  maxIterations: 100,
+  agent: sandcastle.claudeCode("claude-sonnet-4-6"),
+  promptFile: "./.sandcastle/implement-prompt.md",
+});
+
+const review = await sandbox.run({
+  name: "reviewer",
+  agent: sandcastle.claudeCode("claude-sonnet-4-6"),
+  promptFile: "./.sandcastle/review-prompt.md",
+});
+console.log(review.iterations[0]?.sessionFilePath);
+
+const wt = await sandcastle.createWorktree({
+  branchStrategy: { type: "merge-to-head" },
+});
+await wt.run({
+  agent: sandcastle.claudeCode("claude-sonnet-4-6"),
+  sandbox: docker(),
+  prompt: "go",
+  completionTimeoutSeconds: 30,
+});

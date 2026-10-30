@@ -1,5 +1,5 @@
 import { exec } from "node:child_process";
-import { mkdtemp, readdir, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -35,8 +35,11 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("sandcastle");
     expect(stdout).toContain("docker");
     expect(stdout).toContain("init");
-    expect(stdout).not.toContain("run");
+    // No top-level `run`/`interactive` commands (those are library APIs).
+    // `codemod run-many` legitimately mentions run(), so check command lines.
+    expect(stdout).not.toMatch(/^\s*- run\b/m);
     expect(stdout).not.toContain("interactive");
+    expect(stdout).toContain("codemod run-many");
     // build-image and remove-image are namespaced under docker, not top-level
     expect(stdout).toContain("docker build-image");
     expect(stdout).toContain("docker remove-image");
@@ -66,6 +69,28 @@ describe("sandcastle CLI", () => {
       const output = stdout + stderr;
       expect(output).toContain("No .sandcastle/ found");
     }
+  });
+
+  it("codemod run-many rewrites a looping run() call to runMany()", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "cli-codemod-"));
+    await writeFile(
+      join(dir, "main.mts"),
+      [
+        'import { run, claudeCode } from "@ai-hero/sandcastle";',
+        'await run({ agent: claudeCode("m"), maxIterations: 3 });',
+        "",
+      ].join("\n"),
+    );
+    await runCli("codemod run-many main.mts --dry-run", dir);
+    expect(await readFile(join(dir, "main.mts"), "utf8")).toContain(
+      "await run({",
+    );
+    await runCli("codemod run-many .", dir);
+    const out = await readFile(join(dir, "main.mts"), "utf8");
+    expect(out).toContain(
+      'import { claudeCode, runMany } from "@ai-hero/sandcastle";',
+    );
+    expect(out).toContain("await runMany({");
   });
 
   it("init --help shows --template flag", async () => {

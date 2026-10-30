@@ -17,3 +17,7 @@ Motivation: each iteration produces its own **agent session** — its own JSONL,
 - `.resume()` does not accept a `maxIterations` option. Callers wanting iteration loops use `run()` (which supports `maxIterations`) or chain `.resume()` calls in their own loop.
 - The existing `resumeSession + maxIterations > 1` runtime check in `run.ts` stays — `.resume()` is sugar over that path, and the constraint there is upheld for the same reason.
 - Adding multi-iteration resume later would be a feature addition (probably its own option, with explicit semantics on which session each iteration resumes from), not a constraint relaxation.
+
+## Amendment — made structural by the split
+
+With the `run()`/`runMany()` split ([ADR 0022](0022-split-run-into-run-and-runmany.md)), `.resume()` / `.fork()` call the one-shot `run()` and return its flat `RunResult` — including when called on a `runMany()` result, where they continue the last iteration's session. `resumeSession` is a `run()`-only option, so the `resumeSession + maxIterations > 1` runtime check was deleted: "resume then loop" is no longer expressible.
