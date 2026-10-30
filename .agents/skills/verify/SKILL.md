@@ -42,7 +42,7 @@ npm run verify:world          # builds dist, creates a world, prints its run id 
 
 Every run uses the real agent on its cheapest model, and nothing else. A faked or scripted agent proves the fake: the seams it skips are where Sandcastle's bugs live, and those bugs reach users. A check tests Sandcastle, not the model, so a pricier model proves nothing more.
 
-`doctor` prints each agent's model from one map (`CHEAP_MODELS` in `.sandcastle/verify/lib.ts`), overridable for a single run with `VERIFY_MODEL=<id>`. Pass it everywhere a model is chosen: `init --model`, or the agent factory.
+`doctor` prints each agent's factory call on its cheapest model, from `CHEAP_MODELS` and `CHEAP_MODEL_OPTIONS` in `.sandcastle/verify/lib.ts`. `VERIFY_MODEL=<id>` overrides the model for a single run and drops the options. Pass the model everywhere a model is chosen (`init --model`, or the agent factory), and write the factory call into the main file exactly as printed, options included.
 
 A missing key makes the claim **UNVERIFIABLE**, naming the key. There are no downgrades: no other agent, no other key, no stand-in binary. The keys live in `.sandcastle/.env`; from a worktree with none, the harness reads the main checkout's. Adding one is Matt's job, through `.sandcastle/setup-verify-keys.sh`, a wizard with one stage per key. Creating accounts and starting trials are out of bounds.
 

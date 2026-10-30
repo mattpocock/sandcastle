@@ -1000,6 +1000,8 @@ agent: pi("claude-sonnet-4-6", { thinking: "high" });
 | `env`             | `Record<string, string>`                                                 | `{}`    | Environment variables injected by this agent provider    |
 | `captureSessions` | `boolean`                                                                | `true`  | Capture pi session JSONL to host for `pi --session <id>` |
 
+Without `thinking`, Sandcastle passes no `--thinking` flag, and pi uses its own default (`medium`). Some models reject that default. With pi 0.73.1, `anthropic/claude-haiku-5-5` fails with a 400 (`"thinking.type.enabled" is not supported for this model`). For a model like that, pass `{ thinking: "off" }`.
+
 ### Provider `env`
 
 Both **agent providers** and **sandbox providers** accept an optional `env: Record<string, string>` in their options. These environment variables are merged with the `.sandcastle/.env` resolver output at launch time:

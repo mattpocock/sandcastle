@@ -16,7 +16,7 @@ import { join } from "node:path";
 import {
   AGENT_KEYS,
   AGENTS,
-  cheapModel,
+  cheapAgentCall,
   keysFile,
   loadKeys,
   missingKeys,
@@ -86,11 +86,13 @@ const doctor = (world?: World): number => {
       `  ${s.padEnd(8)} ${why.length ? `UNVERIFIABLE (${why.join("; ")})` : "ready"}`,
     );
   }
-  console.log("\nagents (cheapest model; VERIFY_MODEL overrides):");
+  console.log(
+    "\nagents (factory call on the cheapest model; VERIFY_MODEL swaps the model and drops its options):",
+  );
   for (const a of AGENTS) {
     const missing = missingKeys(AGENT_KEYS[a]);
     console.log(
-      `  ${a.padEnd(10)} ${cheapModel(a).padEnd(28)} ${missing.length ? `UNVERIFIABLE (missing ${missing.join(", ")})` : "ready"}`,
+      `  ${a.padEnd(10)} ${cheapAgentCall(a).padEnd(56)} ${missing.length ? `UNVERIFIABLE (missing ${missing.join(", ")})` : "ready"}`,
     );
   }
   console.log(

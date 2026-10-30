@@ -16,7 +16,7 @@ The agent's shell has no TTY, so every prompt must come as a flag. A missing one
 | ------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `--template`              | blank, simple-loop, sequential-reviewer, parallel-planner, parallel-planner-with-review              |
 | `--agent`                 | claude-code, pi, codex, cursor, opencode, copilot                                                    |
-| `--model`                 | any id. Without it, the agent's default model, which is never the cheapest: always pass `cheapModel` |
+| `--model`                 | any id. Without it, the agent's default, never the cheapest. Pass `doctor`'s model; options by hand. |
 | `--sandbox`               | docker, podman (`src/InitService.ts:595-608`). Vercel and Daytona exist only in the JS API           |
 | `--issue-tracker`         | github-issues, beads, custom                                                                         |
 | `--create-label`          | true/false (github-issues only)                                                                      |
