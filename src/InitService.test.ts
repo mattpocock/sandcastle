@@ -592,6 +592,7 @@ describe("InitService scaffold", () => {
       template: string,
       mainFilename: string,
       packageManager: PackageManager = "npm",
+      installedDependencies: readonly string[] = [],
     ) =>
       getNextStepsLines(
         template,
@@ -599,6 +600,7 @@ describe("InitService scaffold", () => {
         ghIssues,
         claudeCodeAgent,
         packageManager,
+        installedDependencies,
       );
 
     it("blank template returns steps mentioning .env and main filename (not npx sandcastle run)", () => {
@@ -737,6 +739,7 @@ describe("InitService scaffold", () => {
         ghIssues,
         piAgent,
         "npm",
+        [],
       ).join("\n");
       const codexLines = getNextStepsLines(
         "blank",
@@ -744,6 +747,7 @@ describe("InitService scaffold", () => {
         ghIssues,
         codexAgent,
         "npm",
+        [],
       ).join("\n");
       expect(piLines).not.toContain("claude setup-token");
       expect(piLines).not.toContain("CLAUDE_CODE_OAUTH_TOKEN");
@@ -764,6 +768,82 @@ describe("InitService scaffold", () => {
       expect(joined).not.toContain("zod");
     });
 
+    describe("reflects the detected package manager and what init already did", () => {
+      const managers: Array<{
+        pm: PackageManager;
+        run: string;
+        add: string;
+        install: string;
+      }> = [
+        {
+          pm: "npm",
+          run: "npm run sandcastle",
+          add: "npm install zod",
+          install: "npm install",
+        },
+        {
+          pm: "pnpm",
+          run: "pnpm run sandcastle",
+          add: "pnpm add zod",
+          install: "pnpm install",
+        },
+        {
+          pm: "yarn",
+          run: "yarn run sandcastle",
+          add: "yarn add zod",
+          install: "yarn install",
+        },
+        {
+          pm: "bun",
+          run: "bun run sandcastle",
+          add: "bun add zod",
+          install: "bun install",
+        },
+      ];
+
+      for (const { pm, run, add, install } of managers) {
+        for (const zodInstalled of [false, true]) {
+          it(`parallel-planner, ${pm}, zod ${zodInstalled ? "installed" : "not installed"}`, () => {
+            const joined = next(
+              "parallel-planner",
+              "main.ts",
+              pm,
+              zodInstalled ? ["zod"] : [],
+            ).join("\n");
+            expect(joined).toContain(`Run \`${run}\``);
+            if (pm !== "npm") expect(joined).not.toMatch(/\bnpm run/);
+            if (zodInstalled) {
+              expect(joined).not.toContain("zod");
+              expect(joined).not.toContain("schema validator");
+            } else {
+              expect(joined).toContain(add);
+            }
+            if (pm !== "npm") {
+              expect(joined).toContain(`\`${install}\``);
+            }
+          });
+        }
+
+        it(`blank, ${pm}: run step uses ${run}`, () => {
+          const joined = next("blank", "main.ts", pm).join("\n");
+          expect(joined).toContain(`Run \`${run}\``);
+          if (pm !== "npm") expect(joined).not.toMatch(/\bnpm run/);
+        });
+      }
+
+      it("steps stay numbered consecutively when the zod step is skipped", () => {
+        const numbers = next(
+          "parallel-planner-with-review",
+          "main.ts",
+          "pnpm",
+          ["zod"],
+        )
+          .filter((l) => /^\d+\./.test(l))
+          .map((l) => Number(l.split(".")[0]));
+        expect(numbers).toEqual(numbers.map((_, i) => i + 1));
+      });
+    });
+
     it("custom issue tracker points at the setup doc and the agent's setup command, regardless of template", () => {
       const lines = getNextStepsLines(
         "simple-loop",
@@ -771,6 +851,7 @@ describe("InitService scaffold", () => {
         customManager,
         claudeCodeAgent,
         "npm",
+        [],
       );
       const joined = lines.join("\n");
       expect(joined).toContain("SETUP_ISSUE_TRACKER.md");
@@ -786,6 +867,7 @@ describe("InitService scaffold", () => {
         customManager,
         getAgent("opencode")!,
         "npm",
+        [],
       );
       const joined = lines.join("\n");
       expect(joined.toLowerCase()).toContain("host");

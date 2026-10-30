@@ -496,9 +496,12 @@ const initCommand = Command.make(
       // build their <plan> output schema with it) and the host doesn't already
       // declare it, offer to install it. Without this, the very first
       // `npx tsx .sandcastle/main.ts` crashes with ERR_MODULE_NOT_FOUND.
+      const installedDependencies: string[] = [];
       if (getTemplateDependencies(selectedTemplate).includes("zod")) {
         const alreadyInstalled = yield* hostHasDependency(cwd, "zod");
-        if (!alreadyInstalled) {
+        if (alreadyInstalled) {
+          installedDependencies.push("zod");
+        } else {
           const installCmd = addDependencyCommand(packageManager, "zod");
           const shouldInstall = yield* resolveConfirmFlag({
             choice: installTemplateDepsChoice,
@@ -515,6 +518,7 @@ const initCommand = Command.make(
                 return false;
               }
             });
+            if (installed) installedDependencies.push("zod");
             yield* installed
               ? d.status(`Installed zod with ${packageManager}.`, "success")
               : d.status(
@@ -578,6 +582,7 @@ const initCommand = Command.make(
         selectedIssueTracker,
         selectedAgent,
         packageManager,
+        installedDependencies,
       );
       for (const [i, line] of nextSteps.entries()) {
         yield* d.text(i === 0 ? line : styleText("dim", line));
