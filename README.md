@@ -1021,6 +1021,7 @@ await run({
 - Provider env (agent + sandbox) overrides `.sandcastle/.env` resolver output for shared keys
 - Agent provider env and sandbox provider env **must not overlap** — if they share any key, `run()` throws an error
 - When `env` is not provided, it defaults to `{}`
+- Under `createSandbox()` and `worktree.createSandbox()`, the container starts before any agent is chosen, so each `sandbox.run()` applies its agent's `env` to that run's agent process only. `sandbox.exec()` and hooks don't see it
 
 Environment variables are also resolved automatically from `.sandcastle/.env` and `process.env` — no need to pass them to the API. The required variables depend on the **agent provider** (see `sandcastle init` output for details).
 
