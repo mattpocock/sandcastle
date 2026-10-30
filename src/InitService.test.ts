@@ -2252,6 +2252,96 @@ describe("InitService scaffold", () => {
       expect(dockerfile).toContain("@mariozechner/pi-coding-agent");
       expect(dockerfile).not.toContain("GitHub CLI");
     });
+
+    it("scaffold with beads pins the bd release instead of the main-branch install script", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        issueTracker: getIssueTracker("beads"),
+      });
+
+      const dockerfile = await readFile(
+        join(dir, ".sandcastle", "Dockerfile"),
+        "utf-8",
+      );
+      expect(dockerfile).toMatch(/ARG BEADS_VERSION=\d+\.\d+\.\d+/);
+      expect(dockerfile).toContain(
+        "https://github.com/gastownhall/beads/releases/download/v${BEADS_VERSION}",
+      );
+      expect(dockerfile).toContain("sha256sum -c");
+      expect(dockerfile).not.toContain("scripts/install.sh");
+    });
+
+    // Beads keeps its database in a git-ignored .beads/embeddeddolt/, so a
+    // worktree sandbox (merge-to-head / branch) never sees it. Every sandbox
+    // must mount the host's .beads/ and point bd at it via BEADS_DIR, so all
+    // phases read and close issues in the one shared database.
+    describe("beads shares the host database with every sandbox", () => {
+      const templates = [
+        "blank",
+        "simple-loop",
+        "sequential-reviewer",
+        "parallel-planner",
+        "parallel-planner-with-review",
+      ];
+
+      for (const templateName of templates) {
+        it(`${templateName}: every sandbox mounts the host .beads/ and sets BEADS_DIR`, async () => {
+          const dir = await makeDir();
+          await runScaffold(dir, {
+            templateName,
+            issueTracker: getIssueTracker("beads"),
+          });
+
+          const main = await readFile(
+            join(dir, ".sandcastle", "main.mts"),
+            "utf-8",
+          );
+          expect(main).not.toContain("docker()");
+          const calls = main.match(/\bdocker\(([^)]*)\)/g) ?? [];
+          expect(calls.length).toBeGreaterThan(0);
+          for (const call of calls) {
+            expect(call).toBe("docker(sandboxOptions)");
+          }
+          expect(main).toContain('hostPath: ".beads"');
+          expect(main).toContain('sandboxPath: "/home/agent/host-beads"');
+          expect(main).toContain('BEADS_DIR: "/home/agent/host-beads"');
+        });
+      }
+
+      it("rewrites the podman factory calls too", async () => {
+        const dir = await makeDir();
+        await runScaffold(dir, {
+          templateName: "parallel-planner",
+          issueTracker: getIssueTracker("beads"),
+          sandboxProvider: getSandboxProvider("podman")!,
+        });
+
+        const main = await readFile(
+          join(dir, ".sandcastle", "main.mts"),
+          "utf-8",
+        );
+        expect(main).not.toContain("podman()");
+        expect(main).not.toMatch(/\bdocker\b/);
+        expect(main.match(/podman\(sandboxOptions\)/g)).toHaveLength(3);
+        expect(main).toContain('BEADS_DIR: "/home/agent/host-beads"');
+      });
+
+      it("leaves other trackers' sandboxes unchanged", async () => {
+        const dir = await makeDir();
+        await runScaffold(dir, {
+          templateName: "simple-loop",
+          issueTracker: getIssueTracker("github-issues"),
+        });
+
+        const main = await readFile(
+          join(dir, ".sandcastle", "main.mts"),
+          "utf-8",
+        );
+        expect(main).toContain("docker()");
+        expect(main).not.toContain("sandboxOptions");
+        expect(main).not.toContain("BEADS_DIR");
+      });
+    });
   });
 
   // --- ESM extension detection ---

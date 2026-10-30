@@ -503,6 +503,13 @@ export interface IssueTrackerEntry {
   };
   /** Lines to append to `.env.example` for this issue tracker, or empty string if none needed. */
   readonly envExample: string;
+  /**
+   * TypeScript source for a `sandboxOptions` object literal (comment included)
+   * that the scaffolded main file passes to every sandbox provider call, or
+   * undefined to leave the calls bare. For trackers whose state must reach
+   * every sandbox, including worktree sandboxes, which get tracked files only.
+   */
+  readonly sandboxOptions?: string;
 }
 
 const GITHUB_CLI_TOOLS = `# Install GitHub CLI
@@ -512,6 +519,24 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \\
   | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \\
   && apt-get update && apt-get install -y gh \\
   && rm -rf /var/lib/apt/lists/*`;
+
+// The bd release baked into the beads image. 1.0.4 is the first release whose
+// embedded backend lets several bd processes open one database at once (the
+// parallel templates' sandboxes plus the host); 1.3.2 is the release this
+// scaffold was verified with.
+const BEADS_VERSION = "1.3.2";
+
+// Every sandbox, including worktree sandboxes, mounts the host's .beads/ and
+// points bd at it, so all phases share the one issue database.
+const BEADS_SANDBOX_DIR = "/home/agent/host-beads";
+const BEADS_SANDBOX_OPTIONS = `// Beads keeps its database in .beads/, which git ignores, so a worktree
+// sandbox never gets it. Mount the host's .beads/ into every sandbox and point
+// bd at it, so every phase reads and closes issues in the one shared database.
+// Run this file from the repo root (hostPath is relative to the cwd).
+const sandboxOptions = {
+  mounts: [{ hostPath: ".beads", sandboxPath: "${BEADS_SANDBOX_DIR}" }],
+  env: { BEADS_DIR: "${BEADS_SANDBOX_DIR}" },
+};`;
 
 const BEADS_TOOLS = `# Install system dependencies for Beads
 RUN apt-get update && apt-get install -y \\
@@ -523,7 +548,18 @@ RUN apt-get update && apt-get install -y \\
        ln -s "$lib" "\${lib%.72}.74"; \\
      done
 
-RUN curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash
+# Pinned bd release. Every sandbox opens your host's beads database (see
+# sandboxOptions in main), so keep this equal to the host's \`bd version\`.
+ARG BEADS_VERSION=${BEADS_VERSION}
+RUN ARCH=$(dpkg --print-architecture) \\
+  && BEADS_TARBALL="beads_\${BEADS_VERSION}_linux_\${ARCH}.tar.gz" \\
+  && BEADS_URL="https://github.com/gastownhall/beads/releases/download/v\${BEADS_VERSION}" \\
+  && cd /tmp \\
+  && curl -fsSLO "\${BEADS_URL}/\${BEADS_TARBALL}" \\
+  && curl -fsSL "\${BEADS_URL}/checksums.txt" | grep " \${BEADS_TARBALL}\$" | sha256sum -c - \\
+  && tar -xzf "\${BEADS_TARBALL}" -C /usr/local/bin bd \\
+  && rm "\${BEADS_TARBALL}" \\
+  && bd version
 
 RUN corepack enable`;
 
@@ -563,6 +599,7 @@ GH_TOKEN=`,
       ISSUE_TRACKER_TOOLS: BEADS_TOOLS,
     },
     envExample: "",
+    sandboxOptions: BEADS_SANDBOX_OPTIONS,
   },
   {
     name: "custom",
@@ -842,6 +879,58 @@ const rewriteMainTs = (
 
     yield* fs
       .writeFileString(mainTsPath, content)
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+  });
+
+/**
+ * Pass the issue tracker's `sandboxOptions` (if any) to every sandbox provider
+ * call in a scaffolded main file: declare the options after the provider
+ * import, then rewrite each bare `<provider>()` call to
+ * `<provider>(sandboxOptions)`. Runs after `rewriteMainTs`, so the provider
+ * name is already the selected one.
+ */
+const applyIssueTrackerSandboxOptions = (
+  configDir: string,
+  issueTracker: IssueTrackerEntry,
+  sandboxProvider: SandboxProviderEntry,
+  mainFilename: string,
+): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    if (!issueTracker.sandboxOptions) return;
+    const fs = yield* FileSystem.FileSystem;
+    const mainTsPath = join(configDir, mainFilename);
+
+    const exists = yield* fs
+      .exists(mainTsPath)
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+    if (!exists) return;
+
+    const content = yield* fs
+      .readFileString(mainTsPath)
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+
+    const provider = sandboxProvider.name;
+    const importRe = new RegExp(
+      `^import \\{ ${provider} \\} from "@ai-hero/sandcastle/sandboxes/${provider}";$`,
+      "m",
+    );
+    if (!importRe.test(content)) {
+      return yield* Effect.fail(
+        new Error(
+          `Cannot apply ${issueTracker.label} sandbox options: ${mainFilename} has no ${provider} import.`,
+        ),
+      );
+    }
+
+    const updated = content
+      .replace(importRe, (line) => `${line}\n\n${issueTracker.sandboxOptions}`)
+      .replace(
+        new RegExp(`\\b${provider}\\(\\)`, "g"),
+        `${provider}(sandboxOptions)`,
+      );
+
+    yield* fs
+      .writeFileString(mainTsPath, updated)
       .pipe(Effect.mapError((e) => new Error(e.message)));
   });
 
@@ -1133,6 +1222,14 @@ export const scaffold = (
       sandboxProvider,
       mainFilename,
       imageName,
+    );
+
+    // Pass the issue tracker's sandbox options to every sandbox provider call
+    yield* applyIssueTrackerSandboxOptions(
+      configDir,
+      issueTracker,
+      sandboxProvider,
+      mainFilename,
     );
 
     // Replace issue tracker template arguments in all text files (must run before label stripping)
