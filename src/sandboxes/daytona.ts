@@ -66,6 +66,9 @@ export interface DaytonaOptions {
   readonly maxOutputTailChars?: number;
 }
 
+/** How often a streamed `exec` checks that its session shell is still alive. */
+const SESSION_WATCH_INTERVAL_MS = 15_000;
+
 /**
  * Create a Daytona isolated sandbox provider.
  *
@@ -144,13 +147,21 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
           if (opts?.onLine) {
             const onLine = opts.onLine;
             const sessionId = `sandcastle-${crypto.randomUUID()}`;
+            const pidPath = `/tmp/${sessionId}.pid`;
             await sandbox.process.createSession(sessionId);
 
             try {
+              // A session runs its commands in one long-lived shell, which
+              // records each command's exit code once it returns. A command
+              // that ends that shell (a top-level `exit`) never gets one, and
+              // its log stream never closes. So run the command in a subshell,
+              // where `exit` ends only the subshell. The newline before `)`
+              // keeps a trailing comment from swallowing it. The session
+              // shell's PID goes to a file, to check it is still alive.
               const execResponse = await sandbox.process.executeSessionCommand(
                 sessionId,
                 {
-                  command: `cd ${opts?.cwd ?? worktreePath} && ${effectiveCommand}`,
+                  command: `echo $$ > ${pidPath}; ( cd ${opts?.cwd ?? worktreePath} && ${effectiveCommand}\n)`,
                   async: true,
                 },
               );
@@ -161,7 +172,7 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
               const stderrTail = new BoundedTail(maxOutputTailChars, "");
               let partial = "";
 
-              await sandbox.process.getSessionCommandLogs(
+              const logsDone = sandbox.process.getSessionCommandLogs(
                 sessionId,
                 cmdId,
                 (chunk: string) => {
@@ -177,6 +188,51 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
                   stderrTail.push(chunk);
                 },
               );
+
+              // Once the race below is lost, a late failure of the stream
+              // must not surface as an unhandled rejection.
+              logsDone.catch(() => {});
+
+              // If the session shell dies anyway (killed, say), the stream
+              // would wait forever. Watch the shell, and once it is gone stop
+              // waiting: fail if the command recorded no exit code. A missing
+              // PID file counts as alive, so it can never fail a command.
+              let watchTimer: ReturnType<typeof setTimeout> | undefined;
+              let watching = true;
+              const sessionGone = new Promise<void>((resolve, reject) => {
+                const check = async () => {
+                  const alive = await sandbox.process
+                    .executeCommand(
+                      `test ! -f ${pidPath} || kill -0 "$(cat ${pidPath})"`,
+                    )
+                    .then((r) => r.exitCode === 0)
+                    .catch(() => true);
+                  const cmd = alive
+                    ? undefined
+                    : await sandbox.process
+                        .getSessionCommand(sessionId, cmdId)
+                        .catch(() => undefined);
+                  if (!watching) return;
+                  if (alive) {
+                    watchTimer = setTimeout(check, SESSION_WATCH_INTERVAL_MS);
+                    return;
+                  }
+                  if (cmd?.exitCode != null) return resolve();
+                  reject(
+                    new Error(
+                      `Daytona session shell exited before the command finished, so its exit code is unknown: ${command}`,
+                    ),
+                  );
+                };
+                watchTimer = setTimeout(check, SESSION_WATCH_INTERVAL_MS);
+              });
+
+              try {
+                await Promise.race([logsDone, sessionGone]);
+              } finally {
+                watching = false;
+                clearTimeout(watchTimer);
+              }
 
               if (partial) {
                 stdoutTail.push(partial);
@@ -195,6 +251,9 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
               };
             } finally {
               await sandbox.process.deleteSession(sessionId).catch(() => {});
+              await sandbox.process
+                .executeCommand(`rm -f ${pidPath}`)
+                .catch(() => {});
             }
           }
 

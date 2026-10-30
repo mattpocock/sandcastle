@@ -10,6 +10,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // - `process.executeCommand` gives no stdin, and returns stdout and stderr
 //   merged into `result`, with no separate stderr;
 // - session commands give no stdin either, and stream stdout and stderr apart.
+//   They run in the session's one long-lived shell, which records each
+//   command's exit code after it. A command that ends that shell (a top-level
+//   `exit`) never gets an exit code, and its log stream never closes.
 // `fs.uploadFile(buffer, path)` writes the file where a command can read it.
 const sdk = vi.hoisted(() => ({
   createParams: [] as unknown[],
@@ -27,7 +30,21 @@ vi.mock("@daytona/sdk", async () => {
       stdio: ["ignore", "pipe", "pipe"],
       encoding: "utf8",
     });
-  const sessionCommands = new Map<string, ReturnType<typeof sh>>();
+  // A session command, run as the session shell would: the shell records the
+  // exit code (here, on fd 3) only if it is still alive after the command.
+  const sessionSh = (command: string) => {
+    const r = spawnSync("sh", ["-c", `${command}\nprintf %s "$?" >&3`], {
+      stdio: ["ignore", "pipe", "pipe", "pipe"],
+      encoding: "utf8",
+    });
+    const recorded = r.output[3];
+    return {
+      stdout: r.stdout,
+      stderr: r.stderr,
+      exitCode: recorded ? Number(recorded) : undefined,
+    };
+  };
+  const sessionCommands = new Map<string, ReturnType<typeof sessionSh>>();
 
   class Daytona {
     async create(params: unknown) {
@@ -56,7 +73,7 @@ vi.mock("@daytona/sdk", async () => {
             req: { command: string },
           ) => {
             const cmdId = `cmd-${sessionCommands.size}`;
-            sessionCommands.set(cmdId, sh(req.command));
+            sessionCommands.set(cmdId, sessionSh(req.command));
             return { cmdId };
           },
           getSessionCommandLogs: async (
@@ -68,9 +85,11 @@ vi.mock("@daytona/sdk", async () => {
             const r = sessionCommands.get(cmdId)!;
             if (r.stdout) onStdout(r.stdout);
             if (r.stderr) onStderr(r.stderr);
+            // The session shell died: the stream never closes.
+            if (r.exitCode === undefined) await new Promise(() => {});
           },
           getSessionCommand: async (_sessionId: string, cmdId: string) => ({
-            exitCode: sessionCommands.get(cmdId)!.status,
+            exitCode: sessionCommands.get(cmdId)!.exitCode,
           }),
         },
       };
@@ -165,6 +184,60 @@ describe("daytona()", () => {
       expect(sdk.uploadedPaths).toHaveLength(2);
       for (const path of sdk.uploadedPaths)
         expect(existsSync(path)).toBe(false);
+    });
+
+    it("returns a streamed command's exit code when it exits the shell", async () => {
+      // A session runs commands in one long-lived shell. A top-level `exit`
+      // must end the command, not that shell, or the call hangs forever.
+      const handle = await daytona().create({ env: {} });
+      const lines: string[] = [];
+
+      const result = await handle.exec("echo before; exit 3", {
+        cwd,
+        onLine: (line) => lines.push(line),
+      });
+
+      expect(result.exitCode).toBe(3);
+      expect(lines).toEqual(["before"]);
+    });
+
+    it("returns a streamed command's exit code when it exits the shell, with stdin", async () => {
+      const handle = await daytona().create({ env: {} });
+
+      const result = await handle.exec("cat; exit 3", {
+        cwd,
+        stdin: "hi",
+        onLine: () => {},
+      });
+
+      expect(result).toMatchObject({ exitCode: 3, stdout: "hi" });
+    });
+
+    it("fails a streamed command whose session shell dies, instead of hanging", async () => {
+      // Should the session shell die anyway (here, killed), no exit code is
+      // ever recorded and the log stream never closes.
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const handle = await daytona().create({ env: {} });
+
+        const outcome = handle.exec("echo before; kill -9 $$", {
+          cwd,
+          onLine: () => {},
+        });
+        let settled = false;
+        outcome.then(
+          () => (settled = true),
+          () => (settled = true),
+        );
+        for (let i = 0; i < 20 && !settled; i++)
+          await vi.advanceTimersByTimeAsync(5_000);
+
+        await expect(outcome).rejects.toThrow(
+          /session shell exited before the command finished/,
+        );
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("surfaces a failed command's output as stderr", async () => {
