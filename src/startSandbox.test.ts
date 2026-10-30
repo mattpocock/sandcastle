@@ -239,6 +239,109 @@ describe("startSandbox", () => {
       }
     }, 15_000);
 
+    it("closes the handle when sync-in fails after create", async () => {
+      const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
+      tempDirs.push(hostDir);
+      await initRepo(hostDir);
+      await commitFile(hostDir, "hello.txt", "hello", "initial");
+
+      const realProvider = testIsolated();
+      let closeCalls = 0;
+      const provider = createIsolatedSandboxProvider({
+        name: "failing-sync-in",
+        create: async (options) => {
+          const handle = await realProvider.create(options);
+          return {
+            ...handle,
+            // Every command fails, so sync-in's git clone fails.
+            exec: async () => ({ stdout: "", stderr: "denied", exitCode: 128 }),
+            close: async () => {
+              closeCalls++;
+              await handle.close();
+            },
+          };
+        },
+      });
+
+      const exit = await Effect.runPromiseExit(
+        startSandbox({ provider, hostRepoDir: hostDir, env: {} }),
+      );
+
+      expect(Exit.isFailure(exit)).toBe(true);
+      expect(closeCalls).toBe(1);
+    });
+
+    it("closes the handle when copying copyPaths fails", async () => {
+      const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
+      tempDirs.push(hostDir);
+      await initRepo(hostDir);
+      await commitFile(hostDir, "hello.txt", "hello", "initial");
+      await writeFile(join(hostDir, "extra.txt"), "extra content");
+
+      const realProvider = testIsolated();
+      let closeCalls = 0;
+      const provider = createIsolatedSandboxProvider({
+        name: "failing-copy",
+        create: async (options) => {
+          const handle = await realProvider.create(options);
+          return {
+            ...handle,
+            copyIn: async (hostPath: string, sandboxPath: string) => {
+              if (sandboxPath.includes("repo.bundle")) {
+                return handle.copyIn(hostPath, sandboxPath);
+              }
+              throw new Error("copy failed");
+            },
+            close: async () => {
+              closeCalls++;
+              await handle.close();
+            },
+          };
+        },
+      });
+
+      const exit = await Effect.runPromiseExit(
+        startSandbox({
+          provider,
+          hostRepoDir: hostDir,
+          env: {},
+          copyPaths: ["extra.txt"],
+        }),
+      );
+
+      expect(Exit.isFailure(exit)).toBe(true);
+      expect(closeCalls).toBe(1);
+    });
+
+    it("does not close the handle when setup succeeds", async () => {
+      const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
+      tempDirs.push(hostDir);
+      await initRepo(hostDir);
+      await commitFile(hostDir, "hello.txt", "hello", "initial");
+
+      const realProvider = testIsolated();
+      let closeCalls = 0;
+      const provider = createIsolatedSandboxProvider({
+        name: "counting",
+        create: async (options) => {
+          const handle = await realProvider.create(options);
+          return {
+            ...handle,
+            close: async () => {
+              closeCalls++;
+              await handle.close();
+            },
+          };
+        },
+      });
+
+      const { handle } = await Effect.runPromise(
+        startSandbox({ provider, hostRepoDir: hostDir, env: {} }),
+      );
+      expect(closeCalls).toBe(0);
+      await handle.close();
+    });
+
     it("skips missing copyPaths without error", async () => {
       const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
       tempDirs.push(hostDir);
