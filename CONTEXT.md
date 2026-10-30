@@ -137,7 +137,7 @@ The preprocessing step that evaluates **shell expressions** in a **prompt**, rep
 _Avoid_: "prompt preprocessing" (too generic), "command expansion"
 
 **Shell expression**:
-A `` !`command` `` marker in a **prompt** that evaluates a shell command inside the **sandbox**.
+A `` !`command` `` marker in a **prompt** that evaluates a shell command inside the **sandbox**. A marker inside an HTML comment (`<!-- … -->`) is not a shell expression and never runs.
 _Avoid_: "command" (overloaded), "inline command", "prompt command"
 
 **Built-in prompt argument**:

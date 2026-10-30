@@ -208,6 +208,51 @@ describe("PromptPreprocessor", () => {
     expect(result).toBe("Payload: !`rm -rf /`");
   });
 
+  it("does not execute shell blocks inside HTML comments", async () => {
+    const { sandboxDir, sandbox, displayLayer } = await setup();
+    const prompt = [
+      "<!-- Use !`command` to pull in dynamic context. -->",
+      "<!-- Example: !`exit 4` or",
+      "  !`exit 5` -->",
+      "Live: !`echo live`",
+    ].join("\n");
+    const result = await run(prompt, sandbox, displayLayer, sandboxDir);
+    expect(result).toBe(
+      [
+        "<!-- Use !`command` to pull in dynamic context. -->",
+        "<!-- Example: !`exit 4` or",
+        "  !`exit 5` -->",
+        "Live: live",
+      ].join("\n"),
+    );
+  });
+
+  it("treats an unclosed HTML comment as running to the end of the prompt", async () => {
+    const { sandboxDir, sandbox, displayLayer } = await setup();
+    const prompt = "Live: !`echo live`\n<!-- unclosed !`exit 4`";
+    const result = await run(prompt, sandbox, displayLayer, sandboxDir);
+    expect(result).toBe("Live: live\n<!-- unclosed !`exit 4`");
+  });
+
+  it("decides comment ranges from the raw template, not from prompt argument values", async () => {
+    const { sandboxDir, sandbox, displayLayer } = await setup();
+    // An arg value that opens or closes a comment must not hide a live
+    // template shell block, nor revive a commented-out one.
+    const rawTemplate =
+      "{{OPEN}} Live: !`echo live`\n<!-- {{CLOSE}} !`exit 4` -->";
+    const substituted = await Effect.runPromise(
+      substitutePromptArgs(rawTemplate, { OPEN: "<!--", CLOSE: "-->" }).pipe(
+        Effect.provide(displayLayer),
+      ),
+    );
+    const result = await Effect.runPromise(
+      preprocessPrompt(substituted, sandbox, sandboxDir).pipe(
+        Effect.provide(displayLayer),
+      ),
+    );
+    expect(result).toBe("<!-- Live: live\n<!-- --> !`exit 4` -->");
+  });
+
   it("fails with PromptExpansionTimeoutError carrying elapsedMs measured at the throw site", async () => {
     const { sandboxDir, displayLayer } = await setup();
     const hangingSandbox: SandboxService = {
