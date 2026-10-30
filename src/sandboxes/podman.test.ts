@@ -14,7 +14,7 @@ vi.mock("node:child_process", async () => {
   };
 });
 
-import { execFile, execFileSync } from "node:child_process";
+import { execFile, execFileSync, type ChildProcess } from "node:child_process";
 import { writeFileSync, mkdtempSync, unlinkSync, rmdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
@@ -629,6 +629,76 @@ describe("podman()", () => {
     )?.[1] as string[];
 
     expect(runArgs).not.toContain("--cpus");
+
+    await handle.close();
+  });
+
+  it("passes memory and pids-limit flags to podman run when provided", async () => {
+    mockExecFile.mockImplementation((_command, _args, ...rest: unknown[]) => {
+      const callback = rest[rest.length - 1] as (
+        error: Error | null,
+        stdout: string,
+        stderr: string,
+      ) => void;
+      callback(null, "", "");
+      return undefined as unknown as ChildProcess;
+    });
+
+    const provider = podman({ memory: "2g", pidsLimit: 256 });
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    const runArgs = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    )?.[1] as string[];
+
+    const memIdx = runArgs.indexOf("--memory");
+    expect(memIdx).toBeGreaterThan(-1);
+    expect(runArgs[memIdx + 1]).toBe("2g");
+    const swapIdx = runArgs.indexOf("--memory-swap");
+    expect(swapIdx).toBeGreaterThan(-1);
+    expect(runArgs[swapIdx + 1]).toBe("2g");
+    const pidsIdx = runArgs.indexOf("--pids-limit");
+    expect(pidsIdx).toBeGreaterThan(-1);
+    expect(runArgs[pidsIdx + 1]).toBe("256");
+
+    await handle.close();
+  });
+
+  it("does not pass memory or pids flags when omitted", async () => {
+    mockExecFile.mockImplementation((_command, _args, ...rest: unknown[]) => {
+      const callback = rest[rest.length - 1] as (
+        error: Error | null,
+        stdout: string,
+        stderr: string,
+      ) => void;
+      callback(null, "", "");
+      return undefined as unknown as ChildProcess;
+    });
+
+    const provider = podman();
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    const runArgs = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    )?.[1] as string[];
+
+    expect(runArgs).not.toContain("--memory");
+    expect(runArgs).not.toContain("--memory-swap");
+    expect(runArgs).not.toContain("--pids-limit");
 
     await handle.close();
   });
