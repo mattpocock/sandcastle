@@ -1,4 +1,4 @@
-Use `npm run typecheck` for type checking.
+Use `npm run typecheck` for type checking. Before you finish a change, run `npm test`, then the `verify` skill on the agent × sandbox combination it touches.
 
 Check [./CONTEXT.md](./CONTEXT.md) for terminology questions.
 
