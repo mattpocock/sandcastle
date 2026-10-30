@@ -23,3 +23,7 @@ Rejected alternatives:
 - `AnySandboxProvider` is deprecated as an alias for `SandboxProvider` — the distinction it encoded no longer exists.
 - Trust model is explicit: importing `noSandbox()` is the opt-in. Sandcastle does not add a runtime guard against AFK-on-host; the caller owns the risk.
 - The **agent provider** still does not receive `dangerouslySkipPermissions: true` with `noSandbox()` — that behaviour is unchanged from the `interactive()`-only path.
+
+## Amendment — `interactive()` removed (2026-10-30)
+
+`interactive()` was removed by [ADR 0021](0021-remove-interactive.md). `noSandbox()` is accepted by `run()` and `createSandbox()`.

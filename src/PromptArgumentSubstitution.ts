@@ -59,31 +59,6 @@ export const validateNoBuiltInArgOverride = (
   return Effect.void;
 };
 
-/**
- * Scans a prompt for `{{KEY}}` placeholders and returns the keys that are
- * missing from `providedArgs`, excluding built-in keys.
- */
-export const findMissingPromptArgKeys = (
-  prompt: string,
-  providedArgs: PromptArgs,
-): string[] => {
-  const matches = [...prompt.matchAll(PLACEHOLDER_PATTERN)];
-  const builtInSet = new Set<string>(BUILT_IN_PROMPT_ARG_KEYS);
-  const seen = new Set<string>();
-  const missing: string[] = [];
-
-  for (const m of matches) {
-    const key = m[1]!;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    if (builtInSet.has(key)) continue;
-    if (key in providedArgs && providedArgs[key] != null) continue;
-    missing.push(key);
-  }
-
-  return missing;
-};
-
 export const substitutePromptArgs = (
   prompt: string,
   args: PromptArgs,

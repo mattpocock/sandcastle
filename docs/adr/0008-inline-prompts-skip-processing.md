@@ -16,3 +16,7 @@ Motivation: issue #453. Callers that build inline prompts programmatically often
 - `run({ prompt, promptArgs })` is an error — `promptArgs` only applies to templates. Empty `promptArgs: {}` is treated as absent.
 - Inline prompts that want branch context must interpolate in JS (`` `Work on ${branch}...` ``) rather than relying on built-in args.
 - `interactive()` skips the "prompt user for missing `{{KEY}}`" flow for inline prompts.
+
+## Amendment — `interactive()` removed (2026-10-30)
+
+`interactive()` was removed by [ADR 0021](0021-remove-interactive.md), and with it the prompt-fill flow for missing `{{KEY}}`s. The inline-is-literal rule is unchanged.

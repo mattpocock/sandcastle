@@ -259,24 +259,6 @@ describe("claudeCode factory", () => {
     expect(command).not.toContain("--dangerously-skip-permissions");
   });
 
-  it("buildInteractiveArgs includes --dangerously-skip-permissions when true", () => {
-    const provider = claudeCode("claude-opus-4-8");
-    const args = provider.buildInteractiveArgs!({
-      prompt: "test",
-      dangerouslySkipPermissions: true,
-    });
-    expect(args).toContain("--dangerously-skip-permissions");
-  });
-
-  it("buildInteractiveArgs omits --dangerously-skip-permissions when false", () => {
-    const provider = claudeCode("claude-opus-4-8");
-    const args = provider.buildInteractiveArgs!({
-      prompt: "test",
-      dangerouslySkipPermissions: false,
-    });
-    expect(args).not.toContain("--dangerously-skip-permissions");
-  });
-
   // --- permissionMode option ---
 
   it("buildPrintCommand emits --permission-mode when permissionMode is set", () => {
@@ -301,25 +283,6 @@ describe("claudeCode factory", () => {
     const provider = claudeCode("claude-opus-4-8");
     const { command } = provider.buildPrintCommand(opts("test"));
     expect(command).not.toContain("--permission-mode");
-  });
-
-  it("buildInteractiveArgs emits --permission-mode when permissionMode is set", () => {
-    const provider = claudeCode("claude-opus-4-8", { permissionMode: "plan" });
-    const args = provider.buildInteractiveArgs!({
-      prompt: "test",
-      dangerouslySkipPermissions: false,
-    });
-    expect(args).toContain("--permission-mode");
-    expect(args).toContain("plan");
-  });
-
-  it("buildInteractiveArgs omits --dangerously-skip-permissions when permissionMode is set", () => {
-    const provider = claudeCode("claude-opus-4-8", { permissionMode: "auto" });
-    const args = provider.buildInteractiveArgs!({
-      prompt: "test",
-      dangerouslySkipPermissions: true,
-    });
-    expect(args).not.toContain("--dangerously-skip-permissions");
   });
 });
 
@@ -1053,32 +1016,8 @@ describe("cursor factory", () => {
     );
   });
 
-  it("buildInteractiveArgs includes binary, model and prompt", () => {
-    const provider = cursor("claude-sonnet-4-6");
-    const args = provider.buildInteractiveArgs!({
-      prompt: "test prompt",
-      dangerouslySkipPermissions: true,
-    });
-    expect(args).toEqual([
-      "agent",
-      "--model",
-      "claude-sonnet-4-6",
-      "--force",
-      "test prompt",
-    ]);
-  });
-
-  it("buildInteractiveArgs omits prompt when empty", () => {
-    const provider = cursor("claude-sonnet-4-6");
-    const args = provider.buildInteractiveArgs!({
-      prompt: "",
-      dangerouslySkipPermissions: true,
-    });
-    expect(args).toEqual(["agent", "--model", "claude-sonnet-4-6", "--force"]);
-  });
-
   // Orchestrator.invokeAgent always passes dangerouslySkipPermissions: true in print mode;
-  // this branch is still used by interactive mode and direct provider.buildPrintCommand callers.
+  // this branch is still used by direct provider.buildPrintCommand callers.
   it("buildPrintCommand does not include --force when dangerouslySkipPermissions is false", () => {
     const provider = cursor("claude-sonnet-4-6");
     const { command } = provider.buildPrintCommand({
@@ -1315,26 +1254,6 @@ describe("opencode factory", () => {
     });
     const { command } = provider.buildPrintCommand(opts("test"));
     expect(command).toContain("--agent 'it'\\''s tricky'");
-  });
-
-  it("buildInteractiveArgs includes --agent when specified", () => {
-    const provider = opencode("opencode/big-pickle", { agent: "build" });
-    const args = provider.buildInteractiveArgs!(opts("do something"));
-    expect(args).toEqual([
-      "opencode",
-      "--model",
-      "opencode/big-pickle",
-      "--agent",
-      "build",
-      "--prompt",
-      "do something",
-    ]);
-  });
-
-  it("buildInteractiveArgs omits --agent when not specified", () => {
-    const provider = opencode("opencode/big-pickle");
-    const args = provider.buildInteractiveArgs!(opts("do something"));
-    expect(args).not.toContain("--agent");
   });
 
   it("parseStreamLine extracts session id from step_start", () => {
@@ -1696,26 +1615,6 @@ describe("copilot factory", () => {
     });
     expect(command).not.toContain("--resume");
     expect(command).not.toContain("abc-123");
-  });
-
-  it("buildInteractiveArgs includes copilot binary, --model, and prompt", () => {
-    const provider = copilot("claude-sonnet-4.5");
-    const args = provider.buildInteractiveArgs!(opts("hello"));
-    expect(args[0]).toBe("copilot");
-    expect(args).toContain("--model");
-    expect(args).toContain("claude-sonnet-4.5");
-    expect(args).toContain("hello");
-  });
-
-  it("buildInteractiveArgs seeds the prompt with -i, not -p", () => {
-    // `-p`/`--prompt` runs programmatically and exits; interactive sessions
-    // must use `-i`/`--interactive` to launch the TUI without exiting.
-    const provider = copilot("claude-sonnet-4.5");
-    const args = provider.buildInteractiveArgs!(opts("hello"));
-    expect(args).toContain("-i");
-    expect(args).not.toContain("-p");
-    // The prompt immediately follows the -i flag.
-    expect(args[args.indexOf("-i") + 1]).toBe("hello");
   });
 
   it("parseStreamLine returns empty array for non-JSON and unrecognised input", () => {

@@ -56,7 +56,7 @@ Every proof pins one **combination**: one agent (claudeCode, pi, codex, cursor, 
 
 - the CLI, its templates and its trackers;
 - the image commands;
-- `run`, `interactive`, `createSandbox` and `createWorktree`;
+- `run`, `createSandbox` and `createWorktree`;
 - the branch strategies, the sandboxes and the agents.
 
 For each one it gives the entry point and the end state that counts as proof. Read the index before you call a claim verified: a proof through one entry point leaves the others listed beside it open.

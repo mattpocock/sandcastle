@@ -6,12 +6,7 @@
  *   await run({ agent: claudeCode("claude-opus-4-8"), sandbox: podman() });
  */
 
-import {
-  execFile,
-  execFileSync,
-  spawn,
-  type StdioOptions,
-} from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import {
@@ -20,7 +15,6 @@ import {
   type BindMountCreateOptions,
   type BindMountSandboxHandle,
   type ExecResult,
-  type InteractiveExecOptions,
 } from "../SandboxProvider.js";
 import type { MountConfig } from "../MountConfig.js";
 import type { SelinuxLabel } from "../mountUtils.js";
@@ -372,38 +366,6 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
                 });
               });
             }
-          });
-        },
-
-        interactiveExec: (
-          args: string[],
-          opts: InteractiveExecOptions,
-        ): Promise<{ exitCode: number }> => {
-          return new Promise((resolve, reject) => {
-            const podmanArgs = ["exec"];
-            // Allocate a pseudo-terminal when stdin looks like a TTY
-            if (
-              "isTTY" in opts.stdin &&
-              (opts.stdin as { isTTY?: boolean }).isTTY
-            ) {
-              podmanArgs.push("-it");
-            } else {
-              podmanArgs.push("-i");
-            }
-            if (opts.cwd) podmanArgs.push("-w", opts.cwd);
-            podmanArgs.push(containerName, ...args);
-
-            const proc = spawn("podman", podmanArgs, {
-              stdio: [opts.stdin, opts.stdout, opts.stderr] as StdioOptions,
-            });
-
-            proc.on("error", (error: Error) => {
-              reject(new Error(`podman exec failed: ${error.message}`));
-            });
-
-            proc.on("close", (code: number | null) => {
-              resolve({ exitCode: code ?? 0 });
-            });
           });
         },
 

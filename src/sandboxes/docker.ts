@@ -6,12 +6,7 @@
  *   await run({ agent: claudeCode("claude-opus-4-8"), sandbox: docker() });
  */
 
-import {
-  execFile,
-  execFileSync,
-  spawn,
-  type StdioOptions,
-} from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import { Effect } from "effect";
@@ -22,7 +17,6 @@ import {
   type BindMountCreateOptions,
   type BindMountSandboxHandle,
   type ExecResult,
-  type InteractiveExecOptions,
 } from "../SandboxProvider.js";
 import type { MountConfig } from "../MountConfig.js";
 import type { SelinuxLabel } from "../mountUtils.js";
@@ -316,38 +310,6 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
                 });
               });
             }
-          });
-        },
-
-        interactiveExec: (
-          args: string[],
-          opts: InteractiveExecOptions,
-        ): Promise<{ exitCode: number }> => {
-          return new Promise((resolve, reject) => {
-            const dockerArgs = ["exec"];
-            // Allocate a pseudo-terminal when stdin looks like a TTY
-            if (
-              "isTTY" in opts.stdin &&
-              (opts.stdin as { isTTY?: boolean }).isTTY
-            ) {
-              dockerArgs.push("-it");
-            } else {
-              dockerArgs.push("-i");
-            }
-            if (opts.cwd) dockerArgs.push("-w", opts.cwd);
-            dockerArgs.push(containerName, ...args);
-
-            const proc = spawn("docker", dockerArgs, {
-              stdio: [opts.stdin, opts.stdout, opts.stderr] as StdioOptions,
-            });
-
-            proc.on("error", (error: Error) => {
-              reject(new Error(`docker exec failed: ${error.message}`));
-            });
-
-            proc.on("close", (code: number | null) => {
-              resolve({ exitCode: code ?? 0 });
-            });
           });
         },
 

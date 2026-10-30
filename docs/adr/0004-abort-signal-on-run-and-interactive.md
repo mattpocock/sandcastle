@@ -9,3 +9,7 @@ The factory calls `createWorktree()` and `createSandbox()` deliberately do **not
 - Lifecycle hooks receive `signal` on their argument object so they can cooperatively abort their own async work. Hook authors opt in; existing hooks are unaffected.
 - The existing process-level SIGINT/SIGTERM handler in `createSandbox.ts` is untouched — it handles process termination, which is a different concern from per-operation cancellation.
 - Abort semantics match error semantics: worktree preserved, sandbox handle still alive on `Sandbox.run()` / `Worktree.run()`. Callers distinguish abort from other errors via `error.name === "AbortError"` (or by comparing to their own `signal.reason`).
+
+## Amendment — `interactive()` removed (2026-10-30)
+
+`interactive()`, `Worktree.interactive()` and `Sandbox.interactive()` were removed by [ADR 0021](0021-remove-interactive.md). The decision stands for `run()`, `Worktree.run()` and `Sandbox.run()`: they take a `signal`, the factories don't.

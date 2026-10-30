@@ -12,14 +12,6 @@ export interface ExecResult {
   readonly exitCode: number;
 }
 
-/** Options for interactiveExec — the streams the provider should wire to the spawned process. */
-export interface InteractiveExecOptions {
-  readonly stdin: NodeJS.ReadableStream;
-  readonly stdout: NodeJS.WritableStream;
-  readonly stderr: NodeJS.WritableStream;
-  readonly cwd?: string;
-}
-
 /** Handle to a running bind-mount sandbox. */
 export interface BindMountSandboxHandle {
   /** Absolute path to the worktree inside the sandbox. */
@@ -45,16 +37,6 @@ export interface BindMountSandboxHandle {
       stdin?: string;
     },
   ): Promise<ExecResult>;
-  /**
-   * Launch an interactive process inside the sandbox.
-   * Optional — providers that support interactive sessions implement this.
-   * The provider detects TTY mode from the streams (e.g. stdin.isTTY) and
-   * allocates a pseudo-terminal accordingly.
-   */
-  interactiveExec?(
-    args: string[],
-    options: InteractiveExecOptions,
-  ): Promise<{ exitCode: number }>;
   /** Copy a single file from the host into the sandbox. */
   copyFileIn(hostPath: string, sandboxPath: string): Promise<void>;
   /** Copy a single file from the sandbox to the host. */
@@ -122,16 +104,6 @@ export interface IsolatedSandboxHandle {
       stdin?: string;
     },
   ): Promise<ExecResult>;
-  /**
-   * Launch an interactive process inside the sandbox.
-   * Optional — providers that support interactive sessions implement this.
-   * The provider detects TTY mode from the streams (e.g. stdin.isTTY) and
-   * allocates a pseudo-terminal accordingly.
-   */
-  interactiveExec?(
-    args: string[],
-    options: InteractiveExecOptions,
-  ): Promise<{ exitCode: number }>;
   /** Copy a file or directory from the host into the sandbox. */
   copyIn(hostPath: string, sandboxPath: string): Promise<void>;
   /** Copy a single file from the sandbox to the host. */
@@ -214,13 +186,6 @@ export interface NoSandboxHandle {
       stdin?: string;
     },
   ): Promise<ExecResult>;
-  /**
-   * Launch an interactive process on the host with inherited stdio.
-   */
-  interactiveExec(
-    args: string[],
-    options: InteractiveExecOptions,
-  ): Promise<{ exitCode: number }>;
   /** No-op — no container to tear down. */
   close(): Promise<void>;
 }
@@ -289,8 +254,8 @@ export type BranchStrategy =
   | NoSandboxBranchStrategy;
 
 /**
- * A sandbox provider — the pluggable unit that `run()`, `interactive()`, and
- * `createSandbox()` accept. Tagged for internal dispatch: "bind-mount",
+ * A sandbox provider — the pluggable unit that `run()` and `createSandbox()`
+ * accept. Tagged for internal dispatch: "bind-mount",
  * "isolated", or "none". When `NoSandboxProvider` is used, the agent runs
  * directly on the host with no container isolation — opt in at your own risk.
  */

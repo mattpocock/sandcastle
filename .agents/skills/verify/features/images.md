@@ -24,6 +24,6 @@ npm run -s verify -- sandcastle <run> podman remove-image [--image-name <n>]
 - **remove-image:**
   - Exit 0, then `Image removed.`; the inspect now fails.
   - It needs no `.sandcastle/`.
-- **A run against a missing image** fails before starting a container: `Image '<name>' not found locally. Build it first with 'sandcastle docker build-image'.` (`src/sandboxes/docker.ts:398-407`).
+- **A run against a missing image** fails before starting a container: `Image '<name>' not found locally. Build it first with 'sandcastle docker build-image'.` (`src/sandboxes/docker.ts:360-369`).
 
 The first build of an agent's image installs its CLI over the network and takes minutes. Later worlds reuse docker's layer cache and take seconds. When the stock image can't build here, the claim is UNVERIFIABLE: there is no agent-free fallback image, because every run uses a real agent.

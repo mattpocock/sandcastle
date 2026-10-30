@@ -1,6 +1,6 @@
 # JS entry points
 
-All four come from `@ai-hero/sandcastle`; sandboxes come from `@ai-hero/sandcastle/sandboxes/<name>`. Drive them from a committed script in the world's project, through the `tsx` verb.
+All three come from `@ai-hero/sandcastle`; sandboxes come from `@ai-hero/sandcastle/sandboxes/<name>`. Drive them from a committed script in the world's project, through the `tsx` verb.
 
 ## `run(options)` (`src/run.ts:482`)
 
@@ -36,11 +36,7 @@ const r = await run({
   - The log ends `Run complete: agent finished after N iteration(s).`, or `…reached N iteration(s) without completion signal.` when the prompt never asks for `<promise>COMPLETE</promise>`. That is still a successful run.
   - The ledger shows no worktree and no container.
 
-## `interactive(options)` (`src/interactive.ts:114`)
-
-It hands the terminal to the agent's interactive CLI. The default sandbox is `noSandbox()` (`:122`), which a world never runs, so always pass a sandbox. An agent's shell has no TTY, so a claim about the interactive session itself is UNVERIFIABLE here: say "verify on a maintainer's machine". The parts around the session are provable from a script: argument collection, worktree setup, the commits returned, and `exitCode`.
-
-## `createSandbox(options)` (`src/createSandbox.ts:904`)
+## `createSandbox(options)` (`src/createSandbox.ts:731`)
 
 ```ts
 await using sb = await createSandbox({ branch: "verify/x", sandbox: docker() });
@@ -60,7 +56,7 @@ const r = await sb.run({ agent: claudeCode("claude-haiku-5-5"), prompt: "…" })
   - The commits are on `verify/x`, and the host's checked-out branch didn't move.
   - After `close()`, the ledger shows no container and no worktree, and `verify/x` remains (expected).
 
-## `createWorktree(options)` (`src/createWorktree.ts:215`)
+## `createWorktree(options)` (`src/createWorktree.ts:174`)
 
 ```ts
 await using wt = await createWorktree({
@@ -81,7 +77,6 @@ await wt.run({
   - Returns `{ commits, branch, … }` with no `preservedWorktreePath`.
 - **Other handle methods:**
   - `wt.createSandbox()` returns a sandbox whose `close()` stops only its container.
-  - `wt.interactive()` defaults to `noSandbox()`, which a world never runs, so always pass a sandbox.
 - **`wt.close()`:** removes the worktree when clean, keeps it when dirty, and never deletes the branch.
 - **Proof:**
   - The commits are on `wt.branch`.
