@@ -1,6 +1,15 @@
 import { Effect, Layer, Ref } from "effect";
 import { exec } from "node:child_process";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  open,
+  readFile,
+  rename,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -58,6 +67,30 @@ const commitFile = async (
 const getHead = async (dir: string) => {
   const { stdout } = await execAsync("git rev-parse HEAD", { cwd: dir });
   return stdout.trim();
+};
+
+/**
+ * A FIFO that blocks whoever opens it for reading until `release()` is called.
+ * Point a host git step at it and that step hangs until released — so a
+ * timeout override is guaranteed to fire however loaded the machine is,
+ * rather than racing a real child process against a real 1ms timer.
+ */
+const makeFifoGate = async (dir: string) => {
+  const path = join(dir, "gate.fifo");
+  await execAsync(`mkfifo "${path}"`);
+  return {
+    path,
+    release: async () => {
+      // Swap a regular empty file in first: git may re-open the path, and
+      // later opens must not block.
+      const parked = `${path}.released`;
+      await rename(path, parked);
+      await writeFile(path, "");
+      // Opening for read+write never blocks, and it wakes any reader stuck
+      // opening the FIFO; closing it then gives that reader EOF.
+      await (await open(parked, constants.O_RDWR)).close();
+    },
+  };
 };
 
 const testDisplayLayer = SilentDisplay.layer(
@@ -1352,9 +1385,11 @@ describe("withSandboxLifecycle (worktree mode)", () => {
 
   it("respects a commitCollectionMs timeout override", async () => {
     const { hostDir, worktreeDir, sandbox } = await setupWorktree();
+    const gate = await makeFifoGate(hostDir);
 
-    // A 1ms budget cannot outrun spawning the `git rev-list` process, so
-    // commit collection should time out under the override (default is 30s).
+    // Once the work is done, gate the host repo's config on the FIFO: the
+    // commit-collection `git rev-list` then blocks reading its config until
+    // released, so only the 1ms override (not the 30s default) can end it.
     const result = Effect.runPromise(
       withSandboxLifecycle(
         {
@@ -1364,20 +1399,37 @@ describe("withSandboxLifecycle (worktree mode)", () => {
           timeouts: { commitCollectionMs: 1 },
         },
         sandbox,
-        () => Effect.succeed("ok"),
+        () =>
+          Effect.promise(() =>
+            execAsync(`git config include.path "${gate.path}"`, {
+              cwd: hostDir,
+            }),
+          ),
       ).pipe(Effect.provide(testDisplayLayer)),
     );
 
-    await expect(result).rejects.toThrow(
-      /Commit collection timed out after 1ms/,
-    );
+    try {
+      await expect(result).rejects.toThrow(
+        /Commit collection timed out after 1ms/,
+      );
+    } finally {
+      await gate.release();
+    }
   });
 
   it("respects a mergeToHostMs timeout override", async () => {
     const { hostDir, worktreeDir, sandbox } = await setupWorktree();
 
+    // A post-merge hook that blocks on the FIFO holds the host-side
+    // `git merge` open until released, so only the 1ms override (not the 30s
+    // default) can end it.
+    const gate = await makeFifoGate(hostDir);
+    const hook = join(hostDir, ".git", "hooks", "post-merge");
+    await writeFile(hook, `#!/bin/sh\ncat "${gate.path}" > /dev/null\n`);
+    await chmod(hook, 0o755);
+
     // Merge-to-head path (no explicit branch) with a real commit, so the
-    // host-side merge runs and times out under the 1ms override (default 30s).
+    // host-side merge runs and hits the gated hook.
     const result = Effect.runPromise(
       withSandboxLifecycle(
         {
@@ -1402,7 +1454,11 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       ).pipe(Effect.provide(testDisplayLayer)),
     );
 
-    await expect(result).rejects.toThrow(/timed out after 1ms/);
+    try {
+      await expect(result).rejects.toThrow(/timed out after 1ms/);
+    } finally {
+      await gate.release();
+    }
   });
 
   it("fails after exhausting retries on a persistent transient failure", async () => {
