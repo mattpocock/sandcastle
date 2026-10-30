@@ -7,7 +7,7 @@
  *   npm run -s verify -- sandcastle <run> …    the world's installed `sandcastle` CLI
  *   npm run -s verify -- tsx <run> <file> …    a TypeScript file, e.g. .sandcastle/main.ts
  *   npm run -s verify -- sh <run> <cmd> …      any command, inside the world
- *   npm run -s verify -- ledger <run>          what the runs left behind; exit 1 on a leak
+ *   npm run -s verify -- ledger <run>          what the runs left behind (LEDGER-<n>.md); exit 1 on a leak
  *   npm run -s verify -- cleanup <run>|--all   remove the world's containers, images, worktrees
  *   npm run -s verify -- dir <run>             the world's directory
  */
@@ -41,6 +41,7 @@ import {
   runInWorld,
   saveWorld,
   worldContainer,
+  worldTmp,
   type Engine,
   type World,
 } from "./world.ts";
@@ -134,19 +135,19 @@ const cleanup = (world: World): void => {
     sh("git", ["worktree", "remove", "--force", p], { cwd: world.project });
     removed.push(`worktree ${p}`);
   }
-  for (const p of [world.project, world.remote, world.home])
+  for (const p of [world.project, world.remote, world.home, worldTmp(world)])
     rmSync(p, { recursive: true, force: true });
   for (const f of sh("ls", [world.dir]).stdout.split("\n")) {
     if (f.endsWith(".tgz")) rmSync(join(world.dir, f), { force: true });
   }
-  removed.push("project, remote, home and packed build");
+  removed.push("project, remote, home, tmp and packed build");
   world.cleanedAt = new Date().toISOString();
   saveWorld(world);
   console.log(
     `cleanup ${world.runId}:\n${removed.map((r) => `  removed ${r}`).join("\n")}`,
   );
   console.log(
-    `  kept the evidence: ${world.dir} (world.json, logs/, observed.jsonl, LEDGER.md)`,
+    `  kept the evidence: ${world.dir} (world.json, logs/, observed.jsonl, LEDGER-*.md)`,
   );
 };
 
@@ -199,8 +200,9 @@ const main = async (): Promise<number> => {
         : runInWorld(world, "sh", args[0]!, args.slice(1));
     }
     case "ledger": {
-      const { text, leaks } = runLedger(loadWorld(rest[0]));
+      const { text, leaks, file } = runLedger(loadWorld(rest[0]));
       console.log(text);
+      console.error(`[verify] ledger written to ${file}`);
       return leaks === 0 ? 0 : 1;
     }
     case "cleanup": {

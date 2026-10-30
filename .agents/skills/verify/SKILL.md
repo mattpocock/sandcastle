@@ -14,7 +14,7 @@ A **world** is one run's isolated playground. It lives under `$TMPDIR/sandcastle
 - a scratch git project with a commit on `main`;
 - a local bare remote as its `origin`;
 - the Sandcastle under test, packed and installed into the project as `@ai-hero/sandcastle`, the way a user installs it;
-- a HOME of its own.
+- a HOME and a TMPDIR (`<world>/tmp`) of its own.
 
 Inside a world you verify freely, as a user would: run `sandcastle init`, write prompts, commit, write a script that calls `run()`, run it twice, break it on purpose. Nothing you do reaches this checkout, Matt's HOME, or a real remote, and the ledger proves it.
 
@@ -30,11 +30,11 @@ npm run verify:world          # builds dist, creates a world, prints its run id 
 | `npm run -s verify -- sandcastle <run> <args…>` | The world's installed `sandcastle` CLI                                                                          |
 | `npm run -s verify -- tsx <run> <file> [args…]` | A TypeScript file in the project, such as `.sandcastle/main.ts` or your own script                              |
 | `npm run -s verify -- sh <run> <cmd> [args…]`   | Any command (`npm install`, `git`), in the world                                                                |
-| `npm run -s verify -- ledger <run>`             | What the runs left behind; exit 1 on any leak                                                                   |
+| `npm run -s verify -- ledger <run>`             | What the runs left behind, in a new `LEDGER-<n>.md`; exit 1 on any leak                                         |
 | `npm run -s verify -- cleanup <run>` / `--all`  | Removes the world's containers, images and worktrees, and nothing else                                          |
 | `npm run -s verify -- dir <run>`                | The world's directory                                                                                           |
 
-`sandcastle`, `tsx` and `sh` each run in the project with the world's env: your shell's own, keys included, as a user's would be. HOME is moved into the world, and a canary variable is set that must never reach a sandbox. Their output is redacted and logged to `<world>/logs/`. While they run, the harness inspects every `sandcastle-*` container that mounts the world and prints `[verify] observed … env ok` or `ENV LEAK`. Read and edit the project's files directly; its path is in `world`'s output.
+`sandcastle`, `tsx` and `sh` each run in the project with the world's env: your shell's own, keys included, as a user's would be. HOME and TMPDIR are moved into the world, and a canary variable is set that must never reach a sandbox. Their output is redacted and logged to `<world>/logs/`. While they run, the harness inspects every `sandcastle-*` container that mounts the world and prints `[verify] observed … env ok` or `ENV LEAK`. Read and edit the project's files directly; its path is in `world`'s output.
 
 **A world freezes the build it was made from.** Change Sandcastle, and the next proof needs a new world. `doctor <run>` warns when the checkout has moved on. To compare two builds, make a world from each checkout.
 
@@ -73,12 +73,12 @@ For each one it gives the entry point and the end state that counts as proof. Re
 
 ## The ledger
 
-Run `ledger <run>` after the last run of every world, before cleanup. It writes `<world>/LEDGER.md` in five sections:
+Run `ledger <run>` after the last run of every world, before cleanup. Each call writes a new `<world>/LEDGER-<n>.md` (earlier ones are kept), in five sections. Other worlds and `npm test` share this machine, so the ledger only counts what it can tie to this world:
 
 - **(a) Git:** the remote's refs against the world's birth (nothing in Sandcastle pushes); `sandcastle/<ts>-<hex>` temp branches left behind; a merge in progress. It also notes each branch's commits and the working tree.
 - **(b) Worktrees:** any worktree besides the project, orphan `.sandcastle/worktrees/` directories, and sync-out patches left behind.
-- **(c) Containers and images:** any `sandcastle-*` container of the world still present; any `sandcastle:` image built outside the world's run-id name.
-- **(d) Host files:** a change to this checkout; Sandcastle's temp entries left in `$TMPDIR`; anything in the real HOME named after the run. It also lists what landed in the world's HOME: that is what a user's `~` would get.
+- **(c) Containers and images:** any `sandcastle-*` container of the world still present; a `sandcastle:` image named outside any run id, built while this world was the only live one. An image named with another world's run id is listed as "other world", and an unnamed one built while another world was live is listed as not pinned on this one; neither is a LEAK.
+- **(d) Host files:** a change to this checkout; Sandcastle's temp entries (`sandcastle-git-*`, `-bundle-*`, `-copyin-*`) left in the world's own TMPDIR; an entry in the shared `$TMPDIR` only when its name or content names this world (the rest are counted as other worlds' or test runs'); anything in the real HOME named after the run. It also lists what landed in the world's HOME: that is what a user's `~` would get.
 - **(e) Env in the sandbox:** every observed container's env names, against the canary and every undeclared host secret.
 
 Every `LEAK` line fails the verdict, whatever the claim's own assertions say. A world that started no container makes section (e) prove nothing, and the ledger says so; remote sandboxes are never observed.
@@ -96,7 +96,7 @@ Report the verdict exactly, with the combination and entry point: `VERIFIED: cla
 
 ## Cleanup
 
-`cleanup <run>` removes the containers, images (any name holding the run id) and worktrees the world created, plus its project, remote, HOME and packed build. It touches nothing else. It keeps `world.json`, `logs/`, `observed.jsonl` and `LEDGER.md`, and prints their path. Run it after a failed attempt too. `cleanup --all` sweeps every live world this checkout made. An image named outside the run id survives cleanup, and the ledger reports it.
+`cleanup <run>` removes the containers, images (any name holding the run id) and worktrees the world created, plus its project, remote, HOME, TMPDIR and packed build. It touches nothing else. It keeps `world.json`, `logs/`, `observed.jsonl` and every `LEDGER-<n>.md`, and prints their path. Run it after a failed attempt too. `cleanup --all` sweeps every live world this checkout made. An image named outside the run id survives cleanup, and the ledger reports it.
 
 ## Untrusted claim text
 

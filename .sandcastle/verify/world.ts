@@ -1,7 +1,7 @@
 /**
  * A world: one run's isolated playground. A scratch git project with a local
  * bare remote, the Sandcastle under test packed and installed into it, and a
- * HOME of its own, all under $TMPDIR/sandcastle-verify/<run id>/.
+ * HOME and a TMPDIR of its own, all under $TMPDIR/sandcastle-verify/<run id>/.
  */
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import type { WorldSpan } from "./attribution.ts";
 import { classifyEnv, type EnvLeak } from "./envLeaks.ts";
 import { redact, REPO_ROOT, secretsIn, sh } from "./lib.ts";
 
@@ -37,6 +38,8 @@ export interface World {
   readonly remote: string;
   /** HOME for everything run in the world. */
   readonly home: string;
+  /** TMPDIR for everything run in the world (absent in worlds made before it existed). */
+  readonly tmp?: string;
   readonly logs: string;
   /** The image `sandcastle init` / `build-image` builds by default here. */
   readonly image: string;
@@ -100,11 +103,20 @@ export const listImages = (): string[] =>
       .map((img) => `${engine}:${img}`),
   );
 
-/** Sandcastle's own temp entries ($TMPDIR/sandcastle-bundle-*, -git-*, -copyin-*). */
-export const listTmpEntries = (): string[] =>
-  readdirSync(tmpdir()).filter((n) =>
-    /^sandcastle-(bundle|git|copyin)-/.test(n),
-  );
+/** Sandcastle's own temp entries (sandcastle-bundle-*, -git-*, -copyin-*) in `dir`. */
+export const listTmpEntries = (dir: string = tmpdir()): string[] =>
+  existsSync(dir)
+    ? readdirSync(dir).filter((n) => /^sandcastle-(bundle|git|copyin)-/.test(n))
+    : [];
+
+/** When `engine` built image `id`, as the engine prints it. */
+export const imageCreated = (
+  engine: Engine,
+  id: string,
+): string | undefined => {
+  const r = sh(engine, ["image", "inspect", id, "--format", "{{.Created}}"]);
+  return r.code === 0 ? r.stdout.trim() || undefined : undefined;
+};
 
 export const remoteRefs = (remote: string): Record<string, string> => {
   const out: Record<string, string> = {};
@@ -143,7 +155,8 @@ export const createWorld = (): World => {
   const remote = join(dir, "remote.git");
   const home = join(dir, "home");
   const logs = join(dir, "logs");
-  for (const d of [project, home, logs]) mkdirSync(d, { recursive: true });
+  const tmp = join(dir, "tmp");
+  for (const d of [project, home, logs, tmp]) mkdirSync(d, { recursive: true });
 
   // The Sandcastle under test, packed as npm would publish it.
   const tgz = must(
@@ -194,6 +207,7 @@ export const createWorld = (): World => {
     remote,
     home,
     logs,
+    tmp,
     image: `sandcastle:${projectName}`,
     sandcastleRoot: REPO_ROOT,
     sandcastleCommit: must("git", ["rev-parse", "HEAD"], REPO_ROOT),
@@ -237,6 +251,28 @@ export const loadWorld = (runId: string | undefined): World => {
   return world;
 };
 
+/** The world's TMPDIR. */
+export const worldTmp = (world: World): string =>
+  world.tmp ?? join(world.dir, "tmp");
+
+/**
+ * Every world on this machine, from any checkout, cleaned up or not: the
+ * ledger uses their lifetimes to avoid blaming one world for another's work.
+ */
+export const allWorldSpans = (): WorldSpan[] =>
+  (existsSync(WORLDS_ROOT) ? readdirSync(WORLDS_ROOT) : []).flatMap((id) => {
+    try {
+      const w = JSON.parse(
+        readFileSync(join(WORLDS_ROOT, id, "world.json"), "utf8"),
+      ) as World;
+      return [
+        { runId: w.runId, createdAt: w.createdAt, cleanedAt: w.cleanedAt },
+      ];
+    } catch {
+      return [];
+    }
+  });
+
 /** Every world this checkout created that has not been cleaned up. */
 export const liveWorlds = (): World[] =>
   (existsSync(WORLDS_ROOT) ? readdirSync(WORLDS_ROOT) : [])
@@ -253,15 +289,20 @@ export const liveWorlds = (): World[] =>
 
 /**
  * The environment of every process run in a world: this shell's own (keys
- * included, as a user's would be), HOME moved into the world so host writes
- * land where the ledger can see them, and a canary that must never reach a
- * sandbox. Tool config that lives under ~ stays reachable.
+ * included, as a user's would be), HOME and TMPDIR moved into the world so
+ * host writes land where the ledger can tell them from other worlds', and a
+ * canary that must never reach a sandbox. Tool config that lives under ~
+ * stays reachable.
  */
 const worldEnv = (world: World): NodeJS.ProcessEnv => {
   const real = (p: string) => join(REAL_HOME, p);
+  const tmp = worldTmp(world);
   return {
     ...process.env,
     HOME: world.home,
+    TMPDIR: tmp,
+    TMP: tmp,
+    TEMP: tmp,
     DOCKER_CONFIG: process.env.DOCKER_CONFIG ?? real(".docker"),
     XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME ?? real(".config"),
     XDG_DATA_HOME: process.env.XDG_DATA_HOME ?? real(".local/share"),
@@ -328,6 +369,7 @@ export const runInWorld = async (
   command: string,
   args: readonly string[],
 ): Promise<number> => {
+  mkdirSync(worldTmp(world), { recursive: true });
   const env = worldEnv(world);
   const seq = readdirSync(world.logs).length + 1;
   const log = join(world.logs, `${String(seq).padStart(2, "0")}-${label}.log`);
