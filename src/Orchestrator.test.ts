@@ -13,7 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Display, type DisplayEntry, SilentDisplay } from "./Display.js";
 import { makeLocalSandbox } from "./testSandbox.js";
 import { orchestrate } from "./Orchestrator.js";
@@ -46,6 +46,26 @@ const testDisplayLayer = Layer.mergeAll(
   SilentDisplay.layer(Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([])),
   noopAgentStreamEmitterLayer,
 );
+
+/**
+ * Run `fn` with `setTimeout`/`clearTimeout` faked, so the Orchestrator's idle,
+ * warning and completion timers (Effect.sleep → setTimeout) only fire when the
+ * mock agent calls `advance`. Timer tests then assert on a fixed ordering of
+ * events instead of racing real timers with tens-of-ms margins, which can
+ * flip under CPU load. Child processes (git) are unaffected.
+ */
+const withFakeTimers = async <T>(fn: () => Promise<T>): Promise<T> => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    return await fn();
+  } finally {
+    vi.useRealTimers();
+  }
+};
+
+/** Advance the fake clock by `ms`, firing every timer due on the way. */
+const advance = (ms: number) =>
+  Effect.promise(() => vi.advanceTimersByTimeAsync(ms));
 
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });
@@ -2394,9 +2414,7 @@ describe("Orchestrator Display integration", () => {
               const onLine = options.onLine;
               return Effect.gen(function* () {
                 // Wait 100ms then emit a text event (resets idle timer)
-                yield* Effect.promise(
-                  () => new Promise((resolve) => setTimeout(resolve, 100)),
-                );
+                yield* advance(100);
                 onLine(
                   JSON.stringify({
                     type: "assistant",
@@ -2406,9 +2424,7 @@ describe("Orchestrator Display integration", () => {
                   }),
                 );
                 // Wait another 100ms then emit the result
-                yield* Effect.promise(
-                  () => new Promise((resolve) => setTimeout(resolve, 100)),
-                );
+                yield* advance(100);
                 onLine(JSON.stringify({ type: "result", result: "done" }));
                 return { stdout: "", stderr: "", exitCode: 0 };
               });
@@ -2422,17 +2438,19 @@ describe("Orchestrator Display integration", () => {
       },
     );
 
-    const exitResult = await Effect.runPromise(
-      orchestrate({
-        provider: testProvider,
-        hostRepoDir: hostDir,
+    const exitResult = await withFakeTimers(() =>
+      Effect.runPromise(
+        orchestrate({
+          provider: testProvider,
+          hostRepoDir: hostDir,
 
-        iterations: 1,
-        prompt: "test",
-        idleTimeoutSeconds: 0.15, // 150ms — timer resets on text at t=100ms
-      }).pipe(
-        Effect.provide(Layer.merge(factoryLayer, testDisplayLayer)),
-        Effect.exit,
+          iterations: 1,
+          prompt: "test",
+          idleTimeoutSeconds: 0.15, // 150ms — timer resets on text at t=100ms
+        }).pipe(
+          Effect.provide(Layer.merge(factoryLayer, testDisplayLayer)),
+          Effect.exit,
+        ),
       ),
     );
 
@@ -2461,14 +2479,10 @@ describe("Orchestrator Display integration", () => {
               const onLine = options.onLine;
               return Effect.gen(function* () {
                 // Wait 100ms then emit a raw, unparsable line (should still reset idle timer)
-                yield* Effect.promise(
-                  () => new Promise((resolve) => setTimeout(resolve, 100)),
-                );
+                yield* advance(100);
                 onLine("raw TUI output: rendering panel...");
                 // Wait another 100ms then emit the result so the run completes
-                yield* Effect.promise(
-                  () => new Promise((resolve) => setTimeout(resolve, 100)),
-                );
+                yield* advance(100);
                 onLine(JSON.stringify({ type: "result", result: "done" }));
                 return { stdout: "", stderr: "", exitCode: 0 };
               });
@@ -2482,17 +2496,19 @@ describe("Orchestrator Display integration", () => {
       },
     );
 
-    const exitResult = await Effect.runPromise(
-      orchestrate({
-        provider: testProvider,
-        hostRepoDir: hostDir,
+    const exitResult = await withFakeTimers(() =>
+      Effect.runPromise(
+        orchestrate({
+          provider: testProvider,
+          hostRepoDir: hostDir,
 
-        iterations: 1,
-        prompt: "test",
-        idleTimeoutSeconds: 0.15, // 150ms — should be reset by raw stdout at t=100ms
-      }).pipe(
-        Effect.provide(Layer.merge(factoryLayer, testDisplayLayer)),
-        Effect.exit,
+          iterations: 1,
+          prompt: "test",
+          idleTimeoutSeconds: 0.15, // 150ms — should be reset by raw stdout at t=100ms
+        }).pipe(
+          Effect.provide(Layer.merge(factoryLayer, testDisplayLayer)),
+          Effect.exit,
+        ),
       ),
     );
 
@@ -2506,8 +2522,8 @@ describe("Orchestrator Display integration", () => {
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
-    // Agent stays idle for 250ms with _idleWarningIntervalMs=100ms,
-    // so ~2 warnings should fire before the agent completes.
+    // Agent stays idle for 250ms (fake clock) with _idleWarningIntervalMs=100ms,
+    // so exactly 2 warnings fire (t=100ms, t=200ms) before the agent completes.
     const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory(
       hostDir,
       (dir) => {
@@ -2517,10 +2533,8 @@ describe("Orchestrator Display integration", () => {
             if (command.startsWith("claude ") && options?.onLine) {
               const onLine = options.onLine;
               return Effect.gen(function* () {
-                // Stay idle for 250ms — enough for ~2 warnings at 100ms interval
-                yield* Effect.promise(
-                  () => new Promise((resolve) => setTimeout(resolve, 250)),
-                );
+                // Stay idle for 250ms — warnings fire at 100ms and 200ms
+                yield* advance(250);
                 onLine(JSON.stringify({ type: "result", result: "done" }));
                 return { stdout: "", stderr: "", exitCode: 0 };
               });
@@ -2540,18 +2554,20 @@ describe("Orchestrator Display integration", () => {
       noopAgentStreamEmitterLayer,
     );
 
-    const exitResult = await Effect.runPromise(
-      orchestrate({
-        provider: testProvider,
-        hostRepoDir: hostDir,
+    const exitResult = await withFakeTimers(() =>
+      Effect.runPromise(
+        orchestrate({
+          provider: testProvider,
+          hostRepoDir: hostDir,
 
-        iterations: 1,
-        prompt: "test",
-        idleTimeoutSeconds: 10, // high enough not to kill
-        _idleWarningIntervalMs: 100, // fire warnings every 100ms for testing
-      }).pipe(
-        Effect.provide(Layer.merge(factoryLayer, displayLayer)),
-        Effect.exit,
+          iterations: 1,
+          prompt: "test",
+          idleTimeoutSeconds: 10, // high enough not to kill
+          _idleWarningIntervalMs: 100, // fire warnings every 100ms for testing
+        }).pipe(
+          Effect.provide(Layer.merge(factoryLayer, displayLayer)),
+          Effect.exit,
+        ),
       ),
     );
 
@@ -2562,8 +2578,8 @@ describe("Orchestrator Display integration", () => {
       (e) => e._tag === "status" && e.severity === "warn",
     );
 
-    // Should have at least 2 warning entries (at ~100ms and ~200ms)
-    expect(warningEntries.length).toBeGreaterThanOrEqual(2);
+    // Exactly 2 warning entries: at 100ms and 200ms of the 250ms idle
+    expect(warningEntries).toHaveLength(2);
     // First warning should say "1 minute" (even though the interval is 100ms in test)
     expect((warningEntries[0] as { message: string }).message).toContain(
       "Agent idle for 1 minute",
@@ -2580,8 +2596,8 @@ describe("Orchestrator Display integration", () => {
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
     // Mock agent: idle 150ms, emit text (resets counter), idle 150ms, complete.
-    // With 100ms warning interval, we should see warning at ~100ms (1 minute),
-    // then text at ~150ms resets counter, then warning at ~250ms (1 minute again, not 2).
+    // With 100ms warning interval, we should see warning at 100ms (1 minute),
+    // then text at 150ms resets counter, then warning at 250ms (1 minute again, not 2).
     const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory(
       hostDir,
       (dir) => {
@@ -2591,10 +2607,8 @@ describe("Orchestrator Display integration", () => {
             if (command.startsWith("claude ") && options?.onLine) {
               const onLine = options.onLine;
               return Effect.gen(function* () {
-                // Idle for 150ms — warning fires at ~100ms
-                yield* Effect.promise(
-                  () => new Promise((resolve) => setTimeout(resolve, 150)),
-                );
+                // Idle for 150ms — warning fires at 100ms
+                yield* advance(150);
                 // Emit text — should reset the warning counter
                 onLine(
                   JSON.stringify({
@@ -2604,10 +2618,8 @@ describe("Orchestrator Display integration", () => {
                     },
                   }),
                 );
-                // Idle for another 150ms — warning fires at ~100ms after reset
-                yield* Effect.promise(
-                  () => new Promise((resolve) => setTimeout(resolve, 150)),
-                );
+                // Idle for another 150ms — warning fires 100ms after reset
+                yield* advance(150);
                 onLine(JSON.stringify({ type: "result", result: "done" }));
                 return { stdout: "", stderr: "", exitCode: 0 };
               });
@@ -2627,18 +2639,20 @@ describe("Orchestrator Display integration", () => {
       noopAgentStreamEmitterLayer,
     );
 
-    const exitResult = await Effect.runPromise(
-      orchestrate({
-        provider: testProvider,
-        hostRepoDir: hostDir,
+    const exitResult = await withFakeTimers(() =>
+      Effect.runPromise(
+        orchestrate({
+          provider: testProvider,
+          hostRepoDir: hostDir,
 
-        iterations: 1,
-        prompt: "test",
-        idleTimeoutSeconds: 10,
-        _idleWarningIntervalMs: 100,
-      }).pipe(
-        Effect.provide(Layer.merge(factoryLayer, displayLayer)),
-        Effect.exit,
+          iterations: 1,
+          prompt: "test",
+          idleTimeoutSeconds: 10,
+          _idleWarningIntervalMs: 100,
+        }).pipe(
+          Effect.provide(Layer.merge(factoryLayer, displayLayer)),
+          Effect.exit,
+        ),
       ),
     );
 
@@ -2649,8 +2663,8 @@ describe("Orchestrator Display integration", () => {
       (e) => e._tag === "status" && e.severity === "warn",
     );
 
-    // Should have at least 2 warnings (one before text, one after text reset)
-    expect(warningEntries.length).toBeGreaterThanOrEqual(2);
+    // Exactly 2 warnings: one before the text (t=100ms), one after the reset (t=250ms)
+    expect(warningEntries).toHaveLength(2);
     // Both should say "1 minute" because the counter was reset by the text event
     expect((warningEntries[0] as { message: string }).message).toContain(
       "Agent idle for 1 minute",
@@ -3985,7 +3999,7 @@ describe("Orchestrator completion timeout (hanging process)", () => {
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
-    // After the signal: emit a trailing usage/result line ~120ms later. With a
+    // After the signal: emit a trailing usage/result line 120ms later. With a
     // 200ms grace window the trailing line MUST land before the timer fires
     // and MUST reset it, so the run succeeds and the trailing text is in stdout.
     const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) => {
@@ -4008,9 +4022,7 @@ describe("Orchestrator completion timeout (hanging process)", () => {
                   },
                 }),
               );
-              yield* Effect.promise(
-                () => new Promise((resolve) => setTimeout(resolve, 120)),
-              );
+              yield* advance(120);
               onLine(
                 JSON.stringify({
                   type: "result",
@@ -4018,7 +4030,8 @@ describe("Orchestrator completion timeout (hanging process)", () => {
                     "Plan ready. <promise>COMPLETE</promise>\nTRAILING_TOKEN",
                 }),
               );
-              // Hang forever after trailing output.
+              // Let the (reset) grace window lapse, then hang forever.
+              yield* advance(200);
               yield* Effect.never;
               return { stdout: "", stderr: "", exitCode: 0 };
             });
@@ -4031,15 +4044,17 @@ describe("Orchestrator completion timeout (hanging process)", () => {
       };
     });
 
-    const result = await Effect.runPromise(
-      orchestrate({
-        provider: testProvider,
-        hostRepoDir: hostDir,
-        iterations: 1,
-        prompt: "do some work",
-        completionTimeoutSeconds: 0.2,
-        idleTimeoutSeconds: 30,
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+    const result = await withFakeTimers(() =>
+      Effect.runPromise(
+        orchestrate({
+          provider: testProvider,
+          hostRepoDir: hostDir,
+          iterations: 1,
+          prompt: "do some work",
+          completionTimeoutSeconds: 0.2,
+          idleTimeoutSeconds: 30,
+        }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      ),
     );
 
     expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
