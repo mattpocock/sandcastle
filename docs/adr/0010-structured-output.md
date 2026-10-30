@@ -38,3 +38,7 @@ Structured output is a separate domain concept from the **completion signal**. T
 The error now also carries `sessionId?` and `sessionFilePath?`, populated from the iteration that produced the bad output (structured-output runs are single-iteration, so `iterations.at(-1)`). Both are optional: `sessionId` is absent for non-Claude agents that don't emit one, and `sessionFilePath` is only set when the session was captured to the host. The fields are additive and backward compatible.
 
 Alternatives considered and rejected: (B) an `onIteration`/`onSessionId` callback on `run()` to surface the id before the throw — broader surface, and attaching to the error covers this use case more simply; (C) a caller-supplied `--session-id` passthrough on `claudeCode` so the id is known in advance — generally useful but a larger surface and not required once the error exposes the id. Retry/feedback orchestration stays out of Sandcastle: the error exposes what's needed for recovery, and the loop lives in the consumer.
+
+## Amendment — `interactive()` removed (2026-10-30)
+
+`interactive()` and `wt.interactive()` were removed by [ADR 0021](0021-remove-interactive.md). `output` is still `run()`-only.

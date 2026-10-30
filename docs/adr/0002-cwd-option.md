@@ -19,3 +19,7 @@ The rejected alternative was to resolve relative `promptFile` against `cwd`, so 
 - Users supplying a custom `cwd` must pass an absolute `promptFile` (or arrange `process.cwd()` accordingly). Documented in the option's JSDoc.
 - `_test.hostRepoDir` is removed from `createSandbox` and `createWorktree`; tests migrate to the public `cwd`. `_test.buildSandboxLayer` stays.
 - The "tail -f" log hint prints an absolute path when `cwd !== process.cwd()`, relative otherwise.
+
+## Amendment — `interactive()` removed (2026-10-30)
+
+`interactive()` was removed by [ADR 0021](0021-remove-interactive.md). `cwd` still applies to `run()`, `createSandbox()` and `createWorktree()`.

@@ -62,3 +62,7 @@ Only the **branch** strategy is affected. The **merge-to-head** strategy creates
 - The `.sandcastle/locks/` directory becomes a new managed directory in the **config directory**.
 - A crashed process does not permanently lock a **worktree** — stale detection via PID liveness check ensures recovery.
 - This closes the open thread from ADR 0003: "Worktree locking (#401) is a future mitigation for the concurrent-access risk this opens up."
+
+## Amendment — `interactive()` removed (2026-10-30)
+
+`interactive()` was removed by [ADR 0021](0021-remove-interactive.md). What this ADR says about concurrent calls now applies to `run()` alone.

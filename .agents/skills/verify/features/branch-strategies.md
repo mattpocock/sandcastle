@@ -1,6 +1,6 @@
 # Branch strategies
 
-`branchStrategy` on `run()`, `interactive()` and `createWorktree()` (`src/SandboxProvider.ts:245-289`). With none given, `run()` and `interactive()` use **head** on bind-mount sandboxes (docker, podman) and **merge-to-head** on isolated ones (vercel, daytona) (`src/run.ts:508-512`). `createSandbox()` always uses an explicit branch.
+`branchStrategy` on `run()` and `createWorktree()` (`src/SandboxProvider.ts:210-254`). With none given, `run()` uses **head** on bind-mount sandboxes (docker, podman) and **merge-to-head** on isolated ones (vercel, daytona) (`src/run.ts:508-512`). `createSandbox()` always uses an explicit branch.
 
 Each strategy's proof starts from the host repo's branch and HEAD before the run, which the ledger's section (a) prints. Record them before you start.
 

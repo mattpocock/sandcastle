@@ -25,8 +25,6 @@ import {
 import { claudeCode, cursor, opencode } from "./AgentProvider.js";
 import { Output, StructuredOutputError } from "./Output.js";
 import { claudeHostSessionPath } from "./SessionStore.js";
-import type { InteractiveOptions } from "./interactive.js";
-import type { WorktreeInteractiveOptions } from "./createWorktree.js";
 import { defaultImageName } from "./sandboxes/docker.js";
 import * as sandcastle from "./SandboxProvider.js";
 import { createBindMountSandboxProvider } from "./SandboxProvider.js";
@@ -1121,26 +1119,6 @@ describe("RunOptions with output", () => {
       sandbox: testSandbox,
       prompt: "test",
     };
-    expect(opts.output).toBeUndefined();
-  });
-});
-
-describe("output type-level exclusion", () => {
-  it("InteractiveOptions does not accept output", () => {
-    const opts: InteractiveOptions = {
-      agent: claudeCode("claude-opus-4-8"),
-      prompt: "test",
-    };
-    // @ts-expect-error output is not a field on InteractiveOptions
-    expect(opts.output).toBeUndefined();
-  });
-
-  it("WorktreeInteractiveOptions does not accept output", () => {
-    const opts: WorktreeInteractiveOptions = {
-      agent: claudeCode("claude-opus-4-8"),
-      prompt: "test",
-    };
-    // @ts-expect-error output is not a field on WorktreeInteractiveOptions
     expect(opts.output).toBeUndefined();
   });
 });

@@ -3,21 +3,20 @@
  *
  * Usage:
  *   import { noSandbox } from "sandcastle/sandboxes/no-sandbox";
- *   await interactive({ agent: claudeCode("claude-opus-4-8"), sandbox: noSandbox() });
+ *   await run({ agent: claudeCode("claude-opus-4-8"), sandbox: noSandbox(), prompt: "…" });
  *
- * Accepted by `run()`, `interactive()`, and `createSandbox()`. Skips
+ * Accepted by `run()` and `createSandbox()`. Skips
  * container isolation entirely — the agent executes on the host. Does not
  * pass `--dangerously-skip-permissions` to the agent — the user manages
  * permissions themselves.
  */
 
-import { spawn, type StdioOptions } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import type {
   NoSandboxProvider,
   NoSandboxHandle,
   ExecResult,
-  InteractiveExecOptions,
 } from "../SandboxProvider.js";
 import { BoundedTail, MAX_TAIL_CHARS } from "../boundedTail.js";
 
@@ -132,32 +131,6 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
               });
             });
           }
-        });
-      },
-
-      interactiveExec: (
-        args: string[],
-        opts: InteractiveExecOptions,
-      ): Promise<{ exitCode: number }> => {
-        return new Promise((resolve, reject) => {
-          const [cmd, ...rest] = args;
-          // Agent CLIs on Windows are typically installed as `.cmd`/`.ps1`
-          // npm wrappers; bare `spawn("claude", …)` only resolves `.exe`
-          // without `shell: true`, so let cmd.exe handle PATHEXT lookup.
-          const proc = spawn(cmd!, rest, {
-            cwd: opts.cwd ?? worktreePath,
-            env: processEnv,
-            stdio: [opts.stdin, opts.stdout, opts.stderr] as StdioOptions,
-            shell: process.platform === "win32",
-          });
-
-          proc.on("error", (error: Error) => {
-            reject(new Error(`exec failed: ${error.message}`));
-          });
-
-          proc.on("close", (code: number | null) => {
-            resolve({ exitCode: code ?? 0 });
-          });
         });
       },
 
