@@ -404,7 +404,8 @@ export interface RunOptions<A extends AgentProvider = AgentProvider> {
    * - Phase boundaries (between iterations) also check the signal.
    * - The rejected promise surfaces `signal.reason` via
    *   `signal.throwIfAborted()` — no Sandcastle-specific wrapping.
-   * - The worktree is preserved on disk after abort (error-path behavior).
+   * - The worktree is preserved on disk after abort, even when it has no
+   *   uncommitted changes, and its path is printed to stderr.
    */
   readonly signal?: AbortSignal;
   /** Override default timeouts for built-in lifecycle steps. Unset keys keep their defaults. */
