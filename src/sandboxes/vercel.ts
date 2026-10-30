@@ -32,9 +32,10 @@ export interface VercelOptions {
   /**
    * Vercel access token.
    *
-   * Falls back to the SDK's default auth behavior, which reads
-   * `VERCEL_OIDC_TOKEN` (recommended for Vercel-hosted environments) or
-   * `VERCEL_TOKEN` from the environment.
+   * Falls back to the `VERCEL_TOKEN` environment variable. A token needs a
+   * team and project id too (`teamId`/`VERCEL_TEAM_ID`,
+   * `projectId`/`VERCEL_PROJECT_ID`). With no token at all, the SDK's OIDC
+   * auth applies, which reads `VERCEL_OIDC_TOKEN`.
    */
   readonly token?: string;
 
@@ -90,11 +91,13 @@ export interface VercelOptions {
 
   /**
    * Vercel project ID to associate sandbox operations with.
+   * Falls back to the `VERCEL_PROJECT_ID` environment variable when a token is used.
    */
   readonly projectId?: string;
 
   /**
    * Vercel team ID to associate sandbox operations with.
+   * Falls back to the `VERCEL_TEAM_ID` environment variable when a token is used.
    */
   readonly teamId?: string;
 
@@ -122,6 +125,46 @@ export interface VercelOptions {
    */
   readonly maxOutputTailChars?: number;
 }
+
+/**
+ * Resolve the auth params for `Sandbox.create()`.
+ *
+ * `@vercel/sandbox` only accepts a token as an explicit param, together with
+ * `teamId` and `projectId` (all three or none); otherwise it falls back to
+ * OIDC. So read `VERCEL_TOKEN`, `VERCEL_TEAM_ID` and `VERCEL_PROJECT_ID`
+ * here, explicit options first.
+ */
+const resolveVercelAuth = (
+  options: VercelOptions | undefined,
+): { token?: string; teamId?: string; projectId?: string } => {
+  const env = process.env;
+  const token = options?.token || env.VERCEL_TOKEN || undefined;
+
+  if (!token) {
+    // No token: the SDK's OIDC flow, which may use team/project ids as hints.
+    return {
+      ...(options?.teamId ? { teamId: options.teamId } : {}),
+      ...(options?.projectId ? { projectId: options.projectId } : {}),
+    };
+  }
+
+  const teamId = options?.teamId || env.VERCEL_TEAM_ID || undefined;
+  const projectId = options?.projectId || env.VERCEL_PROJECT_ID || undefined;
+  const missing = [
+    teamId ? null : "VERCEL_TEAM_ID (or the teamId option)",
+    projectId ? null : "VERCEL_PROJECT_ID (or the projectId option)",
+  ].filter((name): name is string => name !== null);
+
+  if (missing.length > 0) {
+    const source = options?.token ? "the token option" : "VERCEL_TOKEN";
+    throw new Error(
+      `vercel(): ${source} is set, but a Vercel token also needs a team and project id. ` +
+        `Missing: ${missing.join(", ")}.`,
+    );
+  }
+
+  return { token, teamId, projectId };
+};
 
 /**
  * Create a Vercel isolated sandbox provider.
@@ -159,10 +202,7 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
       // Merge provider env with Sandcastle env
       createParams.env = createOptions.env;
 
-      // Auth: pass token and team/project IDs if provided
-      if (options?.token) createParams.token = options.token;
-      if (options?.projectId) createParams.projectId = options.projectId;
-      if (options?.teamId) createParams.teamId = options.teamId;
+      Object.assign(createParams, resolveVercelAuth(options));
 
       const sandbox = await Sandbox.create(
         createParams as Parameters<typeof Sandbox.create>[0],
