@@ -3,6 +3,8 @@
 Copy the nearest check in `.sandcastle/verify/` to `.sandcastle/verify/<slug>.ts`, keeping its shape: one `verify()` call on `harness.ts` (its header and exports are the API), with prerequisites first, then setup, then assertions.
 
 - **Prerequisites.** `requireEnv` every key the combination needs and `requireCommand` every daemon, so a gap becomes UNVERIFIABLE naming it rather than a FAILED.
+- **Keys reach the sandbox by declaration.** Sandcastle passes only the keys named in the scratch repo's `.sandcastle/.env`; declare exactly the combination's keys, empty (`KEY=`), so their values come from the environment and no other agent's key leaks in.
+- **Model.** Pass `cheapModel(agent)` wherever the check picks a model (`sandcastle init --model`, or the agent factory).
 - **Deterministic assertions.** Assert only on observables: exit codes, commit counts, a file's exact content, a fixed string in the output. When an agent runs inside the sandbox, prompt it for one fixed artefact (one file holding one line, one commit) so the model's wording never decides the verdict.
 - **Faithful path.** Drive the same entry point a user would: `sandcastleCli(["init", …])` plus the scaffolded `main.ts` for init claims, or the `run()` / `createSandbox()` call the claim names. Keep the combination from step 2: a stand-in agent binary or another agent is a different combination, so run it only as a separately labelled extra and keep it out of the verdict.
 - **Image fallback.** If the stock `sandcastle init` image can't build (the network blocks apt or the Claude installer) and the claim doesn't need the agent CLI, build this minimal image with `sandcastle docker build-image --dockerfile <path>`. A claim that needs the agent CLI is UNVERIFIABLE here instead.

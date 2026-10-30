@@ -7,6 +7,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import {
+  cheapModel,
   requireCommand,
   requireEnv,
   sandcastleCli,
@@ -38,6 +39,8 @@ await verify(
         "blank",
         "--agent",
         "claude-code",
+        "--model",
+        cheapModel("claudeCode"),
         "--sandbox",
         "docker",
         "--issue-tracker",
@@ -63,7 +66,8 @@ await verify(
     if (init.code !== 0 || image.code !== 0) return;
 
     // As a student would: commit the scaffold, set the prompt, provide the key.
-    // The key is declared empty so Sandcastle reads it from process.env.
+    // The key is declared empty so Sandcastle reads it from process.env, and
+    // only declared keys reach the sandbox (so ANTHROPIC_API_KEY stays out).
     repo.write(
       ".sandcastle/prompt.md",
       `Create a file named hello.txt whose entire content is the single line: ${EXPECTED}\n` +
@@ -78,6 +82,11 @@ await verify(
     const main = existsSync(join(repo.dir, ".sandcastle", "main.ts"))
       ? ".sandcastle/main.ts"
       : ".sandcastle/main.mts";
+    check.expect(
+      repo.read(main).includes(`claudeCode("${cheapModel("claudeCode")}")`),
+      `${main} runs claudeCode("${cheapModel("claudeCode")}")`,
+      repo.read(main),
+    );
     check.step(`npx tsx ${main} (runs Claude Code in Docker)`);
     const run = tsx(main, {
       cwd: repo.dir,

@@ -36,6 +36,38 @@ const TSX = join(REPO_ROOT, "node_modules", ".bin", "tsx");
 /** Thrown when the check cannot run here. The message names what is missing. */
 export class Unverifiable extends Error {}
 
+// --- Combination ------------------------------------------------------------
+
+export type Agent =
+  | "claudeCode"
+  | "pi"
+  | "codex"
+  | "cursor"
+  | "opencode"
+  | "copilot";
+
+/** Sandboxes a check may run in. noSandbox is left out on purpose: it runs
+ *  the agent on the host, and its unit tests already cover it. */
+export type Sandbox = "docker" | "podman" | "vercel" | "daytona";
+
+/**
+ * The cheapest model each agent can do a check's one-file, one-commit task
+ * with. A pricier model proves nothing more about Sandcastle. Override one
+ * run with VERIFY_MODEL=<id>.
+ */
+const CHEAP_MODELS: Record<Agent, string> = {
+  claudeCode: "claude-haiku-5-5", // Claude Haiku 5.5
+  pi: "anthropic/claude-haiku-5-5", // pi takes provider/id
+  codex: "gpt-6-luna", // "most efficient" Codex model
+  cursor: "composer-2", // init's default; cheapest id unconfirmed
+  opencode: "opencode/big-pickle", // free on OpenCode Zen
+  copilot: "claude-haiku-4.5", // 0.33x premium requests
+};
+
+/** The model a check runs `agent` on. */
+export const cheapModel = (agent: Agent): string =>
+  process.env.VERIFY_MODEL || CHEAP_MODELS[agent];
+
 // --- Secret redaction -------------------------------------------------------
 
 const SECRET_KEY = /TOKEN|KEY|SECRET|PASSWORD/i;
@@ -66,7 +98,9 @@ export const tail = (text: string, lines = 15): string =>
 export const requireEnv = (...keys: string[]): void => {
   const missing = keys.filter((k) => !process.env[k]);
   if (missing.length > 0) {
-    throw new Unverifiable(`missing env var(s): ${missing.join(", ")}`);
+    throw new Unverifiable(
+      `missing env var(s): ${missing.join(", ")}; add with .sandcastle/setup-verify-keys.sh`,
+    );
   }
 };
 
@@ -204,11 +238,13 @@ export interface Check {
  * check file.
  */
 export const verify = async (
-  meta: { claim: string; agent: string; sandbox: string },
+  meta: { claim: string; agent: Agent; sandbox: Sandbox },
   body: (check: Check) => Promise<void>,
 ): Promise<never> => {
   console.log(`CLAIM: ${meta.claim}`);
-  console.log(`COMBINATION: ${meta.agent} × ${meta.sandbox}`);
+  console.log(
+    `COMBINATION: ${meta.agent} (${cheapModel(meta.agent)}) × ${meta.sandbox}`,
+  );
   let failures = 0;
   const check: Check = {
     expect: (ok, label, evidence) => {
