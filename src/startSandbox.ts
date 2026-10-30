@@ -70,7 +70,7 @@ export interface StartSandboxResult {
   worktreePath: string;
 }
 
-const CONTAINER_START_TIMEOUT_MS = 120_000;
+export const CONTAINER_START_TIMEOUT_MS = 120_000;
 const SYNC_IN_TIMEOUT_MS = 120_000;
 export const COPY_PATHS_TIMEOUT_MS = 120_000;
 
@@ -103,6 +103,30 @@ export const startSandbox = (
   return startIsolatedSandbox(options as StartSandboxIsolatedOptions);
 };
 
+/**
+ * Run a provider's `create()`. If we stop waiting for it (the start timeout
+ * fires, or the caller is interrupted) the provider still finishes creating
+ * the sandbox, and nobody holds its handle. Close that handle when it
+ * arrives, so a late sandbox never outlives the run.
+ */
+const createClosingIfAbandoned = <H extends { close(): Promise<void> }, E>(
+  create: () => Promise<H>,
+  onError: (e: unknown) => E,
+): Effect.Effect<H, E> =>
+  Effect.suspend(() => {
+    let pending: Promise<H> | undefined;
+    return Effect.tryPromise({
+      try: () => (pending = create()),
+      catch: onError,
+    }).pipe(
+      Effect.onInterrupt(() =>
+        Effect.sync(() => {
+          pending?.then((handle) => handle.close()).catch(() => {});
+        }),
+      ),
+    );
+  });
+
 const startNoSandbox = (
   options: StartSandboxNoSandboxOptions,
 ): Effect.Effect<StartSandboxResult, WorktreeError> =>
@@ -130,8 +154,8 @@ const startBindMountSandbox = (
   StartSandboxResult,
   DockerError | WorktreeError | ContainerStartTimeoutError
 > =>
-  Effect.tryPromise({
-    try: () => {
+  createClosingIfAbandoned(
+    () => {
       const rawMounts = [
         {
           hostPath: options.worktreeOrRepoPath,
@@ -155,11 +179,11 @@ const startBindMountSandbox = (
         env: options.env,
       });
     },
-    catch: (e) =>
+    (e) =>
       new WorktreeError({
         message: `Provider '${options.provider.name}' create failed: ${e instanceof Error ? e.message : String(e)}`,
       }),
-  }).pipe(
+  ).pipe(
     Effect.map((handle) => ({
       handle,
       sandbox: makeSandboxFromHandle(handle),
@@ -187,13 +211,13 @@ const startIsolatedSandbox = (
   | CopyToWorktreeTimeoutError
 > =>
   Effect.gen(function* () {
-    const handle = yield* Effect.tryPromise({
-      try: () => options.provider.create({ env: options.env }),
-      catch: (e) =>
+    const handle = yield* createClosingIfAbandoned(
+      () => options.provider.create({ env: options.env }),
+      (e) =>
         new WorktreeError({
           message: `Isolated provider '${options.provider.name}' setup failed: ${e instanceof Error ? e.message : String(e)}`,
         }),
-    }).pipe(
+    ).pipe(
       withTimeout(
         CONTAINER_START_TIMEOUT_MS,
         () =>

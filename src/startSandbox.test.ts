@@ -12,9 +12,16 @@ import {
   type IsolatedSandboxHandle,
 } from "./SandboxProvider.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
-import { startSandbox, COPY_PATHS_TIMEOUT_MS } from "./startSandbox.js";
+import {
+  startSandbox,
+  COPY_PATHS_TIMEOUT_MS,
+  CONTAINER_START_TIMEOUT_MS,
+} from "./startSandbox.js";
 import { testIsolated } from "./sandboxes/test-isolated.js";
-import { CopyToWorktreeTimeoutError } from "./errors.js";
+import {
+  ContainerStartTimeoutError,
+  CopyToWorktreeTimeoutError,
+} from "./errors.js";
 
 const execAsync = promisify(exec);
 
@@ -359,6 +366,113 @@ describe("startSandbox", () => {
       );
 
       await handle.close();
+    });
+  });
+
+  describe("create() outliving the container start timeout", () => {
+    /**
+     * A provider whose create() only resolves when the test says so, so the
+     * start timeout can fire while create() is still in flight.
+     */
+    const makeSlowCreate = () => {
+      let resolveCreate!: () => void;
+      const released = new Promise<void>((r) => (resolveCreate = r));
+      let closeCalls = 0;
+      const close = async () => {
+        closeCalls++;
+      };
+      return {
+        released,
+        resolveCreate: () => resolveCreate(),
+        closeCalls: () => closeCalls,
+        close,
+      };
+    };
+
+    const timeOutThenResolve = async (
+      start: Effect.Effect<unknown, unknown>,
+      slow: ReturnType<typeof makeSlowCreate>,
+    ) => {
+      const exit = await Effect.runPromise(
+        Effect.gen(function* () {
+          const fiber = yield* Effect.fork(start);
+          yield* Effect.yieldNow();
+          yield* TestClock.adjust(
+            Duration.millis(CONTAINER_START_TIMEOUT_MS + 1),
+          );
+          return yield* fiber.await;
+        }).pipe(Effect.provide(TestContext.TestContext)),
+      );
+      // The provider finishes creating the sandbox after we gave up on it.
+      slow.resolveCreate();
+      await new Promise((r) => setTimeout(r, 10));
+      return exit;
+    };
+
+    const expectStartTimeout = (exit: Exit.Exit<unknown, unknown>) => {
+      expect(Exit.isFailure(exit)).toBe(true);
+      if (Exit.isFailure(exit) && exit.cause._tag === "Fail") {
+        expect(exit.cause.error).toBeInstanceOf(ContainerStartTimeoutError);
+      } else {
+        throw new Error("Expected Fail cause");
+      }
+    };
+
+    it("closes an isolated sandbox that finishes creating after the timeout", async () => {
+      const slow = makeSlowCreate();
+      const provider = createIsolatedSandboxProvider({
+        name: "slow-isolated",
+        create: async () => {
+          await slow.released;
+          return {
+            worktreePath: "/home/agent/workspace",
+            exec: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
+            copyIn: async () => {},
+            copyFileOut: async () => {},
+            close: slow.close,
+          };
+        },
+      });
+
+      const exit = await timeOutThenResolve(
+        startSandbox({ provider, hostRepoDir: "/repo", env: {} }),
+        slow,
+      );
+
+      expectStartTimeout(exit);
+      expect(slow.closeCalls()).toBe(1);
+    });
+
+    it("closes a bind-mount sandbox that finishes creating after the timeout", async () => {
+      const slow = makeSlowCreate();
+      const provider = createBindMountSandboxProvider({
+        name: "slow-bind-mount",
+        create: async () => {
+          await slow.released;
+          return {
+            worktreePath: SANDBOX_REPO_DIR,
+            exec: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
+            copyFileIn: async () => {},
+            copyFileOut: async () => {},
+            close: slow.close,
+          };
+        },
+      });
+
+      const exit = await timeOutThenResolve(
+        startSandbox({
+          provider,
+          hostRepoDir: "/repo",
+          env: {},
+          worktreeOrRepoPath: "/worktree",
+          gitMounts: [],
+          repoDir: SANDBOX_REPO_DIR,
+        }),
+        slow,
+      );
+
+      expectStartTimeout(exit);
+      expect(slow.closeCalls()).toBe(1);
     });
   });
 });
