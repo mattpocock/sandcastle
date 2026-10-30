@@ -195,16 +195,20 @@ export const parseGitdirPath = (
 };
 
 /**
- * On Windows, patch git mounts so that worktree `.git` files resolve inside
- * the Linux sandbox. See ADR-0006 for the full rationale.
+ * Patch git worktree mounts before the Linux sandbox starts.
  *
- * Two fixes are applied:
+ * On Windows, two fixes are applied:
  * 1. The parent `.git` directory mount is remapped to `PARENT_GIT_SANDBOX_DIR`.
  * 2. A corrected `.git` file (with a POSIX `gitdir:` path) is created and
  *    mounted at `sandboxRepoDir/.git`, overlaying the original.
  *
- * On non-Windows platforms, or when the worktree's `.git` is a directory
- * (not a worktree pointer), returns the mounts unchanged.
+ * On non-Windows platforms, the forward `.git` pointer already resolves, but
+ * the parent admin `gitdir` back-pointer can still point at an unmounted host
+ * worktree path. Overlay that file with the sandbox worktree `.git` path so
+ * in-container git does not rewrite or prune the host metadata.
+ *
+ * When the worktree's `.git` is a directory (not a worktree pointer), returns
+ * the mounts unchanged.
  *
  * @param gitMounts - Raw mounts from `resolveGitMounts`.
  * @param worktreeHostPath - Host path to the directory mounted at `sandboxRepoDir`.
@@ -225,8 +229,6 @@ export const patchGitMountsForWindows = (
   WorktreeError
 > =>
   Effect.gen(function* () {
-    if (platform !== "win32") return gitMounts;
-
     const _readFile =
       readFile ??
       (async (p: string) => {
@@ -268,6 +270,40 @@ export const patchGitMountsForWindows = (
 
     const gitdirPath = match[1]!;
     const { parentGitDir, worktreeName } = parseGitdirPath(gitdirPath);
+    const normalizedParentGitDir = parentGitDir.replace(/\\/g, "/");
+
+    if (platform !== "win32") {
+      const parentGitMount = gitMounts.find(
+        (m) => m.hostPath.replace(/\\/g, "/") === normalizedParentGitDir,
+      );
+      const parentGitSandboxDir =
+        parentGitMount?.sandboxPath.replace(/\\/g, "/") ??
+        normalizedParentGitDir;
+
+      const tempDir = yield* Effect.tryPromise({
+        try: () => mkdtemp(join(tmpdir(), "sandcastle-git-")),
+        catch: (e) =>
+          new WorktreeError({
+            message: `Failed to create temp dir for git override: ${e instanceof Error ? e.message : String(e)}`,
+          }),
+      });
+      const tempAdminGitdirFile = join(tempDir, "admin-gitdir-override");
+      yield* Effect.tryPromise({
+        try: () => writeFile(tempAdminGitdirFile, `${sandboxRepoDir}/.git\n`),
+        catch: (e) =>
+          new WorktreeError({
+            message: `Failed to write git admin override file: ${e instanceof Error ? e.message : String(e)}`,
+          }),
+      });
+
+      return [
+        ...gitMounts,
+        {
+          hostPath: tempAdminGitdirFile,
+          sandboxPath: `${parentGitSandboxDir}/worktrees/${worktreeName}/gitdir`,
+        },
+      ];
+    }
 
     // Create a temp file with the corrected gitdir content
     const correctedGitdir = `${PARENT_GIT_SANDBOX_DIR}/worktrees/${worktreeName}`;
@@ -288,7 +324,6 @@ export const patchGitMountsForWindows = (
     });
 
     // Build corrected mounts
-    const normalizedParentGitDir = parentGitDir.replace(/\\/g, "/");
     const gitFileHostPath = gitEntryPath.replace(/\\/g, "/");
 
     const correctedMounts: Array<{ hostPath: string; sandboxPath: string }> =
