@@ -52,6 +52,25 @@ const commitFile = async (
 };
 
 describe("createWorktree", () => {
+  it("rejects invalid timeouts before creating the worktree", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-timeouts-validate-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    try {
+      await expect(
+        createWorktree({
+          branchStrategy: { type: "branch", branch: "timeouts-validate" },
+          cwd: hostDir,
+          timeouts: { copyToWorktreeMs: 0 },
+        }),
+      ).rejects.toThrow("timeouts.copyToWorktreeMs must be a positive number");
+      expect(existsSync(join(hostDir, ".sandcastle", "worktrees"))).toBe(false);
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
   it("creates a worktree with 'branch' strategy", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "ws-test-"));
     await initRepo(hostDir);
@@ -697,6 +716,40 @@ describe("worktree.run()", () => {
         return handle;
       },
     });
+
+  it("rejects idleTimeoutSeconds: 0 before the agent runs", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-run-idle-validate-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    let agentRan = false;
+    const sandbox = makeRunTestProvider(async () => {
+      agentRan = true;
+      return "mock output";
+    });
+
+    const ws = await createWorktree({
+      branchStrategy: { type: "branch", branch: "run-idle-validate" },
+      cwd: hostDir,
+    });
+
+    try {
+      await expect(
+        ws.run({
+          agent: claudeCode("claude-opus-4-8"),
+          sandbox,
+          prompt: "do something",
+          idleTimeoutSeconds: 0,
+        }),
+      ).rejects.toThrow(
+        "idleTimeoutSeconds must be a positive number of seconds. Received: 0",
+      );
+      expect(agentRan).toBe(false);
+    } finally {
+      await ws.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
 
   it("runs agent and returns WorktreeRunResult", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "ws-run-"));
@@ -1349,6 +1402,31 @@ const testSandbox: SandboxProvider = createBindMountSandboxProvider({
 });
 
 describe("worktree.createSandbox()", () => {
+  it("rejects invalid timeouts before starting the sandbox", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-sandbox-timeouts-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const ws = await createWorktree({
+      branchStrategy: { type: "branch", branch: "ws-sandbox-timeouts" },
+      cwd: hostDir,
+    });
+
+    try {
+      await expect(
+        ws.createSandbox({
+          sandbox: testSandbox,
+          timeouts: { commitCollectionMs: -5 },
+        }),
+      ).rejects.toThrow(
+        "timeouts.commitCollectionMs must be a positive number",
+      );
+    } finally {
+      await ws.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
   it("creates a sandbox with branch and worktreePath from the worktree", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "ws-sandbox-"));
     await initRepo(hostDir);

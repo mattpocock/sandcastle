@@ -137,12 +137,12 @@ describe("formatErrorMessage", () => {
     const msg = formatErrorMessage(
       new AgentIdleTimeoutError({
         message:
-          "Agent idle for 1200 seconds — no output received. Consider increasing the idle timeout with --idle-timeout.",
+          "Agent idle for 1200 seconds — no output received. Increase the idleTimeoutSeconds option to allow longer silences.",
         timeoutMs: 1_200_000,
       }),
     );
     expect(msg).toContain("1200");
-    expect(msg).toContain("--idle-timeout");
+    expect(msg).toContain("idleTimeoutSeconds");
   });
 });
 
@@ -206,7 +206,7 @@ describe("withFriendlyErrors", () => {
         Effect.fail(
           new AgentIdleTimeoutError({
             message:
-              "Agent idle for 600 seconds — no output received. Consider increasing the idle timeout with --idle-timeout.",
+              "Agent idle for 600 seconds — no output received. Increase the idleTimeoutSeconds option to allow longer silences.",
             timeoutMs: 600_000,
           }),
         ),

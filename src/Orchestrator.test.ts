@@ -2504,7 +2504,8 @@ describe("Orchestrator Display integration", () => {
       if (err instanceof AgentIdleTimeoutError) {
         expect(err.timeoutMs).toBe(100);
         expect(err.message).toContain("idle");
-        expect(err.message).toContain("--idle-timeout");
+        expect(err.message).toContain("idleTimeoutSeconds");
+        expect(err.message).not.toContain("--idle-timeout");
       }
     }
   }, 10_000);

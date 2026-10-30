@@ -43,6 +43,7 @@ import { noSandbox } from "./sandboxes/no-sandbox.js";
 import { raceAbortSignal } from "./raceAbortSignal.js";
 import { resolveCwd } from "./resolveCwd.js";
 import type { Timeouts } from "./run.js";
+import { validateTimeoutOptions } from "./validateTimeouts.js";
 
 export interface InteractiveOptions {
   /** Agent provider to use (e.g. claudeCode("claude-opus-4-8")) */
@@ -118,6 +119,8 @@ export const interactive = async (
   options.signal?.throwIfAborted();
 
   const { prompt, promptFile, hooks, agent: provider } = options;
+
+  validateTimeoutOptions(options);
 
   const resolvedSandbox = options.sandbox ?? noSandbox();
 

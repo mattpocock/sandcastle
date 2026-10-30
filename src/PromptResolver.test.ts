@@ -32,7 +32,7 @@ describe("PromptResolver", () => {
       ),
     );
     expect(error).toBeInstanceOf(PromptError);
-    expect(error.message).toContain("both");
+    expect(error.message).toBe("Cannot provide both prompt and promptFile");
   });
 
   it("errors when neither prompt nor promptFile is provided", async () => {
