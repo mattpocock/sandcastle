@@ -1244,17 +1244,18 @@ describe("withSandboxLifecycle (worktree mode)", () => {
   it("retries a transient exit-126 git setup failure, then succeeds", async () => {
     const { hostDir, worktreeDir } = await setupWorktree();
 
-    let safeDirAttempts = 0;
-    // Sandbox where the first `safe.directory` config attempt exits 126
-    // (overlayfs/exec race seen under heavy parallelism), then succeeds.
+    let addAttempts = 0;
+    // Sandbox where the first `safe.directory` *write* exits 126 (overlayfs/exec
+    // race seen under heavy parallelism), then succeeds. The `--get-all` probe
+    // reports no existing entries, so the idempotent add proceeds.
     // Effect.sync defers per-run so retries re-evaluate, matching how the
     // real exec (Effect.tryPromise) re-invokes the SDK on each attempt.
     const sandbox: SandboxService = {
       exec: (command, _options) =>
         Effect.sync(() => {
-          if (command.includes("safe.directory")) {
-            safeDirAttempts++;
-            if (safeDirAttempts === 1) {
+          if (command.includes("--add") && command.includes("safe.directory")) {
+            addAttempts++;
+            if (addAttempts === 1) {
               return { stdout: "", stderr: "cannot exec", exitCode: 126 };
             }
           }
@@ -1276,19 +1277,21 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       ).pipe(Effect.provide(testDisplayLayer)),
     );
 
-    expect(safeDirAttempts).toBe(2);
+    expect(addAttempts).toBe(2);
     expect(result.result).toBe("ok");
   });
 
   it("does not retry a non-transient git setup failure", async () => {
     const { hostDir, worktreeDir } = await setupWorktree();
 
-    let safeDirAttempts = 0;
+    let addAttempts = 0;
+    // The `--add` write fails with a genuine (non-transient) error; the
+    // `--get-all` probe reports no existing entries so the add is attempted.
     const sandbox: SandboxService = {
       exec: (command, _options) =>
         Effect.sync(() => {
-          if (command.includes("safe.directory")) {
-            safeDirAttempts++;
+          if (command.includes("--add") && command.includes("safe.directory")) {
+            addAttempts++;
             return { stdout: "", stderr: "fatal: bad config", exitCode: 1 };
           }
           return { stdout: "", stderr: "", exitCode: 0 };
@@ -1311,7 +1314,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       ),
     ).rejects.toThrow(/exit 1/);
 
-    expect(safeDirAttempts).toBe(1);
+    expect(addAttempts).toBe(1);
   });
 
   it("respects a gitSetupMs timeout override", async () => {
@@ -1439,6 +1442,38 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     // Initial attempt + bounded retries (does not loop forever)
     expect(safeDirAttempts).toBeGreaterThan(1);
     expect(safeDirAttempts).toBeLessThanOrEqual(4);
+  });
+
+  it("does not accumulate duplicate safe.directory entries across runs", async () => {
+    const { hostDir, worktreeDir, sandbox } = await setupWorktree();
+
+    // The sandbox shares one isolated global git config across both runs
+    // (makeLocalSandbox pins GIT_CONFIG_GLOBAL for its lifetime), mirroring how
+    // the no-sandbox provider writes to a single persistent host config.
+    const run = () =>
+      Effect.runPromise(
+        withSandboxLifecycle(
+          {
+            hostRepoDir: hostDir,
+            sandboxRepoDir: worktreeDir,
+            branch: "sandcastle/test",
+          },
+          sandbox,
+          () => Effect.succeed("ok"),
+        ).pipe(Effect.provide(testDisplayLayer)),
+      );
+
+    await run();
+    await run();
+
+    const { stdout } = await Effect.runPromise(
+      sandbox.exec("git config --global --get-all safe.directory"),
+    );
+    const occurrences = stdout
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line === worktreeDir).length;
+    expect(occurrences).toBe(1);
   });
 });
 
