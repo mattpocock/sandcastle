@@ -320,9 +320,13 @@ export const createWorktree = async (
         const userArgs = opts.promptArgs ?? {};
         yield* validateNoBuiltInArgOverride(userArgs);
 
+        // TARGET_BRANCH is the host's active branch at run() time, matching
+        // top-level run(): the branch merge-to-head merges back into.
+        const currentHostBranch =
+          yield* WorktreeManager.getCurrentBranch(hostRepoDir);
         const effectiveArgs = {
           SOURCE_BRANCH: worktreeInfo.branch,
-          TARGET_BRANCH: worktreeInfo.branch,
+          TARGET_BRANCH: currentHostBranch,
           ...userArgs,
         };
         const builtInArgKeysSet = new Set<string>(BUILT_IN_PROMPT_ARG_KEYS);
@@ -537,9 +541,13 @@ export const createWorktree = async (
         resolvedPrompt = rawPrompt;
       } else {
         yield* validateNoBuiltInArgOverride(userArgs);
+        // TARGET_BRANCH is the host's active branch, matching top-level
+        // interactive(): the branch merge-to-head merges back into.
+        const currentHostBranch =
+          yield* WorktreeManager.getCurrentBranch(hostRepoDir);
         const effectiveArgs = {
           SOURCE_BRANCH: worktreeInfo.branch,
-          TARGET_BRANCH: worktreeInfo.branch,
+          TARGET_BRANCH: currentHostBranch,
           ...userArgs,
         };
         const builtInArgKeysSet = new Set<string>(BUILT_IN_PROMPT_ARG_KEYS);
