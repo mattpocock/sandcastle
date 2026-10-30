@@ -22,6 +22,8 @@ import type {
   CreateSandboxFromSnapshotParams,
 } from "@daytona/sdk";
 
+const shellEscape = (s: string): string => "'" + s.replace(/'/g, "'\\''") + "'";
+
 /** Options for the Daytona sandbox provider. */
 export interface DaytonaOptions {
   /**
@@ -110,7 +112,11 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
             sudo?: boolean;
           },
         ): Promise<ExecResult> => {
-          const effectiveCommand = opts?.sudo ? `sudo ${command}` : command;
+          // Wrap the whole command in `sh -c`, so sudo elevates all of it
+          // (`a && b`, not just `a`).
+          const effectiveCommand = opts?.sudo
+            ? `sudo sh -c ${shellEscape(command)}`
+            : command;
           if (opts?.onLine) {
             const onLine = opts.onLine;
             const sessionId = `sandcastle-${crypto.randomUUID()}`;

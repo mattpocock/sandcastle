@@ -11,7 +11,7 @@ vi.mock("node:child_process", async (importOriginal) => {
 });
 
 import { execFile } from "node:child_process";
-import { startContainer, buildImage } from "./DockerLifecycle.js";
+import { startContainer, buildImage, removeImage } from "./DockerLifecycle.js";
 
 const mockExecFile = vi.mocked(execFile);
 
@@ -462,5 +462,44 @@ describe("startContainer", () => {
     const runArgs = runCall![1] as string[];
     const vIdx = runArgs.indexOf("-v");
     expect(runArgs[vIdx + 1]).toBe("/host/path:/sandbox/path:ro");
+  });
+});
+
+describe("removeImage", () => {
+  it("fails with ImageNotFoundError, not DockerError, when the image does not exist", async () => {
+    mockExecFile.mockImplementation((_cmd, _args, _opts, cb: any) => {
+      cb(
+        new Error("Command failed"),
+        "",
+        "Error response from daemon: No such image: sandcastle:nope\n",
+      );
+      return undefined as any;
+    });
+
+    const error = await Effect.runPromise(
+      Effect.flip(removeImage("sandcastle:nope")),
+    );
+
+    expect(error._tag).toBe("ImageNotFoundError");
+    expect(error.message).toBe(
+      "Docker image 'sandcastle:nope' does not exist, so there is nothing to remove.",
+    );
+  });
+
+  it("keeps other rmi failures as DockerError", async () => {
+    mockExecFile.mockImplementation((_cmd, _args, _opts, cb: any) => {
+      cb(
+        new Error("Command failed"),
+        "",
+        "Cannot connect to the Docker daemon at unix:///var/run/docker.sock.\n",
+      );
+      return undefined as any;
+    });
+
+    const error = await Effect.runPromise(
+      Effect.flip(removeImage("sandcastle:x")),
+    );
+
+    expect(error._tag).toBe("DockerError");
   });
 });

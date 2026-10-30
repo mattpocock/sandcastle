@@ -8,6 +8,7 @@ import {
   ConfigDirError,
   CopyError,
   DockerError,
+  ImageNotFoundError,
   ExecError,
   ExecHostError,
   InitError,
@@ -40,6 +41,18 @@ describe("formatErrorMessage", () => {
   it("CopyError includes message", () => {
     const msg = formatErrorMessage(new CopyError({ message: "disk full" }));
     expect(msg).toContain("disk full");
+  });
+
+  it("ImageNotFoundError shows its message without a daemon hint", () => {
+    const msg = formatErrorMessage(
+      new ImageNotFoundError({
+        message:
+          "Docker image 'sandcastle:nope' does not exist, so there is nothing to remove.",
+      }),
+    );
+    expect(msg).toBe(
+      "Docker image 'sandcastle:nope' does not exist, so there is nothing to remove.",
+    );
   });
 
   it("DockerError includes message and Docker hint", () => {

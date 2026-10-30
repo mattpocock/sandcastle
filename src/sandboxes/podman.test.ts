@@ -14,7 +14,9 @@ vi.mock("node:child_process", async () => {
   };
 });
 
-import { execFile, execFileSync } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import { writeFileSync, mkdtempSync, unlinkSync, rmdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
@@ -1039,5 +1041,74 @@ describe("defaultImageName()", () => {
 
   it("falls back to 'local' for empty path", () => {
     expect(defaultImageName("")).toBe("sandcastle:local");
+  });
+});
+
+describe("podman() exec with sudo", () => {
+  const fakeProc = () => {
+    const proc = new EventEmitter() as EventEmitter & {
+      stdout: PassThrough;
+      stderr: PassThrough;
+    };
+    proc.stdout = new PassThrough();
+    proc.stderr = new PassThrough();
+    setImmediate(() => {
+      proc.stdout.end();
+      proc.stderr.end();
+      proc.emit("close", 0);
+    });
+    return proc;
+  };
+
+  const createHandle = async () => {
+    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      callback(null, "", "");
+      return undefined as any;
+    });
+    vi.mocked(spawn).mockImplementation(() => fakeProc() as any);
+    return (await podman().create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    })) as BindMountSandboxHandle;
+  };
+
+  afterEach(() => {
+    vi.mocked(spawn).mockReset();
+  });
+
+  it("runs the whole command as root via --user 0:0, without a sudo binary", async () => {
+    const handle = await createHandle();
+
+    await handle.exec("id -u > /tmp/x && id -u >> /tmp/x", { sudo: true });
+
+    const [cmd, args] = vi.mocked(spawn).mock.calls.at(-1)!;
+    expect(cmd).toBe("podman");
+    const execArgs = args as string[];
+    expect(execArgs[0]).toBe("exec");
+    expect(execArgs[execArgs.indexOf("--user") + 1]).toBe("0:0");
+    expect(execArgs.slice(-2)).toEqual([
+      "-c",
+      "id -u > /tmp/x && id -u >> /tmp/x",
+    ]);
+    expect(execArgs.some((a) => a.includes("sudo"))).toBe(false);
+
+    await handle.close();
+  });
+
+  it("runs as the container's default user when sudo is not set", async () => {
+    const handle = await createHandle();
+
+    await handle.exec("id -u");
+
+    const execArgs = vi.mocked(spawn).mock.calls.at(-1)![1] as string[];
+    expect(execArgs).not.toContain("--user");
+    expect(execArgs.slice(-2)).toEqual(["-c", "id -u"]);
+
+    await handle.close();
   });
 });

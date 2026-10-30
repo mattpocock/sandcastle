@@ -7,10 +7,7 @@ vi.mock("node:child_process", () => ({
 }));
 
 import { execFile } from "node:child_process";
-import {
-  buildImage,
-  removeImage,
-} from "./PodmanLifecycle.js";
+import { buildImage, removeImage } from "./PodmanLifecycle.js";
 
 const mockExecFile = vi.mocked(execFile);
 
@@ -96,6 +93,26 @@ describe("PodmanLifecycle", () => {
       const result = await Effect.runPromiseExit(removeImage("my-image"));
 
       expect(result._tag).toBe("Failure");
+    });
+
+    it("fails with ImageNotFoundError, not PodmanError, when the image does not exist", async () => {
+      mockExecFile.mockImplementation((_cmd, _args, _opts, cb: any) => {
+        cb(
+          new Error("Command failed"),
+          "",
+          "Error: sandcastle:nope: image not known\n",
+        );
+        return undefined as any;
+      });
+
+      const error = await Effect.runPromise(
+        Effect.flip(removeImage("sandcastle:nope")),
+      );
+
+      expect(error._tag).toBe("ImageNotFoundError");
+      expect(error.message).toBe(
+        "Podman image 'sandcastle:nope' does not exist, so there is nothing to remove.",
+      );
     });
   });
 });

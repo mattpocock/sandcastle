@@ -256,11 +256,14 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
             stdin?: string;
           },
         ): Promise<ExecResult> => {
-          const effectiveCommand = opts?.sudo ? `sudo ${command}` : command;
           const args = ["exec"];
+          // Elevate by running as root through the engine, not a `sudo`
+          // prefix: the image needs no sudo binary, and the whole command
+          // (`a && b`, not just `a`) runs as root.
+          if (opts?.sudo) args.push("--user", "0:0");
           if (opts?.stdin !== undefined) args.push("-i");
           if (opts?.cwd) args.push("-w", opts.cwd);
-          args.push(containerName, "sh", "-c", effectiveCommand);
+          args.push(containerName, "sh", "-c", command);
 
           return new Promise((resolve, reject) => {
             const proc = spawn("docker", args, {

@@ -30,6 +30,11 @@ export class PodmanError extends Data.TaggedError("PodmanError")<{
   readonly message: string;
 }> {}
 
+/** A container image to act on does not exist */
+export class ImageNotFoundError extends Data.TaggedError("ImageNotFoundError")<{
+  readonly message: string;
+}> {}
+
 /** Git sync-in or sync-out operation failed */
 export class SyncError extends Data.TaggedError("SyncError")<{
   readonly message: string;
@@ -200,6 +205,7 @@ export type SandboxError =
   | CopyError
   | DockerError
   | PodmanError
+  | ImageNotFoundError
   | SyncError
   | WorktreeError
   | PromptError
