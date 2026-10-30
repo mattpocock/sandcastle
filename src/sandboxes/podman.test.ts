@@ -920,6 +920,71 @@ describe("podman()", () => {
     await handle.close();
   });
 
+  // PID 1 is `sleep infinity`, which ignores SIGTERM, so a plain `rm -f`
+  // waits out the 10 s StopTimeout. The shutdown teardown's 5 s timeout then
+  // kills it mid-stop and podman leaves the container in `Stopping`.
+  it("kills the container without a stop grace period on signal handler cleanup", async () => {
+    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      callback(null, "", "");
+      return undefined as any;
+    });
+
+    const provider = podman();
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    const exitListeners = process.listeners("exit");
+    exitListeners[exitListeners.length - 1]!(0);
+
+    const rmCall = mockExecFileSync.mock.calls.find(
+      ([cmd, args]) =>
+        cmd === "podman" && Array.isArray(args) && args[0] === "rm",
+    );
+    expect(rmCall).toBeDefined();
+    expect(rmCall![1]).toEqual(
+      expect.arrayContaining(["rm", "-f", "--time", "0"]),
+    );
+
+    await handle.close();
+  });
+
+  it("kills the container without a stop grace period on close", async () => {
+    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      callback(null, "", "");
+      return undefined as any;
+    });
+
+    const provider = podman();
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    mockExecFile.mockClear();
+    await handle.close();
+
+    const rmCall = mockExecFile.mock.calls.find(
+      ([cmd, args]) =>
+        cmd === "podman" && Array.isArray(args) && args[0] === "rm",
+    );
+    expect(rmCall).toBeDefined();
+    expect(rmCall![1]).toEqual(
+      expect.arrayContaining(["rm", "-f", "--time", "0"]),
+    );
+  });
+
   it("shares a single SIGINT listener across many concurrent sandboxes", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
       const callback = rest[rest.length - 1];
