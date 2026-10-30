@@ -709,6 +709,124 @@ describe("createSandbox", () => {
     }
   });
 
+  it("sandbox.run().resume() and .fork() work after a promptFile + promptArgs run", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-resume-args-"));
+    const hostProjectsDir = await mkdtemp(
+      join(tmpdir(), "sandbox-resume-args-host-projects-"),
+    );
+    const sandboxProjectsDir = await mkdtemp(
+      join(tmpdir(), "sandbox-resume-args-sb-projects-"),
+    );
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    const promptPath = join(hostProjectsDir, "prompt.md");
+    await writeFile(promptPath, "Remember {{TOKEN}}");
+    const mockSessionId = "resume-args-session-1";
+    const sandboxBaseDir = mkdtempSync(
+      join(tmpdir(), "sandbox-resume-args-sb-"),
+    );
+
+    const fakeHandle: BindMountSandboxHandle = {
+      worktreePath: sandboxBaseDir,
+      exec: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
+      copyFileIn: async (hostPath, sandboxPath) => {
+        await mkdir(dirname(sandboxPath), { recursive: true });
+        await copyFile(hostPath, sandboxPath);
+      },
+      copyFileOut: async (sandboxPath, hostPath) => {
+        await mkdir(dirname(hostPath), { recursive: true });
+        await copyFile(sandboxPath, hostPath);
+      },
+      close: async () => {},
+    };
+
+    const agentStdin: (string | undefined)[] = [];
+    const buildSandbox = (sandboxDir: string): SandboxService => {
+      const real = makeLocalSandbox(sandboxDir);
+      return {
+        exec: (command, options) => {
+          if (command.startsWith("claude ") && options?.onLine) {
+            agentStdin.push(options.stdin);
+            const onLine = options.onLine;
+            return Effect.gen(function* () {
+              const cwd = options?.cwd ?? sandboxDir;
+              const sessionsDir = join(
+                sandboxProjectsDir,
+                encodeProjectPath(cwd),
+              );
+              yield* Effect.promise(async () => {
+                await mkdir(sessionsDir, { recursive: true });
+                await writeFile(
+                  join(sessionsDir, `${mockSessionId}.jsonl`),
+                  JSON.stringify({
+                    type: "system",
+                    subtype: "init",
+                    session_id: mockSessionId,
+                    cwd,
+                  }),
+                );
+              });
+              const streamLines = [
+                JSON.stringify({
+                  type: "system",
+                  subtype: "init",
+                  session_id: mockSessionId,
+                }),
+                JSON.stringify({ type: "result", result: "ok" }),
+              ];
+              for (const line of streamLines) onLine(line);
+              return {
+                stdout: streamLines.join("\n"),
+                stderr: "",
+                exitCode: 0,
+              };
+            });
+          }
+          return real.exec(command, options);
+        },
+        copyIn: (hostPath, sandboxPath) => real.copyIn(hostPath, sandboxPath),
+        copyFileOut: (sandboxPath, hostPath) =>
+          real.copyFileOut(sandboxPath, hostPath),
+      };
+    };
+
+    const sandbox = await createSandbox({
+      branch: "resume-args",
+      sandbox: testSandbox,
+      cwd: hostDir,
+      _test: { buildSandbox, bindMountHandle: fakeHandle },
+    });
+
+    try {
+      const first = await sandbox.run({
+        agent: claudeCode("test-model", {
+          sessionStorage: { hostProjectsDir, sandboxProjectsDir },
+        }),
+        promptFile: promptPath,
+        promptArgs: { TOKEN: "tok-123" },
+        maxIterations: 1,
+      });
+
+      const resumed = await first.resume!("repeat {{TOKEN}}");
+      const forked = await first.fork!("fork {{TOKEN}}");
+
+      expect(resumed.iterations.length).toBe(1);
+      expect(forked.iterations.length).toBe(1);
+      // The follow-up prompts are inline: passed as-is, never substituted.
+      expect(agentStdin).toEqual([
+        "Remember tok-123",
+        "repeat {{TOKEN}}",
+        "fork {{TOKEN}}",
+      ]);
+    } finally {
+      await sandbox.close();
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(hostProjectsDir, { recursive: true, force: true });
+      await rm(sandboxProjectsDir, { recursive: true, force: true });
+      await rm(sandboxBaseDir, { recursive: true, force: true });
+    }
+  });
+
   it("sandbox.run() appends raw stdout to the same log file when logging.verbose is true", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-verbose-"));
     await initRepo(hostDir);

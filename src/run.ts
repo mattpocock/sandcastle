@@ -821,6 +821,8 @@ export async function run(
       }
       return run({
         ...options,
+        // The follow-up prompt is inline: drop the template's arguments.
+        promptArgs: undefined,
         ...resumeOptions,
         prompt,
         promptFile: undefined,
@@ -838,6 +840,8 @@ export async function run(
       }
       return run({
         ...options,
+        // The follow-up prompt is inline: drop the template's arguments.
+        promptArgs: undefined,
         ...forkOptions,
         prompt,
         promptFile: undefined,
