@@ -278,7 +278,9 @@ const fastForwardFromOrigin = (
  * Creates a git worktree at `.sandcastle/worktrees/<name>/`.
  *
  * - If `branch` is specified, checks out that branch.
- * - If not, creates a temporary `sandcastle/<timestamp>` branch.
+ * - If not, creates a temporary branch: `tempBranch` when given (a name the
+ *   caller already generated with `generateTempBranchName` and showed to the
+ *   user), otherwise a fresh `generateTempBranchName(name)`.
  *
  * When `branch` collides with an existing managed worktree:
  * - Clean → reuses the existing worktree and fast-forwards it from
@@ -294,6 +296,7 @@ export const create = (
     branch?: string;
     baseBranch?: string;
     name?: string;
+    tempBranch?: string;
   },
 ): Effect.Effect<
   WorktreeInfo,
@@ -314,16 +317,8 @@ export const create = (
       branch = opts.branch;
       worktreeName = branch.replace(/\//g, "-");
     } else {
-      const timestamp = formatTimestamp(new Date());
-      const suffix = randomBranchSuffix();
-      if (opts?.name) {
-        const sanitized = sanitizeName(opts.name);
-        branch = `sandcastle/${sanitized}/${timestamp}-${suffix}`;
-        worktreeName = `sandcastle-${sanitized}-${timestamp}-${suffix}`;
-      } else {
-        branch = `sandcastle/${timestamp}-${suffix}`;
-        worktreeName = `sandcastle-${timestamp}-${suffix}`;
-      }
+      branch = opts?.tempBranch ?? generateTempBranchName(opts?.name);
+      worktreeName = branch.replace(/\//g, "-");
     }
 
     const worktreePath = join(worktreesDir, worktreeName);

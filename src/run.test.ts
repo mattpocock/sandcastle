@@ -5,6 +5,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { execSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
@@ -22,7 +23,12 @@ import {
   type RunOptions,
   type RunResult,
 } from "./run.js";
-import { claudeCode, cursor, opencode } from "./AgentProvider.js";
+import {
+  claudeCode,
+  cursor,
+  opencode,
+  type AgentProvider,
+} from "./AgentProvider.js";
 import { Output, StructuredOutputError } from "./Output.js";
 import { claudeHostSessionPath } from "./SessionStore.js";
 import type { InteractiveOptions } from "./interactive.js";
@@ -1501,5 +1507,90 @@ describe("output.maxRetries end-to-end", () => {
         output: Output.object({ tag: "result", schema: mockSchema() }),
       }),
     ).rejects.toBeInstanceOf(StructuredOutputError);
+  });
+});
+
+describe("merge-to-head temp branch name", () => {
+  let hostDir: string;
+
+  beforeEach(() => {
+    hostDir = mkdtempSync(join(tmpdir(), "sandcastle-run-m2h-"));
+    const git = (cmd: string) =>
+      execSync(`git ${cmd}`, { cwd: hostDir, stdio: "ignore" });
+    git("init -b main");
+    git('config user.email "test@test.com"');
+    git('config user.name "Test"');
+    writeFileSync(join(hostDir, "README.md"), "# Test\n");
+    git("add .");
+    git('commit -m "initial"');
+  });
+
+  afterEach(() => {
+    rmSync(hostDir, { recursive: true, force: true });
+  });
+
+  // Runs sandbox commands on the host, in the worktree Sandcastle created.
+  const hostWorktreeSandbox = createBindMountSandboxProvider({
+    name: "host-worktree",
+    create: async (options) => ({
+      worktreePath: options.worktreePath,
+      exec: async (command) => {
+        const stdout = execSync(command, {
+          cwd: options.worktreePath,
+          encoding: "utf-8",
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+        return { stdout, stderr: "", exitCode: 0 };
+      },
+      copyFileIn: async () => {},
+      copyFileOut: async () => {},
+      close: async () => {},
+    }),
+  });
+
+  it("uses one name for the log file, {{SOURCE_BRANCH}} and the branch the agent works on", async () => {
+    const promptPath = join(hostDir, "prompt.md");
+    writeFileSync(
+      promptPath,
+      "SOURCE={{SOURCE_BRANCH}} ACTUAL=!`git rev-parse --abbrev-ref HEAD`",
+    );
+    let agentPrompt: string | undefined;
+    const recordingAgent: AgentProvider = {
+      name: "recording",
+      env: {},
+      captureSessions: false,
+      buildPrintCommand: ({ prompt }) => {
+        agentPrompt = prompt;
+        return { command: "true" };
+      },
+      parseStreamLine: () => [],
+    };
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      const result = await run({
+        agent: recordingAgent,
+        sandbox: hostWorktreeSandbox,
+        promptFile: promptPath,
+        cwd: hostDir,
+        branchStrategy: { type: "merge-to-head" },
+      });
+
+      const match = agentPrompt?.match(/^SOURCE=(\S+) ACTUAL=(\S+)$/);
+      expect(match).not.toBeNull();
+      const [, sourceBranch, actualBranch] = match!;
+      expect(actualBranch).toMatch(/^sandcastle\//);
+      expect(sourceBranch).toBe(actualBranch);
+      expect(result.logFilePath).toBe(
+        join(
+          hostDir,
+          ".sandcastle",
+          "logs",
+          buildLogFilename(actualBranch!, "main"),
+        ),
+      );
+    } finally {
+      consoleSpy.mockRestore();
+    }
   });
 });

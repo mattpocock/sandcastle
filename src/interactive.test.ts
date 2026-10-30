@@ -535,6 +535,32 @@ describe("interactive()", () => {
     expect(log).toContain("merge commit");
   });
 
+  it("merge-to-head strategy: {{SOURCE_BRANCH}} names the temp branch the agent works on", async () => {
+    const promptPath = join(hostDir, "source-branch-prompt.md");
+    writeFileSync(promptPath, "SOURCE={{SOURCE_BRANCH}}");
+    let promptArg: string | undefined;
+    let actualBranch: string | undefined;
+
+    const provider = makeTestProvider(async (args, opts) => {
+      promptArg = args[args.length - 1];
+      actualBranch = execSync("git rev-parse --abbrev-ref HEAD", {
+        cwd: opts.cwd!,
+        encoding: "utf-8",
+      }).trim();
+      return { exitCode: 0 };
+    });
+
+    await interactive({
+      agent: claudeCode("claude-opus-4-8"),
+      sandbox: provider,
+      promptFile: promptPath,
+      branchStrategy: { type: "merge-to-head" },
+    });
+
+    expect(actualBranch).toMatch(/^sandcastle\//);
+    expect(promptArg).toBe(`SOURCE=${actualBranch}`);
+  });
+
   it("branch strategy: commits land on explicit branch", async () => {
     const provider = makeTestProvider(async (_args, opts) => {
       const cwd = opts.cwd!;
