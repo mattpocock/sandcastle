@@ -6,7 +6,7 @@
  */
 
 import { readdir, stat } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { join, posix, relative } from "node:path";
 import {
   createIsolatedSandboxProvider,
   type ExecResult,
@@ -83,7 +83,7 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
   createIsolatedSandboxProvider({
     name: "daytona",
     env: options?.env,
-    create: async (): Promise<IsolatedSandboxHandle> => {
+    create: async (createOptions): Promise<IsolatedSandboxHandle> => {
       const maxOutputTailChars = options?.maxOutputTailChars ?? MAX_TAIL_CHARS;
       const { Daytona } =
         (await import("@daytona/sdk")) as typeof import("@daytona/sdk");
@@ -94,12 +94,25 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
       if (options?.target) config.target = options.target;
 
       const client: DaytonaClient = new Daytona(config);
-      const sandbox = await client.create(options?.create as any);
+      // Pass the resolved env (env resolver + provider + agent) to the
+      // sandbox. Explicit `create.envVars` win, as the most specific source.
+      const sandbox = await client.create({
+        ...options?.create,
+        envVars: { ...createOptions.env, ...options?.create?.envVars },
+      } as any);
 
-      const worktreePath =
+      const workDir =
         (await sandbox.getWorkDir()) ??
         (await sandbox.getUserHomeDir()) ??
         "/home/daytona";
+
+      // Use a subdirectory of the work dir, not the work dir itself: sync-in
+      // clones into `${worktreePath}_clone` and then replaces worktreePath,
+      // which needs a parent the sandbox user can write. On the default
+      // snapshot the work dir is the user's home (/home/daytona), and /home
+      // is root-owned.
+      const worktreePath = posix.join(workDir, "workspace");
+      await sandbox.fs.createFolder(worktreePath, "755");
 
       return {
         worktreePath,
