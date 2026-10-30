@@ -1,0 +1,12 @@
+{
+  "mode": "apply",
+  "repository": "hanhnghh/sandcastle",
+  "scopeLabel": "scope:operator-admin",
+  "readyLabel": "ready-for-agent",
+  "blockedLabel": "blocked",
+  "holdLabels": ["readiness:hold"],
+  "qualificationLabel": "ready-for-qualification",
+  "publishBody": true,
+  "contextIssueNumbers": [1],
+  "verifyCommand": null
+}

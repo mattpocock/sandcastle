@@ -70,6 +70,7 @@ interface AgentProvider {
   env: Record<string, string>;
   captureSessions: boolean;
   sessionStorage?: AgentSessionStorage;
+  buildActivityCommand?(sessionId: string): string;
   buildPrintCommand(options: AgentCommandOptions): PrintCommand;
   buildInteractiveArgs?(options: AgentCommandOptions): string[];
   parseStreamLine(line: string): ParsedStreamEvent[];
@@ -83,6 +84,7 @@ Field by field:
 - `env` — environment variables injected into the **sandbox** when this agent runs. Auth keys live here. Merged with the env resolver and **sandbox provider** env at launch.
 - `captureSessions` — user-facing kill-switch. When `true` (default), Sandcastle records the agent's session log per **iteration** and is able to resume it. Expose this on the provider's `Options` interface so users can opt out.
 - `sessionStorage` — provider-owned object that describes where and how the agent's session record is persisted ([ADR 0012](../adr/0012-agent-provider-owned-session-storage.md)). See [`AgentSessionStorage`](#agentsessionstorage) below. Omit for providers that do not support resume.
+- `buildActivityCommand(sessionId)` — optional supplement for CLIs that persist activity without forwarding it to stdout. Return a read-only sandbox command whose stdout is only a monotonically increasing byte count for that exact session. Sandcastle establishes a baseline, then extends the pre-completion idle timer only on growth. Never return transcript content, treat PID existence as activity, or include other sessions. Missing/invalid/failed samples do not count as activity; a hung probe disables further probes. The probe is bounded and scoped to the invocation, independent of session capture. Codex implements this with a Node.js metadata probe; providers with complete stdout streams need not implement it.
 - `buildPrintCommand({ prompt, dangerouslySkipPermissions, resumeSession })` — returns the shell command to run the agent non-interactively. Return `{ command, stdin }` when piping the prompt via stdin (preferred for large prompts). When `resumeSession` is set, append the agent's native resume CLI flag.
 - `buildInteractiveArgs(options)` — optional. Returns the argv array for `interactive()`. Omit if the agent has no TUI.
 - `parseStreamLine(line)` — given one line of stdout, return zero or more `ParsedStreamEvent`s. Event types: `text`, `result`, `tool_call`, `session_id`, `usage`. Return `[]` for lines you can't or don't need to parse. **Emitting `session_id` is required** — without it, Sandcastle cannot capture the session for resume. Emit `usage` if the stream carries token counts (e.g. Codex's `turn.completed`); it feeds the usage display without needing session capture.
