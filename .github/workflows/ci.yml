@@ -4,6 +4,19 @@ on:
   push:
     branches:
       - main
+  # pull_request, not pull_request_target: a fork PR's code runs here with no
+  # secrets and a read-only token (see the agent workflows, moved off
+  # pull_request_target in 8976368).
+  pull_request:
+
+permissions:
+  contents: read
+
+# A new push to a PR cancels that PR's in-flight run. Runs on main are never
+# cancelled: each push to main gets its own group.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   ci:
@@ -14,5 +27,7 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
+      - run: npm run typecheck
+      # Tests import from dist, so build before test.
       - run: npm run build
       - run: npm test
