@@ -570,6 +570,7 @@ export const WorktreeDockerSandboxFactory = {
                         hostRepoDir: worktreeInfo.path,
                         env,
                         copyPaths,
+                        copySourceDir: hostRepoDir,
                       }),
                       ({ sandbox, worktreePath, handle }) =>
                         makeEffect(

@@ -315,6 +315,7 @@ export const interactive = async (
             hostRepoDir: worktreeInfo!.path,
             env: effectiveEnv,
             copyPaths: options.copyToWorktree,
+            copySourceDir: hostRepoDir,
           }),
         );
         return startResult.handle;

@@ -832,6 +832,30 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
     expect(contentB).toBe('{"b":2}');
   });
 
+  it("copies gitignored copyToWorktree files from the host repo, not the fresh worktree", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
+    tempDirs.push(hostDir);
+    await initRepoWithCommit(hostDir);
+    await commitFile(hostDir, ".gitignore", "secret.txt\n", "ignore secret");
+    // Gitignored, so it exists only in the host repo, never in a fresh worktree
+    await writeFile(join(hostDir, "secret.txt"), "host secret");
+
+    let fileContent = "";
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const factory = yield* SandboxFactory;
+        yield* factory.withSandbox((_, sandbox) =>
+          Effect.gen(function* () {
+            const result = yield* sandbox.exec("cat secret.txt");
+            fileContent = result.stdout.trim();
+          }),
+        );
+      }).pipe(Effect.provide(makeIsolatedLayer(hostDir, ["secret.txt"]))),
+    );
+
+    expect(fileContent).toBe("host secret");
+  });
+
   it("skips missing copyToWorktree paths without error", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
     tempDirs.push(hostDir);

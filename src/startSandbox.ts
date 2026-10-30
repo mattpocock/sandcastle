@@ -38,15 +38,25 @@ export interface StartSandboxBindMountOptions {
   copyPaths?: undefined;
 }
 
-export interface StartSandboxIsolatedOptions {
+export type StartSandboxIsolatedOptions = {
   provider: IsolatedSandboxProvider;
+  /** Directory synced into the sandbox via git bundle (usually the worktree). */
   hostRepoDir: string;
   env: Record<string, string>;
   worktreeOrRepoPath?: undefined;
   gitMounts?: undefined;
   repoDir?: undefined;
-  copyPaths?: string[];
-}
+} & (
+  | { copyPaths?: undefined; copySourceDir?: undefined }
+  | {
+      copyPaths: string[] | undefined;
+      /**
+       * Directory `copyPaths` are resolved against: the user's repo, not the
+       * fresh worktree, which never contains gitignored files.
+       */
+      copySourceDir: string;
+    }
+);
 
 export interface StartSandboxNoSandboxOptions {
   provider: NoSandboxProvider;
@@ -246,9 +256,10 @@ const startIsolatedSandbox = (
 
       if (options.copyPaths && options.copyPaths.length > 0) {
         const pathsToCopy = options.copyPaths;
+        const copySourceDir = options.copySourceDir;
         yield* Effect.gen(function* () {
           for (const relativePath of pathsToCopy) {
-            const hostPath = join(options.hostRepoDir, relativePath);
+            const hostPath = join(copySourceDir, relativePath);
             if (!existsSync(hostPath)) {
               continue;
             }

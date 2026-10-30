@@ -831,6 +831,7 @@ export const createSandboxFromWorktree = async (
         hostRepoDir: worktreePath,
         env,
         copyPaths: options.copyToWorktree,
+        copySourceDir: hostRepoDir,
       });
     } else if (provider.tag === "none") {
       startEffect = startSandbox({
@@ -1019,6 +1020,7 @@ export const createSandbox = async (
                   hostRepoDir: worktreePath,
                   env,
                   copyPaths: options.copyToWorktree,
+                  copySourceDir: hostRepoDir,
                 })
               : provider.tag === "none"
                 ? startSandbox({
