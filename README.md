@@ -928,6 +928,7 @@ Constraints:
 - The provider's host session file must exist (throws before sandbox creation).
 - Only iteration 1 receives the resume flag; subsequent iterations (if any) start fresh.
 - Providers without resume support reject `resumeSession`.
+- `.resume()` and `.fork()` don't inherit the first run's `output` or `promptArgs`. To get structured output from the follow-up, pass `output` again, and put its tag in the follow-up prompt.
 
 ### Session fork
 
