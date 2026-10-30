@@ -1,4 +1,5 @@
 import { exec } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdtemp, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -274,6 +275,65 @@ describe("sandcastle CLI", () => {
       expect(output).toContain("--create-label");
       expect(output).toContain("non-interactive");
     }
+  });
+
+  it("init without --build-image fails before writing .sandcastle/ in non-interactive mode", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    try {
+      await runCli(
+        "init --agent claude-code --template blank --sandbox docker --issue-tracker github-issues --create-label false",
+        hostDir,
+      );
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const { stdout, stderr } = err as { stdout: string; stderr: string };
+      const output = stdout + stderr;
+      expect(output).toContain("--build-image");
+      expect(output).toContain("non-interactive");
+    }
+    expect(existsSync(join(hostDir, ".sandcastle"))).toBe(false);
+  });
+
+  it("init without --install-template-deps fails before writing .sandcastle/ when the template needs zod", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    try {
+      await runCli(
+        "init --agent claude-code --template parallel-planner --sandbox docker --issue-tracker beads --build-image false",
+        hostDir,
+      );
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const { stdout, stderr } = err as { stdout: string; stderr: string };
+      const output = stdout + stderr;
+      expect(output).toContain("--install-template-deps");
+      expect(output).toContain("non-interactive");
+    }
+    expect(existsSync(join(hostDir, ".sandcastle"))).toBe(false);
+  });
+
+  it("init names every missing flag at once in non-interactive mode", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    try {
+      await runCli(
+        "init --template blank --sandbox docker --issue-tracker github-issues",
+        hostDir,
+      );
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const { stdout, stderr } = err as { stdout: string; stderr: string };
+      const output = stdout + stderr;
+      expect(output).toContain("--agent");
+      expect(output).toContain("--create-label");
+      expect(output).toContain("--build-image");
+      expect(output).toContain("non-interactive");
+    }
+    expect(existsSync(join(hostDir, ".sandcastle"))).toBe(false);
   });
 
   it("init --issue-tracker custom ignores --build-image and scaffolds without trying to build", async () => {

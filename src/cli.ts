@@ -228,6 +228,17 @@ const initCommand = Command.make(
         }
       }
 
+      if (agentFlag._tag === "Some" && !getAgent(agentFlag.value)) {
+        const names = listAgents()
+          .map((a) => a.name)
+          .join(", ");
+        yield* Effect.fail(
+          new InitError({
+            message: `Unknown agent "${agentFlag.value}". Available: ${names}`,
+          }),
+        );
+      }
+
       const createLabelChoice = choiceToTriBool(createLabelFlag);
       const buildImageChoice = choiceToTriBool(buildImageFlag);
       const installTemplateDepsChoice = choiceToTriBool(
@@ -269,6 +280,42 @@ const initCommand = Command.make(
           }
           return confirmed === true;
         });
+
+      // Without a TTY, every prompt init would show must be answered by a flag.
+      // Check them all here, before anything is written (the label, .sandcastle/,
+      // zod), and name every missing flag at once, so a scripted init never
+      // stops halfway with a partial scaffold behind it.
+      if (!isInteractive) {
+        const tracker = Option.getOrUndefined(issueTrackerFlag);
+        const missing: string[] = [];
+        if (agentFlag._tag === "None") missing.push("--agent");
+        if (sandboxFlag._tag === "None") missing.push("--sandbox");
+        if (tracker === undefined) missing.push("--issue-tracker");
+        if (template._tag === "None") missing.push("--template");
+        if (tracker === "github-issues" && createLabelChoice._tag === "None") {
+          missing.push("--create-label");
+        }
+        if (
+          template._tag === "Some" &&
+          installTemplateDepsChoice._tag === "None" &&
+          getTemplateDependencies(template.value).includes("zod") &&
+          !(yield* hostHasDependency(cwd, "zod"))
+        ) {
+          missing.push("--install-template-deps");
+        }
+        if (tracker !== "custom" && buildImageChoice._tag === "None") {
+          missing.push("--build-image");
+        }
+        if (missing.length === 1) {
+          yield* failIfNonInteractive(missing[0]!);
+        } else if (missing.length > 1) {
+          yield* Effect.fail(
+            new InitError({
+              message: `${missing.join(", ")} are required in non-interactive mode (no TTY detected).`,
+            }),
+          );
+        }
+      }
 
       // Resolve agent: CLI flag > interactive select
       const agents = listAgents();
