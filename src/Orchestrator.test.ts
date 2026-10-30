@@ -3844,6 +3844,82 @@ describe("Session capture integration", () => {
 });
 
 describe("Orchestrator signal (AbortSignal)", () => {
+  it.each(["abort", "idle timeout"] as const)(
+    "starts no timers from agent output that arrives after the %s settles the run",
+    async (ending) => {
+      const hostDir = await mkdtemp(join(tmpdir(), "orch-late-line-"));
+      await initRepo(hostDir);
+      await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+      const ac = new AbortController();
+      // The agent process outlives the run: it never exits, and keeps a
+      // handle on onLine — like `docker exec` streaming after teardown.
+      let lateOnLine: ((line: string) => void) | undefined;
+      const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) => {
+        const real = makeLocalSandbox(dir);
+        return {
+          ...real,
+          exec: (command, options) => {
+            if (command.startsWith("claude ") && options?.onLine) {
+              lateOnLine = options.onLine;
+              if (ending === "abort") {
+                setTimeout(() => ac.abort("verify-abort"), 20);
+              }
+              return Effect.never;
+            }
+            return real.exec(command, options);
+          },
+        };
+      });
+
+      const displayEntries = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+      const exit = await Effect.runPromise(
+        orchestrate({
+          provider: testProvider,
+          hostRepoDir: hostDir,
+          iterations: 1,
+          prompt: "test",
+          signal: ac.signal,
+          idleTimeoutSeconds: ending === "idle timeout" ? 0.1 : 10,
+          _idleWarningIntervalMs: 30,
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              factoryLayer,
+              SilentDisplay.layer(displayEntries),
+              noopAgentStreamEmitterLayer,
+            ),
+          ),
+          Effect.exit,
+        ),
+      );
+      expect(exit._tag).toBe("Failure");
+
+      const idleWarnings = async () =>
+        (await Effect.runPromise(Ref.get(displayEntries))).filter(
+          (e) =>
+            e._tag === "status" &&
+            (e as { message: string }).message.includes("Agent idle for"),
+        ).length;
+      const warningsAtSettle = await idleWarnings();
+
+      // A line arrives after the run settled (e.g. Claude's final event as
+      // its container is removed).
+      lateOnLine!(
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "text", text: "late" }] },
+        }),
+      );
+      await new Promise((r) => setTimeout(r, 200));
+
+      // The run is over: no idle warning ticks, nothing keeps the loop alive.
+      expect(await idleWarnings()).toBe(warningsAtSettle);
+      await rm(hostDir, { recursive: true, force: true });
+    },
+    10_000,
+  );
+
   it("rejects with pre-aborted signal before running any iteration", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "orch-host-"));
     await initRepo(hostDir);

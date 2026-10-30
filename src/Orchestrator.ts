@@ -67,6 +67,11 @@ const invokeAgent = (
     // Periodic idle warning state
     let warningFiber: Fiber.RuntimeFiber<unknown, unknown> | null = null;
     let idleMinuteCounter = 0;
+    // Set once the race below settles (success, failure, abort, idle or
+    // completion timeout). The losing exec may still be streaming — e.g. a
+    // `docker exec` outliving the run — and every line would otherwise fork
+    // fresh timer fibers nobody interrupts, keeping the host process alive.
+    let settled = false;
 
     const interruptFiber = (
       fiber: Fiber.RuntimeFiber<unknown, unknown> | null,
@@ -148,6 +153,7 @@ const invokeAgent = (
       });
       const execResult = yield* sandbox.exec(printCmd.command, {
         onLine: (line) => {
+          if (settled) return;
           // Surface the raw line FIRST so verbose mode/forwarders see every
           // stdout line the agent produced, including ones parseStreamLine
           // drops. Errors thrown by the callback are caught by the emitter
@@ -251,6 +257,7 @@ const invokeAgent = (
     return yield* raced.pipe(
       Effect.ensuring(
         Effect.sync(() => {
+          settled = true;
           abortCleanup?.();
           interruptFiber(timeoutFiber);
           timeoutFiber = null;
