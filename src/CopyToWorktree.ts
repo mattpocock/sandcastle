@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { type ChildProcess, execFile } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname, join, sep } from "node:path";
@@ -61,31 +61,41 @@ export const copyToWorktree = (
         },
       });
       yield* Effect.async<void, CopyToWorktreeError>((resume) => {
-        execFile("cp", [...cowFlags, cpSrc, dest], (error) => {
+        // The cp currently running, killed if the copy is interrupted (e.g.
+        // by the timeout below) so it can't keep writing into the worktree.
+        let child: ChildProcess;
+        child = execFile("cp", [...cowFlags, cpSrc, dest], (error) => {
           if (error) {
             // Fall back to a regular copy if copy-on-write is not supported
-            execFile("cp", ["-R", cpSrc, dest], (fallbackError, _, stderr) => {
-              if (fallbackError) {
-                resume(
-                  Effect.fail(
-                    new CopyToWorktreeError({
-                      message: `Failed to copy ${relativePath} to worktree: ${stderr || fallbackError.message}`,
-                      path: relativePath,
-                      stderr: stderr || fallbackError.message,
-                      exitCode:
-                        typeof fallbackError.code === "number"
-                          ? fallbackError.code
-                          : null,
-                    }),
-                  ),
-                );
-              } else {
-                resume(Effect.succeed(undefined));
-              }
-            });
+            child = execFile(
+              "cp",
+              ["-R", cpSrc, dest],
+              (fallbackError, _, stderr) => {
+                if (fallbackError) {
+                  resume(
+                    Effect.fail(
+                      new CopyToWorktreeError({
+                        message: `Failed to copy ${relativePath} to worktree: ${stderr || fallbackError.message}`,
+                        path: relativePath,
+                        stderr: stderr || fallbackError.message,
+                        exitCode:
+                          typeof fallbackError.code === "number"
+                            ? fallbackError.code
+                            : null,
+                      }),
+                    ),
+                  );
+                } else {
+                  resume(Effect.succeed(undefined));
+                }
+              },
+            );
           } else {
             resume(Effect.succeed(undefined));
           }
+        });
+        return Effect.sync(() => {
+          child.kill("SIGKILL");
         });
       });
     }

@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile, mkdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -206,6 +207,44 @@ describe("copyToWorktree", () => {
       await rm(worktreeDir, { recursive: true, force: true });
     }
   });
+
+  it.skipIf(process.platform === "win32")(
+    "kills the cp process when the copy times out",
+    async () => {
+      const hostDir = await mkdtemp(join(tmpdir(), "cw-test-"));
+      const worktreeDir = await mkdtemp(join(tmpdir(), "cw-wt-"));
+      await writeFile(join(hostDir, "stuck.txt"), "content");
+      // cp blocks opening a FIFO destination that has no reader.
+      const dest = join(worktreeDir, "stuck.txt");
+      execFileSync("mkfifo", [dest]);
+      const cpAlive = () => {
+        try {
+          execFileSync("pgrep", ["-f", `cp .*${dest}`]);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+
+      try {
+        const exit = await Effect.runPromiseExit(
+          copyToWorktree(["stuck.txt"], hostDir, worktreeDir, 300),
+        );
+        expect(Exit.isFailure(exit)).toBe(true);
+
+        const deadline = Date.now() + 2000;
+        while (cpAlive() && Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 50));
+        }
+        expect(cpAlive()).toBe(false);
+      } finally {
+        // Unblock any surviving cp by opening the FIFO for reading.
+        execFileSync("sh", ["-c", `timeout 1 cat "${dest}" || true`]);
+        await rm(hostDir, { recursive: true, force: true });
+        await rm(worktreeDir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("defaults to 60s timeout when timeoutMs is omitted", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cw-test-"));

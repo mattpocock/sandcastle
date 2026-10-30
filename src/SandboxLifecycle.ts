@@ -12,6 +12,7 @@ import {
   withTimeout,
   type SandboxError,
 } from "./errors.js";
+import { execHostShell } from "./hostShell.js";
 import { type ExecResult, type SandboxService } from "./SandboxFactory.js";
 import type { Timeouts } from "./run.js";
 import { countCommitsToSync } from "./syncOut.js";
@@ -120,7 +121,11 @@ export const runHostHooks = (
     for (const hook of hooks) {
       const timeout = hook.timeoutMs ?? HOOK_TIMEOUT_MS;
       yield* Effect.tryPromise({
-        try: () => execAsync(hook.command, { cwd, signal }),
+        try: (effectSignal) =>
+          execHostShell(hook.command, {
+            cwd,
+            signals: [signal, effectSignal],
+          }),
         catch: (err) =>
           new ExecError({
             command: hook.command,
@@ -334,10 +339,10 @@ export const withSandboxLifecycle = <A>(
         const hostHookEffects = (hostOnSandboxReady ?? []).map((hook) => {
           const timeout = hook.timeoutMs ?? HOOK_TIMEOUT_MS;
           return Effect.tryPromise({
-            try: () =>
-              execAsync(hook.command, {
+            try: (effectSignal) =>
+              execHostShell(hook.command, {
                 cwd: hostSideWorktreePath,
-                signal,
+                signals: [signal, effectSignal],
               }),
             catch: (err) =>
               new ExecError({
