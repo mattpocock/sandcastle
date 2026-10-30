@@ -36,7 +36,13 @@ export type ParsedStreamEvent =
   | { type: "result"; result: string }
   | { type: "tool_call"; name: string; args: string }
   | { type: "session_id"; sessionId: string }
-  | { type: "usage"; usage: IterationUsage };
+  | { type: "usage"; usage: IterationUsage }
+  /**
+   * The agent reported a failure in its own stream (an API rejection, a
+   * failed turn). Some agents exit 0 after one, so the Orchestrator fails the
+   * run on it whatever the exit code.
+   */
+  | { type: "error"; message: string };
 
 /** @internal Single-quote a string for safe use in a POSIX shell command. */
 export const shellEscape = (s: string): string =>
@@ -107,6 +113,9 @@ const parseStreamJsonLine = (line: string): ParsedStreamEvent[] => {
       return events;
     }
     if (obj.type === "result" && typeof obj.result === "string") {
+      if (obj.is_error === true) {
+        return [{ type: "error", message: obj.result }];
+      }
       return [{ type: "result", result: obj.result }];
     }
     if (
@@ -578,20 +587,34 @@ const parsePiStreamLine = (line: string): ParsedStreamEvent[] => {
       return [{ type: "tool_call", name: toolName, args: argValue }];
     }
     // Pi emits agent_error / error events on stdout (not stderr) for auth
-    // failures, rate limits, and API errors. Capture them as result events so
-    // the Orchestrator's stderr-empty fallback can surface them to the user.
+    // failures, rate limits, and API errors.
     if (obj.type === "agent_error" || obj.type === "error") {
       const msg = extractErrorMessage(obj);
-      return msg ? [{ type: "result", result: msg }] : [];
+      return msg ? [{ type: "error", message: msg }] : [];
     }
     if (obj.type === "agent_end" && Array.isArray(obj.messages)) {
       const messages = obj.messages as {
         role: string;
         content: { type: string; text?: string }[];
+        stopReason?: string;
+        errorMessage?: string;
       }[];
       for (let i = messages.length - 1; i >= 0; i--) {
         const msg = messages[i];
         if (msg?.role === "assistant") {
+          // When the model call fails (e.g. an API 400), pi puts the error on
+          // the last assistant message and still exits 0.
+          if (msg.stopReason === "error") {
+            return [
+              {
+                type: "error",
+                message:
+                  typeof msg.errorMessage === "string" && msg.errorMessage
+                    ? msg.errorMessage
+                    : 'pi stopped with stopReason "error"',
+              },
+            ];
+          }
           const texts: string[] = [];
           for (const block of msg.content) {
             if (block.type === "text" && typeof block.text === "string") {
@@ -735,6 +758,12 @@ const parseCodexStreamLine = (line: string): ParsedStreamEvent[] => {
     if (obj.type === "error") {
       const msg = extractErrorMessage(obj);
       return msg ? [{ type: "result", result: msg }] : [];
+    }
+
+    // turn.failed is codex's terminal failure for the turn.
+    if (obj.type === "turn.failed") {
+      const msg = extractErrorMessage(obj);
+      return [{ type: "error", message: msg ?? "codex turn failed" }];
     }
 
     // turn.completed carries token usage for the turn.
@@ -930,11 +959,10 @@ const parseOpenCodeStreamLine = (line: string): ParsedStreamEvent[] => {
     }
 
     // OpenCode emits error events on stdout (not stderr) for auth failures,
-    // rate limits, and API errors. Capture them as result events so the
-    // Orchestrator's stderr-empty fallback can surface them to the user.
+    // rate limits, and API errors, and still exits 0 (opencode 1.3.13).
     if (obj.type === "error") {
       const msg = extractErrorMessage(obj);
-      return msg ? [{ type: "result", result: msg }] : [];
+      return msg ? [{ type: "error", message: msg }] : [];
     }
 
     // step_finish, tool output, etc. → skip
@@ -1042,8 +1070,8 @@ function assertCopilotPrintPromptFitsArgv(prompt: string): void {
  * - `result` — `{ sessionId, exitCode, usage }`
  *   Terminal event. We surface `sessionId` as a `session_id` event.
  *
- * - `error` / `agent_error` — defensive: surface as a `result` event the same
- *   way Pi/Codex do, so the Orchestrator's stderr-empty fallback can show it.
+ * - `error` / `agent_error` — defensive: surface as an `error` event the same
+ *   way Pi/OpenCode do, so the Orchestrator fails the run with its message.
  */
 const parseCopilotStreamLine = (line: string): ParsedStreamEvent[] => {
   if (!line.startsWith("{")) return [];
@@ -1089,10 +1117,10 @@ const parseCopilotStreamLine = (line: string): ParsedStreamEvent[] => {
       return [{ type: "session_id", sessionId: obj.sessionId }];
     }
 
-    // Defensive: surface error events as result events (matches Pi/Codex)
+    // Defensive: surface error events as error events (matches Pi/OpenCode)
     if (obj.type === "error" || obj.type === "agent_error") {
       const msg = extractErrorMessage(obj);
-      return msg ? [{ type: "result", result: msg }] : [];
+      return msg ? [{ type: "error", message: msg }] : [];
     }
   } catch {
     // Not valid JSON — skip
