@@ -448,11 +448,37 @@ export const withSandboxLifecycle = <A>(
                 await execAsync(`git merge "${resolvedBranch}"`, {
                   cwd: hostRepoDir,
                 });
-              } catch {
+              } catch (e) {
+                const { stdout, stderr } = e as {
+                  stdout?: string;
+                  stderr?: string;
+                };
+                const gitOutput = [stdout, stderr]
+                  .map((s) => s?.trim())
+                  .filter(Boolean)
+                  .join("\n");
+                // Don't leave the host mid-merge (MERGE_HEAD set, conflict
+                // markers in the working tree): if the merge started, abort it
+                // so the host is as it was and the retry below starts clean.
+                const mergeStarted = await execAsync(
+                  "git rev-parse -q --verify MERGE_HEAD",
+                  { cwd: hostRepoDir },
+                ).then(
+                  () => true,
+                  () => false,
+                );
+                if (mergeStarted) {
+                  await execAsync("git merge --abort", {
+                    cwd: hostRepoDir,
+                  }).catch(() => {});
+                }
                 throw new Error(
-                  `Merge of '${resolvedBranch}' onto '${hostCurrentBranch}' failed. ` +
+                  `Merge of '${resolvedBranch}' onto '${hostCurrentBranch}' failed` +
+                    (mergeStarted ? " and was aborted" : "") +
+                    `, so '${hostCurrentBranch}' is unchanged.` +
+                    (gitOutput ? `\ngit merge said:\n${gitOutput}\n` : " ") +
                     `The temporary branch '${resolvedBranch}' has been preserved. ` +
-                    `To retry: git merge ${resolvedBranch}, ` +
+                    `To retry: git merge ${resolvedBranch} (resolve any conflicts and commit), ` +
                     `then clean up: git branch -D ${resolvedBranch}`,
                 );
               }
