@@ -1,4 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { rm } from "node:fs/promises";
+import { dirname } from "node:path";
 import { Effect } from "effect";
 import {
   defaultImageName,
@@ -390,6 +392,25 @@ describe("patchGitMountsForWindows", () => {
   });
 
   describe("on Windows platform", () => {
+    // patchGitMountsForWindows writes its override file into a fresh
+    // $TMPDIR/sandcastle-git-* dir; remove each one so no test leaves it behind.
+    const tempDirs: string[] = [];
+    const runPatch = async (
+      effect: ReturnType<typeof patchGitMountsForWindows>,
+    ) => {
+      const result = await Effect.runPromise(effect);
+      for (const m of result) {
+        if (m.hostPath.endsWith("git-override"))
+          tempDirs.push(dirname(m.hostPath));
+      }
+      return result;
+    };
+    afterEach(async () => {
+      await Promise.all(
+        tempDirs.splice(0).map((d) => rm(d, { recursive: true, force: true })),
+      );
+    });
+
     it("returns mounts unchanged when .git is a directory", async () => {
       const mounts = [
         {
@@ -397,7 +418,7 @@ describe("patchGitMountsForWindows", () => {
           sandboxPath: "C:/Users/project/.git",
         },
       ];
-      const result = await Effect.runPromise(
+      const result = await runPatch(
         patchGitMountsForWindows(
           mounts,
           "/tmp/test-worktree",
@@ -420,7 +441,7 @@ describe("patchGitMountsForWindows", () => {
           sandboxPath: "C:/Users/project/.git",
         },
       ];
-      const result = await Effect.runPromise(
+      const result = await runPatch(
         patchGitMountsForWindows(
           mounts,
           "/tmp/test-worktree",
@@ -456,7 +477,7 @@ describe("patchGitMountsForWindows", () => {
           sandboxPath: "C:/Users/parent-repo/.git",
         },
       ];
-      const result = await Effect.runPromise(
+      const result = await runPatch(
         patchGitMountsForWindows(
           mounts,
           "/tmp/test-worktree",
@@ -487,7 +508,7 @@ describe("patchGitMountsForWindows", () => {
         },
       ];
 
-      const result = await Effect.runPromise(
+      const result = await runPatch(
         patchGitMountsForWindows(
           mounts,
           "/tmp/test-worktree",
@@ -519,7 +540,7 @@ describe("patchGitMountsForWindows", () => {
           sandboxPath: "C:/Users/project/.git",
         },
       ];
-      const result = await Effect.runPromise(
+      const result = await runPatch(
         patchGitMountsForWindows(
           mounts,
           "/tmp/test-worktree",
@@ -539,7 +560,7 @@ describe("patchGitMountsForWindows", () => {
           sandboxPath: "C:/Users/project/.git",
         },
       ];
-      const result = await Effect.runPromise(
+      const result = await runPatch(
         patchGitMountsForWindows(
           mounts,
           "/tmp/test-worktree",
