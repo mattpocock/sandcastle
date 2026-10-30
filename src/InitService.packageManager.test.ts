@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   detectPackageManager,
   addDependencyCommand,
+  installDependenciesCommand,
   hostHasDependency,
   getTemplateDependencies,
 } from "./InitService.js";
@@ -66,6 +67,17 @@ describe("addDependencyCommand", () => {
     { pm: "bun" as const, expected: "bun add zod" },
   ])("$pm builds '$expected'", ({ pm, expected }) => {
     expect(addDependencyCommand(pm, "zod")).toBe(expected);
+  });
+});
+
+describe("installDependenciesCommand", () => {
+  it.each([
+    { pm: "npm" as const, expected: "npm install" },
+    { pm: "pnpm" as const, expected: "pnpm install" },
+    { pm: "yarn" as const, expected: "yarn install" },
+    { pm: "bun" as const, expected: "bun install" },
+  ])("$pm builds '$expected'", ({ pm, expected }) => {
+    expect(installDependenciesCommand(pm)).toBe(expected);
   });
 });
 
