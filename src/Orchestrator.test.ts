@@ -3899,47 +3899,60 @@ describe("Orchestrator completion timeout (hanging process)", () => {
     };
   };
 
-  it("succeeds with completionSignal set when the agent hangs after emitting the signal", async () => {
-    const hostDir = await mkdtemp(join(tmpdir(), "orch-comp-hang-"));
-    await initRepo(hostDir);
-    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+  it.each(
+    [
+      ["All done. <promise>COMPLETE</promise>"],
+      ['<result>{"done":', "true}</result><promise>COMPLETE</promise>"],
+      ['<promise>COMPLETE</promise><result>{"done":', "true}</result>"],
+    ].map((parts) => ({ parts })),
+  )(
+    "preserves assistant messages when the agent hangs: $parts",
+    async ({ parts }) => {
+      const hostDir = await mkdtemp(join(tmpdir(), "orch-comp-hang-"));
+      await initRepo(hostDir);
+      await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
-    const lines = [
-      JSON.stringify({
-        type: "assistant",
-        message: {
-          content: [
-            {
-              type: "text",
-              text: "All done. <promise>COMPLETE</promise>",
+      const lines = [
+        ...parts.map((text) =>
+          JSON.stringify({
+            type: "assistant",
+            message: {
+              content: [
+                {
+                  type: "text",
+                  text,
+                },
+              ],
             },
-          ],
-        },
-      }),
-      JSON.stringify({
-        type: "result",
-        result: "All done. <promise>COMPLETE</promise>",
-      }),
-    ];
+          }),
+        ),
+        JSON.stringify({
+          type: "result",
+          result: parts.at(-1),
+        }),
+      ];
 
-    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) =>
-      makeHangingClaudeAgentLayer(dir, lines),
-    );
+      const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) =>
+        makeHangingClaudeAgentLayer(dir, lines),
+      );
 
-    const result = await Effect.runPromise(
-      orchestrate({
-        provider: testProvider,
-        hostRepoDir: hostDir,
-        iterations: 1,
-        prompt: "do some work",
-        completionTimeoutSeconds: 0.2, // 200ms grace window for the test
-        idleTimeoutSeconds: 30, // way larger than the test runtime
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
-    );
+      const result = await Effect.runPromise(
+        orchestrate({
+          provider: testProvider,
+          hostRepoDir: hostDir,
+          iterations: 1,
+          prompt: "do some work",
+          completionTimeoutSeconds: 0.2, // 200ms grace window for the test
+          idleTimeoutSeconds: 30, // way larger than the test runtime
+        }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      );
 
-    expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
-    expect(result.iterations.length).toBe(1);
-  }, 10_000);
+      expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
+      expect(result.iterations.length).toBe(1);
+      expect(result.stdout).toBe(parts.join(""));
+    },
+    10_000,
+  );
 
   it("falls through to the idle timeout when the agent hangs WITHOUT emitting the signal", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "orch-comp-noidle-"));
