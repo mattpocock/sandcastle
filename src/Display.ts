@@ -250,7 +250,7 @@ export const terminalStyle = {
 
 /** Prints a text chunk via clack, dropping leading/trailing blank lines. */
 const printClackText = (text: string) => {
-  const trimmed = text.replace(/^\n+|\n+$/g, "");
+  const trimmed = text.replaceAll(/^\n+|\n+$/g, "");
   if (trimmed.trim().length > 0) {
     clack.log.message(trimmed);
   }
