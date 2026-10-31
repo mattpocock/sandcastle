@@ -47,4 +47,4 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
-      - run: npx vitest run src/sandboxes/no-sandbox.windows.test.ts src/sandboxes/no-sandbox.test.ts
+      - run: npx vitest run src/sandboxes/no-sandbox.windows.test.ts src/sandboxes/no-sandbox.test.ts src/sandboxes/posixSimpleCommand.test.ts

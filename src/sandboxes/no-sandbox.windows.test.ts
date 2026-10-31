@@ -11,6 +11,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { z } from "zod";
 import {
   claudeCode,
   codex,
@@ -55,16 +56,19 @@ const NPM_CMD_SHIM = [
   "SETLOCAL",
   "CALL :find_dp0",
   "",
-  'IF EXIST "%dp0%\\node.exe" (',
-  '  SET "_prog=%dp0%\\node.exe"',
+  String.raw`IF EXIST "%dp0%\node.exe" (`,
+  String.raw`  SET "_prog=%dp0%\node.exe"`,
   ") ELSE (",
   '  SET "_prog=node"',
   "  SET PATHEXT=%PATHEXT:;.JS;=;%",
   ")",
   "",
-  'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\argv.js" %*',
+  String.raw`endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\argv.js" %*`,
   "",
 ].join("\r\n");
+
+/** One backslash, for strings that end in one (String.raw can't). */
+const BACKSLASH = String.fromCodePoint(92);
 
 const AGENT_BINS = ["claude", "codex", "pi", "agent", "opencode", "copilot"];
 
@@ -82,9 +86,9 @@ const NASTY_ARGS = [
   "pipe | and ||",
   "redirects < > >> 2>&1",
   "parens ( ) and !bang!",
-  "trailing backslash\\",
-  'backslash before quote \\" here',
-  "C:\\Program Files\\thing\\",
+  `trailing backslash${BACKSLASH}`,
+  String.raw`backslash before quote \" here`,
+  `${String.raw`C:\Program Files\thing`}${BACKSLASH}`,
   "claude-fable-5[1m]",
   "$HOME `whoami` $(id)",
   "unicode: café — 日本語",
@@ -99,7 +103,9 @@ let dir: string;
 let printer: string;
 
 beforeAll(() => {
-  if (!isWindows) return;
+  if (!isWindows) {
+    return;
+  }
   dir = mkdtempSync(join(tmpdir(), "no-sandbox-windows-"));
   printer = join(dir, "argv.js");
   writeFileSync(printer, ARGV_PRINTER);
@@ -109,14 +115,17 @@ beforeAll(() => {
 });
 
 afterAll(() => {
-  if (dir) rmSync(dir, { recursive: true, force: true });
+  if (isWindows) {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
-interface Printed {
-  readonly argv: string[];
-  readonly stdin: string | null;
-  readonly probe: string | null;
-}
+const Printed = z.object({
+  argv: z.array(z.string()),
+  stdin: z.string().nullable(),
+  probe: z.string().nullable(),
+});
+type Printed = z.infer<typeof Printed>;
 
 /** A noSandbox handle whose PATH finds the fake agents first. */
 const makeHandle = async (env: Record<string, string> = {}) => {
@@ -135,11 +144,11 @@ const execPrinted = async (
   const result = await handle.exec(command, { stdin: opts.stdin });
   expect(result.stderr).toBe("");
   expect(result.exitCode).toBe(0);
-  return JSON.parse(result.stdout) as Printed;
+  return Printed.parse(JSON.parse(result.stdout));
 };
 
 const posixArgs = (args: readonly string[]): string =>
-  args.map(shellEscape).join(" ");
+  args.map((arg) => shellEscape(arg)).join(" ");
 
 describe.runIf(isWindows)("noSandbox on Windows (cmd.exe, #940)", () => {
   it("passes every argument verbatim to an .exe (node)", async () => {
@@ -160,10 +169,10 @@ describe.runIf(isWindows)("noSandbox on Windows (cmd.exe, #940)", () => {
     const handle = await makeHandle();
     await expect(
       handle.exec(`argv-shim ${shellEscape("two\nlines")}`),
-    ).rejects.toThrow(/newline/);
+    ).rejects.toThrow(/newline/u);
     await expect(
       handle.exec(`argv-shim ${shellEscape("x".repeat(9000))}`),
-    ).rejects.toThrow(/too long/);
+    ).rejects.toThrow(/too long/u);
   });
 
   it("applies a leading `export NAME=value;` to the command's env", async () => {
@@ -184,7 +193,7 @@ describe.runIf(isWindows)("noSandbox on Windows (cmd.exe, #940)", () => {
       stderr: process.stderr,
     });
     expect(result.exitCode).toBe(0);
-    const printed = JSON.parse(readFileSync(out, "utf8")) as Printed;
+    const printed = Printed.parse(JSON.parse(readFileSync(out, "utf8")));
     expect(printed.argv).toStrictEqual(args);
   });
 
@@ -222,7 +231,11 @@ describe.runIf(isWindows)("noSandbox on Windows (cmd.exe, #940)", () => {
 
     it("codex: resume id, -m and -c arrive unquoted, prompt on stdin", async () => {
       const printed = await run(codex(model, { effort: "high" }), session);
-      expect(printed.argv.slice(0, 2)).toStrictEqual(["resume", session]);
+      expect(printed.argv.slice(0, 3)).toStrictEqual([
+        "exec",
+        "resume",
+        session,
+      ]);
       expect(valueAfter(printed.argv, "-m")).toBe(model);
       expect(valueAfter(printed.argv, "-c")).toBe(
         'model_reasoning_effort="high"',
