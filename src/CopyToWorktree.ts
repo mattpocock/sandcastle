@@ -86,12 +86,12 @@ export const copyToWorktree = (
                     ),
                   );
                 } else {
-                  resume(Effect.succeed(undefined));
+                  resume(Effect.void);
                 }
               },
             );
           } else {
-            resume(Effect.succeed(undefined));
+            resume(Effect.void);
           }
         });
         return Effect.sync(() => {

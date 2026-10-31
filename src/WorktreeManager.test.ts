@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { FileSystem } from "@effect/platform";
+import type { FileSystem } from "@effect/platform";
 import { NodeFileSystem } from "@effect/platform-node";
 import { exec } from "node:child_process";
 import {
@@ -13,7 +13,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -96,20 +96,19 @@ const setupRepoWithOrigin = async () => {
 };
 
 /** Run an Effect and return its success value, throwing on failure. */
-const run = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem>) =>
+const run = async <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem>) =>
   Effect.runPromise(
-    effect.pipe(Effect.provide(NodeFileSystem.layer)) as Effect.Effect<
-      A,
-      never
-    >,
+    effect.pipe(Effect.provide(NodeFileSystem.layer)) as Effect.Effect<A>,
   );
 
 /** Run an Effect and return the error, throwing if it succeeds. */
-const runFail = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem>) =>
+const runFail = async <A, E>(
+  effect: Effect.Effect<A, E, FileSystem.FileSystem>,
+) =>
   Effect.runPromise(
     Effect.flip(effect).pipe(
       Effect.provide(NodeFileSystem.layer),
-    ) as Effect.Effect<E, never>,
+    ) as Effect.Effect<E>,
   );
 
 describe("sanitizeName", () => {
@@ -145,7 +144,9 @@ describe("generateTempBranchName", () => {
 
   it("returns different names when called within the same second (random suffix)", () => {
     const names = new Set<string>();
-    for (let i = 0; i < 16; i++) names.add(generateTempBranchName());
+    for (let i = 0; i < 16; i++) {
+      names.add(generateTempBranchName());
+    }
     expect(names.size).toBe(16);
   });
 
@@ -176,7 +177,7 @@ describe("WorktreeManager.create", () => {
   it("returns the branch name", async () => {
     const repoDir = await setupRepo();
     const { branch } = await run(create(repoDir));
-    expect(typeof branch).toBe("string");
+    expect(branch).toBeTypeOf("string");
     expect(branch.length).toBeGreaterThan(0);
   });
 
@@ -209,7 +210,7 @@ describe("WorktreeManager.create", () => {
       create(repoDir, { branch: "feature/my-feature" }),
     );
     expect(branch).toBe("feature/my-feature");
-    expect(await getBranch(path)).toBe("feature/my-feature");
+    await expect(getBranch(path)).resolves.toBe("feature/my-feature");
   });
 
   it("the worktree directory is on the correct branch", async () => {
@@ -298,7 +299,9 @@ describe("WorktreeManager.create", () => {
     );
 
     expect(branch).toBe("sandcastle/issue-42-new-feature");
-    expect(await getBranch(path)).toBe("sandcastle/issue-42-new-feature");
+    await expect(getBranch(path)).resolves.toBe(
+      "sandcastle/issue-42-new-feature",
+    );
 
     // The worktree should have the same HEAD as the main repo
     const { stdout: mainHead } = await execAsync("git rev-parse HEAD", {
@@ -331,7 +334,7 @@ describe("WorktreeManager.create", () => {
     );
 
     expect(branch).toBe("feature/from-base");
-    expect(await getBranch(path)).toBe("feature/from-base");
+    await expect(getBranch(path)).resolves.toBe("feature/from-base");
 
     // The worktree should be at the base commit, not HEAD
     const { stdout: worktreeHead } = await execAsync("git rev-parse HEAD", {
@@ -407,7 +410,7 @@ describe("WorktreeManager.create", () => {
     });
     expect(afterSha.trim()).not.toBe(initialSha.trim());
     // The pushed file should now exist in the worktree
-    const newFile = await readFile(join(second.path, "new.txt"), "utf-8");
+    const newFile = await readFile(join(second.path, "new.txt"), "utf8");
     expect(newFile).toBe("new");
 
     await run(remove(first.path));
@@ -447,7 +450,7 @@ describe("WorktreeManager.create", () => {
       cwd: second.path,
     });
     expect(afterSha.trim()).toBe(localSha.trim());
-    const localFile = await readFile(join(second.path, "local.txt"), "utf-8");
+    const localFile = await readFile(join(second.path, "local.txt"), "utf8");
     expect(localFile).toBe("local");
 
     await run(remove(first.path));
@@ -481,7 +484,7 @@ describe("WorktreeManager.create", () => {
     });
     expect(afterSha.trim()).toBe(initialSha.trim());
     // The uncommitted file is still there
-    const dirty = await readFile(join(second.path, "dirty.txt"), "utf-8");
+    const dirty = await readFile(join(second.path, "dirty.txt"), "utf8");
     expect(dirty).toBe("uncommitted");
 
     await run(remove(first.path));
@@ -538,7 +541,7 @@ describe("WorktreeManager.create", () => {
       cwd: second.path,
     });
     expect(afterSha.trim()).toBe(localSha.trim());
-    const localFile = await readFile(join(second.path, "local.txt"), "utf-8");
+    const localFile = await readFile(join(second.path, "local.txt"), "utf8");
     expect(localFile).toBe("local");
 
     await run(remove(first.path));
@@ -576,7 +579,7 @@ describe("WorktreeManager.create", () => {
     // preconditions for the bug.
     await expect(
       execAsync("git symbolic-ref --quiet HEAD", { cwd: first.path }),
-    ).rejects.toThrow();
+    ).rejects.toThrow("Command failed: git symbolic-ref --quiet HEAD");
     const { stdout: status } = await execAsync("git status --porcelain", {
       cwd: first.path,
     });
@@ -598,9 +601,8 @@ describe("WorktreeManager.create", () => {
       "git rev-parse --git-path rebase-merge",
       { cwd: second.path },
     );
-    const resolvedRebaseDir = rebaseMergePath.trim().startsWith("/")
-      ? rebaseMergePath.trim()
-      : join(second.path, rebaseMergePath.trim());
+    // resolvePath() keeps an absolute git path and joins a relative one.
+    const resolvedRebaseDir = resolvePath(second.path, rebaseMergePath.trim());
     expect((await stat(resolvedRebaseDir)).isDirectory()).toBe(true);
 
     await execAsync("git rebase --abort", { cwd: first.path }).catch(() => {});
@@ -721,7 +723,9 @@ describe("WorktreeManager.create", () => {
     const { path, branch } = await run(create(repoDir));
 
     // The temp branch should also have no upstream tracking config
-    const escapedBranch = branch.replace(/\//g, "\\/").replace(/\./g, "\\.");
+    const escapedBranch = branch
+      .replaceAll("/", String.raw`\/`)
+      .replaceAll(".", String.raw`\.`);
     const { stdout: trackingConfig } = await execAsync(
       `git config --get-regexp "branch\\.${escapedBranch}\\." || true`,
       { cwd: repoDir },
@@ -739,7 +743,7 @@ describe("WorktreeManager.remove", () => {
 
     await run(remove(path));
 
-    await expect(stat(path)).rejects.toThrow();
+    await expect(stat(path)).rejects.toThrow("ENOENT");
   });
 
   it("removes git worktree metadata", async () => {
@@ -793,16 +797,12 @@ describe("WorktreeManager.pruneStale", () => {
   it("does not remove active worktrees", async () => {
     const repoDir = await setupRepo();
     const { path } = await run(create(repoDir));
-    const name = path.split("/").pop()!;
-
     await run(pruneStale(repoDir));
 
     const s = await stat(path);
     expect(s.isDirectory()).toBe(true);
     // cleanup
     await run(remove(path));
-    // suppress unused var warning
-    void name;
   });
 
   it("does not remove active worktrees when .sandcastle is a symlink", async () => {
@@ -888,32 +888,31 @@ describe("WorktreeManager git locale", () => {
   // the real `git` binary with a shim that records the LC_ALL it received,
   // asserting the module invokes git in the C locale even when the parent
   // process is set to a different one.
-  it("invokes git with LC_ALL=C even when the process locale is non-English", async () => {
-    if (process.platform === "win32") return; // POSIX shell shim
-    const repoDir = await setupRepo();
-    const shimDir = await mkdtemp(join(tmpdir(), "wt-git-shim-"));
-    const logPath = join(shimDir, "lc_all.log");
-    const gitShim = join(shimDir, "git");
-    await writeFile(
-      gitShim,
-      `#!/bin/sh\nprintf '%s' "\${LC_ALL-}" > "${logPath}"\necho main\n`,
-    );
-    await chmod(gitShim, 0o755);
+  // POSIX shell shim, so not on Windows.
+  it.skipIf(process.platform === "win32")(
+    "invokes git with LC_ALL=C even when the process locale is non-English",
+    async () => {
+      const repoDir = await setupRepo();
+      const shimDir = await mkdtemp(join(tmpdir(), "wt-git-shim-"));
+      const logPath = join(shimDir, "lc_all.log");
+      const gitShim = join(shimDir, "git");
+      await writeFile(
+        gitShim,
+        `#!/bin/sh\nprintf '%s' "\${LC_ALL-}" > "${logPath}"\necho main\n`,
+      );
+      await chmod(gitShim, 0o755);
 
-    const originalPath = process.env.PATH;
-    const originalLcAll = process.env.LC_ALL;
-    process.env.PATH = `${shimDir}:${originalPath ?? ""}`;
-    process.env.LC_ALL = "en_US.UTF-8";
-    try {
-      const branch = await run(getCurrentBranch(repoDir));
-      expect(branch).toBe("main");
-    } finally {
-      if (originalPath === undefined) delete process.env.PATH;
-      else process.env.PATH = originalPath;
-      if (originalLcAll === undefined) delete process.env.LC_ALL;
-      else process.env.LC_ALL = originalLcAll;
-    }
+      // join() renders an unset PATH as "", as before.
+      vi.stubEnv("PATH", [shimDir, process.env.PATH].join(":"));
+      vi.stubEnv("LC_ALL", "en_US.UTF-8");
+      try {
+        const branch = await run(getCurrentBranch(repoDir));
+        expect(branch).toBe("main");
+      } finally {
+        vi.unstubAllEnvs();
+      }
 
-    expect(await readFile(logPath, "utf8")).toBe("C");
-  });
+      await expect(readFile(logPath, "utf8")).resolves.toBe("C");
+    },
+  );
 });

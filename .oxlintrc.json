@@ -129,6 +129,14 @@
 
     // --- Configured, not off ----------------------------------------------
     "eslint/one-var": ["error", "never"],
+    // `value || fallback` on strings deliberately treats "" as missing.
+    "typescript/prefer-nullish-coalescing": [
+      "error",
+      { "ignorePrimitives": { "string": true } }
+    ],
+    // 10 (the default) blocks extracting a helper that names its steps; 20
+    // still flags a function doing too much, and complexity 15 caps branching.
+    "eslint/max-statements": ["error", { "max": 20 }],
     "unicorn/filename-case": [
       "error",
       { "cases": { "camelCase": true, "pascalCase": true, "kebabCase": true } }
@@ -150,7 +158,7 @@
     "unicorn/no-static-only-class": "off",
     // Fights `noPropertyAccessFromIndexSignature`, which wants brackets.
     "typescript/dot-notation": "off",
-    // Fights unicorn/no-useless-undefined: `let x;` then assign is fine.
+    // `let x;` then assign is fine.
     "eslint/init-declarations": "off",
     // The repo exports by name. These contradict each other and the repo.
     "import/no-named-export": "off",
@@ -180,6 +188,28 @@
     "import/no-namespace": "off",
     // Effect and SDK types are not deeply readonly; unfixable at the call site.
     "typescript/prefer-readonly-parameter-types": "off",
+
+    // --- Off: they fight correct code ----------------------------------------
+    // `process.stdout.isTTY === true` is right: isTTY is `true | undefined`.
+    "typescript/no-unnecessary-boolean-literal-compare": "off",
+    // `typeof X === "undefined"` is the only safe test for a build-time global.
+    "unicorn/no-typeof-undefined": "off",
+    // Flags TypeScript declaration merging (a const and a type of one name).
+    "eslint/no-redeclare": "off",
+    // Flags an ambient `.d.ts` shim class.
+    "typescript/no-extraneous-class": "off",
+    // Fires on exhaustive switches; clashes with Effect missingReturnYieldStar.
+    "typescript/consistent-return": "off",
+    // Explicit `undefined` documents intent (`resolve(undefined)`, `return undefined`).
+    "unicorn/no-useless-undefined": "off",
+    // `.then()` without await is a deliberate fire-and-forget.
+    "promise/prefer-await-to-then": "off",
+    // The CLI and the agent workflow scripts exit on purpose.
+    "unicorn/no-process-exit": "off",
+    // errors.ts is one file of small tagged error classes, by design.
+    "eslint/max-classes-per-file": "off",
+    // Low value: a test file without a top-level describe is still clear.
+    "vitest/require-top-level-describe": "off",
 
     // --- Off: wrong for this codebase ---------------------------------------
     // A Node CLI imports Node.
@@ -227,7 +257,12 @@
     },
     {
       // Tests. Only rules that are wrong for a test file are loosened.
-      "files": ["**/*.test.ts", "src/testSetup.ts", "src/testSandbox.ts"],
+      "files": [
+        "**/*.test.ts",
+        "tests/**/*.ts",
+        "src/testSetup.ts",
+        "src/testSandbox.ts"
+      ],
       "rules": {
         // Tests run Effects; that is how they observe them.
         "eslint/no-restricted-properties": "off",
@@ -242,7 +277,10 @@
         "eslint/no-empty-function": "off",
         "promise/avoid-new": "off",
         // Helpers sit next to the tests that use them.
-        "unicorn/consistent-function-scoping": "off"
+        "unicorn/consistent-function-scoping": "off",
+        // Stubs return promises without awaiting: promise-function-async
+        // wants them async, this wants an await, and no fix satisfies both.
+        "typescript/require-await": "off"
       }
     }
   ]

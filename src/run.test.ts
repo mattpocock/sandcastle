@@ -8,7 +8,15 @@ import {
 import { execSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import {
+  assert,
+  describe,
+  expect,
+  it,
+  vi,
+  beforeEach,
+  afterEach,
+} from "vitest";
 import {
   buildAgentStreamHandler,
   buildCompletionMessage,
@@ -19,15 +27,10 @@ import {
   printFileDisplayStartup,
   run,
   sanitizeBranchForFilename,
-  type RunOptions,
-  type RunResult,
 } from "./run.js";
-import {
-  claudeCode,
-  cursor,
-  opencode,
-  type AgentProvider,
-} from "./AgentProvider.js";
+import type { RunOptions, RunResult } from "./run.js";
+import { claudeCode, cursor, opencode } from "./AgentProvider.js";
+import type { AgentProvider } from "./AgentProvider.js";
 import { Output, StructuredOutputError } from "./Output.js";
 import { claudeHostSessionPath } from "./SessionStore.js";
 import type { InteractiveOptions } from "./interactive.js";
@@ -111,7 +114,7 @@ describe("printFileDisplayStartup", () => {
     });
     const allOutput = consoleSpy.mock.calls.flat().join(" ");
     // Bold ANSI escape code
-    expect(allOutput).toContain("\u001b[1m");
+    expect(allOutput).toContain("\u001B[1m");
   });
 
   it("prints a relative log path when hostRepoDir equals process.cwd()", () => {
@@ -153,9 +156,10 @@ describe("buildAgentStreamHandler (verbose file mode)", () => {
         type: "file",
         path: logPath,
         verbose: true,
-      })!;
+      });
+      assert.isDefined(handler);
       handler(rawEvent('{"type":"assistant"}'));
-      expect(readFileSync(logPath, "utf-8")).toBe(
+      expect(readFileSync(logPath, "utf8")).toBe(
         'I\'ll commit the result myself.\n{"type":"assistant"}\n',
       );
     } finally {
@@ -172,10 +176,11 @@ describe("buildAgentStreamHandler (verbose file mode)", () => {
         type: "file",
         path: logPath,
         verbose: true,
-      })!;
+      });
+      assert.isDefined(handler);
       handler(rawEvent('{"type":"system"}'));
       handler(rawEvent('{"type":"assistant"}'));
-      expect(readFileSync(logPath, "utf-8")).toBe(
+      expect(readFileSync(logPath, "utf8")).toBe(
         'Agent started\n{"type":"system"}\n{"type":"assistant"}\n',
       );
     } finally {
@@ -239,9 +244,9 @@ describe("RunResult", () => {
       commits: [],
       branch: "main",
     };
-    expect(result.iterations.length).toBe(2);
-    expect(result.iterations[0]!.sessionId).toBe("abc-123");
-    expect(result.iterations[1]!.sessionId).toBe("def-456");
+    expect(result.iterations).toHaveLength(2);
+    expect(result.iterations[0]?.sessionId).toBe("abc-123");
+    expect(result.iterations[1]?.sessionId).toBe("def-456");
   });
 
   it("has undefined sessionId for non-Claude agent iterations", () => {
@@ -252,7 +257,9 @@ describe("RunResult", () => {
       commits: [],
       branch: "main",
     };
-    expect(result.iterations[0]!.sessionId).toBeUndefined();
+    const [iteration] = result.iterations;
+    assert.isDefined(iteration);
+    expect(iteration.sessionId).toBeUndefined();
   });
 
   it("carries sessionFilePath when session capture is enabled", () => {
@@ -269,7 +276,7 @@ describe("RunResult", () => {
       commits: [],
       branch: "main",
     };
-    expect(result.iterations[0]!.sessionFilePath).toContain("abc-123.jsonl");
+    expect(result.iterations[0]?.sessionFilePath).toContain("abc-123.jsonl");
   });
 
   it("has undefined sessionFilePath when capture is disabled", () => {
@@ -280,7 +287,9 @@ describe("RunResult", () => {
       commits: [],
       branch: "main",
     };
-    expect(result.iterations[0]!.sessionFilePath).toBeUndefined();
+    const [iteration] = result.iterations;
+    assert.isDefined(iteration);
+    expect(iteration.sessionFilePath).toBeUndefined();
   });
 
   it("allows fork as an optional sibling of resume on the type", () => {
@@ -299,7 +308,7 @@ describe("RunResult", () => {
         branch: "main",
       }),
     };
-    expect(typeof result.fork).toBe("function");
+    expect(result.fork).toBeTypeOf("function");
   });
 });
 
@@ -450,18 +459,15 @@ describe("signal (AbortSignal)", () => {
     const reason = new DOMException("user cancelled", "AbortError");
     const ac = new AbortController();
     ac.abort(reason);
-    try {
-      await run({
+    await expect(
+      run({
         agent: claudeCode("claude-opus-4-8"),
         sandbox: testSandbox,
         prompt: "test",
         branchStrategy: { type: "head" },
         signal: ac.signal,
-      });
-      expect.unreachable("should have thrown");
-    } catch (err) {
-      expect(err).toBe(reason);
-    }
+      }),
+    ).rejects.toBe(reason);
   });
 });
 
@@ -664,7 +670,9 @@ describe("sanitizeBranchForFilename", () => {
   });
 
   it("replaces backslashes with dashes", () => {
-    expect(sanitizeBranchForFilename("feature\\branch")).toBe("feature-branch");
+    expect(sanitizeBranchForFilename(String.raw`feature\branch`)).toBe(
+      "feature-branch",
+    );
   });
 
   it("replaces all problematic filesystem characters", () => {
@@ -797,8 +805,8 @@ describe("inline prompt passthrough", () => {
     // matching value". With inline passthrough, {{KEY}} is delivered literally
     // and substitution is skipped entirely, so no scan happens.
     //
-    // The run still fails (fake sandbox can't actually run the agent) but the
-    // failure must not be a prompt-substitution error.
+    // The fake sandbox runs to completion, so the run resolves; a
+    // prompt-substitution error would reject it.
     const promise = run({
       agent: claudeCode("claude-opus-4-8"),
       sandbox: testSandbox,
@@ -806,10 +814,7 @@ describe("inline prompt passthrough", () => {
       branchStrategy: { type: "head" },
     });
 
-    await promise.catch((err: Error) => {
-      expect(err.message).not.toContain("matching value in promptArgs");
-      expect(err.message).not.toContain("{{BRANCH}}");
-    });
+    await expect(promise).resolves.toHaveProperty("iterations");
   });
 
   it("accepts inline prompt with empty promptArgs ({})", async () => {
@@ -824,11 +829,7 @@ describe("inline prompt passthrough", () => {
       promptArgs: {},
     });
 
-    await promise.catch((err: Error) => {
-      expect(err.message).not.toContain(
-        "promptArgs is only supported with promptFile",
-      );
-    });
+    await expect(promise).resolves.toHaveProperty("iterations");
   });
 });
 
@@ -859,7 +860,7 @@ describe("run() error logging to file", () => {
       }),
     ).rejects.toThrow();
 
-    const log = readFileSync(logPath, "utf-8");
+    const log = readFileSync(logPath, "utf8");
     expect(log).toContain("SOURCE_BRANCH");
     expect(log).toContain("built-in prompt argument");
   });
@@ -1018,21 +1019,18 @@ describe("structured output error carries the failed session id", () => {
   it("threads iterations[].sessionId onto StructuredOutputError", async () => {
     // captureSessions: false keeps the session id from the stream without
     // attempting to transfer a (nonexistent) session file off the sandbox.
-    try {
-      await run({
-        agent: claudeCode("claude-opus-4-8", { captureSessions: false }),
-        sandbox: sessionEmittingSandbox,
-        prompt: "emit your answer inside <result> tags",
-        branchStrategy: { type: "head" },
-        output: Output.object({ tag: "result", schema: mockSchema() }),
-      });
-      expect.unreachable("should have thrown StructuredOutputError");
-    } catch (err) {
-      expect(err).toBeInstanceOf(StructuredOutputError);
-      const soe = err as StructuredOutputError;
-      expect(soe.sessionId).toBe("sess-abc-123");
-      expect(soe.rawMatched).toBe("not valid json");
-    }
+    const promise = run({
+      agent: claudeCode("claude-opus-4-8", { captureSessions: false }),
+      sandbox: sessionEmittingSandbox,
+      prompt: "emit your answer inside <result> tags",
+      branchStrategy: { type: "head" },
+      output: Output.object({ tag: "result", schema: mockSchema() }),
+    });
+    await expect(promise).rejects.toBeInstanceOf(StructuredOutputError);
+    await expect(promise).rejects.toMatchObject({
+      sessionId: "sess-abc-123",
+      rawMatched: "not valid json",
+    });
   });
 });
 
@@ -1301,7 +1299,7 @@ describe("output.maxRetries end-to-end", () => {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(
       path,
-      JSON.stringify({ type: "system", cwd: hostRepoDir }) + "\n",
+      `${JSON.stringify({ type: "system", cwd: hostRepoDir })}\n`,
     );
   };
 
@@ -1349,7 +1347,7 @@ describe("output.maxRetries end-to-end", () => {
       ],
       [
         `{"type":"system","subtype":"init","session_id":"${sessionId}"}`,
-        '{"type":"result","result":"<result>{\\"answer\\":42}</result>"}',
+        String.raw`{"type":"result","result":"<result>{\"answer\":42}</result>"}`,
       ],
     ]);
 
@@ -1368,7 +1366,7 @@ describe("output.maxRetries end-to-end", () => {
           maxRetries: 1,
         }),
       });
-      expect(result.output).toEqual({ answer: 42 });
+      expect(result.output).toStrictEqual({ answer: 42 });
     } finally {
       rmSync(hostProjectsDir, { recursive: true, force: true });
     }
@@ -1387,7 +1385,7 @@ describe("output.maxRetries end-to-end", () => {
     const sandbox = stagedAgentSandbox([badStage, badStage, badStage]);
 
     try {
-      await run({
+      const promise = run({
         agent: claudeCode("claude-opus-4-8", {
           captureSessions: false,
           sessionStorage: { hostProjectsDir },
@@ -1401,10 +1399,10 @@ describe("output.maxRetries end-to-end", () => {
           maxRetries: 2,
         }),
       });
-      expect.unreachable("should have thrown StructuredOutputError");
-    } catch (err) {
-      expect(err).toBeInstanceOf(StructuredOutputError);
-      expect((err as StructuredOutputError).rawMatched).toBe("still not valid");
+      await expect(promise).rejects.toBeInstanceOf(StructuredOutputError);
+      await expect(promise).rejects.toMatchObject({
+        rawMatched: "still not valid",
+      });
     } finally {
       rmSync(hostProjectsDir, { recursive: true, force: true });
     }
@@ -1420,7 +1418,7 @@ describe("output.maxRetries end-to-end", () => {
         // Should never reach this stage — a stray success would mask a missing
         // guard around the recursion.
         `{"type":"system","subtype":"init","session_id":"sess-noretry"}`,
-        '{"type":"result","result":"<result>{\\"answer\\":1}</result>"}',
+        String.raw`{"type":"result","result":"<result>{\"answer\":1}</result>"}`,
       ],
     ]);
 
@@ -1463,7 +1461,7 @@ describe("merge-to-head temp branch name", () => {
       exec: async (command) => {
         const stdout = execSync(command, {
           cwd: options.worktreePath,
-          encoding: "utf-8",
+          encoding: "utf8",
           stdio: ["pipe", "pipe", "pipe"],
         });
         return { stdout, stderr: "", exitCode: 0 };
@@ -1503,8 +1501,9 @@ describe("merge-to-head temp branch name", () => {
       });
 
       const match = agentPrompt?.match(/^SOURCE=(\S+) ACTUAL=(\S+)$/);
-      expect(match).not.toBeNull();
-      const [, sourceBranch, actualBranch] = match!;
+      assert.exists(match);
+      const [, sourceBranch, actualBranch] = match;
+      assert.isDefined(actualBranch);
       expect(actualBranch).toMatch(/^sandcastle\//);
       expect(sourceBranch).toBe(actualBranch);
       expect(result.logFilePath).toBe(
@@ -1512,7 +1511,7 @@ describe("merge-to-head temp branch name", () => {
           hostDir,
           ".sandcastle",
           "logs",
-          buildLogFilename(actualBranch!, "main"),
+          buildLogFilename(actualBranch, "main"),
         ),
       );
     } finally {
@@ -1543,7 +1542,7 @@ describe("resume/fork after a promptFile + promptArgs run", () => {
     mkdirSync(dirname(sessionPath), { recursive: true });
     writeFileSync(
       sessionPath,
-      JSON.stringify({ type: "system", cwd: process.cwd() }) + "\n",
+      `${JSON.stringify({ type: "system", cwd: process.cwd() })}\n`,
     );
     const promptFile = join(dir, "prompt.md");
     writeFileSync(promptFile, "Remember {{TOKEN}}");
@@ -1585,13 +1584,15 @@ describe("resume/fork after a promptFile + promptArgs run", () => {
         logging: { type: "file", path: join(dir, "run.log") },
       });
 
-      const resumed = await first.resume!("repeat {{TOKEN}}");
-      const forked = await first.fork!("fork {{TOKEN}}");
+      assert.isDefined(first.resume);
+      assert.isDefined(first.fork);
+      const resumed = await first.resume("repeat {{TOKEN}}");
+      const forked = await first.fork("fork {{TOKEN}}");
 
-      expect(resumed.iterations.length).toBe(1);
-      expect(forked.iterations.length).toBe(1);
+      expect(resumed.iterations).toHaveLength(1);
+      expect(forked.iterations).toHaveLength(1);
       // The follow-up prompts are inline: passed as-is, never substituted.
-      expect(agentStdin).toEqual([
+      expect(agentStdin).toStrictEqual([
         "Remember tok-123",
         "repeat {{TOKEN}}",
         "fork {{TOKEN}}",
@@ -1624,7 +1625,7 @@ describe("resume/fork after a structured-output run", () => {
     mkdirSync(dirname(sessionPath), { recursive: true });
     writeFileSync(
       sessionPath,
-      JSON.stringify({ type: "system", cwd: process.cwd() }) + "\n",
+      `${JSON.stringify({ type: "system", cwd: process.cwd() })}\n`,
     );
 
     const agentStdin: (string | undefined)[] = [];
@@ -1653,7 +1654,7 @@ describe("resume/fork after a structured-output run", () => {
       }),
     });
 
-    const first = () =>
+    const first = async () =>
       run({
         agent: claudeCode("claude-opus-4-8", {
           captureSessions: false,
@@ -1675,14 +1676,16 @@ describe("resume/fork after a structured-output run", () => {
       const r = await first();
       expect(r.output).toBe("all good");
 
-      const resumed = await r.resume!("write the word DONE into done.txt");
-      const forked = await r.fork!("write the word DONE into done.txt");
+      assert.isDefined(r.resume);
+      assert.isDefined(r.fork);
+      const resumed = await r.resume("write the word DONE into done.txt");
+      const forked = await r.fork("write the word DONE into done.txt");
 
-      expect(resumed.iterations.length).toBe(1);
-      expect(forked.iterations.length).toBe(1);
+      expect(resumed.iterations).toHaveLength(1);
+      expect(forked.iterations).toHaveLength(1);
       expect("output" in resumed).toBe(false);
       expect("output" in forked).toBe(false);
-      expect(agentStdin).toEqual([
+      expect(agentStdin).toStrictEqual([
         "Summarise inside <summary> tags",
         "write the word DONE into done.txt",
         "write the word DONE into done.txt",
@@ -1696,13 +1699,15 @@ describe("resume/fork after a structured-output run", () => {
     const { dir, first } = setup();
     try {
       const r = await first();
-      const resumed = (await r.resume!("Summarise again in <summary> tags", {
+      assert.isDefined(r.resume);
+      assert.isDefined(r.fork);
+      const resumed = (await r.resume("Summarise again in <summary> tags", {
         output: Output.string({ tag: "summary" }),
       })) as { output?: unknown };
       expect(resumed.output).toBe("all good");
 
       await expect(
-        r.fork!("no tag here", { output: Output.string({ tag: "summary" }) }),
+        r.fork("no tag here", { output: Output.string({ tag: "summary" }) }),
       ).rejects.toThrow(/output tag <summary> not found/);
     } finally {
       rmSync(dir, { recursive: true, force: true });

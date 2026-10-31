@@ -1,11 +1,67 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  assert,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { vercel } from "./vercel.js";
 
+// A fake @vercel/sandbox modelling Vercel's default image: the user's
+// home is /vercel, and /vercel/sandbox doesn't exist. `mkDir` isn't recursive,
+// as on Vercel; a `mkdir -p` command creates the parents.
+const fs = vi.hoisted(() => ({ dirs: new Set<string>() }));
+
+interface FakeResult {
+  exitCode: number;
+  stdout: () => Promise<string>;
+  stderr: () => Promise<string>;
+}
+
+interface FakeSandbox {
+  mkDir: (path: string) => Promise<void>;
+  runCommand: (params: { cmd: string; args?: string[] }) => Promise<FakeResult>;
+}
+
 const sandboxCreate = vi.hoisted(() =>
-  vi.fn(async (_params: unknown) => ({
-    mkDir: async () => {},
-  })),
+  vi.fn<(params: Record<string, unknown>) => Promise<FakeSandbox>>(async () => {
+    const parentOf = (path: string) => path.slice(0, path.lastIndexOf("/"));
+    return {
+      mkDir: async (path: string) => {
+        if (!fs.dirs.has(parentOf(path))) {
+          throw new Error(
+            "Status code 400 is not ok: error creating directory: No such file or directory",
+          );
+        }
+        fs.dirs.add(path);
+      },
+      runCommand: async ({ cmd, args }: { cmd: string; args?: string[] }) => {
+        const [flag, target] = args ?? [];
+        if (cmd === "mkdir" && flag === "-p" && target !== undefined) {
+          for (let path = target; path !== ""; path = parentOf(path)) {
+            fs.dirs.add(path);
+          }
+          return {
+            exitCode: 0,
+            stdout: async () => "",
+            stderr: async () => "",
+          };
+        }
+        return {
+          exitCode: 127,
+          stdout: async () => "",
+          stderr: async () => "",
+        };
+      },
+    };
+  }),
 );
+
+beforeEach(() => {
+  fs.dirs = new Set(["/vercel"]);
+});
 
 vi.mock("@vercel/sandbox", () => ({
   Sandbox: { create: sandboxCreate },
@@ -20,7 +76,7 @@ describe("vercel()", () => {
 
   it("has a create function", () => {
     const provider = vercel();
-    expect(typeof provider.create).toBe("function");
+    expect(provider.create).toBeTypeOf("function");
   });
 
   it("accepts a token option", () => {
@@ -41,12 +97,52 @@ describe("vercel()", () => {
   it("accepts an env option", () => {
     const provider = vercel({ env: { VERCEL_VAR: "value" } });
     expect(provider.tag).toBe("isolated");
-    expect(provider.env).toEqual({ VERCEL_VAR: "value" });
+    expect(provider.env).toStrictEqual({ VERCEL_VAR: "value" });
   });
 
   it("defaults env to empty object when not provided", () => {
     const provider = vercel();
-    expect(provider.env).toEqual({});
+    expect(provider.env).toStrictEqual({});
+  });
+});
+
+describe("vercel() setup", () => {
+  beforeEach(() => {
+    sandboxCreate.mockClear();
+    vi.stubEnv("VERCEL_TOKEN", undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("creates the worktree folder on a runtime with no /vercel/sandbox", async () => {
+    const handle = await vercel().create({ env: {} });
+
+    expect(handle.worktreePath).toBe("/vercel/sandbox/workspace");
+    expect(fs.dirs.has("/vercel/sandbox/workspace")).toBe(true);
+  });
+
+  it("leaves the runtime unset by default, so Vercel uses its default image, which ships the claude CLI", async () => {
+    await vercel().create({ env: {} });
+
+    expect(sandboxCreate.mock.lastCall?.[0]).not.toHaveProperty("runtime");
+  });
+
+  it("passes the runtime option, then the template alias", async () => {
+    await vercel({ runtime: "node22", template: "python3.13" }).create({
+      env: {},
+    });
+    await vercel({ template: "python3.13" }).create({ env: {} });
+
+    expect(sandboxCreate).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ runtime: "node22" }),
+    );
+    expect(sandboxCreate).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ runtime: "python3.13" }),
+    );
   });
 });
 
@@ -60,7 +156,9 @@ describe("vercel() auth from the environment", () => {
 
   beforeEach(() => {
     sandboxCreate.mockClear();
-    for (const key of AUTH_KEYS) vi.stubEnv(key, undefined);
+    for (const key of AUTH_KEYS) {
+      vi.stubEnv(key, undefined);
+    }
   });
 
   afterEach(() => {
@@ -70,7 +168,9 @@ describe("vercel() auth from the environment", () => {
   const createdWith = async (options?: Parameters<typeof vercel>[0]) => {
     await vercel(options).create({ env: {} });
     expect(sandboxCreate).toHaveBeenCalledTimes(1);
-    return sandboxCreate.mock.calls[0]![0] as Record<string, unknown>;
+    const [call] = sandboxCreate.mock.calls;
+    assert.isDefined(call);
+    return call[0];
   };
 
   it("passes VERCEL_TOKEN, VERCEL_TEAM_ID and VERCEL_PROJECT_ID from the environment", async () => {
@@ -131,14 +231,14 @@ describe("vercel() auth from the environment", () => {
     vi.stubEnv("VERCEL_TOKEN", "env-token");
     vi.stubEnv("VERCEL_TEAM_ID", "team_env");
 
-    const error = await vercel()
+    const failure = await vercel()
       .create({ env: {} })
-      .catch((e: unknown) => e as Error);
+      .catch((error: unknown) => error);
 
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain("VERCEL_PROJECT_ID");
-    expect((error as Error).message).not.toContain("VERCEL_TEAM_ID");
-    expect((error as Error).message).not.toContain("env-token");
+    assert.instanceOf(failure, Error);
+    expect(failure.message).toContain("VERCEL_PROJECT_ID");
+    expect(failure.message).not.toContain("VERCEL_TEAM_ID");
+    expect(failure.message).not.toContain("env-token");
   });
 
   it("leaves auth to the SDK's OIDC flow when no token is available", async () => {

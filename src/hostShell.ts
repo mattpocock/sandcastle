@@ -19,7 +19,7 @@ export const execHostShell = (
   command: string,
   options: {
     readonly cwd: string;
-    readonly signals: ReadonlyArray<AbortSignal | undefined>;
+    readonly signals: readonly (AbortSignal | undefined)[];
   },
 ): Promise<{ stdout: string; stderr: string }> =>
   new Promise((resolve, reject) => {
@@ -41,23 +41,33 @@ export const execHostShell = (
 
     let exited = false;
     const killTree = () => {
-      if (exited || child.pid === undefined) return;
+      if (exited || child.pid === undefined) {
+        return;
+      }
       try {
-        if (usesProcessGroup) process.kill(-child.pid, "SIGKILL");
-        else child.kill("SIGKILL");
+        if (usesProcessGroup) {
+          process.kill(-child.pid, "SIGKILL");
+        } else {
+          child.kill("SIGKILL");
+        }
       } catch {
         // Already gone.
       }
     };
 
-    const onAbort = (event: Event) => {
-      killTree();
-      reject(abortError(command, event.target as AbortSignal));
-    };
-    for (const s of signals) s.addEventListener("abort", onAbort);
+    const abortListeners = signals.map((signal) => {
+      const onAbort = () => {
+        killTree();
+        reject(abortError(command, signal));
+      };
+      signal.addEventListener("abort", onAbort);
+      return { signal, onAbort };
+    });
     const unregisterShutdown = registerShutdown(killTree);
     const cleanup = () => {
-      for (const s of signals) s.removeEventListener("abort", onAbort);
+      for (const { signal, onAbort } of abortListeners) {
+        signal.removeEventListener("abort", onAbort);
+      }
       unregisterShutdown();
     };
 

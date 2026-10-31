@@ -225,7 +225,7 @@ export const validate = <T>(
 ): T => {
   const result = schema["~standard"].validate(value);
   if (result instanceof Promise) {
-    throw new Error("Schema validation must be synchronous");
+    throw new TypeError("Schema validation must be synchronous");
   }
   if (result.issues) {
     throw new Error(result.issues.map((issue) => issue.message).join("; "));

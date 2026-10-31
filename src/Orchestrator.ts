@@ -1,4 +1,4 @@
-import { Deferred, Duration, Effect, Fiber } from "effect";
+import { Deferred, Duration, Effect, Fiber, Runtime } from "effect";
 import { AgentStreamEmitter } from "./AgentStreamEmitter.js";
 import { Display } from "./Display.js";
 import { preprocessPrompt } from "./PromptPreprocessor.js";
@@ -9,15 +9,14 @@ import {
 } from "./errors.js";
 import type { SandboxError } from "./errors.js";
 import type { SandboxService } from "./SandboxFactory.js";
-import { SandboxFactory, SANDBOX_REPO_DIR } from "./SandboxFactory.js";
-import { withSandboxLifecycle, type SandboxHooks } from "./SandboxLifecycle.js";
+import { SandboxFactory } from "./SandboxFactory.js";
+import { withSandboxLifecycle } from "./SandboxLifecycle.js";
+import type { SandboxHooks } from "./SandboxLifecycle.js";
 import type { AgentProvider, IterationUsage } from "./AgentProvider.js";
 import type { Timeouts } from "./run.js";
 import { TextDeltaBuffer } from "./TextDeltaBuffer.js";
-import {
-  buildContextWindowLines,
-  type ContextWindow,
-} from "./ContextWindow.js";
+import { buildContextWindowLines } from "./ContextWindow.js";
+import type { ContextWindow } from "./ContextWindow.js";
 
 export type { ParsedStreamEvent, IterationUsage } from "./AgentProvider.js";
 
@@ -62,10 +61,14 @@ const invokeAgent = (
     // fires (signal seen but process hasn't exited). Resolving lets the race
     // hand control back to the orchestrator with the buffered output, which
     // still contains the signal so the existing completionSignal check works.
-    const completionTimeoutDeferred = yield* Deferred.make<
-      { result: string; sessionId?: string; usage?: IterationUsage },
-      never
-    >();
+    const completionTimeoutDeferred = yield* Deferred.make<{
+      result: string;
+      sessionId?: string;
+      usage?: IterationUsage;
+    }>();
+    // Timer and abort callbacks fire outside any fiber; they fork onto the
+    // surrounding runtime rather than a fresh default one.
+    const runFork = Runtime.runFork(yield* Effect.runtime());
     let timeoutFiber: Fiber.RuntimeFiber<unknown, unknown> | null = null;
     let completionDetected = false;
 
@@ -81,13 +84,15 @@ const invokeAgent = (
     const interruptFiber = (
       fiber: Fiber.RuntimeFiber<unknown, unknown> | null,
     ) => {
-      if (fiber !== null) Effect.runFork(Fiber.interrupt(fiber));
+      if (fiber !== null) {
+        runFork(Fiber.interrupt(fiber));
+      }
     };
 
     const startWarningInterval = () => {
       interruptFiber(warningFiber);
       idleMinuteCounter = 0;
-      warningFiber = Effect.runFork(
+      warningFiber = runFork(
         Effect.gen(function* () {
           while (true) {
             yield* Effect.sleep(Duration.millis(idleWarningIntervalMs));
@@ -102,7 +107,7 @@ const invokeAgent = (
       interruptFiber(timeoutFiber);
       if (completionDetected) {
         // Post-signal grace window — successful resolution on expiry.
-        timeoutFiber = Effect.runFork(
+        timeoutFiber = runFork(
           Effect.gen(function* () {
             yield* Effect.sleep(Duration.millis(completionTimeoutMs));
             onCompletionTimeout(completionTimeoutMs);
@@ -115,7 +120,7 @@ const invokeAgent = (
         );
       } else {
         // Pre-signal idle window — failure on expiry.
-        timeoutFiber = Effect.runFork(
+        timeoutFiber = runFork(
           Effect.gen(function* () {
             yield* Effect.sleep(Duration.millis(idleTimeoutMs));
             yield* Deferred.fail(
@@ -134,17 +139,19 @@ const invokeAgent = (
 
     // Deferred that will be resolved (as a defect) when the AbortSignal fires.
     // Uses Effect.die so the abort reason propagates as-is to run().
-    const abortDeferred = yield* Deferred.make<never, never>();
+    const abortDeferred = yield* Deferred.make<never>();
     let abortCleanup: (() => void) | null = null;
     if (signal) {
       if (signal.aborted) {
         return yield* Effect.die(signal.reason);
       }
       const onAbort = () => {
-        Effect.runFork(Deferred.die(abortDeferred, signal.reason));
+        runFork(Deferred.die(abortDeferred, signal.reason));
       };
       signal.addEventListener("abort", onAbort, { once: true });
-      abortCleanup = () => signal.removeEventListener("abort", onAbort);
+      abortCleanup = () => {
+        signal.removeEventListener("abort", onAbort);
+      };
     }
 
     resetTimer();
@@ -158,7 +165,9 @@ const invokeAgent = (
       });
       const execResult = yield* sandbox.exec(printCmd.command, {
         onLine: (line) => {
-          if (settled) return;
+          if (settled) {
+            return;
+          }
           // Surface the raw line FIRST so verbose mode/forwarders see every
           // stdout line the agent produced, including ones parseStreamLine
           // drops. Errors thrown by the callback are caught by the emitter
@@ -220,21 +229,17 @@ const invokeAgent = (
           const lines = execResult.stdout.split("\n").filter((l) => l.trim());
           errorDetail = lines.slice(-20).join("\n");
         }
-        return yield* Effect.fail(
-          new AgentError({
-            message: `${provider.name} exited with code ${execResult.exitCode}:\n${errorDetail}`,
-          }),
-        );
+        return yield* new AgentError({
+          message: `${provider.name} exited with code ${execResult.exitCode}:\n${errorDetail}`,
+        });
       }
 
       // Some agents (pi, opencode) exit 0 after reporting a failure in their
       // stream. Treat the reported error as authoritative.
       if (streamError !== undefined) {
-        return yield* Effect.fail(
-          new AgentError({
-            message: `${provider.name} reported an error:\n${streamError}`,
-          }),
-        );
+        return yield* new AgentError({
+          message: `${provider.name} reported an error:\n${streamError}`,
+        });
       }
 
       return { result: resultText || execResult.stdout, sessionId, usage };
@@ -255,10 +260,7 @@ const invokeAgent = (
     > = Effect.raceFirst(execEffect, Deferred.await(timeoutSignal));
     raced = Effect.raceFirst(raced, Deferred.await(completionTimeoutDeferred));
     if (signal) {
-      raced = Effect.raceFirst(
-        raced,
-        Deferred.await(abortDeferred) as Effect.Effect<never, never>,
-      );
+      raced = Effect.raceFirst(raced, Deferred.await(abortDeferred));
     }
 
     return yield* raced.pipe(
@@ -361,8 +363,12 @@ export const orchestrate = (
     const factory = yield* SandboxFactory;
     const display = yield* Display;
     const streamEmitter = yield* AgentStreamEmitter;
+    // The agent's stream callbacks fire outside any fiber; they fork their
+    // display and emitter effects onto the surrounding runtime.
+    const runFork = Runtime.runFork(yield* Effect.runtime());
     const { hostRepoDir, iterations, hooks, prompt, branch, provider } =
       options;
+    const { sessionStorage } = provider;
     let completionSignals: string[];
     if (options.completionSignal === undefined) {
       completionSignals = [DEFAULT_COMPLETION_SIGNAL];
@@ -419,12 +425,12 @@ export const orchestrate = (
                   if (
                     iterationResumeSession &&
                     bindMountHandle &&
-                    provider.sessionStorage
+                    sessionStorage
                   ) {
                     yield* display.status(label("Resuming session"), "info");
                     yield* Effect.tryPromise({
                       try: () =>
-                        provider.sessionStorage!.resumeIntoSandbox({
+                        sessionStorage.resumeIntoSandbox({
                           hostCwd: hostRepoDir,
                           sandboxCwd: ctx.sandboxRepoDir,
                           sessionId: iterationResumeSession,
@@ -453,8 +459,8 @@ export const orchestrate = (
                   // Invoke the agent — buffer text deltas so Pi's single-token
                   // chunks are displayed as readable multi-word lines.
                   const textBuffer = new TextDeltaBuffer((chunk) => {
-                    Effect.runPromise(display.textChunk(chunk));
-                    Effect.runPromise(
+                    runFork(display.textChunk(chunk));
+                    runFork(
                       streamEmitter.emit({
                         type: "text",
                         message: chunk,
@@ -468,8 +474,8 @@ export const orchestrate = (
                   };
                   const onToolCall = (name: string, formattedArgs: string) => {
                     textBuffer.flush();
-                    Effect.runPromise(display.toolCall(name, formattedArgs));
-                    Effect.runPromise(
+                    runFork(display.toolCall(name, formattedArgs));
+                    runFork(
                       streamEmitter.emit({
                         type: "toolCall",
                         name,
@@ -480,7 +486,7 @@ export const orchestrate = (
                     );
                   };
                   const onRawLine = (line: string) => {
-                    Effect.runPromise(
+                    runFork(
                       streamEmitter.emit({
                         type: "raw",
                         line,
@@ -494,10 +500,10 @@ export const orchestrate = (
                       minutes === 1
                         ? "Agent idle for 1 minute"
                         : `Agent idle for ${minutes} minutes`;
-                    Effect.runPromise(display.status(label(msg), "warn"));
+                    runFork(display.status(label(msg), "warn"));
                   };
                   const onCompletionTimeout = (timeoutMs: number) => {
-                    Effect.runPromise(
+                    runFork(
                       display.status(
                         label(
                           `Completion signal seen but agent process is hanging — force-completing after ${timeoutMs / 1000}s grace window.`,
@@ -548,14 +554,14 @@ export const orchestrate = (
                   let usage: IterationUsage | undefined = streamUsage;
                   if (
                     provider.captureSessions &&
-                    provider.sessionStorage &&
+                    sessionStorage &&
                     sessionId &&
                     bindMountHandle
                   ) {
                     yield* display.status(label("Capturing session"), "info");
                     yield* Effect.tryPromise({
                       try: () =>
-                        provider.sessionStorage!.captureToHost({
+                        sessionStorage.captureToHost({
                           hostCwd: hostRepoDir,
                           sandboxCwd: ctx.sandboxRepoDir,
                           sessionId,
@@ -567,11 +573,10 @@ export const orchestrate = (
                           sessionId,
                         }),
                     });
-                    sessionFilePath =
-                      provider.sessionStorage.hostSessionFilePath(
-                        hostRepoDir,
-                        sessionId,
-                      );
+                    sessionFilePath = sessionStorage.hostSessionFilePath(
+                      hostRepoDir,
+                      sessionId,
+                    );
 
                     // Parse token usage and the context window from the
                     // captured session JSONL
@@ -580,17 +585,16 @@ export const orchestrate = (
                       provider.parseSessionContextWindow
                     ) {
                       const content = yield* Effect.promise(() =>
-                        provider
-                          .sessionStorage!.readHostSession(
-                            hostRepoDir,
-                            sessionId,
-                          )
+                        sessionStorage
+                          .readHostSession(hostRepoDir, sessionId)
                           .catch(() => undefined as string | undefined),
                       );
                       if (content) {
                         const parsedUsage =
                           provider.parseSessionUsage?.(content);
-                        if (parsedUsage) usage = parsedUsage;
+                        if (parsedUsage) {
+                          usage = parsedUsage;
+                        }
                         const parsedContextWindow =
                           provider.parseSessionContextWindow?.(content);
                         if (parsedContextWindow) {
