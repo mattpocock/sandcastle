@@ -108,6 +108,12 @@ To pay down debt, pick a rule or a file from `npm run lint:report` and fix every
 
 ## Testing
 
+### Where tests live
+
+New tests go in `tests/` and use only the public API: `@ai-hero/sandcastle` and its `exports` subpaths, imported by package name. dependency-cruiser (`.dependency-cruiser.mjs`) enforces this, and `src/` never imports from `tests/`. The unit tests elsewhere in `src/` are legacy. The test ratchet (`scripts/test-baseline.json`, checked by `npm run lint`) fails on any new test file outside `tests/`, and the legacy count only shrinks. The tests of the repo's own tooling (`scripts/`, `.sandcastle/`) are out of scope.
+
+Never extend or loosen the public API to suit a test. The only test-motivated surface allowed is the test helpers entry point, which a later PR designs. If a test can't reach something through the public API, that code is either dead or missing a real public seam.
+
 ### Core Principle
 
 Tests verify behavior through public interfaces, not implementation details. Code can change entirely; tests shouldn't break unless behavior changed.
