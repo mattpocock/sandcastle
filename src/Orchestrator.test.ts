@@ -1,7 +1,7 @@
 import { Cause, Effect, Layer, Ref } from "effect";
 import { exec } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import {
   copyFile,
   mkdir,
@@ -4331,4 +4331,165 @@ describe("Orchestrator completion timeout (hanging process)", () => {
       warnEntries.some((e) => /hang|completion timeout/i.test(e.message)),
     ).toBe(true);
   }, 10_000);
+});
+
+describe("Orchestrator context window (last model call)", () => {
+  const fixtureLines = (name: string): string[] =>
+    readFileSync(
+      join(import.meta.dirname, "__fixtures__", "context-window", name),
+      "utf-8",
+    )
+      .split("\n")
+      .filter((l) => l.length > 0);
+
+  /** A sandbox that replays recorded agent stdout for commands starting with `prefix`. */
+  const replaySandbox = (
+    dir: string,
+    prefix: string,
+    perCall: { lines: string[]; exitCode: number }[],
+  ): SandboxService => {
+    const real = makeLocalSandbox(dir);
+    return {
+      exec: (command, options) => {
+        if (command.startsWith(prefix) && options?.onLine) {
+          const onLine = options.onLine;
+          const call = perCall.shift() ?? { lines: [], exitCode: 0 };
+          return Effect.sync(() => {
+            for (const line of call.lines) onLine(line);
+            return {
+              stdout: call.lines.join("\n"),
+              stderr: call.exitCode === 0 ? "" : "API Error: refused",
+              exitCode: call.exitCode,
+            };
+          });
+        }
+        return real.exec(command, options);
+      },
+      copyIn: real.copyIn,
+      copyFileOut: real.copyFileOut,
+    };
+  };
+
+  const newHost = async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-ctxwin-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+    return hostDir;
+  };
+
+  it("claudeCode: reads the last call from the stream, with no session capture", async () => {
+    const hostDir = await newHost();
+    const lines = fixtureLines("claude-code.stream.jsonl");
+    const calls = [
+      { lines, exitCode: 0 },
+      { lines, exitCode: 0 },
+    ];
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) =>
+      replaySandbox(dir, "claude ", calls),
+    );
+
+    const result = await Effect.runPromise(
+      orchestrate({
+        provider: claudeCode("claude-haiku-5-5", { captureSessions: false }),
+        hostRepoDir: hostDir,
+        iterations: 2,
+        prompt: "do some work",
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+    );
+
+    expect(result.iterations.map((it) => it.contextWindow)).toEqual([
+      { tokens: 46633 },
+      { tokens: 46633 },
+    ]);
+  });
+
+  it("codex: reads the last request and the limit from the captured session, not the stream total", async () => {
+    const hostDir = await newHost();
+    const session = fixtureLines("codex.session.jsonl").join("\n");
+    const { factoryLayer: inner } = makeTestSandboxFactory(hostDir, (dir) =>
+      replaySandbox(dir, "codex ", [
+        { lines: fixtureLines("codex.stream.jsonl"), exitCode: 0 },
+      ]),
+    );
+    const handle: BindMountSandboxHandle = {
+      worktreePath: hostDir,
+      exec: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
+      copyFileIn: async () => {},
+      copyFileOut: async () => {},
+      close: async () => {},
+    };
+    const factoryLayer = Layer.provide(
+      Layer.effect(
+        SandboxFactory,
+        Effect.map(SandboxFactory, (f) => ({
+          withSandbox: (make) =>
+            f.withSandbox((info, sb) =>
+              make({ ...info, bindMountHandle: handle }, sb),
+            ),
+        })),
+      ),
+      inner,
+    );
+    const real = codexFactory("gpt-6-luna");
+    const provider = {
+      ...real,
+      sessionStorage: {
+        ...real.sessionStorage,
+        captureToHost: async () => {},
+        readHostSession: async () => session,
+        hostSessionFilePath: () => "/host/rollout.jsonl",
+      },
+    };
+
+    const result = await Effect.runPromise(
+      orchestrate({
+        provider,
+        hostRepoDir: hostDir,
+        iterations: 1,
+        prompt: "do some work",
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+    );
+
+    expect(result.iterations[0]!.contextWindow).toEqual({
+      tokens: 31899,
+      limit: 258400,
+    });
+  });
+
+  it("shows the context window of completed iterations when a later one fails", async () => {
+    const hostDir = await newHost();
+    const ref = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    // Shared across iterations: the factory builds a fresh sandbox per
+    // iteration, so iteration 1 succeeds and iteration 2 fails.
+    const calls = [
+      { lines: fixtureLines("claude-code.stream.jsonl"), exitCode: 0 },
+      { lines: [], exitCode: 1 },
+    ];
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) =>
+      replaySandbox(dir, "claude ", calls),
+    );
+
+    const exit = await Effect.runPromiseExit(
+      orchestrate({
+        provider: claudeCode("claude-haiku-5-5", { captureSessions: false }),
+        hostRepoDir: hostDir,
+        iterations: 2,
+        prompt: "do some work",
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            factoryLayer,
+            SilentDisplay.layer(ref),
+            noopAgentStreamEmitterLayer,
+          ),
+        ),
+      ),
+    );
+
+    expect(exit._tag).toBe("Failure");
+    const entries = await Effect.runPromise(Ref.get(ref));
+    expect(
+      entries.filter((e) => e._tag === "text").map((e) => e.message),
+    ).toEqual(["Context window: 47k"]);
+  });
 });

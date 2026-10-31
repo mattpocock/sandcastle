@@ -302,7 +302,7 @@ describe("createSandbox", () => {
     }
   });
 
-  it("sandbox.run() emits 'Context window: NNNk' line when an iteration has usage", async () => {
+  it("sandbox.run() never shows codex's turn total as the context window", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
     await commitFile(hostDir, "init.txt", "init", "initial commit");
@@ -330,18 +330,20 @@ describe("createSandbox", () => {
         logging: { type: "file", path: logPath },
       });
 
-      // Sanity-check: orchestrator surfaced usage on the iteration.
+      // turn.completed usage is summed over every request (#898). It stays
+      // on `usage`, but it is not the context window.
       expect(result.iterations[0]!.usage).toBeDefined();
+      expect(result.iterations[0]!.contextWindow).toBeUndefined();
 
       const log = await readFile(logPath, "utf-8");
-      expect(log).toContain("Context window: 50k");
+      expect(log).not.toContain("Context window");
     } finally {
       await sandbox.close();
       await rm(hostDir, { recursive: true, force: true });
     }
   });
 
-  it("sandbox.run() captures Claude session and emits 'Context window' from parsed usage (regression: #717)", async () => {
+  it("sandbox.run() captures Claude session and emits 'Context window' (regression: #717)", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-claude-cap-"));
     const hostProjectsDir = await mkdtemp(
       join(tmpdir(), "sandbox-claude-host-projects-"),
@@ -424,7 +426,15 @@ describe("createSandbox", () => {
                 }),
                 JSON.stringify({
                   type: "assistant",
-                  message: { content: [{ type: "text", text: "ok" }] },
+                  message: {
+                    content: [{ type: "text", text: "ok" }],
+                    usage: {
+                      input_tokens: 50000,
+                      cache_creation_input_tokens: 0,
+                      cache_read_input_tokens: 0,
+                      output_tokens: 100,
+                    },
+                  },
                 }),
                 JSON.stringify({ type: "result", result: "ok" }),
               ].join("\n");

@@ -21,6 +21,7 @@ import {
   type HostSessionLookup,
 } from "./SessionStore.js";
 import type { BindMountSandboxHandle } from "./SandboxProvider.js";
+import type { ContextWindow } from "./ContextWindow.js";
 
 const fileExists = async (path: string): Promise<boolean> => {
   try {
@@ -33,6 +34,11 @@ const fileExists = async (path: string): Promise<boolean> => {
 
 export type ParsedStreamEvent =
   | { type: "text"; text: string }
+  /**
+   * The input side of ONE model call (cache included), emitted once per call.
+   * The Orchestrator keeps the last one per iteration; see ContextWindow.
+   */
+  | { type: "context_window"; contextWindow: ContextWindow }
   | { type: "result"; result: string }
   | { type: "tool_call"; name: string; args: string }
   | { type: "session_id"; sessionId: string }
@@ -47,6 +53,47 @@ export type ParsedStreamEvent =
 /** @internal Single-quote a string for safe use in a POSIX shell command. */
 export const shellEscape = (s: string): string =>
   "'" + s.replace(/'/g, "'\\''") + "'";
+
+/**
+ * Build a `context_window` event from ONE model call's input-side buckets
+ * (uncached input plus each cache bucket the agent reports separately).
+ * Returns nothing when the input is missing or the call reports zero tokens,
+ * so a malformed or failed call cannot replace a real figure.
+ */
+const contextWindowEvent = (
+  input: unknown,
+  ...cacheBuckets: unknown[]
+): ParsedStreamEvent[] => {
+  if (typeof input !== "number") return [];
+  let tokens = input;
+  for (const n of cacheBuckets) if (typeof n === "number") tokens += n;
+  return tokens > 0
+    ? [{ type: "context_window", contextWindow: { tokens } }]
+    : [];
+};
+
+/**
+ * Claude Code: each `assistant` line carries its API call's `message.usage`
+ * (lines split from one call repeat it), so the last one is the last call.
+ * Subagent lines (`parent_tool_use_id` set) belong to another context and are
+ * skipped. The `result` line's usage is summed over every call of the turn
+ * and is deliberately never used.
+ */
+const parseClaudeContextWindow = (line: string): ParsedStreamEvent[] => {
+  if (!line.startsWith("{")) return [];
+  try {
+    const obj = JSON.parse(line);
+    if (obj.type !== "assistant" || obj.parent_tool_use_id) return [];
+    const u = obj.message?.usage;
+    return contextWindowEvent(
+      u?.input_tokens,
+      u?.cache_creation_input_tokens,
+      u?.cache_read_input_tokens,
+    );
+  } catch {
+    return [];
+  }
+};
 
 /** Maps allowlisted tool names to the input field containing the display arg */
 const TOOL_ARG_FIELDS: Record<string, string> = {
@@ -195,6 +242,12 @@ const parseCursorToolCallStarted = (
   return [];
 };
 
+/**
+ * Cursor emits no `context_window` events on purpose. Its only token figures
+ * are on the `result` line, summed over every model call of the turn (verified
+ * 2026-10-31: `cacheReadTokens` grew ~5.5x with five calls over the same
+ * content). With no per-call figure, no line beats a wrong one.
+ */
 const parseCursorStreamLine = (line: string): ParsedStreamEvent[] => {
   if (!line.startsWith("{")) return [];
   let obj: Record<string, unknown>;
@@ -285,6 +338,12 @@ export interface AgentProvider {
   parseStreamLine(line: string): ParsedStreamEvent[];
   /** Parse token usage from the captured session JSONL content. Only implemented by Claude Code. */
   parseSessionUsage?(content: string): IterationUsage | undefined;
+  /**
+   * Parse the last model call's context window from the captured session
+   * JSONL. For agents whose stream has no per-call figure (codex). Overrides
+   * the stream's `context_window` events when it returns a value.
+   */
+  parseSessionContextWindow?(content: string): ContextWindow | undefined;
 }
 
 export const DEFAULT_MODEL = "claude-opus-4-8";
@@ -565,6 +624,12 @@ const parsePiStreamLine = (line: string): ParsedStreamEvent[] => {
     if (obj.type === "session" && typeof obj.id === "string") {
       return [{ type: "session_id", sessionId: obj.id }];
     }
+    // Each assistant message_end is one model call with its own usage. Not
+    // agent_end, whose messages[] repeat every call's usage.
+    if (obj.type === "message_end" && obj.message?.role === "assistant") {
+      const u = obj.message.usage;
+      return contextWindowEvent(u?.input, u?.cacheRead, u?.cacheWrite);
+    }
     if (obj.type === "message_update" && obj.assistantMessageEvent) {
       const evt = obj.assistantMessageEvent as {
         type: string;
@@ -738,6 +803,39 @@ const parseCodexUsage = (usage: unknown): IterationUsage | undefined => {
   };
 };
 
+/**
+ * Codex's `exec --json` stream has no per-request usage: `turn.completed`
+ * sums every request of the session (#898). The rollout JSONL does: each
+ * `token_count` event has `last_token_usage` (one request; its `input_tokens`
+ * already includes cached and cache-write tokens) and the model's
+ * `model_context_window`. The last one is the last request.
+ */
+const parseCodexSessionContextWindow = (
+  content: string,
+): ContextWindow | undefined => {
+  const lines = content.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]!;
+    if (!line.startsWith("{")) continue;
+    try {
+      const obj = JSON.parse(line);
+      if (obj.type !== "event_msg" || obj.payload?.type !== "token_count") {
+        continue;
+      }
+      const info = obj.payload.info;
+      const tokens = info?.last_token_usage?.input_tokens;
+      if (typeof tokens !== "number" || tokens <= 0) continue;
+      const limit = info.model_context_window;
+      return typeof limit === "number" && limit > 0
+        ? { tokens, limit }
+        : { tokens };
+    } catch {
+      // Not valid JSON — skip
+    }
+  }
+  return undefined;
+};
+
 const parseCodexStreamLine = (line: string): ParsedStreamEvent[] => {
   if (!line.startsWith("{")) return [];
   try {
@@ -870,6 +968,10 @@ export const codex = (
   parseStreamLine(line: string): ParsedStreamEvent[] {
     return parseCodexStreamLine(line);
   },
+
+  parseSessionContextWindow(content: string): ContextWindow | undefined {
+    return parseCodexSessionContextWindow(content);
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -944,6 +1046,12 @@ const parseOpenCodeStreamLine = (line: string): ParsedStreamEvent[] => {
       return [{ type: "session_id", sessionId: obj.sessionID }];
     }
 
+    // step_finish is one model call; part.tokens is that call's usage.
+    if (obj.type === "step_finish" && part?.tokens) {
+      const t = part.tokens;
+      return contextWindowEvent(t.input, t.cache?.read, t.cache?.write);
+    }
+
     // text event → assistant text. Emit both text (for streaming display) and
     // result (final message; the last result wins in the Orchestrator).
     if (
@@ -982,7 +1090,7 @@ const parseOpenCodeStreamLine = (line: string): ParsedStreamEvent[] => {
       return msg ? [{ type: "error", message: msg }] : [];
     }
 
-    // step_finish, tool output, etc. → skip
+    // tool output, etc. → skip
   } catch {
     // Not valid JSON — skip
   }
@@ -1084,6 +1192,9 @@ function assertCopilotPrintPromptFitsArgv(prompt: string): void {
  *   Mapped to `tool_call` events for allowlisted tools. Copilot uses lowercase
  *   `bash`; we normalise to the existing `Bash` allowlist entry.
  *
+ * - `session.usage_checkpoint` — `{ data: { accountingSnapshot } }`
+ *   `lastCallInputTokens` becomes a `context_window` event.
+ *
  * - `result` — `{ sessionId, exitCode, usage }`
  *   Terminal event. We surface `sessionId` as a `session_id` event.
  *
@@ -1127,6 +1238,14 @@ const parseCopilotStreamLine = (line: string): ParsedStreamEvent[] => {
       obj.data.content.length > 0
     ) {
       return [{ type: "result", result: obj.data.content }];
+    }
+
+    // usage_checkpoint comes once near the end of a run. Use the last call's
+    // input, never modelMetrics[...].usage.inputTokens, which sums all calls.
+    if (obj.type === "session.usage_checkpoint") {
+      return contextWindowEvent(
+        obj.data?.accountingSnapshot?.lastCallInputTokens,
+      );
     }
 
     // Terminal result event carries the session id
@@ -1279,7 +1398,7 @@ export const claudeCode = (
   },
 
   parseStreamLine(line: string): ParsedStreamEvent[] {
-    return parseStreamJsonLine(line);
+    return [...parseStreamJsonLine(line), ...parseClaudeContextWindow(line)];
   },
 
   parseSessionUsage(content: string): IterationUsage | undefined {
