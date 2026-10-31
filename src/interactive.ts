@@ -200,7 +200,7 @@ export const interactive = async (
       const missingKeys = findMissingPromptArgKeys(rawPrompt, userArgs);
       const collectedArgs: Record<string, string> = {};
       for (const key of missingKeys) {
-        const value = yield* Effect.promise(() =>
+        const value = yield* Effect.promise(async () =>
           clack.text({
             message: `Enter value for {{${key}}}`,
             validate: (v) => {
@@ -304,7 +304,7 @@ export const interactive = async (
       if (sandboxProvider.tag === "none") {
         // No-sandbox: run directly on the host, no container
         const worktreePath = isHeadMode ? hostRepoDir : worktreeInfo!.path;
-        return yield* Effect.promise(() =>
+        return yield* Effect.promise(async () =>
           sandboxProvider.create({
             worktreePath,
             env: effectiveEnv,
@@ -402,7 +402,7 @@ export const interactive = async (
             });
 
             const result = yield* raceAbortSignal(
-              Effect.promise(() =>
+              Effect.promise(async () =>
                 interactiveExecFn(interactiveArgs, {
                   stdin: process.stdin,
                   stdout: process.stdout,
@@ -465,7 +465,9 @@ export const interactive = async (
           : Effect.void,
       ),
       // Always close sandbox handle
-      Effect.ensuring(Effect.promise(() => handle.close().catch(() => {}))),
+      Effect.ensuring(
+        Effect.promise(async () => handle.close().catch(() => {})),
+      ),
     );
   });
 

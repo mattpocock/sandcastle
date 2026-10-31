@@ -6,9 +6,9 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { resolveEnv } from "./EnvResolver.js";
 
-const makeDir = () => mkdtemp(join(tmpdir(), "env-resolver-"));
+const makeDir = async () => mkdtemp(join(tmpdir(), "env-resolver-"));
 
-const runResolveEnv = (dir: string) =>
+const runResolveEnv = async (dir: string) =>
   Effect.runPromise(resolveEnv(dir).pipe(Effect.provide(NodeContext.layer)));
 
 describe("resolveEnv", () => {

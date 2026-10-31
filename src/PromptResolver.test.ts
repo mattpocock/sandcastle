@@ -7,8 +7,9 @@ import { describe, expect, it } from "vitest";
 import { resolvePrompt } from "./PromptResolver.js";
 import { PromptError } from "./errors.js";
 
-const run = <A, E>(effect: Effect.Effect<A, E, NodeContext.NodeContext>) =>
-  Effect.runPromise(effect.pipe(Effect.provide(NodeContext.layer)));
+const run = async <A, E>(
+  effect: Effect.Effect<A, E, NodeContext.NodeContext>,
+) => Effect.runPromise(effect.pipe(Effect.provide(NodeContext.layer)));
 
 describe("PromptResolver", () => {
   it("returns inline prompt when prompt is provided", async () => {

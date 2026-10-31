@@ -23,7 +23,7 @@ import type {
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 import { SKELETON_PROMPT } from "./templates.js";
 
-const makeDir = () => mkdtemp(join(tmpdir(), "init-service-"));
+const makeDir = async () => mkdtemp(join(tmpdir(), "init-service-"));
 
 const claudeCodeAgent = getAgent("claude-code")!;
 const piAgent = getAgent("pi")!;
@@ -37,7 +37,10 @@ const defaultOptions: ScaffoldOptions = {
   model: "claude-opus-4-8",
 };
 
-const runScaffold = (repoDir: string, options?: Partial<ScaffoldOptions>) =>
+const runScaffold = async (
+  repoDir: string,
+  options?: Partial<ScaffoldOptions>,
+) =>
   Effect.runPromise(
     scaffold(repoDir, { ...defaultOptions, ...options }).pipe(
       Effect.provide(NodeFileSystem.layer),

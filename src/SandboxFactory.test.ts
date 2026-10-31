@@ -139,7 +139,7 @@ describe("WorktreeDockerSandboxFactory", () => {
 
   afterEach(async () => {
     await Promise.all(
-      tempDirs.map((d) => rm(d, { recursive: true, force: true })),
+      tempDirs.map(async (d) => rm(d, { recursive: true, force: true })),
     );
     tempDirs.length = 0;
   });
@@ -282,7 +282,7 @@ describe("WorktreeDockerSandboxFactory", () => {
             Effect.gen(function* () {
               observedWorktreePath = info.hostWorktreePath;
               // Create an uncommitted change inside the worktree
-              yield* Effect.promise(() =>
+              yield* Effect.promise(async () =>
                 writeFile(join(info.hostWorktreePath!, "dirty.txt"), "dirty"),
               );
               return yield* Effect.die("boom");
@@ -304,7 +304,7 @@ describe("WorktreeDockerSandboxFactory", () => {
         yield* factory.withSandbox((info) =>
           Effect.gen(function* () {
             observedWorktreePath = info.hostWorktreePath;
-            yield* Effect.promise(() =>
+            yield* Effect.promise(async () =>
               writeFile(join(info.hostWorktreePath!, "dirty.txt"), "dirty"),
             );
             return yield* Effect.fail(
@@ -340,7 +340,7 @@ describe("WorktreeDockerSandboxFactory", () => {
         yield* factory.withSandbox((info) =>
           Effect.gen(function* () {
             observedWorktreePath = info.hostWorktreePath;
-            yield* Effect.promise(() =>
+            yield* Effect.promise(async () =>
               writeFile(join(info.hostWorktreePath!, "dirty.txt"), "dirty"),
             );
             return yield* Effect.fail(
@@ -426,7 +426,7 @@ describe("WorktreeDockerSandboxFactory", () => {
         return yield* factory.withSandbox((info) =>
           Effect.gen(function* () {
             observedWorktreePath = info.hostWorktreePath;
-            yield* Effect.promise(() =>
+            yield* Effect.promise(async () =>
               writeFile(join(info.hostWorktreePath!, "dirty.txt"), "dirty"),
             );
             return "done";
@@ -450,7 +450,7 @@ describe("WorktreeDockerSandboxFactory", () => {
         yield* factory.withSandbox((info) =>
           Effect.gen(function* () {
             observedWorktreePath = info.hostWorktreePath;
-            yield* Effect.promise(() =>
+            yield* Effect.promise(async () =>
               writeFile(join(info.hostWorktreePath!, "dirty.txt"), "dirty"),
             );
           }),
@@ -505,7 +505,7 @@ describe("WorktreeDockerSandboxFactory", () => {
           Effect.gen(function* () {
             const factory = yield* SandboxFactory;
             yield* factory.withSandbox((info) =>
-              Effect.promise(() =>
+              Effect.promise(async () =>
                 commitFile(
                   info.hostWorktreePath!,
                   "agent.txt",
@@ -740,7 +740,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
 
   afterEach(async () => {
     await Promise.all(
-      tempDirs.map((d) => rm(d, { recursive: true, force: true })),
+      tempDirs.map(async (d) => rm(d, { recursive: true, force: true })),
     );
     tempDirs.length = 0;
   });
@@ -998,7 +998,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
           yield* factory.withSandbox((info) =>
             Effect.gen(function* () {
               observedWorktreePath = info.hostWorktreePath;
-              yield* Effect.promise(() =>
+              yield* Effect.promise(async () =>
                 writeFile(join(info.hostWorktreePath!, "dirty.txt"), "dirty"),
               );
               return yield* Effect.die("boom");
@@ -1116,7 +1116,7 @@ describe("WorktreeDockerSandboxFactory — no-sandbox provider", () => {
 
   afterEach(async () => {
     await Promise.all(
-      tempDirs.map((d) => rm(d, { recursive: true, force: true })),
+      tempDirs.map(async (d) => rm(d, { recursive: true, force: true })),
     );
     tempDirs.length = 0;
   });
@@ -1223,7 +1223,7 @@ describe("WorktreeDockerSandboxFactory — interruption preserves the worktree",
   afterEach(async () => {
     vi.restoreAllMocks();
     await Promise.all(
-      tempDirs.map((d) => rm(d, { recursive: true, force: true })),
+      tempDirs.map(async (d) => rm(d, { recursive: true, force: true })),
     );
     tempDirs.length = 0;
   });

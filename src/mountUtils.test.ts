@@ -420,7 +420,9 @@ describe("patchGitMountsForWindows", () => {
     };
     afterEach(async () => {
       await Promise.all(
-        tempDirs.splice(0).map((d) => rm(d, { recursive: true, force: true })),
+        tempDirs
+          .splice(0)
+          .map(async (d) => rm(d, { recursive: true, force: true })),
       );
     });
 

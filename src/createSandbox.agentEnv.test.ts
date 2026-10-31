@@ -62,7 +62,7 @@ const shellProvider = (
     env: providerEnv,
     create: async (opts) => ({
       worktreePath: opts.worktreePath,
-      exec: (command, execOpts): Promise<ExecResult> =>
+      exec: async (command, execOpts): Promise<ExecResult> =>
         new Promise((resolve, reject) => {
           const proc = spawn("sh", ["-c", command], {
             cwd: execOpts?.cwd ?? opts.worktreePath,
