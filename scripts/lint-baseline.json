@@ -387,7 +387,6 @@
   "src/createSandbox.ts": {
     "effect/anyUnknownInErrorContext": 2,
     "effect/globalConsole": 3,
-    "effect/multipleEffectProvide": 1,
     "effect/newPromise": 1,
     "eslint(complexity)": 3,
     "eslint(curly)": 6,
@@ -468,7 +467,6 @@
     "vitest(prefer-to-have-length)": 3
   },
   "src/createWorktree.ts": {
-    "effect/multipleEffectProvide": 2,
     "eslint(arrow-body-style)": 1,
     "eslint(complexity)": 1,
     "eslint(curly)": 1,
@@ -512,8 +510,6 @@
   },
   "src/Display.ts": {
     "effect/deterministicKeys": 1,
-    "effect/globalDateInEffect": 5,
-    "effect/missingEffectContext": 2,
     "eslint(curly)": 3,
     "eslint(max-lines-per-function)": 4,
     "eslint(max-lines)": 1,
@@ -571,7 +567,6 @@
     "unicorn(prefer-string-replace-all)": 1
   },
   "src/ErrorHandler.test.ts": {
-    "effect/missedPipeableOpportunity": 3,
     "ratchet/disable-comment": 2,
     "typescript(array-type)": 4,
     "typescript(consistent-type-imports)": 1,
@@ -725,7 +720,6 @@
   },
   "src/interactive.ts": {
     "effect/globalErrorInEffectFailure": 1,
-    "effect/multipleEffectProvide": 1,
     "eslint(complexity)": 2,
     "eslint(curly)": 1,
     "eslint(max-lines-per-function)": 4,
@@ -934,7 +928,6 @@
     "vitest(prefer-strict-equal)": 2
   },
   "src/PromptResolver.ts": {
-    "effect/catchAllToMapError": 1,
     "typescript(restrict-template-expressions)": 1
   },
   "src/raceAbortSignal.ts": {
@@ -1285,9 +1278,7 @@
     "effect/deterministicKeys": 2,
     "effect/effectMapVoid": 1,
     "effect/effectSucceedWithVoid": 2,
-    "effect/globalConsole": 4,
-    "effect/globalConsoleInEffect": 4,
-    "eslint(curly)": 1,
+    "effect/globalConsole": 3,
     "eslint(max-lines-per-function)": 3,
     "eslint(max-lines)": 1,
     "eslint(max-params)": 1,
@@ -1482,7 +1473,6 @@
   },
   "src/syncOut.ts": {
     "effect/asyncFunction": 6,
-    "effect/globalConsoleInEffect": 1,
     "effect/globalDateInEffect": 1,
     "eslint(complexity)": 1,
     "eslint(curly)": 2,
@@ -1596,7 +1586,6 @@
     "vitest(require-to-throw-message)": 2
   },
   "src/WorktreeManager.ts": {
-    "effect/globalConsoleInEffect": 6,
     "effect/globalDate": 1,
     "effect/missingReturnYieldStar": 1,
     "effect/unnecessaryFailYieldableError": 1,

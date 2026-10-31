@@ -4098,8 +4098,7 @@ describe("Orchestrator completion timeout (hanging process)", () => {
               onLine(line);
             }
             // Never resolve — simulate a hanging child holding stdout open.
-            yield* Effect.never;
-            return { stdout: "", stderr: "", exitCode: 0 };
+            return yield* Effect.never;
           });
         }
         return real.exec(command, options);
@@ -4229,8 +4228,7 @@ describe("Orchestrator completion timeout (hanging process)", () => {
               );
               // Let the (reset) grace window lapse, then hang forever.
               yield* advance(200);
-              yield* Effect.never;
-              return { stdout: "", stderr: "", exitCode: 0 };
+              return yield* Effect.never;
             });
           }
           return real.exec(command, options);

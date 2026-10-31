@@ -42,6 +42,7 @@ export const formatErrorMessage = (error: SandboxError): string => {
     case "CommitCollectionTimeoutError":
     case "MergeToHostTimeoutError":
     case "SessionCaptureError":
+    case "SyncOutPathError":
     case "CwdError":
     case "ImageNotFoundError":
       return error.message;
@@ -63,7 +64,6 @@ const showErrorAndExit = (error: SandboxError) =>
 export const withFriendlyErrors = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
 ): Effect.Effect<A, Exclude<E, SandboxError>, R | Display> =>
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   Effect.catchTags(effect as Effect.Effect<A, SandboxError, R>, {
     ExecError: showErrorAndExit,
     ExecHostError: showErrorAndExit,
@@ -71,6 +71,7 @@ export const withFriendlyErrors = <A, E, R>(
     DockerError: showErrorAndExit,
     PodmanError: showErrorAndExit,
     SyncError: showErrorAndExit,
+    SyncOutPathError: showErrorAndExit,
     WorktreeError: showErrorAndExit,
     PromptError: showErrorAndExit,
     AgentError: showErrorAndExit,

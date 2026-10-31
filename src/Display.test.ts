@@ -33,7 +33,7 @@ describe("SilentDisplay", () => {
         }).pipe(Effect.provide(layer)),
       );
 
-      expect(entries).toEqual([
+      expect(entries).toStrictEqual([
         { _tag: "status", message: "Syncing files...", severity: "info" },
       ]);
     });
@@ -51,7 +51,7 @@ describe("SilentDisplay", () => {
         }).pipe(Effect.provide(layer)),
       );
 
-      expect(entries).toEqual([
+      expect(entries).toStrictEqual([
         { _tag: "status", message: "Starting...", severity: "info" },
         { _tag: "status", message: "Done!", severity: "success" },
         { _tag: "status", message: "Something failed", severity: "error" },
@@ -73,12 +73,9 @@ describe("SilentDisplay", () => {
       );
 
       expect(entries).toHaveLength(4);
-      expect(entries.map((e) => (e as { severity: string }).severity)).toEqual([
-        "info",
-        "success",
-        "warn",
-        "error",
-      ]);
+      expect(
+        entries.map((e) => (e as { severity: string }).severity),
+      ).toStrictEqual(["info", "success", "warn", "error"]);
     });
   });
 
@@ -107,7 +104,7 @@ describe("SilentDisplay", () => {
         }).pipe(Effect.provide(layer)),
       );
 
-      expect(entries).toEqual([
+      expect(entries).toStrictEqual([
         { _tag: "spinner", message: "Building image..." },
       ]);
     });
@@ -141,7 +138,7 @@ describe("SilentDisplay", () => {
         }).pipe(Effect.provide(layer)),
       );
 
-      expect(entries).toEqual([
+      expect(entries).toStrictEqual([
         {
           _tag: "summary",
           title: "Token Usage",
@@ -167,7 +164,7 @@ describe("SilentDisplay", () => {
         }).pipe(Effect.provide(layer)),
       );
 
-      expect(entries).toEqual([
+      expect(entries).toStrictEqual([
         { _tag: "textChunk", message: "Now I have" },
         { _tag: "textChunk", message: " a clear picture." },
       ]);
@@ -190,7 +187,7 @@ describe("SilentDisplay", () => {
       );
 
       expect(entries).toHaveLength(4);
-      expect(entries.map((e) => e._tag)).toEqual([
+      expect(entries.map((e) => e._tag)).toStrictEqual([
         "status",
         "spinner",
         "summary",
@@ -267,7 +264,7 @@ describe("FileDisplay", () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const d = yield* Display;
-        yield* d.spinner("Building image", Effect.succeed(undefined));
+        yield* d.spinner("Building image", Effect.void);
       }).pipe(Effect.provide(layer)),
     );
 
@@ -548,7 +545,7 @@ describe("SilentDisplay - toolCall", () => {
       }).pipe(Effect.provide(layer)),
     );
 
-    expect(entries).toEqual([
+    expect(entries).toStrictEqual([
       { _tag: "toolCall", name: "Bash", formattedArgs: "npm test" },
     ]);
   });
@@ -566,7 +563,7 @@ describe("SilentDisplay - toolCall", () => {
       }).pipe(Effect.provide(layer)),
     );
 
-    expect(entries).toEqual([
+    expect(entries).toStrictEqual([
       { _tag: "toolCall", name: "Bash", formattedArgs: "npm install" },
       {
         _tag: "toolCall",

@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import { createWorktree } from "./createWorktree.js";
 import type {
   CreateWorktreeOptions,
@@ -35,6 +35,15 @@ import { makeLocalSandbox } from "./testSandbox.js";
 import { testIsolated } from "./sandboxes/test-isolated.js";
 
 const execAsync = promisify(exec);
+
+/** The first iteration of a run, failing the test if there is none. */
+const firstIteration = <T>(result: {
+  readonly iterations: readonly T[];
+}): T => {
+  const [iteration] = result.iterations;
+  assert.isDefined(iteration, "expected at least one iteration");
+  return iteration;
+};
 
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });
@@ -299,7 +308,8 @@ describe("createWorktree", () => {
       worktreePath = ws.worktreePath;
       expect(existsSync(worktreePath)).toBe(true);
     }
-    expect(existsSync(worktreePath!)).toBe(false);
+    assert.isDefined(worktreePath);
+    expect(existsSync(worktreePath)).toBe(false);
     await rm(hostDir, { recursive: true, force: true });
   });
 
@@ -423,7 +433,8 @@ describe("worktree.interactive()", () => {
 
     const provider = makeTestProvider(async (_args, opts) => {
       // Make a commit during the session
-      const cwd = opts.cwd!;
+      const { cwd } = opts;
+      assert.isDefined(cwd);
       execSync('echo "new content" > newfile.txt', { cwd });
       execSync("git add newfile.txt", { cwd });
       execSync('git commit -m "agent commit"', { cwd });
@@ -587,7 +598,8 @@ describe("worktree.interactive()", () => {
     await commitFile(hostDir, "init.txt", "init", "initial commit");
 
     const provider = makeTestProvider(async (_args, opts) => {
-      const cwd = opts.cwd!;
+      const { cwd } = opts;
+      assert.isDefined(cwd);
       execSync('echo "content" > file.txt', { cwd });
       execSync("git add file.txt", { cwd });
       execSync('git commit -m "a commit"', { cwd });
@@ -608,7 +620,7 @@ describe("worktree.interactive()", () => {
 
       expect(result.exitCode).toBe(42);
       expect(result.commits).toHaveLength(1);
-      expect(result.commits[0]!.sha).toMatch(/^[0-9a-f]{40}$/);
+      expect(result.commits[0]?.sha).toMatch(/^[0-9a-f]{40}$/);
       expect(result.branch).toBe("result-test");
     } finally {
       await ws.close();
@@ -807,8 +819,8 @@ describe("worktree.run()", () => {
 
       // turn.completed usage is summed over every request (#898). It stays
       // on `usage`, but it is not the context window.
-      expect(result.iterations[0]!.usage).toBeDefined();
-      expect(result.iterations[0]!.contextWindow).toBeUndefined();
+      expect(firstIteration(result).usage).toBeDefined();
+      expect(firstIteration(result).contextWindow).toBeUndefined();
 
       const log = await readFile(logPath, "utf8");
       expect(log).not.toContain("Context window");
@@ -945,13 +957,13 @@ describe("worktree.run()", () => {
         logging: { type: "file", path: logPath },
       });
 
-      expect(result.iterations[0]!.usage).toEqual({
+      expect(result.iterations[0]!.usage).toStrictEqual({
         inputTokens: 50_000,
         cacheCreationInputTokens: 0,
         cacheReadInputTokens: 0,
         outputTokens: 100,
       });
-      expect(result.iterations[0]!.sessionFilePath).toBeDefined();
+      expect(firstIteration(result).sessionFilePath).toBeDefined();
 
       const log = await readFile(logPath, "utf8");
       expect(log).toContain("Context window: 50k");
@@ -1028,7 +1040,7 @@ describe("worktree.run()", () => {
       });
 
       expect(result.commits.length).toBeGreaterThanOrEqual(1);
-      expect(result.commits[0]!.sha).toMatch(/^[0-9a-f]{40}$/);
+      expect(result.commits[0]?.sha).toMatch(/^[0-9a-f]{40}$/);
       expect(result.branch).toBe("commits-run-test");
     } finally {
       await ws.close();
@@ -1215,7 +1227,7 @@ describe("worktree.run()", () => {
         cwd: hostDir,
       });
       const messages = log.trim().split("\n");
-      expect(messages).toEqual(["agent commit 2", "agent commit 1"]);
+      expect(messages).toStrictEqual(["agent commit 2", "agent commit 1"]);
     } finally {
       await ws.close();
       await rm(hostDir, { recursive: true, force: true });

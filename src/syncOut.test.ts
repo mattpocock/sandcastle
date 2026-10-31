@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { Effect } from "effect";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import { makeSandboxFromHandle } from "./SandboxFactory.js";
 import { testIsolated } from "./sandboxes/test-isolated.js";
 import { syncIn } from "./syncIn.js";
@@ -424,7 +424,11 @@ describe("syncOut", () => {
       expect(timestampDirs).toHaveLength(1);
       expect(timestampDirs[0]).toMatch(/^\d{8}-\d{6}/);
 
-      const artifactDir = join(patchesDir, timestampDirs[0]!);
+      const [timestampDir] = timestampDirs;
+
+      assert.isDefined(timestampDir);
+
+      const artifactDir = join(patchesDir, timestampDir);
       const files = await readdir(artifactDir);
       // Should have at least one .patch file
       expect(files.some((f) => f.endsWith(".patch"))).toBe(true);
@@ -476,7 +480,11 @@ describe("syncOut", () => {
       const timestampDirs = await readdir(patchesDir);
       expect(timestampDirs).toHaveLength(1);
 
-      const artifactDir = join(patchesDir, timestampDirs[0]!);
+      const [timestampDir] = timestampDirs;
+
+      assert.isDefined(timestampDir);
+
+      const artifactDir = join(patchesDir, timestampDir);
       const files = await readdir(artifactDir);
       expect(files).toContain("changes.patch");
 

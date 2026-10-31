@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { Effect, Layer } from "effect";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import { claudeCode, codex, pi } from "./AgentProvider.js";
 import { createSandbox } from "./createSandbox.js";
 import type { CreateSandboxOptions } from "./createSandbox.js";
@@ -40,6 +40,15 @@ const testSandbox = createBindMountSandboxProvider({
 });
 
 const execAsync = promisify(exec);
+
+/** The first iteration of a run, failing the test if there is none. */
+const firstIteration = <T>(result: {
+  readonly iterations: readonly T[];
+}): T => {
+  const [iteration] = result.iterations;
+  assert.isDefined(iteration, "expected at least one iteration");
+  return iteration;
+};
 
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });
@@ -335,8 +344,8 @@ describe("createSandbox", () => {
 
       // turn.completed usage is summed over every request (#898). It stays
       // on `usage`, but it is not the context window.
-      expect(result.iterations[0]!.usage).toBeDefined();
-      expect(result.iterations[0]!.contextWindow).toBeUndefined();
+      expect(firstIteration(result).usage).toBeDefined();
+      expect(firstIteration(result).contextWindow).toBeUndefined();
 
       const log = await readFile(logPath, "utf8");
       expect(log).not.toContain("Context window");
@@ -474,13 +483,13 @@ describe("createSandbox", () => {
       });
 
       // Usage was parsed out of the captured session JSONL.
-      expect(result.iterations[0]!.usage).toEqual({
+      expect(result.iterations[0]!.usage).toStrictEqual({
         inputTokens: 50_000,
         cacheCreationInputTokens: 0,
         cacheReadInputTokens: 0,
         outputTokens: 100,
       });
-      expect(result.iterations[0]!.sessionFilePath).toBeDefined();
+      expect(firstIteration(result).sessionFilePath).toBeDefined();
 
       const log = await readFile(logPath, "utf8");
       expect(log).toContain("Context window: 50k");
@@ -702,11 +711,12 @@ describe("createSandbox", () => {
         maxIterations: 1,
       });
 
-      expect(first.iterations[0]!.sessionId).toBe(mockSessionId);
+      expect(firstIteration(first).sessionId).toBe(mockSessionId);
       expect(first.resume).toBeTypeOf("function");
       expect(first.fork).toBeTypeOf("function");
 
-      const second = await first.resume!("now do something else");
+      assert.isDefined(first.resume);
+      const second = await first.resume("now do something else");
 
       // The second iteration's agent command must include --resume <sid>.
       expect(capturedCommands).toHaveLength(2);
@@ -822,13 +832,15 @@ describe("createSandbox", () => {
         maxIterations: 1,
       });
 
-      const resumed = await first.resume!("repeat {{TOKEN}}");
-      const forked = await first.fork!("fork {{TOKEN}}");
+      assert.isDefined(first.resume);
+      assert.isDefined(first.fork);
+      const resumed = await first.resume("repeat {{TOKEN}}");
+      const forked = await first.fork("fork {{TOKEN}}");
 
       expect(resumed.iterations).toHaveLength(1);
       expect(forked.iterations).toHaveLength(1);
       // The follow-up prompts are inline: passed as-is, never substituted.
-      expect(agentStdin).toEqual([
+      expect(agentStdin).toStrictEqual([
         "Remember tok-123",
         "repeat {{TOKEN}}",
         "fork {{TOKEN}}",
@@ -1218,7 +1230,8 @@ describe("createSandbox", () => {
       expect(existsSync(worktreePath)).toBe(true);
     }
     // After block exit, worktree should be cleaned up
-    expect(existsSync(worktreePath!)).toBe(false);
+    assert.isDefined(worktreePath);
+    expect(existsSync(worktreePath)).toBe(false);
     await rm(hostDir, { recursive: true, force: true });
   });
 
@@ -1987,7 +2000,8 @@ describe("createSandbox", () => {
         },
         interactiveExec: async (_args, opts) => {
           // Simulate agent making a commit
-          const cwd = opts.cwd!;
+          const { cwd } = opts;
+          assert.isDefined(cwd);
           await writeFile(
             join(cwd, "interactive-file.txt"),
             "interactive content",
@@ -2015,7 +2029,7 @@ describe("createSandbox", () => {
       });
 
       expect(result.commits.length).toBeGreaterThanOrEqual(1);
-      expect(result.commits[0]!.sha).toMatch(/^[0-9a-f]{40}$/);
+      expect(result.commits[0]?.sha).toMatch(/^[0-9a-f]{40}$/);
     } finally {
       await sandbox.close();
       await rm(hostDir, { recursive: true, force: true });
@@ -2112,7 +2126,7 @@ describe("createSandbox", () => {
         promptArgs: { COMPONENT: "LoginForm" },
       });
 
-      const promptArg = receivedArgs.at(-1)!;
+      const promptArg = receivedArgs.at(-1);
       expect(promptArg).toContain("LoginForm");
       expect(promptArg).not.toContain("{{COMPONENT}}");
     } finally {
@@ -2412,7 +2426,7 @@ describe("createSandbox", () => {
           sandbox: failingProvider,
           cwd: hostDir,
         }),
-      ).rejects.toThrow();
+      ).rejects.toThrow("Image 'sandcastle:test' not found locally");
 
       // The worktree must not be left orphaned on disk.
       const worktreesDir = join(hostDir, ".sandcastle", "worktrees");
@@ -2451,7 +2465,7 @@ describe("createSandbox", () => {
         join(sandbox.worktreePath, "config.json"),
         "utf8",
       );
-      expect(JSON.parse(copied)).toEqual({ key: "value" });
+      expect(JSON.parse(copied)).toStrictEqual({ key: "value" });
     } finally {
       await sandbox.close();
       await rm(hostDir, { recursive: true, force: true });

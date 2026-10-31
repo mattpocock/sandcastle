@@ -1,4 +1,4 @@
-import { Deferred, Effect } from "effect";
+import { Deferred, Effect, Runtime } from "effect";
 
 /**
  * Race an Effect against an optional `AbortSignal`.
@@ -29,10 +29,10 @@ export const raceAbortSignal = <A, E, R>(
     }
 
     const abortDeferred = yield* Deferred.make<never>();
+    // The listener fires outside any fiber; fork onto the surrounding runtime.
+    const runFork = Runtime.runFork(yield* Effect.runtime());
     const onAbort = () => {
-      Effect.runPromise(Deferred.die(abortDeferred, signal.reason)).catch(
-        () => {},
-      );
+      runFork(Deferred.die(abortDeferred, signal.reason));
     };
     signal.addEventListener("abort", onAbort, { once: true });
 
