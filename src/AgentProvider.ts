@@ -686,8 +686,7 @@ const makePiSessionStorage = (options?: PiOptions): AgentSessionStorage => {
     },
     readHostSession: async (_cwd, id) => {
       const found = await findPiSessionOnHost(id, hostSessionsDir);
-      if (!found.path) return undefined;
-      return readFile(found.path, "utf8");
+      return found.path ? readFile(found.path, "utf8") : undefined;
     },
     captureToHost: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
       const located = await locateSandboxSessionFile(
