@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cheapAgentCall, cheapModel } from "./lib.ts";
 
-afterEach(() => {
-  vi.unstubAllEnvs();
-});
-
 describe("cheapAgentCall", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("passes thinking: off to pi, whose default thinking its cheap model rejects", () => {
     vi.stubEnv("VERIFY_MODEL", "");
     expect(cheapAgentCall("pi")).toBe(

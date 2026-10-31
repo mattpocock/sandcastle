@@ -130,9 +130,6 @@
     "typescript(no-unsafe-type-assertion)": 2,
     "unicorn(explicit-length-check)": 3
   },
-  ".sandcastle/verify/lib.test.ts": {
-    "vitest(require-top-level-describe)": 1
-  },
   ".sandcastle/verify/lib.ts": {
     "eslint(curly)": 6,
     "eslint(prefer-named-capture-group)": 4,
@@ -206,8 +203,7 @@
     "typescript(no-unsafe-assignment)": 1
   },
   "scripts/check-no-partially-staged.test.ts": {
-    "unicorn(relative-url-style)": 1,
-    "vitest(require-top-level-describe)": 2
+    "unicorn(relative-url-style)": 1
   },
   "scripts/check-public-types-effect-free.mjs": {
     "eslint(func-style)": 1,
@@ -1098,8 +1094,7 @@
     "typescript(no-unsafe-type-assertion)": 2,
     "typescript(require-await)": 6,
     "vitest(prefer-import-in-mock)": 1,
-    "vitest(prefer-strict-equal)": 1,
-    "vitest(require-top-level-describe)": 1
+    "vitest(prefer-strict-equal)": 1
   },
   "src/sandboxes/daytona.test.ts": {
     "eslint(curly)": 6,
@@ -1119,8 +1114,7 @@
     "unicorn(numeric-separators-style)": 1,
     "vitest(no-conditional-in-test)": 1,
     "vitest(prefer-import-in-mock)": 1,
-    "vitest(prefer-strict-equal)": 3,
-    "vitest(require-top-level-describe)": 1
+    "vitest(prefer-strict-equal)": 3
   },
   "src/sandboxes/daytona.ts": {
     "effect/globalTimers": 2,

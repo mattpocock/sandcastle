@@ -101,13 +101,13 @@ vi.mock("@daytona/sdk", async () => {
 
 import { daytona } from "./daytona.js";
 
-beforeEach(() => {
-  sdk.createParams.length = 0;
-  sdk.createdFolders.length = 0;
-  sdk.uploadedPaths.length = 0;
-});
-
 describe("daytona()", () => {
+  beforeEach(() => {
+    sdk.createParams.length = 0;
+    sdk.createdFolders.length = 0;
+    sdk.uploadedPaths.length = 0;
+  });
+
   it("returns an isolated provider named 'daytona'", () => {
     const provider = daytona();
     expect(provider.tag).toBe("isolated");

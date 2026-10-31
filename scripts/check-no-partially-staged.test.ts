@@ -15,22 +15,22 @@ const git = (...args: string[]) =>
 const check = () =>
   spawnSync(process.execPath, [script], { cwd: repo, encoding: "utf8" });
 
-beforeEach(() => {
-  repo = mkdtempSync(join(tmpdir(), "partially-staged-"));
-  git("init", "-q");
-  git("config", "user.email", "test@example.com");
-  git("config", "user.name", "Test");
-  writeFileSync(join(repo, "a.ts"), "one\n");
-  writeFileSync(join(repo, "b.ts"), "one\n");
-  git("add", ".");
-  git("commit", "-q", "-m", "init");
-});
-
-afterEach(() => {
-  rmSync(repo, { recursive: true, force: true });
-});
-
 describe("check-no-partially-staged", () => {
+  beforeEach(() => {
+    repo = mkdtempSync(join(tmpdir(), "partially-staged-"));
+    git("init", "-q");
+    git("config", "user.email", "test@example.com");
+    git("config", "user.name", "Test");
+    writeFileSync(join(repo, "a.ts"), "one\n");
+    writeFileSync(join(repo, "b.ts"), "one\n");
+    git("add", ".");
+    git("commit", "-q", "-m", "init");
+  });
+
+  afterEach(() => {
+    rmSync(repo, { recursive: true, force: true });
+  });
+
   it("fails and names a staged file that also has unstaged edits", () => {
     writeFileSync(join(repo, "a.ts"), "two\n");
     git("add", "a.ts");

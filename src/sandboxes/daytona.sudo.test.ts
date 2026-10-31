@@ -42,11 +42,11 @@ vi.mock("@daytona/sdk", () => {
 
 import { daytona } from "./daytona.js";
 
-beforeEach(() => {
-  sdk.commands.length = 0;
-});
-
 describe("daytona() exec with sudo", () => {
+  beforeEach(() => {
+    sdk.commands.length = 0;
+  });
+
   // `sudo` would need a sudo binary on the test host, so stand in a fake one
   // that runs its arguments as given: this checks which part of the command
   // lands inside sudo's argv.
