@@ -4,22 +4,31 @@ import { mkdtemp, rm, writeFile, mkdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Exit } from "effect";
-import { describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import { copyToWorktree, getCopyOnWriteFlags } from "./CopyToWorktree.js";
 import { CopyToWorktreeError, CopyToWorktreeTimeoutError } from "./errors.js";
 
 describe("getCopyOnWriteFlags", () => {
   it("returns -cR on darwin (APFS clonefile)", () => {
-    expect(getCopyOnWriteFlags("darwin")).toEqual(["-cR"]);
+    expect(getCopyOnWriteFlags("darwin")).toStrictEqual(["-cR"]);
   });
 
   it("returns -R --reflink=auto on linux", () => {
-    expect(getCopyOnWriteFlags("linux")).toEqual(["-R", "--reflink=auto"]);
+    expect(getCopyOnWriteFlags("linux")).toStrictEqual([
+      "-R",
+      "--reflink=auto",
+    ]);
   });
 
   it("returns -R --reflink=auto on other platforms", () => {
-    expect(getCopyOnWriteFlags("win32")).toEqual(["-R", "--reflink=auto"]);
-    expect(getCopyOnWriteFlags("freebsd")).toEqual(["-R", "--reflink=auto"]);
+    expect(getCopyOnWriteFlags("win32")).toStrictEqual([
+      "-R",
+      "--reflink=auto",
+    ]);
+    expect(getCopyOnWriteFlags("freebsd")).toStrictEqual([
+      "-R",
+      "--reflink=auto",
+    ]);
   });
 });
 
@@ -37,22 +46,15 @@ describe("copyToWorktree", () => {
     await writeFile(join(worktreeDir, "nested"), "blocker");
 
     try {
-      const exit = await Effect.runPromiseExit(
-        copyToWorktree(["nested/file.txt"], hostDir, worktreeDir),
+      // Effect.flip: a success (or a defect) rejects, so the test fails.
+      const error = await Effect.runPromise(
+        Effect.flip(copyToWorktree(["nested/file.txt"], hostDir, worktreeDir)),
       );
 
-      expect(Exit.isFailure(exit)).toBe(true);
-      if (Exit.isFailure(exit) && exit.cause._tag === "Fail") {
-        const error = exit.cause.error;
-        expect(error).toBeInstanceOf(CopyToWorktreeError);
-        if (error instanceof CopyToWorktreeError) {
-          expect(error.path).toBe("nested/file.txt");
-          expect(error.stderr).toBeTruthy();
-          expect(error._tag).toBe("CopyToWorktreeError");
-        }
-      } else {
-        throw new Error("Expected Fail cause");
-      }
+      assert.instanceOf(error, CopyToWorktreeError);
+      expect(error.path).toBe("nested/file.txt");
+      expect(error.stderr).not.toHaveLength(0);
+      expect(error._tag).toBe("CopyToWorktreeError");
     } finally {
       await rm(hostDir, { recursive: true, force: true });
       await rm(worktreeDir, { recursive: true, force: true });
@@ -94,12 +96,12 @@ describe("copyToWorktree", () => {
     try {
       await Effect.runPromise(copyToWorktree(["cfg"], hostDir, worktreeDir));
 
-      expect(
-        await readFile(join(worktreeDir, "cfg", "secret.txt"), "utf8"),
-      ).toBe("secret");
-      expect(
-        await readFile(join(worktreeDir, "cfg", "sub", "deep.txt"), "utf8"),
-      ).toBe("deep");
+      await expect(
+        readFile(join(worktreeDir, "cfg", "secret.txt"), "utf8"),
+      ).resolves.toBe("secret");
+      await expect(
+        readFile(join(worktreeDir, "cfg", "sub", "deep.txt"), "utf8"),
+      ).resolves.toBe("deep");
       expect(existsSync(join(worktreeDir, "cfg", "cfg"))).toBe(false);
     } finally {
       await rm(hostDir, { recursive: true, force: true });
@@ -119,9 +121,9 @@ describe("copyToWorktree", () => {
         copyToWorktree(["ignoredir"], hostDir, worktreeDir),
       );
 
-      expect(
-        await readFile(join(worktreeDir, "ignoredir", "x.txt"), "utf8"),
-      ).toBe("x");
+      await expect(
+        readFile(join(worktreeDir, "ignoredir", "x.txt"), "utf8"),
+      ).resolves.toBe("x");
       expect(existsSync(join(worktreeDir, "ignoredir", "ignoredir"))).toBe(
         false,
       );
@@ -146,12 +148,12 @@ describe("copyToWorktree", () => {
         copyToWorktree(["deep/a/b/c.txt", "nested/dir"], hostDir, worktreeDir),
       );
 
-      expect(
-        await readFile(join(worktreeDir, "deep", "a", "b", "c.txt"), "utf8"),
-      ).toBe("c");
-      expect(
-        await readFile(join(worktreeDir, "nested", "dir", "d.txt"), "utf8"),
-      ).toBe("d");
+      await expect(
+        readFile(join(worktreeDir, "deep", "a", "b", "c.txt"), "utf8"),
+      ).resolves.toBe("c");
+      await expect(
+        readFile(join(worktreeDir, "nested", "dir", "d.txt"), "utf8"),
+      ).resolves.toBe("d");
     } finally {
       await rm(hostDir, { recursive: true, force: true });
       await rm(worktreeDir, { recursive: true, force: true });
@@ -163,10 +165,11 @@ describe("copyToWorktree", () => {
     const worktreeDir = await mkdtemp(join(tmpdir(), "cw-wt-"));
 
     try {
-      await Effect.runPromise(
-        copyToWorktree(["nonexistent.txt"], hostDir, worktreeDir),
-      );
-      // Should complete without error
+      await expect(
+        Effect.runPromise(
+          copyToWorktree(["nonexistent.txt"], hostDir, worktreeDir),
+        ),
+      ).resolves.toBeUndefined();
     } finally {
       await rm(hostDir, { recursive: true, force: true });
       await rm(worktreeDir, { recursive: true, force: true });
@@ -194,7 +197,7 @@ describe("copyToWorktree", () => {
       // The copy may succeed before the timeout fires on fast systems,
       // but if it times out, the error should carry the custom timeout value
       if (Exit.isFailure(exit) && exit.cause._tag === "Fail") {
-        const error = exit.cause.error;
+        const { error } = exit.cause;
         expect(error).toBeInstanceOf(CopyToWorktreeTimeoutError);
         if (error instanceof CopyToWorktreeTimeoutError) {
           expect(error.timeoutMs).toBe(customTimeout);

@@ -13,17 +13,10 @@ import { Effect, Layer } from "effect";
 import { resolveCwd } from "./resolveCwd.js";
 import { assertResumeSessionExists } from "./resumePrecheck.js";
 import type { AgentProvider } from "./AgentProvider.js";
-import {
-  ClackDisplay,
-  Display,
-  FileDisplay,
-  type Severity,
-} from "./Display.js";
-import {
-  orchestrate,
-  type IterationResult,
-  type OrchestrateResult,
-} from "./Orchestrator.js";
+import { ClackDisplay, Display, FileDisplay } from "./Display.js";
+import type { Severity } from "./Display.js";
+import { orchestrate } from "./Orchestrator.js";
+import type { IterationResult, OrchestrateResult } from "./Orchestrator.js";
 import { resolvePrompt } from "./PromptResolver.js";
 import {
   WorktreeDockerSandboxFactory,
@@ -33,20 +26,18 @@ import type { SandboxProvider, BranchStrategy } from "./SandboxProvider.js";
 import { resolveEnv } from "./EnvResolver.js";
 import { formatErrorMessage } from "./ErrorHandler.js";
 import type { SandboxError } from "./errors.js";
-import {
-  agentStreamEmitterLayer,
-  type AgentStreamEvent,
-} from "./AgentStreamEmitter.js";
+import { agentStreamEmitterLayer } from "./AgentStreamEmitter.js";
+import type { AgentStreamEvent } from "./AgentStreamEmitter.js";
 import type { SandboxHooks } from "./SandboxLifecycle.js";
 import { mergeProviderEnv } from "./mergeProviderEnv.js";
 import { generateTempBranchName, getCurrentBranch } from "./WorktreeManager.js";
 import {
-  type PromptArgs,
   substitutePromptArgs,
   validateNoArgsWithInlinePrompt,
   validateNoBuiltInArgOverride,
   BUILT_IN_PROMPT_ARG_KEYS,
 } from "./PromptArgumentSubstitution.js";
+import type { PromptArgs } from "./PromptArgumentSubstitution.js";
 import type {
   OutputDefinition,
   OutputObjectDefinition,
@@ -55,6 +46,7 @@ import type {
 import { StructuredOutputError } from "./Output.js";
 import { extractStructuredOutput } from "./extractStructuredOutput.js";
 import { validateTimeoutOptions } from "./validateTimeouts.js";
+import { buildContextWindowLines } from "./ContextWindow.js";
 
 /**
  * Build the token-efficient feedback prompt sent to the agent when retrying
@@ -63,20 +55,22 @@ import { validateTimeoutOptions } from "./validateTimeouts.js";
  *
  * @internal
  */
+const describeParserCause = (cause: unknown): string => {
+  if (cause === undefined) {
+    return "(no parser detail)";
+  }
+  if (typeof cause === "string") {
+    return cause;
+  }
+  return JSON.stringify(cause, null, 2);
+};
+
 export const buildStructuredOutputRetryFeedback = (
   error: StructuredOutputError,
   retriesRemaining: number,
 ): string => {
-  const raw =
-    error.rawMatched === undefined
-      ? "(no matching tag was emitted)"
-      : error.rawMatched;
-  const cause =
-    error.cause === undefined
-      ? "(no parser detail)"
-      : typeof error.cause === "string"
-        ? error.cause
-        : JSON.stringify(error.cause, null, 2);
+  const raw = error.rawMatched ?? "(no matching tag was emitted)";
+  const cause = describeParserCause(error.cause);
 
   return `Your previous response did not produce valid structured output.
 
@@ -99,7 +93,7 @@ export const DEFAULT_MAX_ITERATIONS = 1;
 
 /** Replace characters that are invalid or problematic in file paths with dashes. */
 export const sanitizeBranchForFilename = (branch: string): string =>
-  branch.replace(/[/\\:*?"<>|]/g, "-");
+  branch.replaceAll(/[/\\:*?"<>|]/g, "-");
 
 export interface FileDisplayStartupOptions {
   readonly logPath: string;
@@ -146,7 +140,7 @@ export const buildLogFilename = (
 ): string => {
   const sanitized = sanitizeBranchForFilename(resolvedBranch);
   const nameSuffix = name
-    ? `-${name.toLowerCase().replace(/[^a-z0-9_.-]/g, "-")}`
+    ? `-${name.toLowerCase().replaceAll(/[^a-z0-9_.-]/g, "-")}`
     : "";
   if (targetBranch) {
     return `${sanitizeBranchForFilename(targetBranch)}-${sanitized}${nameSuffix}.log`;
@@ -196,8 +190,7 @@ export const buildCompletionMessage = (
   };
 };
 
-import { buildContextWindowLines } from "./ContextWindow.js";
-export { buildContextWindowLines };
+export { buildContextWindowLines } from "./ContextWindow.js";
 
 /**
  * Controls where Sandcastle writes iteration progress and agent output.
@@ -261,7 +254,9 @@ export const buildAgentStreamHandler = (
   const verboseSink = logging.verbose
     ? buildVerboseRawLineSink(logging)
     : undefined;
-  if (!userHandler && !verboseSink) return undefined;
+  if (!userHandler && !verboseSink) {
+    return undefined;
+  }
   return (event) => {
     if (userHandler) {
       try {
@@ -288,14 +283,18 @@ const fileEndsMidLine = (filePath: string): boolean => {
   try {
     fd = openSync(filePath, "r");
     const { size } = fstatSync(fd);
-    if (size === 0) return false;
+    if (size === 0) {
+      return false;
+    }
     const lastByte = Buffer.alloc(1);
     readSync(fd, lastByte, 0, 1, size - 1);
     return lastByte[0] !== 0x0a;
   } catch {
     return false;
   } finally {
-    if (fd !== undefined) closeSync(fd);
+    if (fd !== undefined) {
+      closeSync(fd);
+    }
   }
 };
 
@@ -315,14 +314,14 @@ const buildVerboseRawLineSink = (
     return (line) => {
       try {
         const prefix = fileEndsMidLine(logPath) ? "\n" : "";
-        appendFileSync(logPath, prefix + line + "\n");
+        appendFileSync(logPath, `${prefix + line}\n`);
       } catch {
         // Swallow — verbose-mode I/O errors must not kill the run.
       }
     };
   }
   return (line) => {
-    process.stdout.write(line + "\n");
+    process.stdout.write(`${line}\n`);
   };
 };
 
@@ -825,7 +824,7 @@ export async function run(
     logFilePath:
       resolvedLogging.type === "file" ? resolvedLogging.path : undefined,
     resume: async (
-      prompt: string,
+      followUpPrompt: string,
       resumeOptions?: ResumeRunResultOptions,
     ): Promise<RunResult> => {
       const lastIteration = result.iterations.at(-1);
@@ -839,14 +838,14 @@ export async function run(
         // The follow-up prompt is new: structured output is opt-in per call.
         output: undefined,
         ...resumeOptions,
-        prompt,
+        prompt: followUpPrompt,
         promptFile: undefined,
         maxIterations: 1,
         resumeSession: lastIteration.sessionId,
       });
     },
     fork: async (
-      prompt: string,
+      followUpPrompt: string,
       forkOptions?: ResumeRunResultOptions,
     ): Promise<RunResult> => {
       const lastIteration = result.iterations.at(-1);
@@ -860,7 +859,7 @@ export async function run(
         // The follow-up prompt is new: structured output is opt-in per call.
         output: undefined,
         ...forkOptions,
-        prompt,
+        prompt: followUpPrompt,
         promptFile: undefined,
         maxIterations: 1,
         resumeSession: lastIteration.sessionId,

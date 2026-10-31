@@ -11,9 +11,9 @@ import {
 // a real Windows host would — something Linux/macOS CI cannot otherwise
 // reproduce, since both git and `join` emit forward slashes there.
 
-const worktreesDir = "C:\\repo\\.sandcastle\\worktrees";
+const worktreesDir = String.raw`C:\repo\.sandcastle\worktrees`;
 const gitWorktreePath = "C:/repo/.sandcastle/worktrees/feature-x";
-const joinWorktreePath = "C:\\repo\\.sandcastle\\worktrees\\feature-x";
+const joinWorktreePath = String.raw`C:\repo\.sandcastle\worktrees\feature-x`;
 
 describe("findCollidingWorktree", () => {
   it("matches by branch name", () => {

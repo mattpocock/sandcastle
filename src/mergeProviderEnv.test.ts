@@ -8,7 +8,7 @@ describe("mergeProviderEnv", () => {
       agentProviderEnv: {},
       sandboxProviderEnv: {},
     });
-    expect(result).toEqual({ FOO: "bar" });
+    expect(result).toStrictEqual({ FOO: "bar" });
   });
 
   it("agent provider env overrides env resolver output", () => {
@@ -17,7 +17,7 @@ describe("mergeProviderEnv", () => {
       agentProviderEnv: { FOO: "new" },
       sandboxProviderEnv: {},
     });
-    expect(result).toEqual({ FOO: "new" });
+    expect(result).toStrictEqual({ FOO: "new" });
   });
 
   it("sandbox provider env overrides env resolver output", () => {
@@ -26,7 +26,7 @@ describe("mergeProviderEnv", () => {
       agentProviderEnv: {},
       sandboxProviderEnv: { FOO: "new" },
     });
-    expect(result).toEqual({ FOO: "new" });
+    expect(result).toStrictEqual({ FOO: "new" });
   });
 
   it("merges all three sources with provider env taking precedence", () => {
@@ -35,7 +35,7 @@ describe("mergeProviderEnv", () => {
       agentProviderEnv: { A: "agent" },
       sandboxProviderEnv: { B: "sandbox" },
     });
-    expect(result).toEqual({ A: "agent", B: "sandbox", C: "3" });
+    expect(result).toStrictEqual({ A: "agent", B: "sandbox", C: "3" });
   });
 
   it("throws when agent and sandbox provider env have overlapping keys", () => {
@@ -61,6 +61,6 @@ describe("mergeProviderEnv", () => {
       agentProviderEnv: { KEY: "agent" },
       sandboxProviderEnv: {},
     });
-    expect(result).toEqual({ KEY: "agent" });
+    expect(result).toStrictEqual({ KEY: "agent" });
   });
 });

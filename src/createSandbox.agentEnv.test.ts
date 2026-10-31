@@ -8,10 +8,8 @@ import { describe, expect, it } from "vitest";
 import { claudeCode } from "./AgentProvider.js";
 import { createSandbox } from "./createSandbox.js";
 import { createWorktree } from "./createWorktree.js";
-import {
-  createBindMountSandboxProvider,
-  type ExecResult,
-} from "./SandboxProvider.js";
+import { createBindMountSandboxProvider } from "./SandboxProvider.js";
+import type { ExecResult } from "./SandboxProvider.js";
 
 const execAsync = promisify(exec);
 
@@ -64,7 +62,7 @@ const shellProvider = (
     env: providerEnv,
     create: async (opts) => ({
       worktreePath: opts.worktreePath,
-      exec: (command, execOpts): Promise<ExecResult> =>
+      exec: async (command, execOpts): Promise<ExecResult> =>
         new Promise((resolve, reject) => {
           const proc = spawn("sh", ["-c", command], {
             cwd: execOpts?.cwd ?? opts.worktreePath,
@@ -75,23 +73,25 @@ const shellProvider = (
               GIT_CONFIG_GLOBAL: gitConfig,
             },
             stdio: [
-              execOpts?.stdin !== undefined ? "pipe" : "ignore",
+              execOpts?.stdin === undefined ? "ignore" : "pipe",
               "pipe",
               "pipe",
             ],
           });
-          if (execOpts?.stdin !== undefined) proc.stdin!.end(execOpts.stdin);
+          if (execOpts?.stdin !== undefined) {
+            proc.stdin!.end(execOpts.stdin);
+          }
           let stdout = "";
           let stderr = "";
           createInterface({ input: proc.stdout! }).on("line", (line) => {
-            stdout += line + "\n";
+            stdout += `${line}\n`;
             execOpts?.onLine?.(line);
           });
           proc.stderr!.on("data", (c: Buffer) => (stderr += c.toString()));
           proc.on("error", reject);
-          proc.on("close", (code) =>
-            resolve({ stdout, stderr, exitCode: code ?? 0 }),
-          );
+          proc.on("close", (code) => {
+            resolve({ stdout, stderr, exitCode: code ?? 0 });
+          });
         }),
       copyFileIn: async () => {},
       copyFileOut: async () => {},

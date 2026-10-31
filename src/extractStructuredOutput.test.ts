@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { extractStructuredOutput } from "./extractStructuredOutput.js";
 import { Output, StructuredOutputError } from "./Output.js";
@@ -51,6 +51,20 @@ const baseContext = {
   branch: "test-branch",
 };
 
+/** Awaits a promise that must reject with a StructuredOutputError, and
+ *  returns that error. Fails the test if it resolves or rejects otherwise. */
+const rejectionOf = async (
+  promise: Promise<unknown>,
+): Promise<StructuredOutputError> => {
+  try {
+    await promise;
+  } catch (error) {
+    assert.instanceOf(error, StructuredOutputError);
+    return error;
+  }
+  return expect.unreachable("should have thrown");
+};
+
 // ---------------------------------------------------------------------------
 // Output.object extraction
 // ---------------------------------------------------------------------------
@@ -60,7 +74,7 @@ describe("extractStructuredOutput — Output.object", () => {
     const stdout = 'Some output\n<result>{"answer": 42}</result>\nDone.';
     const def = Output.object({ tag: "result", schema: passthrough() });
     const value = await extractStructuredOutput(stdout, def, baseContext);
-    expect(value).toEqual({ answer: 42 });
+    expect(value).toStrictEqual({ answer: 42 });
   });
 
   it("uses last occurrence when tag appears multiple times", async () => {
@@ -71,7 +85,7 @@ describe("extractStructuredOutput — Output.object", () => {
     ].join("\n");
     const def = Output.object({ tag: "result", schema: passthrough() });
     const value = await extractStructuredOutput(stdout, def, baseContext);
-    expect(value).toEqual({ answer: 2 });
+    expect(value).toStrictEqual({ answer: 2 });
   });
 
   it("unwraps ```json fence inside tag", async () => {
@@ -84,7 +98,7 @@ describe("extractStructuredOutput — Output.object", () => {
     ].join("\n");
     const def = Output.object({ tag: "result", schema: passthrough() });
     const value = await extractStructuredOutput(stdout, def, baseContext);
-    expect(value).toEqual({ name: "test" });
+    expect(value).toStrictEqual({ name: "test" });
   });
 
   it("unwraps bare ``` fence (no language hint) inside tag", async () => {
@@ -97,118 +111,96 @@ describe("extractStructuredOutput — Output.object", () => {
     ].join("\n");
     const def = Output.object({ tag: "result", schema: passthrough() });
     const value = await extractStructuredOutput(stdout, def, baseContext);
-    expect(value).toEqual({ name: "test" });
+    expect(value).toStrictEqual({ name: "test" });
   });
 
   it("handles JSON without any fence wrapping", async () => {
     const stdout = '<data>{"x": 1}</data>';
     const def = Output.object({ tag: "data", schema: passthrough() });
     const value = await extractStructuredOutput(stdout, def, baseContext);
-    expect(value).toEqual({ x: 1 });
+    expect(value).toStrictEqual({ x: 1 });
   });
 
   it("throws StructuredOutputError with rawMatched=undefined when tag is missing", async () => {
     const stdout = "No structured output here.";
     const def = Output.object({ tag: "result", schema: passthrough() });
-    try {
-      await extractStructuredOutput(stdout, def, baseContext);
-      expect.unreachable("should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(StructuredOutputError);
-      const soe = err as StructuredOutputError;
-      expect(soe.tag).toBe("result");
-      expect(soe.rawMatched).toBeUndefined();
-      expect(soe.commits).toEqual(baseContext.commits);
-      expect(soe.branch).toBe(baseContext.branch);
-      expect(soe.message).toContain("<result>");
-    }
+    const soe = await rejectionOf(
+      extractStructuredOutput(stdout, def, baseContext),
+    );
+    expect(soe.tag).toBe("result");
+    expect(soe.rawMatched).toBeUndefined();
+    expect(soe.commits).toStrictEqual(baseContext.commits);
+    expect(soe.branch).toBe(baseContext.branch);
+    expect(soe.message).toContain("<result>");
   });
 
   it("throws StructuredOutputError with rawMatched set on invalid JSON", async () => {
     const stdout = "<result>not valid json</result>";
     const def = Output.object({ tag: "result", schema: passthrough() });
-    try {
-      await extractStructuredOutput(stdout, def, baseContext);
-      expect.unreachable("should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(StructuredOutputError);
-      const soe = err as StructuredOutputError;
-      expect(soe.tag).toBe("result");
-      expect(soe.rawMatched).toBe("not valid json");
-      expect(soe.cause).toBeInstanceOf(SyntaxError);
-      expect(soe.message).toContain("invalid JSON");
-    }
+    const soe = await rejectionOf(
+      extractStructuredOutput(stdout, def, baseContext),
+    );
+    expect(soe.tag).toBe("result");
+    expect(soe.rawMatched).toBe("not valid json");
+    expect(soe.cause).toBeInstanceOf(SyntaxError);
+    expect(soe.message).toContain("invalid JSON");
   });
 
   it("throws StructuredOutputError with cause on schema validation failure", async () => {
     const stdout = '<result>{"answer": 42}</result>';
     const def = Output.object({ tag: "result", schema: alwaysFail("bad") });
-    try {
-      await extractStructuredOutput(stdout, def, baseContext);
-      expect.unreachable("should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(StructuredOutputError);
-      const soe = err as StructuredOutputError;
-      expect(soe.tag).toBe("result");
-      expect(soe.rawMatched).toBeDefined();
-      expect(soe.cause).toEqual([{ message: "bad" }]);
-      expect(soe.message).toContain("schema validation");
-    }
+    const soe = await rejectionOf(
+      extractStructuredOutput(stdout, def, baseContext),
+    );
+    expect(soe.tag).toBe("result");
+    expect(soe.rawMatched).toBeDefined();
+    expect(soe.cause).toStrictEqual([{ message: "bad" }]);
+    expect(soe.message).toContain("schema validation");
   });
 
   it("validates parsed JSON against the schema", async () => {
     const stdout = '<result>"not an object"</result>';
     const schema = mockObjectSchema<{ name: string }>();
     const def = Output.object({ tag: "result", schema });
-    try {
-      await extractStructuredOutput(stdout, def, baseContext);
-      expect.unreachable("should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(StructuredOutputError);
-      const soe = err as StructuredOutputError;
-      expect(soe.cause).toEqual([{ message: "Expected an object" }]);
-    }
+    const soe = await rejectionOf(
+      extractStructuredOutput(stdout, def, baseContext),
+    );
+    expect(soe.cause).toStrictEqual([{ message: "Expected an object" }]);
   });
 
   it("passes preservedWorktreePath through to the error", async () => {
     const stdout = "no tag";
     const def = Output.object({ tag: "result", schema: passthrough() });
-    try {
-      await extractStructuredOutput(stdout, def, {
+    const soe = await rejectionOf(
+      extractStructuredOutput(stdout, def, {
         ...baseContext,
         preservedWorktreePath: "/tmp/worktree",
-      });
-      expect.unreachable("should have thrown");
-    } catch (err) {
-      const soe = err as StructuredOutputError;
-      expect(soe.preservedWorktreePath).toBe("/tmp/worktree");
-    }
+      }),
+    );
+    expect(soe.preservedWorktreePath).toBe("/tmp/worktree");
   });
 
   it("passes sessionId and sessionFilePath through to the error", async () => {
     const stdout = "no tag";
     const def = Output.object({ tag: "result", schema: passthrough() });
-    try {
-      await extractStructuredOutput(stdout, def, {
+    const soe = await rejectionOf(
+      extractStructuredOutput(stdout, def, {
         ...baseContext,
         sessionId: "session-123",
         sessionFilePath: "/home/u/.claude/projects/x/session-123.jsonl",
-      });
-      expect.unreachable("should have thrown");
-    } catch (err) {
-      const soe = err as StructuredOutputError;
-      expect(soe.sessionId).toBe("session-123");
-      expect(soe.sessionFilePath).toBe(
-        "/home/u/.claude/projects/x/session-123.jsonl",
-      );
-    }
+      }),
+    );
+    expect(soe.sessionId).toBe("session-123");
+    expect(soe.sessionFilePath).toBe(
+      "/home/u/.claude/projects/x/session-123.jsonl",
+    );
   });
 
   it("handles whitespace around JSON inside tags", async () => {
     const stdout = '<result>  \n  {"a": 1}  \n  </result>';
     const def = Output.object({ tag: "result", schema: passthrough() });
     const value = await extractStructuredOutput(stdout, def, baseContext);
-    expect(value).toEqual({ a: 1 });
+    expect(value).toStrictEqual({ a: 1 });
   });
 
   it("handles nested objects in JSON", async () => {
@@ -216,7 +208,7 @@ describe("extractStructuredOutput — Output.object", () => {
       '<result>{"nested": {"deep": true}, "list": [1, 2, 3]}</result>';
     const def = Output.object({ tag: "result", schema: passthrough() });
     const value = await extractStructuredOutput(stdout, def, baseContext);
-    expect(value).toEqual({ nested: { deep: true }, list: [1, 2, 3] });
+    expect(value).toStrictEqual({ nested: { deep: true }, list: [1, 2, 3] });
   });
 
   it("works with async schema validation", async () => {
@@ -232,7 +224,7 @@ describe("extractStructuredOutput — Output.object", () => {
     const stdout = '<result>{"x": 99}</result>';
     const def = Output.object({ tag: "result", schema: asyncSchema });
     const value = await extractStructuredOutput(stdout, def, baseContext);
-    expect(value).toEqual({ x: 99 });
+    expect(value).toStrictEqual({ x: 99 });
   });
 });
 
@@ -258,15 +250,11 @@ describe("extractStructuredOutput — Output.string", () => {
   it("throws StructuredOutputError when string tag is missing", async () => {
     const stdout = "no tags here";
     const def = Output.string({ tag: "summary" });
-    try {
-      await extractStructuredOutput(stdout, def, baseContext);
-      expect.unreachable("should have thrown");
-    } catch (err) {
-      expect(err).toBeInstanceOf(StructuredOutputError);
-      const soe = err as StructuredOutputError;
-      expect(soe.tag).toBe("summary");
-      expect(soe.rawMatched).toBeUndefined();
-    }
+    const soe = await rejectionOf(
+      extractStructuredOutput(stdout, def, baseContext),
+    );
+    expect(soe.tag).toBe("summary");
+    expect(soe.rawMatched).toBeUndefined();
   });
 
   it("preserves multiline string content (after trim)", async () => {
@@ -323,7 +311,7 @@ describe("StructuredOutputError", () => {
     expect(err.tag).toBe("result");
     expect(err.rawMatched).toBe("raw text");
     expect(err.cause).toBeInstanceOf(SyntaxError);
-    expect(err.commits).toEqual([{ sha: "abc" }]);
+    expect(err.commits).toStrictEqual([{ sha: "abc" }]);
     expect(err.branch).toBe("my-branch");
     expect(err.preservedWorktreePath).toBe("/tmp/wt");
     expect(err.sessionId).toBe("sess-1");

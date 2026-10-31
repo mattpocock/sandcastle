@@ -44,7 +44,7 @@ describe("docker()", () => {
 
   it("has a create function", () => {
     const provider = docker();
-    expect(typeof provider.create).toBe("function");
+    expect(provider.create).toBeTypeOf("function");
   });
 
   it("does not have a branchStrategy property", () => {
@@ -142,7 +142,7 @@ describe("docker()", () => {
 
   it("passes --group-add flags to docker run, stringifying numeric GIDs", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -173,7 +173,7 @@ describe("docker()", () => {
 
   it("does not pass --group-add to docker run when groups is omitted", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -199,7 +199,7 @@ describe("docker()", () => {
 
   it("passes --device flags to docker run in order", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -230,7 +230,7 @@ describe("docker()", () => {
 
   it("does not pass --device to docker run when devices is omitted", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -256,7 +256,7 @@ describe("docker()", () => {
 
   it("passes --cpus flag to docker run when cpus is provided", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -284,7 +284,7 @@ describe("docker()", () => {
 
   it("does not pass --cpus to docker run when cpus is omitted", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -311,7 +311,7 @@ describe("docker()", () => {
   it("runs pre-flight docker image inspect before docker run", async () => {
     const callOrder: string[] = [];
     mockExecFile.mockImplementation((_command, args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       if (Array.isArray(args) && args[0] === "image" && args[1] === "inspect") {
         callOrder.push("inspect");
         const hostUid = process.getuid?.() ?? 1000;
@@ -343,7 +343,7 @@ describe("docker()", () => {
 
   it("throws on UID mismatch between image and host", async () => {
     mockExecFile.mockImplementation((_command, args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       if (Array.isArray(args) && args[0] === "image" && args[1] === "inspect") {
         callback(null, "9999:9999\n", "");
       } else {
@@ -368,7 +368,7 @@ describe("docker()", () => {
 
   it("containerUid override bypasses UID mismatch with host", async () => {
     mockExecFile.mockImplementation((_command, args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       if (Array.isArray(args) && args[0] === "image" && args[1] === "inspect") {
         // Image has UID 500, which differs from host but matches containerUid
         callback(null, "500:500\n", "");
@@ -399,7 +399,7 @@ describe("docker()", () => {
 
   it("throws a clear error when image is not found locally", async () => {
     mockExecFile.mockImplementationOnce((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(new Error("no such image"), "", "");
       return undefined as any;
     });
@@ -422,7 +422,7 @@ describe("docker()", () => {
 
   it("uses host UID/GID by default for --user flag", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -452,7 +452,7 @@ describe("docker()", () => {
 
   it("uses containerUid/containerGid for --user flag when provided", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -480,7 +480,7 @@ describe("docker()", () => {
 
   it("copyFileIn calls docker cp with correct arguments", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -516,7 +516,7 @@ describe("docker()", () => {
 
   it("copyFileOut calls docker cp with correct arguments", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -552,7 +552,7 @@ describe("docker()", () => {
 
   it("default mounts include :z SELinux label", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -580,7 +580,7 @@ describe("docker()", () => {
 
   it("selinuxLabel 'Z' produces :Z suffix on mounts", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -607,7 +607,7 @@ describe("docker()", () => {
 
   it("selinuxLabel false produces no SELinux suffix on mounts", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -638,7 +638,7 @@ describe("docker()", () => {
     writeFileSync(tmpFile, "{}");
 
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -687,7 +687,7 @@ describe("docker()", () => {
 
   it("does not run mkdir+chown when there are no file mounts", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -732,7 +732,7 @@ describe("docker()", () => {
 
   it("copyFileIn rejects when docker cp fails", async () => {
     mockExecFile.mockImplementation((_command, args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       if (Array.isArray(args) && args[0] === "cp") {
         callback(new Error("no such file"));
       } else {
@@ -761,7 +761,7 @@ describe("docker()", () => {
 
   it("shares a single SIGINT listener across many concurrent sandboxes", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -790,7 +790,9 @@ describe("docker()", () => {
     expect(process.listenerCount("SIGTERM")).toBe(sigtermBefore + 1);
     expect(process.listenerCount("exit")).toBe(exitBefore + 1);
 
-    for (const h of handles) await h.close();
+    for (const h of handles) {
+      await h.close();
+    }
 
     expect(process.listenerCount("SIGINT")).toBe(sigintBefore);
     expect(process.listenerCount("SIGTERM")).toBe(sigtermBefore);
@@ -816,7 +818,7 @@ describe("docker() exec with sudo", () => {
 
   const createHandle = async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });

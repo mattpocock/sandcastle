@@ -49,7 +49,7 @@ const pathExists = async (path: string): Promise<boolean> => {
 export const encodeProjectPath = (cwd: string): string => {
   const isRoot = cwd === "/" || /^[A-Za-z]:[\\/]?$/.test(cwd);
   const normalized = isRoot ? cwd : cwd.replace(/[\\/]+$/, "");
-  return normalized.replace(/^([A-Za-z]):/, "$1").replace(/[\\/]/g, "-");
+  return normalized.replace(/^([A-Za-z]):/, "$1").replaceAll(/[\\/]/g, "-");
 };
 
 /** Absolute host path to a Claude session JSONL file. */
@@ -117,9 +117,13 @@ export const listClaudeSubagentSessionsInSandbox = async (
   const result = await handle.exec(
     `find ${JSON.stringify(dir)} -type f -name ${JSON.stringify("agent-*.jsonl")} 2>/dev/null`,
   );
-  if (result.exitCode !== 0) return [];
+  if (result.exitCode !== 0) {
+    return [];
+  }
   const stdout = result.stdout.trim();
-  if (stdout === "") return [];
+  if (stdout === "") {
+    return [];
+  }
   return stdout.split("\n").filter((line) => line !== "");
 };
 
@@ -141,7 +145,9 @@ export const findClaudeSessionOnHost = async (
     return { path: undefined, searchedRoot: root };
   }
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
+    if (!entry.isDirectory()) {
+      continue;
+    }
     const candidate = join(root, entry.name, `${id}.jsonl`);
     if (await pathExists(candidate)) {
       return { path: candidate, searchedRoot: root };
@@ -150,32 +156,50 @@ export const findClaudeSessionOnHost = async (
   return { path: undefined, searchedRoot: root };
 };
 
+/**
+ * Point one session entry at `toCwd`: its own `cwd`, and the `payload.cwd` of
+ * a Codex `session_meta` entry, when either is `fromCwd`.
+ */
+const rewriteEntryCwd = (
+  entry: Record<string, unknown>,
+  fromCwd: string,
+  toCwd: string,
+): void => {
+  if (typeof entry.cwd === "string" && entry.cwd === fromCwd) {
+    entry.cwd = toCwd;
+  }
+  if (
+    entry.type === "session_meta" &&
+    isRecord(entry.payload) &&
+    typeof entry.payload.cwd === "string" &&
+    entry.payload.cwd === fromCwd
+  ) {
+    entry.payload.cwd = toCwd;
+  }
+};
+
 const rewriteSessionCwd = (
   content: string,
   fromCwd: string,
   toCwd: string,
 ): string => {
-  if (content === "") return "";
+  if (content === "") {
+    return "";
+  }
   return content
     .split("\n")
     .map((line) => {
-      if (line === "") return line;
+      if (line === "") {
+        return line;
+      }
       // A torn final line (writer killed mid-flush) must not abort the whole
       // transfer — preserve it verbatim so the rest of the session survives.
       try {
-        const entry = JSON.parse(line) as Record<string, unknown>;
-        if (typeof entry.cwd === "string" && entry.cwd === fromCwd) {
-          entry.cwd = toCwd;
+        const entry: unknown = JSON.parse(line);
+        if (!isRecord(entry)) {
+          return line;
         }
-        if (
-          entry.type === "session_meta" &&
-          typeof entry.payload === "object" &&
-          entry.payload !== null &&
-          typeof (entry.payload as { cwd?: unknown }).cwd === "string" &&
-          (entry.payload as { cwd: string }).cwd === fromCwd
-        ) {
-          (entry.payload as { cwd: string }).cwd = toCwd;
-        }
+        rewriteEntryCwd(entry, fromCwd, toCwd);
         return JSON.stringify(entry);
       } catch {
         return line;
@@ -219,7 +243,9 @@ const findCodexSessionPath = async (
       }
       if (entry.isDirectory()) {
         const found = await visit(child);
-        if (found) return found;
+        if (found) {
+          return found;
+        }
       }
     }
     return undefined;
@@ -254,7 +280,9 @@ export const locateCodexHostSession = async (
   const root =
     sessionsDir ?? join(process.env.HOME ?? "~", ".codex", "sessions");
   const path = await findCodexSessionPath(root, id);
-  if (!path) throw new Error(`session ${id} not found in ${root}`);
+  if (!path) {
+    throw new Error(`session ${id} not found in ${root}`);
+  }
   return { path, relativePath: relative(root, path) };
 };
 
@@ -296,7 +324,7 @@ export const transferCodexSession = (
  */
 export const encodePiSessionDir = (cwd: string): string => {
   const stripped = cwd.replace(/^[/\\]/, "");
-  const replaced = stripped.replace(/[/\\:]/g, "-");
+  const replaced = stripped.replaceAll(/[/\\:]/g, "-");
   return `--${replaced}--`;
 };
 
@@ -321,7 +349,9 @@ const findPiSessionPath = async (
     return undefined;
   }
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
+    if (!entry.isDirectory()) {
+      continue;
+    }
     const dirAbs = join(rootDir, entry.name);
     let files;
     try {
@@ -367,7 +397,9 @@ export const locatePiHostSession = async (
   const root =
     sessionsDir ?? join(process.env.HOME ?? "~", ".pi", "agent", "sessions");
   const found = await findPiSessionPath(root, id);
-  if (!found) throw new Error(`session ${id} not found in ${root}`);
+  if (!found) {
+    throw new Error(`session ${id} not found in ${root}`);
+  }
   return found;
 };
 
@@ -400,14 +432,19 @@ export const transferPiSession = (
   fromCwd: string,
   toCwd: string,
 ): string => {
-  if (jsonl === "") return "";
+  if (jsonl === "") {
+    return "";
+  }
   return jsonl
     .split("\n")
     .map((line) => {
-      if (line === "") return line;
+      if (line === "") {
+        return line;
+      }
       try {
-        const entry = JSON.parse(line) as Record<string, unknown>;
+        const entry: unknown = JSON.parse(line);
         if (
+          isRecord(entry) &&
           entry.type === "session" &&
           typeof entry.cwd === "string" &&
           entry.cwd === fromCwd
@@ -422,3 +459,7 @@ export const transferPiSession = (
     })
     .join("\n");
 };
+
+/** A parsed JSON value that is an object (or array), so its fields can be read. */
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
