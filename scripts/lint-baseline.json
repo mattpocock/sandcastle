@@ -526,9 +526,7 @@
     "unicorn(no-useless-fallback-in-spread)": 2
   },
   "src/CwdError.ts": {
-    "eslint(no-redeclare)": 1,
-    "typescript(no-unnecessary-type-assertion)": 1,
-    "typescript(no-unsafe-type-assertion)": 1
+    "eslint(no-redeclare)": 1
   },
   "src/Display.test.ts": {
     "effect/effectSucceedWithVoid": 1,
