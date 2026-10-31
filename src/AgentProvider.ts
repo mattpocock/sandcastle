@@ -194,52 +194,85 @@ function assertCursorPrintPromptFitsArgv(prompt: string): void {
   }
 }
 
+/** Reads `<kind>ToolCall.args[field]` when it is a string. */
+const cursorToolCallArg = (
+  toolCall: unknown,
+  field: string,
+): string | undefined => {
+  if (typeof toolCall !== "object" || toolCall === null) {
+    return undefined;
+  }
+  const args: unknown = Reflect.get(toolCall, "args");
+  if (typeof args !== "object" || args === null) {
+    return undefined;
+  }
+  const value: unknown = Reflect.get(args, field);
+  return typeof value === "string" ? value : undefined;
+};
+
+/**
+ * Cursor's typed tool calls: `<kind>ToolCall` → display name and the arg it
+ * shows. Newer Cursor CLIs (verified 2026-10-31, composer-2) run shell
+ * commands as `shellToolCall` and write files as `editToolCall`.
+ */
+const CURSOR_TYPED_TOOL_CALLS: readonly {
+  readonly kind: string;
+  readonly name: string;
+  readonly field: string;
+}[] = [
+  { kind: "readToolCall", name: "Read", field: "path" },
+  { kind: "writeToolCall", name: "Write", field: "path" },
+  { kind: "editToolCall", name: "Edit", field: "path" },
+  { kind: "shellToolCall", name: "Bash", field: "command" },
+];
+
+/** Cursor's older `function` tool call: `{ name, arguments: "<json>" }`. */
+const parseCursorFunctionToolCall = (fn: unknown): ParsedStreamEvent[] => {
+  if (typeof fn !== "object" || fn === null) {
+    return [];
+  }
+  const name: unknown = Reflect.get(fn, "name");
+  if (typeof name !== "string") {
+    return [];
+  }
+  const rawArguments: unknown = Reflect.get(fn, "arguments");
+  const rawArgs = typeof rawArguments === "string" ? rawArguments : "";
+  if (rawArgs === "") {
+    return [{ type: "tool_call", name, args: "" }];
+  }
+  try {
+    const parsedArgs = JSON.parse(rawArgs) as unknown;
+    const command: unknown =
+      typeof parsedArgs === "object" && parsedArgs !== null
+        ? Reflect.get(parsedArgs, "command")
+        : undefined;
+    if (typeof command === "string") {
+      return [{ type: "tool_call", name: "Bash", args: command }];
+    }
+  } catch {
+    // Use raw arguments string for display.
+  }
+  return [{ type: "tool_call", name, args: rawArgs }];
+};
+
 /** Cursor stream-json emits top-level `tool_call` events (see Cursor CLI output-format docs). */
 const parseCursorToolCallStarted = (
   obj: Record<string, unknown>,
 ): ParsedStreamEvent[] => {
-  if (obj.type !== "tool_call" || obj.subtype !== "started") return [];
+  if (obj.type !== "tool_call" || obj.subtype !== "started") {
+    return [];
+  }
   const toolCall = obj.tool_call;
-  if (!toolCall || typeof toolCall !== "object") return [];
-
-  const tc = toolCall as Record<string, unknown>;
-
-  const readToolCall = tc.readToolCall as
-    | { args?: { path?: unknown } }
-    | undefined;
-  if (readToolCall?.args && typeof readToolCall.args.path === "string") {
-    return [{ type: "tool_call", name: "Read", args: readToolCall.args.path }];
+  if (typeof toolCall !== "object" || toolCall === null) {
+    return [];
   }
-
-  const writeToolCall = tc.writeToolCall as
-    | { args?: { path?: unknown } }
-    | undefined;
-  if (writeToolCall?.args && typeof writeToolCall.args.path === "string") {
-    return [
-      { type: "tool_call", name: "Write", args: writeToolCall.args.path },
-    ];
-  }
-
-  const fn = tc.function as { name?: unknown; arguments?: unknown } | undefined;
-  if (fn && typeof fn.name === "string") {
-    const rawArgs = typeof fn.arguments === "string" ? fn.arguments : "";
-    if (rawArgs) {
-      try {
-        const parsedArgs = JSON.parse(rawArgs) as Record<string, unknown>;
-        if (typeof parsedArgs.command === "string") {
-          return [
-            { type: "tool_call", name: "Bash", args: parsedArgs.command },
-          ];
-        }
-      } catch {
-        // Use raw arguments string for display.
-      }
-      return [{ type: "tool_call", name: fn.name, args: rawArgs }];
+  for (const { kind, name, field } of CURSOR_TYPED_TOOL_CALLS) {
+    const args = cursorToolCallArg(Reflect.get(toolCall, kind), field);
+    if (args !== undefined) {
+      return [{ type: "tool_call", name, args }];
     }
-    return [{ type: "tool_call", name: fn.name, args: "" }];
   }
-
-  return [];
+  return parseCursorFunctionToolCall(Reflect.get(toolCall, "function"));
 };
 
 /**
