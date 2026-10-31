@@ -50,6 +50,12 @@
   "src/extractStructuredOutput.test.ts": {
     "ratchet/test-outside-tests": 1
   },
+  "src/hostGit.guard.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/hostGit.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
   "src/InitService.agents.test.ts": {
     "ratchet/test-outside-tests": 1
   },
@@ -90,6 +96,9 @@
     "ratchet/test-outside-tests": 1
   },
   "src/PromptResolver.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/protectGitMounts.test.ts": {
     "ratchet/test-outside-tests": 1
   },
   "src/RecoveryMessage.test.ts": {
@@ -168,6 +177,9 @@
     "ratchet/test-outside-tests": 1
   },
   "src/validateTimeouts.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/windowsGitOverride.cleanup.test.ts": {
     "ratchet/test-outside-tests": 1
   },
   "src/WorktreeManager.test.ts": {
