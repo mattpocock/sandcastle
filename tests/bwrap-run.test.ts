@@ -47,7 +47,7 @@ case "$prompt" in
   *HANG*) sleep 60; exit 0 ;;
 esac
 pause() { case "$prompt" in *SLOW*) sleep 0.6 ;; esac; }
-project="$HOME/.claude/projects/$(pwd | tr / -)"
+project="$HOME/.claude/projects/$(pwd | sed 's/[^A-Za-z0-9]/-/g')"
 mkdir -p "$project"
 line '{"type":"summary","summary":"fake-session-marker"}' > "$project/${SESSION_ID}.jsonl"
 printf '%s\\n' "$prompt" > agent.txt
@@ -169,6 +169,18 @@ describe.skipIf(skipsHere(BWRAP))(
       expect(readFileSync(String(sessionFile), "utf8")).toContain(
         "fake-session-marker",
       );
+    }, 30_000);
+
+    it("copies the session out of a host-path worktree under .sandcastle/worktrees", async () => {
+      const result = await runFake("Keep my worktree session.", {
+        branchStrategy: { type: "merge-to-head" },
+      });
+
+      const sessionFile = result.iterations[0]?.sessionFilePath;
+      expect(readFileSync(String(sessionFile), "utf8")).toContain(
+        "fake-session-marker",
+      );
+      expect(git("branch", "--list", "sandcastle/*")).toBe("");
     }, 30_000);
 
     it("keeps a slow but streaming agent alive past the idle timeout", async () => {
