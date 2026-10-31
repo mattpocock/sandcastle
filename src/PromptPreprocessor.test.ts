@@ -105,8 +105,8 @@ describe("PromptPreprocessor", () => {
           }
           return { stdout: "", stderr: "", exitCode: 0 };
         }),
-      copyIn: () => Effect.succeed(undefined as never),
-      copyFileOut: () => Effect.succeed(undefined as never),
+      copyIn: () => Effect.void,
+      copyFileOut: () => Effect.void,
     };
 
     const displayLayer = SilentDisplay.layer(
@@ -250,8 +250,8 @@ describe("PromptPreprocessor", () => {
     const { sandboxDir, displayLayer } = await setup();
     const hangingSandbox: SandboxService = {
       exec: () => Effect.never,
-      copyIn: () => Effect.succeed(undefined as never),
-      copyFileOut: () => Effect.succeed(undefined as never),
+      copyIn: () => Effect.void,
+      copyFileOut: () => Effect.void,
     };
 
     const marked = await Effect.runPromise(

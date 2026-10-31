@@ -518,7 +518,7 @@ export const WorktreeDockerSandboxFactory = {
                         timeouts?.copyToWorktreeMs,
                       ),
                     )
-                  : Effect.succeed(undefined)
+                  : Effect.void
                 ).pipe(
                   Effect.andThen(
                     hooks?.host?.onWorktreeReady?.length
@@ -725,7 +725,7 @@ export const WorktreeDockerSandboxFactory = {
                       timeouts?.copyToWorktreeMs,
                     ),
                   )
-                : Effect.succeed(undefined)
+                : Effect.void
               ).pipe(
                 Effect.andThen(
                   hooks?.host?.onWorktreeReady?.length
