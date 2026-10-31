@@ -316,9 +316,10 @@ describe("WorktreeDockerSandboxFactory", () => {
     expect(exit.cause._tag).toBe("Fail");
     if (exit.cause._tag !== "Fail") throw new Error("unreachable");
     expect(exit.cause.error).toBeInstanceOf(AgentIdleTimeoutError);
-    expect(
-      (exit.cause.error as AgentIdleTimeoutError).preservedWorktreePath,
-    ).toBe(observedWorktreePath);
+    expect(exit.cause.error).toHaveProperty(
+      "preservedWorktreePath",
+      observedWorktreePath,
+    );
   });
 
   it("attaches preservedWorktreePath to AgentError on failure with dirty worktree", async () => {
@@ -345,7 +346,8 @@ describe("WorktreeDockerSandboxFactory", () => {
     expect(exit.cause._tag).toBe("Fail");
     if (exit.cause._tag !== "Fail") throw new Error("unreachable");
     expect(exit.cause.error).toBeInstanceOf(AgentError);
-    expect((exit.cause.error as AgentError).preservedWorktreePath).toBe(
+    expect(exit.cause.error).toHaveProperty(
+      "preservedWorktreePath",
       observedWorktreePath,
     );
   });
@@ -617,9 +619,11 @@ describe("WorktreeDockerSandboxFactory", () => {
     expect(exit.cause._tag).toBe("Fail");
     if (exit.cause._tag !== "Fail") throw new Error("unreachable");
     expect(exit.cause.error).toBeInstanceOf(AgentIdleTimeoutError);
-    expect(
-      (exit.cause.error as AgentIdleTimeoutError).preservedWorktreePath,
-    ).toBeUndefined();
+    // Absent or undefined: no worktree was preserved.
+    expect(exit.cause.error).not.toHaveProperty(
+      "preservedWorktreePath",
+      expect.anything(),
+    );
   });
 
   describe("head branch strategy", () => {
