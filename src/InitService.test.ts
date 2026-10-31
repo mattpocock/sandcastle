@@ -1,6 +1,6 @@
 import { NodeFileSystem } from "@effect/platform-node";
 import { Effect } from "effect";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assert, describe, expect, it } from "vitest";
@@ -558,7 +558,6 @@ describe("InitService scaffold", () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "simple-loop" });
 
-    const { readdir } = await import("node:fs/promises");
     const files = await readdir(join(dir, ".sandcastle"));
     const compiledFiles = files.filter(
       (f) =>
@@ -2607,16 +2606,22 @@ describe("init scaffold consistency (every agent x template x sandbox x tracker)
       });
       const configDir = join(dir, ".sandcastle");
       const { image } = sandboxProvider;
-      assert.isDefined(image);
 
       // Containerfile: every placeholder resolved, the real mount path shown.
-      const containerfile = await readFile(
-        join(configDir, image.containerfileName),
-        "utf8",
-      );
-      expect(containerfile).not.toContain("${SANDBOX_REPO_DIR}");
-      expect(containerfile).not.toMatch(/\{\{[A-Z_]+\}\}/);
-      expect(containerfile).toContain(SANDBOX_REPO_DIR);
+      // A native provider has no image, so no containerfile at all.
+      if (image === undefined) {
+        const written = await readdir(configDir);
+        expect(written).not.toContain("Dockerfile");
+        expect(written).not.toContain("Containerfile");
+      } else {
+        const containerfile = await readFile(
+          join(configDir, image.containerfileName),
+          "utf8",
+        );
+        expect(containerfile).not.toContain("${SANDBOX_REPO_DIR}");
+        expect(containerfile).not.toMatch(/\{\{[A-Z_]+\}\}/);
+        expect(containerfile).toContain(SANDBOX_REPO_DIR);
+      }
 
       // Main file: the chosen agent, model, sandbox provider and image name.
       const main = await readFile(join(configDir, mainFilename), "utf8");
@@ -2624,15 +2629,21 @@ describe("init scaffold consistency (every agent x template x sandbox x tracker)
       if (agent.factoryImport !== "claudeCode") {
         expect(main).not.toMatch(/\bclaudeCode\b/);
       }
-      const other = sandboxProvider.name === "docker" ? "podman" : "docker";
-      expect(main).not.toMatch(new RegExp(`\\b${other}\\(`));
+      for (const other of listSandboxProviders()) {
+        if (other.name !== sandboxProvider.name) {
+          expect(main).not.toMatch(new RegExp(`\\b${other.name}\\(`));
+        }
+      }
       const sandboxCalls =
         main.match(new RegExp(`\\b${sandboxProvider.name}\\([^)]*\\)`, "g")) ??
         [];
       expect(sandboxCalls.length).toBeGreaterThan(0);
+      // The image name reaches only a provider with an image.
       for (const call of sandboxCalls) {
         expect(call).toBe(
-          `${sandboxProvider.name}({ imageName: "${imageName}" })`,
+          image === undefined
+            ? `${sandboxProvider.name}(${issueTracker.sandboxOptions === undefined ? "" : "sandboxOptions"})`
+            : `${sandboxProvider.name}({ imageName: "${imageName}" })`,
         );
       }
 
@@ -2646,7 +2657,7 @@ describe("init scaffold consistency (every agent x template x sandbox x tracker)
       expect(new Set(keys).size).toBe(keys.length);
 
       // Custom tracker: the setup doc's build command builds the same image.
-      if (issueTracker.name === "custom") {
+      if (issueTracker.name === "custom" && image !== undefined) {
         const setupDoc = await readFile(
           join(configDir, "SETUP_ISSUE_TRACKER.md"),
           "utf8",
