@@ -627,7 +627,7 @@ export const WorktreeDockerSandboxFactory = {
               Effect.mapError(
                 (e) =>
                   new WorktreeError({
-                    message: `Failed to resolve git mounts: ${e}`,
+                    message: `Failed to resolve git mounts: ${String(e)}`,
                   }) as E | SandboxError,
               ),
               Effect.flatMap((gitMounts) =>
@@ -716,7 +716,7 @@ export const WorktreeDockerSandboxFactory = {
                     Effect.mapError(
                       (e) =>
                         new WorktreeError({
-                          message: `Failed to resolve git mounts: ${e}`,
+                          message: `Failed to resolve git mounts: ${String(e)}`,
                         }),
                     ),
                   ),
