@@ -11,7 +11,10 @@ import path, { join } from "node:path";
 import { styleText } from "node:util";
 import { Effect, Layer } from "effect";
 import { resolveCwd } from "./resolveCwd.js";
-import { assertResumeSessionExists } from "./resumePrecheck.js";
+import {
+  assertForkSupported,
+  assertResumeSessionExists,
+} from "./resumePrecheck.js";
 import type { AgentProvider } from "./AgentProvider.js";
 import { ClackDisplay, Display, FileDisplay } from "./Display.js";
 import type { Severity } from "./Display.js";
@@ -564,6 +567,9 @@ export async function run(
         "Use RunResult.fork(prompt) to fork the last captured session.",
     );
   }
+  if (options.forkSession === true) {
+    assertForkSupported(provider);
+  }
 
   // Validate: output requires maxIterations === 1
   if (options.output && maxIterations !== 1) {
@@ -588,7 +594,7 @@ export async function run(
     throw new Error(
       `output.maxRetries requires an agent provider that supports session resumption. ` +
         `The "${provider.name}" provider does not. ` +
-        `Use claudeCode, codex, or pi, or set maxRetries to 0.`,
+        `Use an agent provider that supports resume, or set maxRetries to 0.`,
     );
   }
 

@@ -56,7 +56,10 @@ import * as WorktreeManager from "./WorktreeManager.js";
 import { copyToWorktree } from "./CopyToWorktree.js";
 import { resolveCwd } from "./resolveCwd.js";
 import { patchGitMountsForWindows, removeMountTempDirs } from "./mountUtils.js";
-import { assertResumeSessionExists } from "./resumePrecheck.js";
+import {
+  assertForkSupported,
+  assertResumeSessionExists,
+} from "./resumePrecheck.js";
 import { registerShutdown } from "./shutdownRegistry.js";
 import { raceAbortSignal } from "./raceAbortSignal.js";
 import { validateTimeoutOptions } from "./validateTimeouts.js";
@@ -399,6 +402,9 @@ const buildSandboxHandle = (
           "forkSession requires resumeSession. " +
             "Use sandboxRunResult.fork(prompt) to fork the most recent captured session.",
         );
+      }
+      if (runOptions.forkSession === true) {
+        assertForkSupported(provider);
       }
 
       // Validate: resumeSession file must exist on the host before launching.

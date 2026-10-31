@@ -1,36 +1,32 @@
-import { mkdir, readFile, rm, writeFile, access } from "node:fs/promises";
-import { dirname, join, posix } from "node:path";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { dirname, join, posix, relative } from "node:path";
 import { tmpdir } from "node:os";
 import {
   claudeHostSessionPath,
   claudeSandboxSessionPath,
   claudeSubagentsDirOnHost,
+  copilotHostSessionsDir,
+  copilotSessionPath,
   encodePiSessionDir,
   findClaudeSessionOnHost,
   findCodexSessionOnHost,
   findPiSessionOnHost,
+  homeDir,
   listClaudeSubagentSessionsInSandbox,
-  locateCodexHostSession,
-  locateCodexSandboxSession,
-  locatePiHostSession,
-  locatePiSandboxSession,
+  locateSandboxSessionFile,
+  makeSessionFileStorage,
+  pathExists,
   piSessionDirPath,
+  requireHostSessionPath,
   transferClaudeSession,
   transferCodexSession,
+  transferCopilotSession,
   transferPiSession,
 } from "./SessionStore.js";
 import type { HostSessionLookup } from "./SessionStore.js";
 import type { BindMountSandboxHandle } from "./SandboxProvider.js";
 import type { ContextWindow } from "./ContextWindow.js";
-
-const fileExists = async (path: string): Promise<boolean> => {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
-};
+import { ForkNotSupportedError } from "./errors.js";
 
 export type ParsedStreamEvent =
   | { type: "text"; text: string }
@@ -408,6 +404,12 @@ export interface AgentSessionStorage {
    * directory that was searched (for not-found errors).
    */
   findByIdOnHost(sessionId: string): Promise<HostSessionLookup>;
+  /**
+   * `false` when the agent's CLI can resume a session but has no native fork:
+   * `.fork()` then throws `ForkNotSupportedError` before any sandbox starts.
+   * Omitted means the agent forks.
+   */
+  readonly canFork?: boolean;
 }
 
 export interface AgentProvider {
@@ -516,10 +518,10 @@ const makeClaudeSessionStorage = (
     hostSessionFilePath: (cwd, id) =>
       claudeHostSessionPath(cwd, id, hostProjectsDir),
     existsOnHost: (cwd, id) =>
-      fileExists(claudeHostSessionPath(cwd, id, hostProjectsDir)),
+      pathExists(claudeHostSessionPath(cwd, id, hostProjectsDir)),
     readHostSession: async (cwd, id) => {
       const path = claudeHostSessionPath(cwd, id, hostProjectsDir);
-      if (!(await fileExists(path))) return undefined;
+      if (!(await pathExists(path))) return undefined;
       return readFile(path, "utf8");
     },
     captureToHost: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
@@ -593,6 +595,11 @@ const makeClaudeSessionStorage = (
   };
 };
 
+/**
+ * Codex sessions live at YYYY/MM/DD/rollout-*-<id>.jsonl — the path is not
+ * derivable from (cwd, id) alone, so we cache the path written by
+ * captureToHost for hostSessionFilePath to surface on the IterationResult.
+ */
 const makeCodexSessionStorage = (
   options?: CodexOptions,
 ): AgentSessionStorage => {
@@ -600,10 +607,6 @@ const makeCodexSessionStorage = (
   const sandboxSessionsDir =
     options?.sessionStorage?.sandboxSessionsDir ??
     posix.join("/home/agent", ".codex", "sessions");
-
-  // Codex sessions live at YYYY/MM/DD/rollout-*-<id>.jsonl — the path is not
-  // derivable from (cwd, id) alone, so we cache the path written by
-  // captureToHost for hostSessionFilePath to surface on the IterationResult.
   const capturedPaths = new Map<string, string>();
 
   return {
@@ -618,25 +621,28 @@ const makeCodexSessionStorage = (
       return readFile(found.path, "utf8");
     },
     captureToHost: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
-      const located = await locateCodexSandboxSession(
-        sessionId,
+      const located = await locateSandboxSessionFile(
         handle,
         sandboxSessionsDir,
+        `rollout-*-${sessionId}.jsonl`,
       );
       const jsonl = await readSandboxFile(handle, located.path, "codex-cap");
       const rewritten = transferCodexSession(jsonl, sandboxCwd, hostCwd);
-      const root =
-        hostSessionsDir ?? join(process.env.HOME ?? "~", ".codex", "sessions");
+      const root = hostSessionsDir ?? join(homeDir(), ".codex", "sessions");
       const target = join(root, located.relativePath);
       await mkdir(dirname(target), { recursive: true });
       await writeFile(target, rewritten);
       capturedPaths.set(sessionId, target);
     },
     resumeIntoSandbox: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
-      const located = await locateCodexHostSession(sessionId, hostSessionsDir);
-      const jsonl = await readFile(located.path, "utf8");
+      const found = await findCodexSessionOnHost(sessionId, hostSessionsDir);
+      const path = requireHostSessionPath(found, sessionId);
+      const jsonl = await readFile(path, "utf8");
       const rewritten = transferCodexSession(jsonl, hostCwd, sandboxCwd);
-      const target = posix.join(sandboxSessionsDir, located.relativePath);
+      const target = posix.join(
+        sandboxSessionsDir,
+        ...relative(found.searchedRoot, path).split(/[\\/]/u),
+      );
       await writeSandboxFile(handle, target, rewritten, "codex-res");
     },
     findByIdOnHost: (id) => findCodexSessionOnHost(id, hostSessionsDir),
@@ -684,10 +690,10 @@ const makePiSessionStorage = (options?: PiOptions): AgentSessionStorage => {
       return readFile(found.path, "utf8");
     },
     captureToHost: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
-      const located = await locatePiSandboxSession(
-        sessionId,
+      const located = await locateSandboxSessionFile(
         handle,
         sandboxSessionsDir,
+        `*_${sessionId}.jsonl`,
       );
       const jsonl = await readSandboxFile(handle, located.path, "pi-cap");
       const rewritten = transferPiSession(jsonl, sandboxCwd, hostCwd);
@@ -701,10 +707,11 @@ const makePiSessionStorage = (options?: PiOptions): AgentSessionStorage => {
       capturedPaths.set(sessionId, target);
     },
     resumeIntoSandbox: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
-      const located = await locatePiHostSession(sessionId, hostSessionsDir);
-      const jsonl = await readFile(located.path, "utf8");
+      const found = await findPiSessionOnHost(sessionId, hostSessionsDir);
+      const path = requireHostSessionPath(found, sessionId);
+      const jsonl = await readFile(path, "utf8");
       const rewritten = transferPiSession(jsonl, hostCwd, sandboxCwd);
-      const filename = located.relativePath.split(/[\\/]/).pop()!;
+      const filename = posix.basename(path.replaceAll("\\", "/"));
       const target = posix.join(
         sandboxSessionsDir,
         encodePiSessionDir(sandboxCwd),
@@ -1388,31 +1395,73 @@ export interface CopilotOptions {
   readonly effort?: "low" | "medium" | "high";
   /** Environment variables injected by this agent provider. */
   readonly env?: Record<string, string>;
+  /** When false, session capture is disabled. Default: true. */
+  readonly captureSessions?: boolean;
+  /** Override Copilot `session-state` directories for tests or non-standard installs. */
+  readonly sessionStorage?: {
+    readonly hostSessionsDir?: string;
+    readonly sandboxSessionsDir?: string;
+  };
 }
+
+/**
+ * Copilot's session is one `events.jsonl` keyed by id alone, so it moves as a
+ * single file. The CLI resumes (`--resume=<id>`) but has no fork flag, so the
+ * provider declares `canFork: false` (ADR 0021).
+ */
+const makeCopilotSessionStorage = (
+  options?: CopilotOptions,
+): AgentSessionStorage => {
+  const hostDir =
+    options?.sessionStorage?.hostSessionsDir ?? copilotHostSessionsDir();
+  const sandboxDir =
+    options?.sessionStorage?.sandboxSessionsDir ??
+    "/home/agent/.copilot/session-state";
+  const hostPath = (id: string): string => join(hostDir, id, "events.jsonl");
+  return {
+    ...makeSessionFileStorage({
+      hostRoot: hostDir,
+      hostPath: (_cwd, id) => hostPath(id),
+      hostPathsById: (id) => [hostPath(id)],
+      sandboxPath: (_cwd, id) => copilotSessionPath(sandboxDir, id),
+      rewrite: transferCopilotSession,
+    }),
+    canFork: false,
+  };
+};
 
 export const copilot = (
   model: string,
   options?: CopilotOptions,
-): AgentProvider => ({
+): AgentProvider & { readonly sessionStorage: AgentSessionStorage } => ({
   name: "copilot",
   env: options?.env ?? {},
-  captureSessions: false,
+  captureSessions: options?.captureSessions ?? true,
+  sessionStorage: makeCopilotSessionStorage(options),
 
-  // Copilot CLI does expose `--resume <id>`, but its session state is indexed by
-  // a SQLite database alongside the JSONL files in ~/.copilot/session-state/, so
-  // transferring a single session file between host and sandbox is not enough to
-  // make resume work (see ADR 0016). Until the round-trip is verified end-to-end,
-  // copilot is non-resumable: captureSessions is false, there is no sessionStorage,
-  // and resumeSession is ignored here — like cursor, pi, and opencode.
   buildPrintCommand({
     prompt,
     dangerouslySkipPermissions,
+    resumeSession,
+    forkSession,
   }: AgentCommandOptions): PrintCommand {
+    if (resumeSession !== undefined && forkSession === true) {
+      throw new ForkNotSupportedError({
+        message:
+          "copilot cannot fork a session: its CLI resumes but has no fork. Use resume() to continue the session in place.",
+        agentProvider: "copilot",
+      });
+    }
     assertCopilotPrintPromptFitsArgv(prompt);
     const allowAll = dangerouslySkipPermissions ? " --allow-all-tools" : "";
     const effortFlag = options?.effort ? ` --effort ${options.effort}` : "";
+    // `--resume` takes an optional value, so the id is bound with `=`.
+    const resumeFlag =
+      resumeSession === undefined
+        ? ""
+        : ` --resume=${shellEscape(resumeSession)}`;
     return {
-      command: `copilot -p ${shellEscape(prompt)} --output-format json --model ${shellEscape(model)}${allowAll}${effortFlag}`,
+      command: `copilot -p ${shellEscape(prompt)} --output-format json --model ${shellEscape(model)}${allowAll}${effortFlag}${resumeFlag}`,
     };
   },
 
