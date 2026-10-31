@@ -2,7 +2,8 @@ import { Effect } from "effect";
 import { execFile } from "node:child_process";
 import { resolve } from "node:path";
 import { DockerError, ImageNotFoundError } from "./errors.js";
-import { formatVolumeMount, type SelinuxLabel } from "./mountUtils.js";
+import { formatVolumeMount } from "./mountUtils.js";
+import type { SelinuxLabel } from "./mountUtils.js";
 
 const dockerExec = (args: string[]): Effect.Effect<string, DockerError> =>
   Effect.async((resume) => {
@@ -15,12 +16,12 @@ const dockerExec = (args: string[]): Effect.Effect<string, DockerError> =>
           resume(
             Effect.fail(
               new DockerError({
-                message: `docker ${args[0]} failed: ${stderr?.toString() || error.message}`,
+                message: `docker ${args[0]} failed: ${stderr || error.message}`,
               }),
             ),
           );
         } else {
-          resume(Effect.succeed(stdout.toString()));
+          resume(Effect.succeed(stdout));
         }
       },
     );
@@ -45,25 +46,16 @@ export const buildImage = (
     const buildArgFlags = Object.entries(options?.buildArgs ?? {}).flatMap(
       ([k, v]) => ["--build-arg", `${k}=${v}`],
     );
-    if (options?.dockerfile) {
-      yield* dockerExec([
-        "build",
-        "-t",
-        imageName,
-        ...buildArgFlags,
-        "-f",
-        resolve(options.dockerfile),
-        process.cwd(),
-      ]);
-    } else {
-      yield* dockerExec([
-        "build",
-        "-t",
-        imageName,
-        ...buildArgFlags,
-        resolve(dockerfileDir),
-      ]);
-    }
+    const buildContext = options?.dockerfile
+      ? ["-f", resolve(options.dockerfile), process.cwd()]
+      : [resolve(dockerfileDir)];
+    yield* dockerExec([
+      "build",
+      "-t",
+      imageName,
+      ...buildArgFlags,
+      ...buildContext,
+    ]);
   });
 
 export interface VolumeMount {
@@ -116,11 +108,9 @@ export const startContainer = (
     ]);
 
     if (existing.trim() === containerName) {
-      yield* Effect.fail(
-        new DockerError({
-          message: `Container '${containerName}' already exists. Run cleanup first.`,
-        }),
-      );
+      return yield* new DockerError({
+        message: `Container '${containerName}' already exists. Run cleanup first.`,
+      });
     }
 
     const envFlags = Object.entries(env).flatMap(([k, v]) => [
@@ -136,11 +126,7 @@ export const startContainer = (
 
     const workdirFlags = options?.workdir ? ["-w", options.workdir] : [];
     const userFlags = options?.user ? ["--user", options.user] : [];
-    const networks = options?.network
-      ? Array.isArray(options.network)
-        ? options.network
-        : [options.network]
-      : [];
+    const networks = options?.network ? [options.network].flat() : [];
     const networkFlags = networks.flatMap((n) => ["--network", n]);
     const groupAddFlags = (options?.groups ?? []).flatMap((g) => [
       "--group-add",
@@ -151,9 +137,9 @@ export const startContainer = (
       d,
     ]);
     const cpusFlags =
-      options?.cpus !== undefined ? ["--cpus", String(options.cpus)] : [];
+      options?.cpus === undefined ? [] : ["--cpus", String(options.cpus)];
 
-    yield* dockerExec([
+    return yield* dockerExec([
       "run",
       "-d",
       "--name",
@@ -167,7 +153,7 @@ export const startContainer = (
       ...deviceFlags,
       ...cpusFlags,
       imageName,
-    ]);
+    ]).pipe(Effect.asVoid);
   });
 
 /**

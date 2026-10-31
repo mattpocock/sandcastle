@@ -202,11 +202,7 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
         ? [`--userns=keep-id:uid=${containerUid},gid=${containerGid}`]
         : [];
       const userArgs = ["--user", `${containerUid}:${containerGid}`];
-      const networks = options?.network
-        ? Array.isArray(options.network)
-          ? options.network
-          : [options.network]
-        : [];
+      const networks = options?.network ? [options.network].flat() : [];
       const networkArgs = networks.flatMap((n) => ["--network", n]);
       const groupArgs = (options?.groups ?? []).flatMap((g) => [
         "--group-add",
@@ -217,7 +213,7 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
         d,
       ]);
       const cpusArgs =
-        options?.cpus !== undefined ? ["--cpus", String(options.cpus)] : [];
+        options?.cpus === undefined ? [] : ["--cpus", String(options.cpus)];
 
       // Start container via podman run
       await new Promise<void>((resolve, reject) => {
@@ -307,7 +303,7 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
       const handle: BindMountSandboxHandle = {
         worktreePath,
 
-        exec: (
+        exec: async (
           command: string,
           opts?: {
             onLine?: (line: string) => void;
@@ -320,42 +316,48 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
           // Elevate by running as root through the engine, not a `sudo`
           // prefix: the image needs no sudo binary, and the whole command
           // (`a && b`, not just `a`) runs as root.
-          if (opts?.sudo) args.push("--user", "0:0");
-          if (opts?.stdin !== undefined) args.push("-i");
-          if (opts?.cwd) args.push("-w", opts.cwd);
+          if (opts?.sudo) {
+            args.push("--user", "0:0");
+          }
+          if (opts?.stdin !== undefined) {
+            args.push("-i");
+          }
+          if (opts?.cwd) {
+            args.push("-w", opts.cwd);
+          }
           args.push(containerName, "sh", "-c", command);
 
           return new Promise((resolve, reject) => {
-            const proc = spawn("podman", args, {
-              stdio: [
-                opts?.stdin !== undefined ? "pipe" : "ignore",
-                "pipe",
-                "pipe",
-              ],
-            });
+            const stdin = opts?.stdin;
+            // Two literal `stdio` tuples, so the types know stdout and stderr
+            // are always piped.
+            const proc =
+              stdin === undefined
+                ? spawn("podman", args, { stdio: ["ignore", "pipe", "pipe"] })
+                : spawn("podman", args, { stdio: ["pipe", "pipe", "pipe"] });
 
-            if (opts?.stdin !== undefined) {
-              proc.stdin!.write(opts.stdin);
-              proc.stdin!.end();
+            if (stdin !== undefined) {
+              proc.stdin?.write(stdin);
+              proc.stdin?.end();
             }
 
-            proc.on("error", (error) => {
+            proc.on("error", (error: Error) => {
               reject(new Error(`podman exec failed: ${error.message}`));
             });
 
             if (opts?.onLine) {
-              const onLine = opts.onLine;
+              const { onLine } = opts;
               const stdoutTail = new BoundedTail(maxOutputTailChars, "\n");
               const stderrTail = new BoundedTail(maxOutputTailChars, "");
-              const rl = createInterface({ input: proc.stdout! });
+              const rl = createInterface({ input: proc.stdout });
               rl.on("line", (line) => {
                 stdoutTail.push(line);
                 onLine(line);
               });
-              proc.stderr!.on("data", (chunk: Buffer) => {
+              proc.stderr.on("data", (chunk: Buffer) => {
                 stderrTail.push(chunk.toString());
               });
-              proc.on("close", (code) => {
+              proc.on("close", (code: number | null) => {
                 resolve({
                   stdout: stdoutTail.toString(),
                   stderr: stderrTail.toString(),
@@ -365,13 +367,13 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
             } else {
               const stdoutChunks: string[] = [];
               const stderrChunks: string[] = [];
-              proc.stdout!.on("data", (chunk: Buffer) => {
+              proc.stdout.on("data", (chunk: Buffer) => {
                 stdoutChunks.push(chunk.toString());
               });
-              proc.stderr!.on("data", (chunk: Buffer) => {
+              proc.stderr.on("data", (chunk: Buffer) => {
                 stderrChunks.push(chunk.toString());
               });
-              proc.on("close", (code) => {
+              proc.on("close", (code: number | null) => {
                 resolve({
                   stdout: stdoutChunks.join(""),
                   stderr: stderrChunks.join(""),
@@ -382,11 +384,11 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
           });
         },
 
-        interactiveExec: (
+        interactiveExec: async (
           args: string[],
           opts: InteractiveExecOptions,
-        ): Promise<{ exitCode: number }> => {
-          return new Promise((resolve, reject) => {
+        ): Promise<{ exitCode: number }> =>
+          new Promise((resolve, reject) => {
             const podmanArgs = ["exec"];
             // Allocate a pseudo-terminal when stdin looks like a TTY
             if (
@@ -397,7 +399,9 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
             } else {
               podmanArgs.push("-i");
             }
-            if (opts.cwd) podmanArgs.push("-w", opts.cwd);
+            if (opts.cwd) {
+              podmanArgs.push("-w", opts.cwd);
+            }
             podmanArgs.push(containerName, ...args);
 
             const proc = spawn("podman", podmanArgs, {
@@ -411,10 +415,11 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
             proc.on("close", (code: number | null) => {
               resolve({ exitCode: code ?? 0 });
             });
-          });
-        },
-
-        copyFileIn: (hostPath: string, sandboxPath: string): Promise<void> =>
+          }),
+        copyFileIn: async (
+          hostPath: string,
+          sandboxPath: string,
+        ): Promise<void> =>
           new Promise((resolve, reject) => {
             execFile(
               "podman",
@@ -429,7 +434,10 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
             );
           }),
 
-        copyFileOut: (sandboxPath: string, hostPath: string): Promise<void> =>
+        copyFileOut: async (
+          sandboxPath: string,
+          hostPath: string,
+        ): Promise<void> =>
           new Promise((resolve, reject) => {
             execFile(
               "podman",
@@ -468,9 +476,9 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
 };
 
 // Re-export for backwards compatibility
-export { defaultImageName };
+export { defaultImageName } from "../mountUtils.js";
 
-const checkImageExists = (imageName: string): Promise<void> =>
+const checkImageExists = async (imageName: string): Promise<void> =>
   new Promise<void>((resolve, reject) => {
     execFile("podman", ["image", "inspect", imageName], (error) => {
       if (error) {
@@ -490,7 +498,7 @@ const podmanMachineError = () =>
     "Podman Machine is not running. Run 'podman machine init && podman machine start' first.",
   );
 
-const checkPodmanMachine = (): Promise<void> =>
+const checkPodmanMachine = async (): Promise<void> =>
   new Promise<void>((resolve, reject) => {
     execFile(
       "podman",
@@ -501,10 +509,11 @@ const checkPodmanMachine = (): Promise<void> =>
           return;
         }
         try {
-          const machines = JSON.parse(stdout.toString()) as Array<{
-            Running?: boolean;
-          }>;
-          if (machines.some((m) => m.Running)) {
+          const machines: unknown = JSON.parse(stdout);
+          if (
+            Array.isArray(machines) &&
+            machines.some((m) => isRunningMachine(m))
+          ) {
             resolve();
           } else {
             reject(podmanMachineError());
@@ -515,3 +524,10 @@ const checkPodmanMachine = (): Promise<void> =>
       },
     );
   });
+
+/** One entry of `podman machine list --format json` that reports it is running. */
+const isRunningMachine = (machine: unknown): boolean =>
+  typeof machine === "object" &&
+  machine !== null &&
+  "Running" in machine &&
+  machine.Running === true;

@@ -11,17 +11,17 @@ import {
   getTemplateDependencies,
 } from "./InitService.js";
 
-const makeDir = () => mkdtemp(join(tmpdir(), "init-service-"));
+const makeDir = async () => mkdtemp(join(tmpdir(), "init-service-"));
 
 describe("detectPackageManager", () => {
-  const detect = (dir: string) =>
+  const detect = async (dir: string) =>
     Effect.runPromise(
       detectPackageManager(dir).pipe(Effect.provide(NodeFileSystem.layer)),
     );
 
   it("defaults to npm when no lockfile or packageManager field is present", async () => {
     const dir = await makeDir();
-    expect(await detect(dir)).toBe("npm");
+    await expect(detect(dir)).resolves.toBe("npm");
   });
 
   it.each([
@@ -33,7 +33,7 @@ describe("detectPackageManager", () => {
   ])("detects $expected from $file", async ({ file, expected }) => {
     const dir = await makeDir();
     await writeFile(join(dir, file), "");
-    expect(await detect(dir)).toBe(expected);
+    await expect(detect(dir)).resolves.toBe(expected);
   });
 
   it("prefers the package.json packageManager field over a lockfile", async () => {
@@ -44,7 +44,7 @@ describe("detectPackageManager", () => {
       join(dir, "package.json"),
       JSON.stringify({ name: "test", packageManager: "pnpm@9.1.0" }),
     );
-    expect(await detect(dir)).toBe("pnpm");
+    await expect(detect(dir)).resolves.toBe("pnpm");
   });
 
   it("ignores an unrecognized packageManager field and falls back to lockfile", async () => {
@@ -54,8 +54,18 @@ describe("detectPackageManager", () => {
       join(dir, "package.json"),
       JSON.stringify({ name: "test", packageManager: "deno@1.0.0" }),
     );
-    expect(await detect(dir)).toBe("yarn");
+    await expect(detect(dir)).resolves.toBe("yarn");
   });
+
+  it.each(["{ not json", "null", "[]", '"pnpm@9.1.0"'])(
+    "falls back to the lockfile when package.json is %s",
+    async (content) => {
+      const dir = await makeDir();
+      await writeFile(join(dir, "yarn.lock"), "");
+      await writeFile(join(dir, "package.json"), content);
+      await expect(detect(dir)).resolves.toBe("yarn");
+    },
+  );
 });
 
 describe("addDependencyCommand", () => {
@@ -70,14 +80,14 @@ describe("addDependencyCommand", () => {
 });
 
 describe("hostHasDependency", () => {
-  const has = (dir: string, pkg: string) =>
+  const has = async (dir: string, pkg: string) =>
     Effect.runPromise(
       hostHasDependency(dir, pkg).pipe(Effect.provide(NodeFileSystem.layer)),
     );
 
   it("returns false when there is no package.json", async () => {
     const dir = await makeDir();
-    expect(await has(dir, "zod")).toBe(false);
+    await expect(has(dir, "zod")).resolves.toBe(false);
   });
 
   it("returns false when the package is not declared", async () => {
@@ -86,7 +96,7 @@ describe("hostHasDependency", () => {
       join(dir, "package.json"),
       JSON.stringify({ name: "test", dependencies: { effect: "^3" } }),
     );
-    expect(await has(dir, "zod")).toBe(false);
+    await expect(has(dir, "zod")).resolves.toBe(false);
   });
 
   it.each(["dependencies", "devDependencies"])(
@@ -97,7 +107,16 @@ describe("hostHasDependency", () => {
         join(dir, "package.json"),
         JSON.stringify({ name: "test", [key]: { zod: "^3" } }),
       );
-      expect(await has(dir, "zod")).toBe(true);
+      await expect(has(dir, "zod")).resolves.toBe(true);
+    },
+  );
+
+  it.each(["{ not json", "null", "[]", '"zod"'])(
+    "returns false when package.json is %s",
+    async (content) => {
+      const dir = await makeDir();
+      await writeFile(join(dir, "package.json"), content);
+      await expect(has(dir, "zod")).resolves.toBe(false);
     },
   );
 });

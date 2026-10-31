@@ -31,7 +31,7 @@ await using worktree = await sandcastle.createWorktree({
   cwd: repoPath,
   branchStrategy: {
     type: "branch",
-    branch: branch,
+    branch,
     baseBranch: base,
   },
   copyToWorktree: ["node_modules"],
@@ -47,7 +47,7 @@ await using sandbox = await worktree.createSandbox({
 });
 
 const result = await sandbox.run({
-  name: "Implementer #" + issueNumber,
+  name: `Implementer #${issueNumber}`,
   agent: sandcastle.claudeCode("claude-opus-4-8"),
   promptFile: "./.sandcastle/implement-prompt.md",
   promptArgs: {
@@ -59,7 +59,7 @@ const result = await sandbox.run({
 
 if (result.commits.length > 0) {
   await sandbox.run({
-    name: "Reviewer #" + issueNumber,
+    name: `Reviewer #${issueNumber}`,
     agent: sandcastle.claudeCode("claude-opus-4-8"),
     promptFile: "./.sandcastle/review-prompt.md",
     promptArgs: {

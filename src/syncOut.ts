@@ -12,6 +12,12 @@
  * 1. Committed changes: `git format-patch` + `git am --3way`
  * 2. Uncommitted changes (staged + unstaged): `git diff HEAD` + `git apply`
  * 3. Untracked files: `git ls-files --others` + `copyFileOut` each file
+ *
+ * Everything the sandbox reports (patch names, untracked paths, the symlinks
+ * the patches make) is untrusted: `syncOutPaths.ts` checks that each host
+ * destination stays inside the host worktree, and out of its `.git`, before
+ * anything is written. A path that fails fails the sync with
+ * `SyncOutPathError`; it is never skipped.
  */
 
 import { existsSync } from "node:fs";
@@ -23,12 +29,23 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
-import { Clock, Effect } from "effect";
+import { basename, dirname, join, relative } from "node:path";
+import { Clock, Console, Effect } from "effect";
 import type { ExecResult, SandboxService } from "./SandboxFactory.js";
 import type { IsolatedSandboxHandle } from "./SandboxProvider.js";
-import { buildRecoveryMessage, type FailedStep } from "./RecoveryMessage.js";
-import { SyncError } from "./errors.js";
+import { buildRecoveryMessage } from "./RecoveryMessage.js";
+import type { FailedStep } from "./RecoveryMessage.js";
+import { SyncError, type SyncOutPathError } from "./errors.js";
+import { hostGit } from "./hostGit.js";
+import {
+  checkPatchFileSymlinks,
+  checkPatchName,
+  checkRelativePath,
+  checkStagedFile,
+  hostSymlinkAt,
+  realRootOf,
+  resolveHostDestination,
+} from "./syncOutPaths.js";
 
 /**
  * Sandbox-owned ref tracking the last-synced commit. Lives inside the sandbox's
@@ -37,30 +54,19 @@ import { SyncError } from "./errors.js";
  */
 export const SYNC_BASE_REF = "refs/sandcastle/sync-base";
 
-/**
- * Execute a command on the host side, returning stdout.
- * Fails with SyncError on non-zero exit.
- */
-const execHost = (
-  command: string,
+/** Run host git, failing with SyncError on non-zero exit. */
+const execHostGit = (
+  args: readonly string[],
   cwd: string,
 ): Effect.Effect<string, SyncError> =>
-  Effect.tryPromise({
-    try: async () => {
-      const { exec } = await import("node:child_process");
-      const { promisify } = await import("node:util");
-      const execAsync = promisify(exec);
-      const { stdout } = await execAsync(command, {
-        cwd,
-        maxBuffer: 10 * 1024 * 1024,
-      });
-      return stdout;
-    },
-    catch: (e) =>
-      new SyncError({
-        message: `Host command failed: ${command}\n${e instanceof Error ? e.message : String(e)}`,
-      }),
-  });
+  hostGit(args, cwd).pipe(
+    Effect.mapError(
+      (e) =>
+        new SyncError({
+          message: `Host command failed: git ${args.join(" ")}\n${e.message}`,
+        }),
+    ),
+  );
 
 /**
  * Execute a command in the sandbox, failing with SyncError if it exits non-zero.
@@ -81,13 +87,13 @@ const execOk = (
       }),
   }).pipe(
     Effect.flatMap((result) =>
-      result.exitCode !== 0
-        ? Effect.fail(
+      result.exitCode === 0
+        ? Effect.succeed(result)
+        : Effect.fail(
             new SyncError({
               message: `Sandbox command failed (exit ${result.exitCode}): ${command}\n${result.stderr}`,
             }),
-          )
-        : Effect.succeed(result),
+          ),
     ),
   );
 
@@ -119,8 +125,10 @@ const isEmptyPatch = (patchPath: string): Effect.Effect<boolean, SyncError> =>
   Effect.tryPromise({
     try: async () => {
       const info = await stat(patchPath);
-      if (info.size === 0) return true;
-      const content = await readFile(patchPath, "utf-8");
+      if (info.size === 0) {
+        return true;
+      }
+      const content = await readFile(patchPath, "utf8");
       return !content.includes("diff --git");
     },
     catch: (e) =>
@@ -128,6 +136,33 @@ const isEmptyPatch = (patchPath: string): Effect.Effect<boolean, SyncError> =>
         message: `Failed to check patch ${patchPath}: ${e instanceof Error ? e.message : String(e)}`,
       }),
   });
+
+/** Removes a sync-out patch directory, and `.sandcastle/patches` once empty. */
+const removePatchDir = (
+  hostRepoDir: string,
+  patchDir: string,
+): Effect.Effect<void, SyncError> =>
+  Effect.tryPromise({
+    try: async () => {
+      await rm(patchDir, { recursive: true, force: true });
+      const patchesRoot = join(hostRepoDir, ".sandcastle", "patches");
+      try {
+        const remaining = await readdir(patchesRoot);
+        if (remaining.length === 0) {
+          await rm(patchesRoot, {
+            recursive: true,
+            force: true,
+          });
+        }
+      } catch {
+        // ignore
+      }
+    },
+    catch: () =>
+      new SyncError({ message: "Failed to clean up patch directory" }),
+  });
+
+const pad = (n: number) => String(n).padStart(2, "0");
 
 /**
  * Generate a YYYYMMDD-HHMMSS timestamp directory name.
@@ -141,7 +176,6 @@ const createPatchDir = (
       Effect.tryPromise({
         try: async () => {
           const now = new Date(nowMillis);
-          const pad = (n: number) => String(n).padStart(2, "0");
           const base = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
 
           const patchesRoot = join(hostRepoDir, ".sandcastle", "patches");
@@ -180,7 +214,7 @@ export const countCommitsToSync = (
   sandbox: SandboxService,
   cwd: string,
   hostHead: string,
-): Effect.Effect<number, never> =>
+): Effect.Effect<number> =>
   Effect.gen(function* () {
     const baseResult = yield* sandbox
       .exec(`git rev-parse --verify --quiet ${SYNC_BASE_REF}`, { cwd })
@@ -208,8 +242,10 @@ export const countCommitsToSync = (
           }),
         ),
       );
-    if (countResult.exitCode !== 0) return 0;
-    const parsed = parseInt(countResult.stdout.trim(), 10);
+    if (countResult.exitCode !== 0) {
+      return 0;
+    }
+    const parsed = Number.parseInt(countResult.stdout.trim(), 10);
     return Number.isNaN(parsed) ? 0 : parsed;
   });
 
@@ -223,12 +259,14 @@ export const countCommitsToSync = (
 export const syncOut = (
   hostRepoDir: string,
   handle: IsolatedSandboxHandle,
-): Effect.Effect<void, SyncError> =>
-  Effect.gen(function* () {
-    const worktreePath = handle.worktreePath;
+): Effect.Effect<void, SyncError | SyncOutPathError> => {
+  let createdPatchDir: string | undefined;
+  return Effect.gen(function* () {
+    const { worktreePath } = handle;
+    const realRoot = yield* realRootOf(hostRepoDir);
 
-    const hostHead = (yield* execHost(
-      "git rev-parse HEAD",
+    const hostHead = (yield* execHostGit(
+      ["rev-parse", "HEAD"],
       hostRepoDir,
     )).trim();
     const sandboxHead = (yield* execOk(handle, "git rev-parse HEAD", {
@@ -280,9 +318,18 @@ export const syncOut = (
       return;
     }
 
+    // Refuse a bad untracked path before anything is written.
+    const untrackedSegments = yield* Effect.all(
+      untrackedFiles.map((relPath) => checkRelativePath(relPath)),
+    );
+
     // --- Phase 1: Save all artifacts ---
     const patchDir = yield* createPatchDir(hostRepoDir);
+    createdPatchDir = patchDir;
+    // Created with `mkdir -p`, which follows symlinks.
+    yield* resolveHostDestination(realRoot, relative(hostRepoDir, patchDir));
     const relativePatchDir = join(".sandcastle", "patches", basename(patchDir));
+    const untrackedDir = join(patchDir, "untracked");
 
     const nonEmptyPatches: string[] = [];
 
@@ -308,6 +355,7 @@ export const syncOut = (
           .filter((name) => name.length > 0);
 
         for (const patchName of patchNames) {
+          yield* checkPatchName(patchName);
           const sandboxPatchPath = `${sandboxPatchDir}/${patchName}`;
           const hostPatchPath = join(patchDir, patchName);
           yield* Effect.tryPromise({
@@ -341,10 +389,12 @@ export const syncOut = (
 
     // Save untracked files
     if (hasUntracked) {
-      const untrackedDir = join(patchDir, "untracked");
-      for (const relPath of untrackedFiles) {
+      for (const [i, relPath] of untrackedFiles.entries()) {
         const sandboxFilePath = `${worktreePath}/${relPath}`;
-        const hostFilePath = join(untrackedDir, relPath);
+        const hostFilePath = join(
+          untrackedDir,
+          ...(untrackedSegments[i] ?? []),
+        );
         yield* Effect.tryPromise({
           try: async () => {
             await mkdir(dirname(hostFilePath), { recursive: true });
@@ -358,18 +408,41 @@ export const syncOut = (
       }
     }
 
+    // Each untracked file's host destination, symlinks resolved on the host.
+    const checkUntrackedDestinations = () =>
+      Effect.all(
+        untrackedFiles.map((relPath, i) =>
+          checkStagedFile(
+            join(untrackedDir, ...(untrackedSegments[i] ?? [])),
+            relPath,
+          ).pipe(
+            Effect.andThen(() => resolveHostDestination(realRoot, relPath)),
+          ),
+        ),
+      );
+    // Checked before anything is applied, and again just before writing.
+    yield* checkUntrackedDestinations();
+
+    // Refuse symlinks the patches would make that lead out of the worktree.
+    yield* checkPatchFileSymlinks(
+      [
+        ...nonEmptyPatches,
+        ...(hasDiff ? [join(patchDir, "changes.patch")] : []),
+      ],
+      hostSymlinkAt(realRoot),
+    );
+
     // --- Phase 2: Apply from saved directory ---
     let failedStep: FailedStep | undefined;
 
     // Apply committed patches
     if (nonEmptyPatches.length > 0) {
       const abortResult = yield* Effect.either(
-        execHost("git am --abort", hostRepoDir),
+        execHostGit(["am", "--abort"], hostRepoDir),
       );
       void abortResult; // ignore abort failures
-      const patchArgs = nonEmptyPatches.map((p) => `"${p}"`).join(" ");
       const applyResult = yield* Effect.either(
-        execHost(`git am --3way ${patchArgs}`, hostRepoDir),
+        execHostGit(["am", "--3way", ...nonEmptyPatches], hostRepoDir),
       );
       if (applyResult._tag === "Left") {
         failedStep = "commits";
@@ -380,22 +453,26 @@ export const syncOut = (
     if (!failedStep && hasDiff) {
       const diffPath = join(patchDir, "changes.patch");
       const applyResult = yield* Effect.either(
-        execHost(`git apply "${diffPath}"`, hostRepoDir),
+        execHostGit(["apply", diffPath], hostRepoDir),
       );
       if (applyResult._tag === "Left") {
         failedStep = "diff";
       }
     }
 
-    // Copy untracked files
+    // Copy untracked files. The applied patches changed the host tree, so
+    // each destination's symlinks are resolved again; a refusal fails the
+    // sync rather than being recovered from.
     if (!failedStep && hasUntracked) {
+      const destinations = yield* checkUntrackedDestinations();
       const copyResult = yield* Effect.either(
         Effect.tryPromise({
           try: async () => {
-            const untrackedDir = join(patchDir, "untracked");
-            for (const relPath of untrackedFiles) {
-              const srcPath = join(untrackedDir, relPath);
-              const destPath = join(hostRepoDir, relPath);
+            for (const [i, destPath] of destinations.entries()) {
+              const srcPath = join(
+                untrackedDir,
+                ...(untrackedSegments[i] ?? []),
+              );
               await mkdir(dirname(destPath), { recursive: true });
               const content = await readFile(srcPath);
               await writeFile(destPath, content);
@@ -432,26 +509,16 @@ export const syncOut = (
         hasDiff,
         hasUntracked,
       });
-      console.error(`\n${msg}`);
+      yield* Console.error(`\n${msg}`);
     } else {
-      yield* Effect.tryPromise({
-        try: async () => {
-          await rm(patchDir, { recursive: true, force: true });
-          const patchesRoot = join(hostRepoDir, ".sandcastle", "patches");
-          try {
-            const remaining = await readdir(patchesRoot);
-            if (remaining.length === 0) {
-              await rm(patchesRoot, {
-                recursive: true,
-                force: true,
-              });
-            }
-          } catch {
-            // ignore
-          }
-        },
-        catch: () =>
-          new SyncError({ message: "Failed to clean up patch directory" }),
-      });
+      yield* removePatchDir(hostRepoDir, patchDir);
     }
-  });
+  }).pipe(
+    // A refused path leaves nothing the sandbox wrote behind on the host.
+    Effect.tapError((e) =>
+      e._tag === "SyncOutPathError" && createdPatchDir !== undefined
+        ? removePatchDir(hostRepoDir, createdPatchDir).pipe(Effect.ignore)
+        : Effect.void,
+    ),
+  );
+};

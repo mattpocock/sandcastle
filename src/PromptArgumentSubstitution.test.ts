@@ -1,6 +1,8 @@
-import { Effect, Layer, Ref } from "effect";
+import type { Layer } from "effect";
+import { Effect, Ref } from "effect";
 import { describe, expect, it } from "vitest";
-import { type DisplayEntry, SilentDisplay } from "./Display.js";
+import { SilentDisplay } from "./Display.js";
+import type { DisplayEntry } from "./Display.js";
 import {
   substitutePromptArgs,
   validateNoArgsWithInlinePrompt,
@@ -12,10 +14,16 @@ import { PromptError } from "./errors.js";
 
 describe("PromptArgumentSubstitution", () => {
   const setup = () => {
-    const displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const displayRef = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     const layer = SilentDisplay.layer(displayRef);
     return { layer, displayRef };
   };
+
+  /** The messages of the warn-level status entries a run displayed. */
+  const warningsIn = (entries: readonly DisplayEntry[]): string[] =>
+    entries.flatMap((e) =>
+      e._tag === "status" && e.severity === "warn" ? [e.message] : [],
+    );
 
   const run = (
     prompt: string,
@@ -26,7 +34,7 @@ describe("PromptArgumentSubstitution", () => {
       substitutePromptArgs(prompt, args).pipe(Effect.provide(layer)),
     );
 
-  const runFail = (
+  const runFail = async (
     prompt: string,
     args: Record<string, string | number | boolean>,
     layer: Layer.Layer<import("./Display.js").Display>,
@@ -114,11 +122,9 @@ describe("PromptArgumentSubstitution", () => {
     const { layer, displayRef } = setup();
     await run("Hello world", { UNUSED: "value" }, layer);
     const entries = await Effect.runPromise(Ref.get(displayRef));
-    const warnings = entries.filter(
-      (e) => e._tag === "status" && e.severity === "warn",
-    );
+    const warnings = warningsIn(entries);
     expect(warnings).toHaveLength(1);
-    expect((warnings[0] as { message: string }).message).toContain("UNUSED");
+    expect(warnings[0]).toContain("UNUSED");
   });
 
   it("passes through a prompt with no placeholders and no args", async () => {
@@ -137,7 +143,7 @@ describe("PromptArgumentSubstitution", () => {
     );
     // Template-authored shell blocks are marked with \x01 so the preprocessor
     // can distinguish them from `!`...`` patterns injected via arg values.
-    expect(result).toBe("Output: !\x01`gh issue view 123`");
+    expect(result).toBe("Output: !\u0001`gh issue view 123`");
   });
 
   it("replaces {{ KEY }} with spaces inside braces", async () => {
@@ -175,9 +181,7 @@ describe("PromptArgumentSubstitution", () => {
     const { layer, displayRef } = setup();
     await run("{{ NAME }}", { NAME: "world" }, layer);
     const entries = await Effect.runPromise(Ref.get(displayRef));
-    const warnings = entries.filter(
-      (e) => e._tag === "status" && e.severity === "warn",
-    );
+    const warnings = warningsIn(entries);
     expect(warnings).toHaveLength(0);
   });
 
@@ -199,9 +203,7 @@ describe("PromptArgumentSubstitution", () => {
     const { layer, displayRef } = setup();
     await run("No placeholders", { FOO: "1", BAR: "2" }, layer);
     const entries = await Effect.runPromise(Ref.get(displayRef));
-    const warnings = entries.filter(
-      (e) => e._tag === "status" && e.severity === "warn",
-    );
+    const warnings = warningsIn(entries);
     expect(warnings).toHaveLength(2);
   });
 
@@ -215,12 +217,10 @@ describe("PromptArgumentSubstitution", () => {
       ).pipe(Effect.provide(layer)),
     );
     const entries = await Effect.runPromise(Ref.get(displayRef));
-    const warnings = entries.filter(
-      (e) => e._tag === "status" && e.severity === "warn",
-    );
+    const warnings = warningsIn(entries);
     // Only USER_ARG should warn — SOURCE_BRANCH and TARGET_BRANCH are silent
     expect(warnings).toHaveLength(1);
-    expect((warnings[0] as { message: string }).message).toContain("USER_ARG");
+    expect(warnings[0]).toContain("USER_ARG");
   });
 
   it("still substitutes silent keys when they appear in the prompt", async () => {
@@ -305,7 +305,7 @@ describe("BUILT_IN_PROMPT_ARG_KEYS", () => {
 
 describe("findMissingPromptArgKeys", () => {
   it("returns empty array when prompt has no placeholders", () => {
-    expect(findMissingPromptArgKeys("plain prompt", {})).toEqual([]);
+    expect(findMissingPromptArgKeys("plain prompt", {})).toStrictEqual([]);
   });
 
   it("returns empty array when all placeholders are provided", () => {
@@ -313,7 +313,7 @@ describe("findMissingPromptArgKeys", () => {
       findMissingPromptArgKeys("Fix {{COMPONENT}} bug", {
         COMPONENT: "Login",
       }),
-    ).toEqual([]);
+    ).toStrictEqual([]);
   });
 
   it("returns missing keys not present in provided args", () => {
@@ -321,12 +321,12 @@ describe("findMissingPromptArgKeys", () => {
       "Fix {{COMPONENT}} on {{BRANCH_NAME}}",
       { COMPONENT: "Login" },
     );
-    expect(result).toEqual(["BRANCH_NAME"]);
+    expect(result).toStrictEqual(["BRANCH_NAME"]);
   });
 
   it("returns multiple missing keys", () => {
     const result = findMissingPromptArgKeys("{{A}} and {{B}} and {{C}}", {});
-    expect(result).toEqual(["A", "B", "C"]);
+    expect(result).toStrictEqual(["A", "B", "C"]);
   });
 
   it("excludes built-in keys (SOURCE_BRANCH, TARGET_BRANCH)", () => {
@@ -334,39 +334,39 @@ describe("findMissingPromptArgKeys", () => {
       "Branch: {{SOURCE_BRANCH}} target: {{TARGET_BRANCH}} component: {{COMPONENT}}",
       {},
     );
-    expect(result).toEqual(["COMPONENT"]);
+    expect(result).toStrictEqual(["COMPONENT"]);
     expect(result).not.toContain("SOURCE_BRANCH");
     expect(result).not.toContain("TARGET_BRANCH");
   });
 
   it("handles spaced placeholders like {{ KEY }}", () => {
     const result = findMissingPromptArgKeys("Fix {{ COMPONENT }}", {});
-    expect(result).toEqual(["COMPONENT"]);
+    expect(result).toStrictEqual(["COMPONENT"]);
   });
 
   it("does not return duplicate keys", () => {
     const result = findMissingPromptArgKeys("{{KEY}} and {{KEY}} again", {});
-    expect(result).toEqual(["KEY"]);
+    expect(result).toStrictEqual(["KEY"]);
   });
 
   it("skips keys already present in provided args", () => {
     const result = findMissingPromptArgKeys("{{PROVIDED}} and {{MISSING}}", {
       PROVIDED: "value",
     });
-    expect(result).toEqual(["MISSING"]);
+    expect(result).toStrictEqual(["MISSING"]);
   });
 
   it("treats a key with an undefined value as missing", () => {
     const result = findMissingPromptArgKeys("Fix {{COMPONENT}}", {
       COMPONENT: undefined,
     } as unknown as Record<string, string>);
-    expect(result).toEqual(["COMPONENT"]);
+    expect(result).toStrictEqual(["COMPONENT"]);
   });
 
   it("treats a key with a null value as missing", () => {
     const result = findMissingPromptArgKeys("Fix {{COMPONENT}}", {
       COMPONENT: null,
     } as unknown as Record<string, string>);
-    expect(result).toEqual(["COMPONENT"]);
+    expect(result).toStrictEqual(["COMPONENT"]);
   });
 });

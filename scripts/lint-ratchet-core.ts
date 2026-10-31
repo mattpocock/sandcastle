@@ -12,9 +12,9 @@ export interface Violation {
 export type Counts = Record<string, Record<string, number>>;
 
 export interface Comparison {
-  /** Counts above the baseline, including files and rules it lacks. */
+  /** Counts above the baseline, including files and rules it lacks. These fail. */
   readonly grown: readonly string[];
-  /** Counts below the baseline, which must be lowered to match. */
+  /** Counts below the baseline. These pass; `shrink` lowers the baseline to match. */
   readonly stale: readonly string[];
 }
 
