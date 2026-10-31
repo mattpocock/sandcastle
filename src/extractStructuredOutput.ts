@@ -62,10 +62,10 @@ const extractObject = async <T>(
   let parsed: unknown;
   try {
     parsed = JSON.parse(unwrapped);
-  } catch (cause) {
+  } catch (error) {
     throw new StructuredOutputError(
       `Structured output tag <${definition.tag}> contains invalid JSON`,
-      { tag: definition.tag, rawMatched: raw, cause, ...context },
+      { tag: definition.tag, rawMatched: raw, cause: error, ...context },
     );
   }
 

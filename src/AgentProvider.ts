@@ -516,10 +516,10 @@ const makeClaudeSessionStorage = (
             ),
             tag: "claude-sub",
           });
-        } catch (err) {
+        } catch (error) {
           console.error(
             `sandcastle: failed to capture Claude subagent transcript ${sandboxSubagentPath}: ${
-              err instanceof Error ? err.message : String(err)
+              error instanceof Error ? error.message : String(error)
             }`,
           );
         }
