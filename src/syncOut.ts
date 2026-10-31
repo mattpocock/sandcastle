@@ -30,7 +30,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { basename, dirname, join, relative } from "node:path";
-import { Console, Effect } from "effect";
+import { Console, DateTime, Effect } from "effect";
 import type { ExecResult, SandboxService } from "./SandboxFactory.js";
 import type { IsolatedSandboxHandle } from "./SandboxProvider.js";
 import { buildRecoveryMessage } from "./RecoveryMessage.js";
@@ -171,30 +171,37 @@ const pad = (n: number) => String(n).padStart(2, "0");
 const createPatchDir = (
   hostRepoDir: string,
 ): Effect.Effect<string, SyncError> =>
-  Effect.tryPromise({
-    try: async () => {
-      const now = new Date();
-      const base = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  DateTime.now.pipe(
+    // Local time, as the directory name has always used.
+    Effect.map((now) =>
+      DateTime.toParts(DateTime.setZone(now, DateTime.zoneMakeLocal())),
+    ),
+    Effect.flatMap((now) =>
+      Effect.tryPromise({
+        try: async () => {
+          const base = `${now.year}${pad(now.month)}${pad(now.day)}-${pad(now.hours)}${pad(now.minutes)}${pad(now.seconds)}`;
 
-      const patchesRoot = join(hostRepoDir, ".sandcastle", "patches");
-      await mkdir(patchesRoot, { recursive: true });
+          const patchesRoot = join(hostRepoDir, ".sandcastle", "patches");
+          await mkdir(patchesRoot, { recursive: true });
 
-      let dirName = base;
-      let counter = 0;
-      while (existsSync(join(patchesRoot, dirName))) {
-        counter++;
-        dirName = `${base}-${counter}`;
-      }
+          let dirName = base;
+          let counter = 0;
+          while (existsSync(join(patchesRoot, dirName))) {
+            counter++;
+            dirName = `${base}-${counter}`;
+          }
 
-      const patchDir = join(patchesRoot, dirName);
-      await mkdir(patchDir, { recursive: true });
-      return patchDir;
-    },
-    catch: (e) =>
-      new SyncError({
-        message: `Failed to create patch directory: ${e instanceof Error ? e.message : String(e)}`,
+          const patchDir = join(patchesRoot, dirName);
+          await mkdir(patchDir, { recursive: true });
+          return patchDir;
+        },
+        catch: (e) =>
+          new SyncError({
+            message: `Failed to create patch directory: ${e instanceof Error ? e.message : String(e)}`,
+          }),
       }),
-  });
+    ),
+  );
 
 /**
  * Count commits that `syncOut` would emit on the next run. Uses the same base

@@ -1469,7 +1469,6 @@
   },
   "src/syncOut.ts": {
     "effect/asyncFunction": 6,
-    "effect/globalDateInEffect": 1,
     "eslint(complexity)": 1,
     "eslint(curly)": 2,
     "eslint(max-lines-per-function)": 2,
