@@ -71,6 +71,15 @@ const branchAt = async (dir: string): Promise<string> => {
   return stdout.trim();
 };
 
+/** List the `sandcastle/*` temp branches left in the host repo. */
+const sandcastleBranches = async (dir: string): Promise<string[]> => {
+  const { stdout } = await execAsync(
+    'git branch --list "sandcastle/*" --format="%(refname:short)"',
+    { cwd: dir },
+  );
+  return stdout.trim() ? stdout.trim().split("\n") : [];
+};
+
 /** Create a mock sandbox provider that records calls and delegates to a no-op handle. */
 const makeMockProvider = (): {
   provider: SandboxProvider;
@@ -456,6 +465,81 @@ describe("WorktreeDockerSandboxFactory", () => {
 
     expect(observedWorktreePath).toBeDefined();
     expect(existsSync(observedWorktreePath!)).toBe(false);
+  });
+
+  it("merge-to-head: deletes the temp branch when the run fails with no commits on it", async () => {
+    await expect(
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const factory = yield* SandboxFactory;
+          yield* factory.withSandbox(() =>
+            Effect.fail(new AgentError({ message: "agent failed" })),
+          );
+        }).pipe(Effect.provide(makeLayer())),
+      ),
+    ).rejects.toThrow();
+
+    expect(await sandcastleBranches(hostRepoDir)).toEqual([]);
+  });
+
+  it("merge-to-head: keeps the temp branch, and says so, when the failed run left commits on it", async () => {
+    const stderrSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await expect(
+        Effect.runPromise(
+          Effect.gen(function* () {
+            const factory = yield* SandboxFactory;
+            yield* factory.withSandbox((info) =>
+              Effect.promise(() =>
+                commitFile(
+                  info.hostWorktreePath!,
+                  "agent.txt",
+                  "agent",
+                  "agent commit",
+                ),
+              ).pipe(
+                Effect.andThen(
+                  Effect.fail(new AgentError({ message: "agent failed" })),
+                ),
+              ),
+            );
+          }).pipe(Effect.provide(makeLayer())),
+        ),
+      ).rejects.toThrow();
+
+      const branches = await sandcastleBranches(hostRepoDir);
+      expect(branches).toHaveLength(1);
+      const output = stderrSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+      expect(output).toContain(`git merge ${branches[0]}`);
+      expect(output).toContain(`git branch -D ${branches[0]}`);
+    } finally {
+      stderrSpy.mockRestore();
+    }
+  });
+
+  it("branch strategy: never deletes the named branch when the run fails", async () => {
+    await expect(
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const factory = yield* SandboxFactory;
+          yield* factory.withSandbox(() =>
+            Effect.fail(new AgentError({ message: "agent failed" })),
+          );
+        }).pipe(
+          Effect.provide(
+            makeLayer(Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]), {
+              type: "branch",
+              branch: "feature/keep-me",
+            }),
+          ),
+        ),
+      ),
+    ).rejects.toThrow();
+
+    const { stdout } = await execAsync('git branch --list "feature/keep-me"', {
+      cwd: hostRepoDir,
+    });
+    expect(stdout.trim()).toBeTruthy();
   });
 
   it("removes worktree when sandbox start fails (e.g. missing image)", async () => {
@@ -922,6 +1006,8 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
     // No worktree should remain
     const worktree = await findCreatedWorktree(hostDir);
     expect(worktree).toBeUndefined();
+    // ...and no merge-to-head temp branch either
+    expect(await sandcastleBranches(hostDir)).toEqual([]);
   });
 
   it("provides applyToHost callback that syncs commits to worktree", async () => {
@@ -1083,6 +1169,7 @@ describe("WorktreeDockerSandboxFactory — no-sandbox provider", () => {
 
     const worktree = await findCreatedWorktree(hostDir);
     expect(worktree).toBeUndefined();
+    expect(await sandcastleBranches(hostDir)).toEqual([]);
   });
 });
 

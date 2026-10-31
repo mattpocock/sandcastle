@@ -204,13 +204,42 @@ const printWorktreePreservedMessage = (
 };
 
 /**
+ * After a merge-to-head worktree is removed, delete its temp branch unless it
+ * holds commits found on no other branch. Those are kept (with a message on
+ * how to merge or discard them) so a failed run never loses an agent's work.
+ */
+const cleanupTempBranch = (
+  hostRepoDir: string,
+  tempBranch: string,
+): Effect.Effect<void> =>
+  WorktreeManager.deleteTempBranchIfUnused(hostRepoDir, tempBranch).pipe(
+    Effect.tap(({ unmergedCommits }) =>
+      Effect.sync(() => {
+        if (unmergedCommits === 0) return;
+        const s = unmergedCommits === 1 ? "" : "s";
+        console.error(
+          `\nTemporary branch '${tempBranch}' kept: it has ${unmergedCommits} commit${s} not on any other branch.`,
+        );
+        console.error(`  To merge: git merge ${tempBranch}`);
+        console.error(`  To discard: git branch -D ${tempBranch}`);
+      }),
+    ),
+    Effect.asVoid,
+    Effect.catchAll(() => Effect.void),
+  );
+
+/**
  * Check for uncommitted changes and either preserve or remove the worktree.
  * Returns the preserved path if preserved, undefined if removed.
+ *
+ * `tempBranch` is set for merge-to-head: once the worktree is removed, the
+ * temp branch is deleted too unless it holds unmerged commits.
  */
 const cleanupWorktree = (
   worktreePath: string,
   exit: Exit.Exit<unknown, unknown>,
   signal: AbortSignal | undefined,
+  temp?: { readonly hostRepoDir: string; readonly branch: string },
 ): Effect.Effect<string | undefined, WorktreeError> => {
   // An interrupted run keeps its worktree, clean or dirty, so the caller can
   // inspect it (ADR-0004). An abort after a successful run is a no-op.
@@ -237,6 +266,9 @@ const cleanupWorktree = (
         console.error(`\nWorktree removed (no uncommitted changes)`);
       }
       return WorktreeManager.remove(worktreePath).pipe(
+        Effect.andThen(
+          temp ? cleanupTempBranch(temp.hostRepoDir, temp.branch) : Effect.void,
+        ),
         Effect.map(() => undefined as string | undefined),
       );
     }),
@@ -332,6 +364,12 @@ export const WorktreeDockerSandboxFactory = {
       const fileSystem = yield* FileSystem.FileSystem;
       const display = yield* Display;
 
+      /** merge-to-head only: the temp branch to delete with the worktree. */
+      const tempBranchOf = (worktreeInfo: { readonly branch: string }) =>
+        branch === undefined
+          ? { hostRepoDir, branch: worktreeInfo.branch }
+          : undefined;
+
       /** Prune stale worktrees (best-effort), then create a fresh one. */
       const pruneAndCreate = () =>
         WorktreeManager.pruneStale(hostRepoDir).pipe(
@@ -365,11 +403,22 @@ export const WorktreeDockerSandboxFactory = {
 
       /** Release: remove or preserve the worktree (see cleanupWorktree). */
       const releaseWorktree = (
-        worktreeInfo: { path: string; unregisterShutdown: () => void },
+        worktreeInfo: {
+          path: string;
+          branch: string;
+          unregisterShutdown: () => void;
+        },
         exit: Exit.Exit<unknown, unknown>,
       ) =>
         Effect.sync(worktreeInfo.unregisterShutdown).pipe(
-          Effect.andThen(cleanupWorktree(worktreeInfo.path, exit, signal)),
+          Effect.andThen(
+            cleanupWorktree(
+              worktreeInfo.path,
+              exit,
+              signal,
+              tempBranchOf(worktreeInfo),
+            ),
+          ),
         );
 
       return {

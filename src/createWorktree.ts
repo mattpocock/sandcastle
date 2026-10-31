@@ -274,6 +274,16 @@ export const createWorktree = async (
         Effect.catchAll(() => Effect.void),
       );
 
+      // merge-to-head: the temp branch only outlives each wt.run() so the
+      // handle can be reused. Once the handle is closed, delete it, unless it
+      // holds commits that never reached another branch (e.g. a failed merge).
+      if (isMergeToHead) {
+        yield* WorktreeManager.deleteTempBranchIfUnused(
+          hostRepoDir,
+          worktreeInfo.branch,
+        ).pipe(Effect.catchAll(() => Effect.void));
+      }
+
       return { preservedWorktreePath: undefined } as CloseResult;
     }).pipe(Effect.runPromise);
   };

@@ -1027,6 +1027,86 @@ describe("worktree.run()", () => {
     }
   });
 
+  it("merge-to-head: close() deletes the temp branch once its commits are on the host", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-close-mth-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const sandbox = makeRunTestProvider(async (cwd) => {
+      execSync('echo "agent file" > agent.txt', { cwd });
+      execSync("git add agent.txt", { cwd });
+      execSync('git commit -m "agent commit"', { cwd });
+      return "done";
+    });
+
+    const ws = await createWorktree({
+      branchStrategy: { type: "merge-to-head" },
+      cwd: hostDir,
+    });
+
+    try {
+      await ws.run({
+        agent: claudeCode("claude-opus-4-8"),
+        sandbox,
+        prompt: "create a file",
+        maxIterations: 1,
+      });
+      await ws.close();
+
+      const { stdout } = await execAsync(`git branch --list "${ws.branch}"`, {
+        cwd: hostDir,
+      });
+      expect(stdout.trim()).toBe("");
+    } finally {
+      await ws.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("merge-to-head: close() deletes an unused temp branch", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-close-mth-unused-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const ws = await createWorktree({
+      branchStrategy: { type: "merge-to-head" },
+      cwd: hostDir,
+    });
+
+    try {
+      await ws.close();
+      const { stdout } = await execAsync(`git branch --list "${ws.branch}"`, {
+        cwd: hostDir,
+      });
+      expect(stdout.trim()).toBe("");
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("merge-to-head: close() keeps the temp branch when it holds commits not on any other branch", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-close-mth-keep-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const ws = await createWorktree({
+      branchStrategy: { type: "merge-to-head" },
+      cwd: hostDir,
+    });
+
+    try {
+      // A commit that never made it back to the host (e.g. a failed merge)
+      await commitFile(ws.worktreePath, "unmerged.txt", "x", "unmerged work");
+      await ws.close();
+      const { stdout } = await execAsync(`git branch --list "${ws.branch}"`, {
+        cwd: hostDir,
+      });
+      expect(stdout.trim()).toBeTruthy();
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
   it("merge-to-head: two sequential run() calls both land on host", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "ws-run-mth-2x-"));
     await initRepo(hostDir);

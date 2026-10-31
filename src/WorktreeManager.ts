@@ -450,6 +450,51 @@ export const remove = (
 };
 
 /**
+ * Deletes a merge-to-head temp branch unless it holds work found nowhere else.
+ *
+ * The branch is deleted when every commit on it is also reachable from some
+ * other local branch (it never got commits, or they were merged back). When
+ * it has commits of its own (an agent committed and then the run failed, or
+ * the merge back failed) it is kept so that work isn't lost, and the count of
+ * those commits is returned. A branch that no longer exists counts as deleted.
+ *
+ * Must be called after the worktree on the branch has been removed.
+ */
+export const deleteTempBranchIfUnused = (
+  repoDir: string,
+  branch: string,
+): Effect.Effect<{ readonly unmergedCommits: number }, WorktreeError> =>
+  Effect.gen(function* () {
+    const ref = `refs/heads/${branch}`;
+    const exists = yield* execGit(
+      ["show-ref", "--verify", "--quiet", ref],
+      repoDir,
+    ).pipe(
+      Effect.as(true),
+      Effect.catchAll(() => Effect.succeed(false)),
+    );
+    if (!exists) return { unmergedCommits: 0 };
+
+    const count = yield* execGit(
+      // `--exclude` patterns for `--branches` are matched without `refs/heads/`.
+      [
+        "rev-list",
+        "--count",
+        ref,
+        "--not",
+        `--exclude=${branch}`,
+        "--branches",
+      ],
+      repoDir,
+    );
+    const unmergedCommits = parseInt(count.trim(), 10) || 0;
+    if (unmergedCommits > 0) return { unmergedCommits };
+
+    yield* execGit(["branch", "-D", branch], repoDir);
+    return { unmergedCommits: 0 };
+  });
+
+/**
  * Prunes stale git worktree metadata and removes orphaned directories under
  * `.sandcastle/worktrees/`.
  */

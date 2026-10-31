@@ -1,6 +1,6 @@
 import { Effect, Layer, Ref } from "effect";
 import { exec } from "node:child_process";
-import { constants } from "node:fs";
+import { constants, existsSync } from "node:fs";
 import {
   chmod,
   mkdir,
@@ -465,6 +465,109 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       cwd: hostDir,
     });
     expect(stdout.trim()).toBeTruthy();
+  });
+
+  it("aborts a conflicting merge so the host is clean, and the suggested retry works", async () => {
+    const { hostDir, worktreeDir, sandbox } = await setupWorktree();
+
+    const error = await Effect.runPromise(
+      withSandboxLifecycle(
+        {
+          hostRepoDir: hostDir,
+          sandboxRepoDir: worktreeDir,
+        },
+        sandbox,
+        (ctx) =>
+          Effect.gen(function* () {
+            yield* ctx.sandbox.exec('git config user.email "test@test.com"', {
+              cwd: ctx.sandboxRepoDir,
+            });
+            yield* ctx.sandbox.exec('git config user.name "Test"', {
+              cwd: ctx.sandboxRepoDir,
+            });
+            yield* ctx.sandbox.exec(
+              'sh -c "echo worktree-version > file.txt && git add file.txt && git commit -m \\"worktree change\\""',
+              { cwd: ctx.sandboxRepoDir },
+            );
+            yield* Effect.promise(async () => {
+              await execAsync(
+                'sh -c "echo main-version > file.txt && git add file.txt && git commit -m \\"main conflict\\""',
+                { cwd: hostDir },
+              );
+            });
+          }),
+      ).pipe(Effect.flip, Effect.provide(testDisplayLayer)),
+    );
+
+    // The host is not left mid-merge: no MERGE_HEAD, no conflict markers
+    expect(existsSync(join(hostDir, ".git", "MERGE_HEAD"))).toBe(false);
+    const { stdout: status } = await execAsync(
+      "git status --porcelain --untracked-files=no",
+      {
+        cwd: hostDir,
+      },
+    );
+    expect(status.trim()).toBe("");
+    expect(await readFile(join(hostDir, "file.txt"), "utf-8")).toBe(
+      "main-version\n",
+    );
+
+    // The message says the merge was aborted and names a retry that works
+    const message = (error as { message: string }).message;
+    expect(message).toMatch(/aborted/i);
+    expect(message).toContain("git merge sandcastle/test");
+    // git's own output is included, not swallowed
+    expect(message).toMatch(/CONFLICT/);
+
+    // The suggested retry reaches the conflict itself, rather than failing
+    // with "Merging is not possible because you have unmerged files".
+    const retry = await execAsync("git merge sandcastle/test", {
+      cwd: hostDir,
+    }).then(
+      () => "",
+      (e: { stdout?: string; stderr?: string }) =>
+        `${e.stdout ?? ""}${e.stderr ?? ""}`,
+    );
+    expect(retry).not.toMatch(/unmerged files/);
+    expect(retry).toMatch(/CONFLICT/);
+  });
+
+  it("a merge git refuses (local changes) keeps those changes and includes git's reason", async () => {
+    const { hostDir, worktreeDir, sandbox } = await setupWorktree();
+
+    const error = await Effect.runPromise(
+      withSandboxLifecycle(
+        {
+          hostRepoDir: hostDir,
+          sandboxRepoDir: worktreeDir,
+        },
+        sandbox,
+        (ctx) =>
+          Effect.gen(function* () {
+            yield* ctx.sandbox.exec('git config user.email "test@test.com"', {
+              cwd: ctx.sandboxRepoDir,
+            });
+            yield* ctx.sandbox.exec('git config user.name "Test"', {
+              cwd: ctx.sandboxRepoDir,
+            });
+            yield* ctx.sandbox.exec(
+              'sh -c "echo worktree-version > file.txt && git add file.txt && git commit -m \\"worktree change\\""',
+              { cwd: ctx.sandboxRepoDir },
+            );
+            // An uncommitted edit on the host to the same file
+            yield* Effect.promise(() =>
+              writeFile(join(hostDir, "file.txt"), "uncommitted host edit"),
+            );
+          }),
+      ).pipe(Effect.flip, Effect.provide(testDisplayLayer)),
+    );
+
+    const message = (error as { message: string }).message;
+    expect(message).toMatch(/would be overwritten/);
+    expect(message).not.toMatch(/aborted/);
+    expect(await readFile(join(hostDir, "file.txt"), "utf-8")).toBe(
+      "uncommitted host edit",
+    );
   });
 
   it("succeeds with merge commit when host branch has diverged (non-conflicting)", async () => {
