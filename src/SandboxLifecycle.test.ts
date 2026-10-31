@@ -1246,6 +1246,30 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     await expect(result).rejects.toThrow(/timed out/);
   });
 
+  it("host.onSandboxReady kills the hook's whole process tree on timeout", async () => {
+    const { hostDir, worktreeDir, sandbox } = await setupWorktree();
+
+    const result = Effect.runPromise(
+      withSandboxLifecycle(
+        {
+          hostRepoDir: hostDir,
+          sandboxRepoDir: worktreeDir,
+          branch: "sandcastle/test",
+          hooks: {
+            host: {
+              onSandboxReady: [{ command: ORPHAN_HOOK, timeoutMs: 500 }],
+            },
+          },
+        },
+        sandbox,
+        () => Effect.succeed("ok"),
+      ).pipe(Effect.provide(testDisplayLayer)),
+    );
+
+    await expect(result).rejects.toThrow(/timed out after 500ms/);
+    await waitForProcessGone(await readPid(worktreeDir));
+  });
+
   it("sandbox.onSandboxReady uses default timeout when timeoutMs omitted", async () => {
     const { hostDir, worktreeDir, sandbox } = await setupWorktree();
 
@@ -1498,6 +1522,32 @@ describe("withSandboxLifecycle (worktree mode)", () => {
   });
 });
 
+/**
+ * Resolves once no process with this pid exists (polls `kill(pid, 0)`),
+ * or rejects with the pid still alive after `withinMs`.
+ */
+const waitForProcessGone = async (pid: number, withinMs = 3000) => {
+  const deadline = Date.now() + withinMs;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  process.kill(pid, "SIGKILL");
+  throw new Error(
+    `process ${pid} still alive ${withinMs}ms after the hook ended`,
+  );
+};
+
+/** A hook that backgrounds a grandchild `sleep`, records its pid, and waits. */
+const ORPHAN_HOOK = "sleep 30 & echo $! > sleep.pid; wait";
+
+const readPid = async (dir: string) =>
+  Number((await readFile(join(dir, "sleep.pid"), "utf-8")).trim());
+
 describe("runHostHooks", () => {
   it("runs hooks sequentially in declared order", async () => {
     const dir = await mkdtemp(join(tmpdir(), "host-hooks-"));
@@ -1578,6 +1628,32 @@ describe("runHostHooks", () => {
         runHostHooks([{ command: "sleep 2", timeoutMs: 500 }], dir),
       ),
     ).rejects.toThrow(/timed out/);
+  });
+
+  it("kills the hook's whole process tree when it times out", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "host-hooks-"));
+
+    await expect(
+      Effect.runPromise(
+        runHostHooks([{ command: ORPHAN_HOOK, timeoutMs: 500 }], dir),
+      ),
+    ).rejects.toThrow(/timed out after 500ms/);
+
+    await waitForProcessGone(await readPid(dir));
+  });
+
+  it("kills the hook's whole process tree when the signal aborts", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "host-hooks-"));
+    const ac = new AbortController();
+    setTimeout(() => ac.abort("cancelled"), 500);
+
+    await expect(
+      Effect.runPromise(
+        runHostHooks([{ command: ORPHAN_HOOK }], dir, ac.signal),
+      ),
+    ).rejects.toThrow();
+
+    await waitForProcessGone(await readPid(dir));
   });
 
   it("uses default timeout when timeoutMs is not specified", async () => {
