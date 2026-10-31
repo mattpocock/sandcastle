@@ -64,7 +64,14 @@ export const copyToWorktree = (
         // The cp currently running, killed if the copy is interrupted (e.g.
         // by the timeout below) so it can't keep writing into the worktree.
         let child: ChildProcess;
+        // Set once the copy is interrupted. Killing the cp makes its callback
+        // fire with an error, which must not start the fallback cp: nothing
+        // would kill that one.
+        let interrupted = false;
         child = execFile("cp", [...cowFlags, cpSrc, dest], (error) => {
+          if (interrupted) {
+            return;
+          }
           if (error) {
             // Fall back to a regular copy if copy-on-write is not supported
             child = execFile(
@@ -95,6 +102,7 @@ export const copyToWorktree = (
           }
         });
         return Effect.sync(() => {
+          interrupted = true;
           child.kill("SIGKILL");
         });
       });

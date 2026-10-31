@@ -58,14 +58,34 @@ export const pathExists = async (path: string): Promise<boolean> => {
 // Claude Code session paths and transfer
 // ---------------------------------------------------------------------------
 
+/** Longest project directory name Claude Code writes before it truncates. */
+const MAX_PROJECT_DIR_LENGTH = 200;
+
+/** Claude Code's 32-bit string hash, in base 36, for truncated names. */
+const claudePathHash = (value: string): string => {
+  // Over UTF-16 code units, wrapping to a signed 32-bit int as Claude Code
+  // does; Math.imul does the wrap.
+  const hash = value
+    .split("")
+    .reduce((acc, unit) => Math.imul(31, acc) + (unit.codePointAt(0) ?? 0), 0);
+  return Math.abs(Math.imul(hash, 1)).toString(36);
+};
+
 /**
- * Encode a cwd into the Claude Code `~/.claude/projects/<encoded>/` layout.
- * Replaces path separators with hyphens, matching Claude Code's convention.
+ * Encode a cwd into the Claude Code `~/.claude/projects/<encoded>/` layout,
+ * matching Claude Code's own naming: every character that isn't an ASCII
+ * letter or digit becomes a hyphen (so `/`, `\`, `:` and `.` all do), and a
+ * name longer than 200 characters is cut to 200 and suffixed with a hash of
+ * the full path. A trailing path separator is ignored.
  */
 export const encodeProjectPath = (cwd: string): string => {
   const isRoot = cwd === "/" || /^[A-Za-z]:[\\/]?$/.test(cwd);
   const normalized = isRoot ? cwd : cwd.replace(/[\\/]+$/, "");
-  return normalized.replace(/^([A-Za-z]):/, "$1").replaceAll(/[\\/]/g, "-");
+  const encoded = normalized.replaceAll(/[^A-Za-z0-9]/g, "-");
+  if (encoded.length <= MAX_PROJECT_DIR_LENGTH) {
+    return encoded;
+  }
+  return `${encoded.slice(0, MAX_PROJECT_DIR_LENGTH)}-${claudePathHash(normalized)}`;
 };
 
 /** Absolute host path to a Claude session JSONL file. */
