@@ -42,6 +42,18 @@ export default defineConfig({
     // Root only, so it runs once: a project that `extends: true` would run it
     // again, nesting one private TMPDIR inside another.
     globalSetup: ["src/testGlobalSetup.ts"],
+    // Off by default; scripts/coverage-gate.ts turns it on per run.
+    coverage: {
+      provider: "v8",
+      include: ["src/**/*.ts"],
+      exclude: [
+        "src/**/*.test.ts",
+        "src/testSetup.ts",
+        "src/testGlobalSetup.ts",
+        "src/testSandbox.ts",
+        "src/sandboxes/test-*.ts",
+      ],
+    },
     projects: [
       {
         resolve: { alias: entryAliases },
