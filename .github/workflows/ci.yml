@@ -59,3 +59,17 @@ jobs:
       - run: npm ci
       - run: npx vitest run --project e2e
       - run: npx vitest run --project legacy src/sandboxes/no-sandbox.test.ts
+
+  # The end-to-end tests on a real macOS host. This is the only place
+  # seatbelt() can be proven (#1272), so it runs on every PR. Like the
+  # windows job, the e2e tests run from src through the vitest alias, so no
+  # build is needed. No secrets: the e2e tests need no agent keys.
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npx vitest run --project e2e
