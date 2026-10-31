@@ -348,7 +348,17 @@ const initCommand = Command.make(
         ) {
           missing.push("--install-template-deps");
         }
-        if (tracker !== "custom" && buildImageChoice._tag === "None") {
+        // --build-image only applies to a provider with an image. Without
+        // --sandbox the provider is unknown, so --build-image is still named.
+        const sandboxName = Option.getOrUndefined(sandboxFlag);
+        const providerHasImage =
+          sandboxName === undefined ||
+          getSandboxProvider(sandboxName)?.image !== undefined;
+        if (
+          tracker !== "custom" &&
+          providerHasImage &&
+          buildImageChoice._tag === "None"
+        ) {
           missing.push("--build-image");
         }
         yield* failInitUnless(
@@ -465,7 +475,10 @@ const initCommand = Command.make(
           createLabel: shouldCreateLabel,
           issueTracker: selectedIssueTracker,
           sandboxProvider: selectedSandboxProvider,
-          imageName: customImageName,
+          imageName:
+            selectedSandboxProvider.image === undefined
+              ? undefined
+              : customImageName,
         }).pipe(
           Effect.mapError(
             (e) =>
@@ -478,7 +491,11 @@ const initCommand = Command.make(
 
       // Beads sandboxes open the host's .beads/ with the image's bd, so a
       // different host bd breaks one side or the other (see beadsVersionWarning).
-      if (selectedIssueTracker.name === "beads") {
+      // Only an image-based provider has an image bd to disagree with.
+      if (
+        selectedIssueTracker.name === "beads" &&
+        selectedSandboxProvider.image !== undefined
+      ) {
         const warning = beadsVersionWarning(yield* detectHostBdVersion(cwd));
         if (warning !== undefined) {
           yield* d.status(warning, "warn");
@@ -533,8 +550,18 @@ const initCommand = Command.make(
       // so there is nothing valid to build yet — skip the build prompt entirely
       // (and silently ignore --build-image) and let the next steps point the
       // user at the setup doc.
+      // A provider with no image has nothing to build, so init skips the
+      // build-image prompt (and ignores --build-image) for it.
       const providerLabel = selectedSandboxProvider.label;
-      if (selectedIssueTracker.name === "custom") {
+      const providerImage = selectedSandboxProvider.image;
+      if (providerImage === undefined) {
+        yield* d.status(
+          selectedIssueTracker.name === "custom"
+            ? "Init complete! Your custom issue tracker isn't configured yet — see the steps below."
+            : "Init complete!",
+          "success",
+        );
+      } else if (selectedIssueTracker.name === "custom") {
         yield* d.status(
           "Init complete! Your custom issue tracker isn't configured yet — see the steps below before building.",
           "success",
@@ -565,7 +592,7 @@ const initCommand = Command.make(
           );
         } else {
           yield* d.status(
-            `Init complete! Run \`${buildImageShellCommand(selectedSandboxProvider, customImageName)}\` to build the ${providerLabel} image later.`,
+            `Init complete! Run \`${buildImageShellCommand(providerImage, customImageName)}\` to build the ${providerLabel} image later.`,
             "success",
           );
         }
@@ -579,6 +606,7 @@ const initCommand = Command.make(
         selectedAgent,
         packageManager,
         installedDependencies,
+        selectedSandboxProvider,
       );
       for (const [i, line] of nextSteps.entries()) {
         yield* d.text(i === 0 ? line : styleText("dim", line));
