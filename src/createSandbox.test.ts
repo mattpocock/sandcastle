@@ -2426,7 +2426,7 @@ describe("createSandbox", () => {
           sandbox: failingProvider,
           cwd: hostDir,
         }),
-      ).rejects.toThrow();
+      ).rejects.toThrow("Image 'sandcastle:test' not found locally");
 
       // The worktree must not be left orphaned on disk.
       const worktreesDir = join(hostDir, ".sandcastle", "worktrees");

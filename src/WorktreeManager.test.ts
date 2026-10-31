@@ -550,7 +550,7 @@ describe("WorktreeManager.create", () => {
     // preconditions for the bug.
     await expect(
       execAsync("git symbolic-ref --quiet HEAD", { cwd: first.path }),
-    ).rejects.toThrow();
+    ).rejects.toThrow("Command failed: git symbolic-ref --quiet HEAD");
     const { stdout: status } = await execAsync("git status --porcelain", {
       cwd: first.path,
     });
@@ -714,7 +714,7 @@ describe("WorktreeManager.remove", () => {
 
     await run(remove(path));
 
-    await expect(stat(path)).rejects.toThrow();
+    await expect(stat(path)).rejects.toThrow("ENOENT");
   });
 
   it("removes git worktree metadata", async () => {
