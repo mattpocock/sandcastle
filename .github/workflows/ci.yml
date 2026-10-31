@@ -34,3 +34,17 @@ jobs:
       - run: npm run build
       - run: npm run lint
       - run: npm test
+
+  # Real cmd.exe and Windows argv rules for noSandbox (#940). Only the
+  # Windows test files run here: most of the suite assumes a POSIX host
+  # (sh, /tmp, POSIX path joins), and `npm run build`'s postbuild uses rm/cp.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npx vitest run src/sandboxes/no-sandbox.windows.test.ts src/sandboxes/no-sandbox.test.ts
