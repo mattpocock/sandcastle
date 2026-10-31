@@ -414,7 +414,6 @@
   "src/createSandbox.ts": {
     "effect/anyUnknownInErrorContext": 2,
     "effect/globalConsole": 3,
-    "effect/multipleEffectProvide": 1,
     "effect/newPromise": 1,
     "effect/nodeBuiltinImport": 1,
     "eslint(complexity)": 3,
@@ -498,7 +497,6 @@
     "vitest(prefer-to-have-length)": 3
   },
   "src/createWorktree.ts": {
-    "effect/multipleEffectProvide": 2,
     "effect/nodeBuiltinImport": 1,
     "eslint(arrow-body-style)": 1,
     "eslint(complexity)": 1,
@@ -777,7 +775,6 @@
   },
   "src/interactive.ts": {
     "effect/globalErrorInEffectFailure": 1,
-    "effect/multipleEffectProvide": 1,
     "effect/nodeBuiltinImport": 1,
     "eslint(complexity)": 2,
     "eslint(curly)": 1,

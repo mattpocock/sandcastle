@@ -1,7 +1,7 @@
 import { NodeContext, NodeFileSystem } from "@effect/platform-node";
 import { join } from "node:path";
 import * as clack from "@clack/prompts";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import type { AgentProvider } from "./AgentProvider.js";
 import { ClackDisplay, Display } from "./Display.js";
 import { preprocessPrompt } from "./PromptPreprocessor.js";
@@ -477,9 +477,13 @@ export const interactive = async (
   try {
     result = await Effect.runPromise(
       inner.pipe(
-        Effect.provide(ClackDisplay.layer),
-        Effect.provide(NodeContext.layer),
-        Effect.provide(NodeFileSystem.layer),
+        Effect.provide(
+          Layer.mergeAll(
+            ClackDisplay.layer,
+            NodeContext.layer,
+            NodeFileSystem.layer,
+          ),
+        ),
       ),
     );
   } catch (error: unknown) {
