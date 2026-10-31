@@ -1,5 +1,6 @@
 import { NodeContext, NodeFileSystem } from "@effect/platform-node";
 import { join } from "node:path";
+import { assertInteractiveSupported } from "./nativeSandboxProvider.js";
 import * as clack from "@clack/prompts";
 import { Effect, Layer } from "effect";
 import type { AgentProvider } from "./AgentProvider.js";
@@ -121,6 +122,7 @@ export const interactive = async (
   validateTimeoutOptions(options);
 
   const resolvedSandbox = options.sandbox ?? noSandbox();
+  assertInteractiveSupported(resolvedSandbox);
 
   // Derive branch strategy
   const branchStrategy: BranchStrategy =

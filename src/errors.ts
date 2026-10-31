@@ -21,6 +21,11 @@ export class CopyError extends Data.TaggedError("CopyError")<{
   readonly message: string;
 }> {}
 
+/** Setting up a `bwrap()` sandbox's private dirs failed */
+export class BwrapError extends Data.TaggedError("BwrapError")<{
+  readonly message: string;
+}> {}
+
 /** Docker infrastructure operation failed */
 export class DockerError extends Data.TaggedError("DockerError")<{
   readonly message: string;
@@ -49,6 +54,18 @@ export class SyncOutPathError extends Data.TaggedError("SyncOutPathError")<{
   readonly message: string;
   /** The offending path, as the sandbox reported it. */
   readonly path: string;
+}> {}
+
+/**
+ * `interactive()` was called with a native sandbox provider, which doesn't
+ * run interactive sessions.
+ */
+export class NativeInteractiveNotSupportedError extends Data.TaggedError(
+  "NativeInteractiveNotSupportedError",
+)<{
+  readonly message: string;
+  /** The native sandbox provider's name. */
+  readonly provider: string;
 }> {}
 
 /**

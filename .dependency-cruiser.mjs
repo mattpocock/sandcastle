@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 /** The files behind package.json `exports`: the public API. */
 const ENTRY_POINTS =
-  "^src/(index|sandboxes/(docker|vercel|podman|daytona|no-sandbox))[.]ts$";
+  "^src/(index|sandboxes/(docker|vercel|podman|daytona|no-sandbox|bwrap))[.]ts$";
 
 /** @type {import('dependency-cruiser').IConfiguration} */
 const config = {

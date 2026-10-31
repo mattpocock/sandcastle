@@ -417,6 +417,20 @@ export interface NamedBranchStrategy {
 }
 
 // @public
+export interface NativeInteractiveNotSupportedError extends Error {
+    // (undocumented)
+    readonly message: string;
+    readonly provider: string;
+    // (undocumented)
+    readonly _tag: "NativeInteractiveNotSupportedError";
+}
+
+// Warning: (ae-forgotten-export) The symbol "NativeInteractiveNotSupportedErrorConstructor" needs to be exported by the entry point index.d.ts
+//
+// @public
+export const NativeInteractiveNotSupportedError: NativeInteractiveNotSupportedErrorConstructor;
+
+// @public
 export type NoSandboxBranchStrategy = HeadBranchStrategy | MergeToHeadBranchStrategy | NamedBranchStrategy;
 
 // @public
