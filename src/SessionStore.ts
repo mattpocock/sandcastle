@@ -8,6 +8,7 @@
  * its own transfer function.
  */
 
+import { createHash } from "node:crypto";
 import { access, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, join, posix } from "node:path";
 import type { BindMountSandboxHandle } from "./SandboxProvider.js";
@@ -474,6 +475,23 @@ export const transferCopilotSession = (
       line === "" ? line : rewriteCopilotEvent(line, fromCwd, toCwd),
     )
     .join("\n");
+
+// ---------------------------------------------------------------------------
+// Cursor session paths
+// ---------------------------------------------------------------------------
+
+/**
+ * Cursor keeps each chat in `~/.cursor/chats/<md5 of the cwd>/<chat id>/`.
+ * Its `store.db` (SQLite) is the whole conversation: `agent --resume <id>`
+ * replays it with no other file present, and rebuilds `meta.json` itself
+ * (verified with Cursor Agent CLI 2026.10.22).
+ */
+export const cursorChatDirName = (cwd: string): string =>
+  createHash("md5").update(cwd).digest("hex");
+
+/** The host's default Cursor `chats` directory. */
+export const cursorHostChatsDir = (): string =>
+  join(homeDir(), ".cursor", "chats");
 
 // ---------------------------------------------------------------------------
 // Session storage for agents that keep each session in one file

@@ -7,6 +7,8 @@ import {
   claudeSubagentsDirOnHost,
   copilotHostSessionsDir,
   copilotSessionPath,
+  cursorChatDirName,
+  cursorHostChatsDir,
   encodePiSessionDir,
   findClaudeSessionOnHost,
   findCodexSessionOnHost,
@@ -685,9 +687,8 @@ const makePiSessionStorage = (options?: PiOptions): AgentSessionStorage => {
       return found.path !== undefined;
     },
     readHostSession: async (_cwd, id) => {
-      const found = await findPiSessionOnHost(id, hostSessionsDir);
-      if (!found.path) return undefined;
-      return readFile(found.path, "utf8");
+      const { path } = await findPiSessionOnHost(id, hostSessionsDir);
+      return path === undefined ? undefined : readFile(path, "utf8");
     },
     captureToHost: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
       const located = await locateSandboxSessionFile(
@@ -1107,28 +1108,72 @@ export const codex = (
 export interface CursorOptions {
   /** Environment variables injected by this agent provider. */
   readonly env?: Record<string, string>;
+  /** When false, session capture is disabled. Default: true. */
+  readonly captureSessions?: boolean;
+  /** Override Cursor `chats` directories for tests or non-standard installs. */
+  readonly sessionStorage?: {
+    readonly hostChatsDir?: string;
+    readonly sandboxChatsDir?: string;
+  };
 }
+
+/**
+ * A Cursor chat is one SQLite `store.db` under the chat dir of the cwd it ran
+ * in, so it moves as a single binary file, unrewritten. The CLI resumes
+ * (`--resume <id>`) but has no fork flag, so the provider declares
+ * `canFork: false` (ADR 0021).
+ */
+const makeCursorSessionStorage = (
+  options?: CursorOptions,
+): AgentSessionStorage => {
+  const hostDir = options?.sessionStorage?.hostChatsDir ?? cursorHostChatsDir();
+  const sandboxDir =
+    options?.sessionStorage?.sandboxChatsDir ?? "/home/agent/.cursor/chats";
+  return {
+    ...makeSessionFileStorage({
+      hostRoot: hostDir,
+      hostPath: (cwd, id) =>
+        join(hostDir, cursorChatDirName(cwd), id, "store.db"),
+      hostPathsById: (id, chatDirs) =>
+        chatDirs.map((chatDir) => join(hostDir, chatDir, id, "store.db")),
+      sandboxPath: (cwd, id) =>
+        posix.join(sandboxDir, cursorChatDirName(cwd), id, "store.db"),
+    }),
+    canFork: false,
+  };
+};
 
 export const cursor = (
   model: string,
   options?: CursorOptions,
-): AgentProvider => ({
+): AgentProvider & { readonly sessionStorage: AgentSessionStorage } => ({
   name: "cursor",
   env: options?.env ?? {},
-  captureSessions: false,
+  captureSessions: options?.captureSessions ?? true,
+  sessionStorage: makeCursorSessionStorage(options),
 
-  // Cursor has no filesystem-backed session storage (captureSessions: false, no
-  // sessionStorage), so it is non-resumable per ADR 0012/0016. resumeSession is
-  // ignored here — like pi and opencode — rather than wired to --resume.
   buildPrintCommand({
     prompt,
     dangerouslySkipPermissions,
+    resumeSession,
+    forkSession,
   }: AgentCommandOptions): PrintCommand {
+    if (resumeSession !== undefined && forkSession === true) {
+      throw new ForkNotSupportedError({
+        message:
+          "cursor cannot fork a session: its CLI resumes but has no fork. Use resume() to continue the session in place.",
+        agentProvider: "cursor",
+      });
+    }
     assertCursorPrintPromptFitsArgv(prompt);
     const forceFlag = dangerouslySkipPermissions ? " --force" : "";
-
+    // `--resume` takes an optional value, so the id is bound with `=`.
+    const resumeFlag =
+      resumeSession === undefined
+        ? ""
+        : ` --resume=${shellEscape(resumeSession)}`;
     return {
-      command: `agent --print --output-format stream-json --model ${shellEscape(model)} ${forceFlag} ${shellEscape(prompt)}`,
+      command: `agent --print --output-format stream-json --model ${shellEscape(model)} ${forceFlag}${resumeFlag} ${shellEscape(prompt)}`,
     };
   },
 
