@@ -457,7 +457,9 @@ export interface RunResult {
   /** Host path to the preserved worktree, set when the run succeeded but the worktree had uncommitted changes. */
   readonly preservedWorktreePath?: string;
   /** Continue the last captured agent session for exactly one iteration.
-   *  Present only when the provider supports resume (`sessionStorage` populated). */
+   *  Present only when the provider supports resume (`sessionStorage` populated).
+   *  `output` and `promptArgs` are not inherited: pass `output` again to get
+   *  structured output from the follow-up (its prompt must contain the tag). */
   readonly resume?: (
     prompt: string,
     options?: ResumeRunResultOptions,
@@ -473,6 +475,8 @@ export interface RunResult {
    * sandbox. Safe concurrent fan-out (`Promise.all([r.fork(a), r.fork(b)])`)
    * requires the caller to give each fork a distinct `branch` — `head` and
    * `merge-to-head` are not safe for concurrent forks. See ADR 0018.
+   *
+   * Like `resume`, `output` and `promptArgs` are not inherited.
    */
   readonly fork?: (
     prompt: string,
@@ -823,6 +827,8 @@ export async function run(
         ...options,
         // The follow-up prompt is inline: drop the template's arguments.
         promptArgs: undefined,
+        // The follow-up prompt is new: structured output is opt-in per call.
+        output: undefined,
         ...resumeOptions,
         prompt,
         promptFile: undefined,
@@ -842,6 +848,8 @@ export async function run(
         ...options,
         // The follow-up prompt is inline: drop the template's arguments.
         promptArgs: undefined,
+        // The follow-up prompt is new: structured output is opt-in per call.
+        output: undefined,
         ...forkOptions,
         prompt,
         promptFile: undefined,

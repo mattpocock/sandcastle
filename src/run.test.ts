@@ -1715,3 +1715,111 @@ describe("resume/fork after a promptFile + promptArgs run", () => {
     }
   });
 });
+
+describe("resume/fork after a structured-output run", () => {
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    consoleSpy.mockRestore();
+  });
+
+  const setup = () => {
+    const dir = mkdtempSync(join(tmpdir(), "sandcastle-resume-output-"));
+    const hostProjectsDir = join(dir, "projects");
+    const sessionId = "sess-resume-output";
+    const sessionPath = claudeHostSessionPath(
+      process.cwd(),
+      sessionId,
+      hostProjectsDir,
+    );
+    mkdirSync(dirname(sessionPath), { recursive: true });
+    writeFileSync(
+      sessionPath,
+      JSON.stringify({ type: "system", cwd: process.cwd() }) + "\n",
+    );
+
+    const agentStdin: (string | undefined)[] = [];
+    const sandbox = createBindMountSandboxProvider({
+      name: "resume-output",
+      create: async () => ({
+        worktreePath: process.cwd(),
+        exec: async (
+          _command: string,
+          options?: { onLine?: (line: string) => void; stdin?: string },
+        ) => {
+          if (options?.onLine) {
+            agentStdin.push(options.stdin);
+            options.onLine(
+              `{"type":"system","subtype":"init","session_id":"${sessionId}"}`,
+            );
+            options.onLine(
+              '{"type":"result","result":"<summary>all good</summary>"}',
+            );
+          }
+          return { stdout: "", stderr: "", exitCode: 0 };
+        },
+        copyFileIn: async () => {},
+        copyFileOut: async () => {},
+        close: async () => {},
+      }),
+    });
+
+    const first = () =>
+      run({
+        agent: claudeCode("claude-opus-4-8", {
+          captureSessions: false,
+          sessionStorage: { hostProjectsDir },
+        }),
+        sandbox,
+        prompt: "Summarise inside <summary> tags",
+        branchStrategy: { type: "head" },
+        logging: { type: "file", path: join(dir, "run.log") },
+        output: Output.string({ tag: "summary" }),
+      });
+
+    return { dir, agentStdin, first };
+  };
+
+  it("does not carry output into a follow-up whose prompt lacks the tag", async () => {
+    const { dir, agentStdin, first } = setup();
+    try {
+      const r = await first();
+      expect(r.output).toBe("all good");
+
+      const resumed = await r.resume!("write the word DONE into done.txt");
+      const forked = await r.fork!("write the word DONE into done.txt");
+
+      expect(resumed.iterations.length).toBe(1);
+      expect(forked.iterations.length).toBe(1);
+      expect("output" in resumed).toBe(false);
+      expect("output" in forked).toBe(false);
+      expect(agentStdin).toEqual([
+        "Summarise inside <summary> tags",
+        "write the word DONE into done.txt",
+        "write the word DONE into done.txt",
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("still extracts output when the follow-up passes it explicitly", async () => {
+    const { dir, first } = setup();
+    try {
+      const r = await first();
+      const resumed = (await r.resume!("Summarise again in <summary> tags", {
+        output: Output.string({ tag: "summary" }),
+      })) as { output?: unknown };
+      expect(resumed.output).toBe("all good");
+
+      await expect(
+        r.fork!("no tag here", { output: Output.string({ tag: "summary" }) }),
+      ).rejects.toThrow(/output tag <summary> not found/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
