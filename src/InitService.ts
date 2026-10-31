@@ -112,7 +112,9 @@ export const detectPackageManager = (
         if (typeof field === "string") {
           const name = field.split("@")[0];
           const match = PACKAGE_MANAGERS.find((pm) => pm === name);
-          if (match) return match;
+          if (match) {
+            return match;
+          }
         }
       } catch {
         // Malformed package.json — fall through to lockfile detection.
@@ -123,7 +125,9 @@ export const detectPackageManager = (
       const exists = yield* fs
         .exists(join(repoDir, file))
         .pipe(Effect.orElseSucceed(() => false));
-      if (exists) return pm;
+      if (exists) {
+        return pm;
+      }
     }
 
     return "npm";
@@ -174,7 +178,9 @@ export const hostHasDependency = (
     const exists = yield* fs
       .exists(pkgPath)
       .pipe(Effect.orElseSucceed(() => false));
-    if (!exists) return false;
+    if (!exists) {
+      return false;
+    }
     const content = yield* fs
       .readFileString(pkgPath)
       .pipe(Effect.orElseSucceed(() => ""));
@@ -669,7 +675,7 @@ export const getSandboxProvider = (
 // Next steps
 // ---------------------------------------------------------------------------
 
-export function getNextStepsLines(
+export const getNextStepsLines = (
   template: string,
   mainFilename: string,
   issueTracker: IssueTrackerEntry,
@@ -677,7 +683,7 @@ export function getNextStepsLines(
   packageManager: PackageManager,
   /** Template dependencies the host already has (declared, or installed by init). */
   installedDependencies: readonly string[],
-): string[] {
+): string[] => {
   const runStep = `Run \`${runScriptCommand(packageManager, "sandcastle")}\` to start the agent`;
   // The custom issue tracker scaffolds a broken-until-configured project, so
   // its next steps are about running the setup prompt — not the template's
@@ -748,16 +754,16 @@ export function getNextStepsLines(
   }
   lines.push(`${step++}. ${runStep}`);
   return lines;
-}
+};
 
 // ---------------------------------------------------------------------------
 // Scaffolding helpers
 // ---------------------------------------------------------------------------
 
-function getTemplatesDir(): string {
+const getTemplatesDir = (): string => {
   const thisFile = fileURLToPath(import.meta.url);
   return join(dirname(thisFile), "templates");
-}
+};
 
 const getTemplateDir = (templateName: string): Effect.Effect<string, Error> =>
   Effect.gen(function* () {
@@ -832,7 +838,9 @@ const rewriteMainTs = (
     const exists = yield* fs
       .exists(mainTsPath)
       .pipe(Effect.mapError((e) => new Error(e.message)));
-    if (!exists) return;
+    if (!exists) {
+      return;
+    }
 
     let content = yield* fs
       .readFileString(mainTsPath)
@@ -895,14 +903,18 @@ const applyIssueTrackerSandboxOptions = (
   mainFilename: string,
 ): Effect.Effect<void, Error, FileSystem.FileSystem> =>
   Effect.gen(function* () {
-    if (!issueTracker.sandboxOptions) return;
+    if (!issueTracker.sandboxOptions) {
+      return;
+    }
     const fs = yield* FileSystem.FileSystem;
     const mainTsPath = join(configDir, mainFilename);
 
     const exists = yield* fs
       .exists(mainTsPath)
       .pipe(Effect.mapError((e) => new Error(e.message)));
-    if (!exists) return;
+    if (!exists) {
+      return;
+    }
 
     const content = yield* fs
       .readFileString(mainTsPath)
@@ -980,10 +992,13 @@ const isTextFile = (filename: string): boolean => {
     filename === "Dockerfile" ||
     filename === "Containerfile" ||
     filename === ".gitignore"
-  )
+  ) {
     return true;
+  }
   const dotIdx = filename.lastIndexOf(".");
-  if (dotIdx === -1) return false;
+  if (dotIdx === -1) {
+    return false;
+  }
   return TEXT_FILE_EXTENSIONS.has(filename.slice(dotIdx));
 };
 
@@ -1139,7 +1154,9 @@ const detectMainFilename = (
     const exists = yield* fs
       .exists(pkgPath)
       .pipe(Effect.orElseSucceed(() => false));
-    if (!exists) return "main.mts";
+    if (!exists) {
+      return "main.mts";
+    }
     const content = yield* fs
       .readFileString(pkgPath)
       .pipe(Effect.orElseSucceed(() => ""));
