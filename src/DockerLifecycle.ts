@@ -16,12 +16,12 @@ const dockerExec = (args: string[]): Effect.Effect<string, DockerError> =>
           resume(
             Effect.fail(
               new DockerError({
-                message: `docker ${args[0]} failed: ${stderr?.toString() || error.message}`,
+                message: `docker ${args[0]} failed: ${stderr || error.message}`,
               }),
             ),
           );
         } else {
-          resume(Effect.succeed(stdout.toString()));
+          resume(Effect.succeed(stdout));
         }
       },
     );

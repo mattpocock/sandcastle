@@ -427,7 +427,7 @@ const checkImageUid = async (
           );
           return;
         }
-        const imageUser = (stdout ?? "").toString().trim();
+        const imageUser = (stdout ?? "").trim();
         if (!imageUser) {
           // No USER directive in image — skip check
           resolve();
