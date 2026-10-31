@@ -46,6 +46,7 @@ import type {
 import { StructuredOutputError } from "./Output.js";
 import { extractStructuredOutput } from "./extractStructuredOutput.js";
 import { validateTimeoutOptions } from "./validateTimeouts.js";
+import { buildContextWindowLines } from "./ContextWindow.js";
 
 /**
  * Build the token-efficient feedback prompt sent to the agent when retrying
@@ -187,9 +188,7 @@ export const buildCompletionMessage = (
   };
 };
 
-import { buildContextWindowLines } from "./ContextWindow.js";
-
-export { buildContextWindowLines };
+export { buildContextWindowLines } from "./ContextWindow.js";
 
 /**
  * Controls where Sandcastle writes iteration progress and agent output.
@@ -253,7 +252,9 @@ export const buildAgentStreamHandler = (
   const verboseSink = logging.verbose
     ? buildVerboseRawLineSink(logging)
     : undefined;
-  if (!userHandler && !verboseSink) return undefined;
+  if (!userHandler && !verboseSink) {
+    return undefined;
+  }
   return (event) => {
     if (userHandler) {
       try {
@@ -280,14 +281,18 @@ const fileEndsMidLine = (filePath: string): boolean => {
   try {
     fd = openSync(filePath, "r");
     const { size } = fstatSync(fd);
-    if (size === 0) return false;
+    if (size === 0) {
+      return false;
+    }
     const lastByte = Buffer.alloc(1);
     readSync(fd, lastByte, 0, 1, size - 1);
     return lastByte[0] !== 0x0a;
   } catch {
     return false;
   } finally {
-    if (fd !== undefined) closeSync(fd);
+    if (fd !== undefined) {
+      closeSync(fd);
+    }
   }
 };
 
