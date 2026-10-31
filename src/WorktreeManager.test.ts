@@ -13,9 +13,9 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import { promisify } from "node:util";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   create,
   generateTempBranchName,
@@ -572,9 +572,8 @@ describe("WorktreeManager.create", () => {
       "git rev-parse --git-path rebase-merge",
       { cwd: second.path },
     );
-    const resolvedRebaseDir = rebaseMergePath.trim().startsWith("/")
-      ? rebaseMergePath.trim()
-      : join(second.path, rebaseMergePath.trim());
+    // resolvePath() keeps an absolute git path and joins a relative one.
+    const resolvedRebaseDir = resolvePath(second.path, rebaseMergePath.trim());
     expect((await stat(resolvedRebaseDir)).isDirectory()).toBe(true);
 
     await execAsync("git rebase --abort", { cwd: first.path }).catch(() => {});
@@ -769,16 +768,12 @@ describe("WorktreeManager.pruneStale", () => {
   it("does not remove active worktrees", async () => {
     const repoDir = await setupRepo();
     const { path } = await run(create(repoDir));
-    const name = path.split("/").pop()!;
-
     await run(pruneStale(repoDir));
 
     const s = await stat(path);
     expect(s.isDirectory()).toBe(true);
     // cleanup
     await run(remove(path));
-    // suppress unused var warning
-    void name;
   });
 
   it("does not remove active worktrees when .sandcastle is a symlink", async () => {
@@ -864,40 +859,31 @@ describe("WorktreeManager git locale", () => {
   // the real `git` binary with a shim that records the LC_ALL it received,
   // asserting the module invokes git in the C locale even when the parent
   // process is set to a different one.
-  it("invokes git with LC_ALL=C even when the process locale is non-English", async () => {
-    if (process.platform === "win32") {
-      return;
-    } // POSIX shell shim
-    const repoDir = await setupRepo();
-    const shimDir = await mkdtemp(join(tmpdir(), "wt-git-shim-"));
-    const logPath = join(shimDir, "lc_all.log");
-    const gitShim = join(shimDir, "git");
-    await writeFile(
-      gitShim,
-      `#!/bin/sh\nprintf '%s' "\${LC_ALL-}" > "${logPath}"\necho main\n`,
-    );
-    await chmod(gitShim, 0o755);
+  // POSIX shell shim, so not on Windows.
+  it.skipIf(process.platform === "win32")(
+    "invokes git with LC_ALL=C even when the process locale is non-English",
+    async () => {
+      const repoDir = await setupRepo();
+      const shimDir = await mkdtemp(join(tmpdir(), "wt-git-shim-"));
+      const logPath = join(shimDir, "lc_all.log");
+      const gitShim = join(shimDir, "git");
+      await writeFile(
+        gitShim,
+        `#!/bin/sh\nprintf '%s' "\${LC_ALL-}" > "${logPath}"\necho main\n`,
+      );
+      await chmod(gitShim, 0o755);
 
-    const originalPath = process.env.PATH;
-    const originalLcAll = process.env.LC_ALL;
-    process.env.PATH = `${shimDir}:${originalPath ?? ""}`;
-    process.env.LC_ALL = "en_US.UTF-8";
-    try {
-      const branch = await run(getCurrentBranch(repoDir));
-      expect(branch).toBe("main");
-    } finally {
-      if (originalPath === undefined) {
-        delete process.env.PATH;
-      } else {
-        process.env.PATH = originalPath;
+      // join() renders an unset PATH as "", as before.
+      vi.stubEnv("PATH", [shimDir, process.env.PATH].join(":"));
+      vi.stubEnv("LC_ALL", "en_US.UTF-8");
+      try {
+        const branch = await run(getCurrentBranch(repoDir));
+        expect(branch).toBe("main");
+      } finally {
+        vi.unstubAllEnvs();
       }
-      if (originalLcAll === undefined) {
-        delete process.env.LC_ALL;
-      } else {
-        process.env.LC_ALL = originalLcAll;
-      }
-    }
 
-    await expect(readFile(logPath, "utf8")).resolves.toBe("C");
-  });
+      await expect(readFile(logPath, "utf8")).resolves.toBe("C");
+    },
+  );
 });
