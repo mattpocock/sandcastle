@@ -771,7 +771,7 @@ Scaffolds the `.sandcastle/` config directory and builds the container image. Th
 
 Init detects your host package manager (npm, pnpm, yarn, or bun) from a `packageManager` field or lockfile, defaulting to npm. Templates whose `main` file imports a host dependency — the planner templates import [Zod](https://zod.dev) for their `<plan>` output schema — prompt you to install it with that package manager when it isn't already in your `package.json`, so the first `npx tsx .sandcastle/main.ts` doesn't fail with `ERR_MODULE_NOT_FOUND`.
 
-Every interactive prompt has a paired `--flag` so the entire init can run non-interactively (e.g. in CI or a scripted setup). When stdin is not a TTY and a required flag is missing, init fails fast with a clear error rather than wedging on a prompt.
+Every interactive prompt has a paired `--flag` so the entire init can run non-interactively (e.g. in CI or a scripted setup). When stdin is not a TTY, init checks every flag it would otherwise prompt for before it writes anything, and fails with one error naming all the missing flags rather than wedging on a prompt or leaving a half-written `.sandcastle/` behind.
 
 | Option                    | Required | Default                      | Description                                                                                                    |
 | ------------------------- | -------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------- |
