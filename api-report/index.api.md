@@ -162,12 +162,19 @@ export interface ContextWindow {
 }
 
 // @public (undocumented)
-export const copilot: (model: string, options?: CopilotOptions) => AgentProvider;
+export const copilot: (model: string, options?: CopilotOptions) => AgentProvider & {
+    readonly sessionStorage: AgentSessionStorage;
+};
 
 // @public
 export interface CopilotOptions {
+    readonly captureSessions?: boolean;
     readonly effort?: "low" | "medium" | "high";
     readonly env?: Record<string, string>;
+    readonly sessionStorage?: {
+        readonly hostSessionsDir?: string;
+        readonly sandboxSessionsDir?: string;
+    };
 }
 
 // @public
@@ -243,6 +250,15 @@ export const findClaudeSessionOnHost: (id: string, projectsDir?: string) => Prom
 
 // @public
 export const findCodexSessionOnHost: (id: string, sessionsDir?: string) => Promise<HostSessionLookup>;
+
+// @public
+export interface ForkNotSupportedError extends Error {
+    readonly agentProvider: string;
+    // (undocumented)
+    readonly name: "ForkNotSupportedError";
+    // (undocumented)
+    readonly _tag: "ForkNotSupportedError";
+}
 
 // @public
 export interface HeadBranchStrategy {
