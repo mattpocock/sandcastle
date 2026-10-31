@@ -226,7 +226,7 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
                     watchTimer = setTimeout(check, SESSION_WATCH_INTERVAL_MS);
                     return;
                   }
-                  if (cmd?.exitCode != null) {
+                  if (typeof cmd?.exitCode === "number") {
                     return resolve();
                   }
                   reject(
