@@ -6,7 +6,7 @@ import { ClackDisplay, Display, FileDisplay } from "./Display.js";
 import { preprocessPrompt } from "./PromptPreprocessor.js";
 import { resolvePrompt } from "./PromptResolver.js";
 import {
-  SandboxFactory,
+  reuseSandboxFactoryLayer,
   makeSandboxFromHandle,
   resolveGitMounts,
   SANDBOX_REPO_DIR,
@@ -662,23 +662,15 @@ export const createWorktree = async (
           : undefined;
 
       // 6. Build a SandboxFactory that reuses the started sandbox
-      const reuseFactoryLayer = Layer.succeed(SandboxFactory, {
-        withSandbox: (makeEffect) =>
-          makeEffect(
-            {
-              hostWorktreePath: worktreeInfo.path,
-              sandboxRepoPath: sandboxRepoDir,
-              applyToHost,
-              bindMountHandle,
-            },
-            sandbox,
-          ).pipe(
-            Effect.map((value) => ({
-              value,
-              preservedWorktreePath: undefined,
-            })),
-          ) as any,
-      });
+      const reuseFactoryLayer = reuseSandboxFactoryLayer(
+        {
+          hostWorktreePath: worktreeInfo.path,
+          sandboxRepoPath: sandboxRepoDir,
+          applyToHost,
+          bindMountHandle,
+        },
+        sandbox,
+      );
 
       const streamEmitterLayer = agentStreamEmitterLayer(
         buildAgentStreamHandler(resolvedLogging),

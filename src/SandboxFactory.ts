@@ -163,6 +163,27 @@ export class SandboxFactory extends Context.Tag("SandboxFactory")<
   }
 >() {}
 
+/**
+ * A SandboxFactory layer that hands every caller the same, already-started
+ * sandbox, instead of creating one per call. Used by the `run()` methods of
+ * `createSandbox` and `createWorktree` handles.
+ */
+export const reuseSandboxFactoryLayer = (
+  info: SandboxInfo,
+  sandbox: SandboxService,
+): Layer.Layer<SandboxFactory> =>
+  Layer.succeed(SandboxFactory, {
+    withSandbox: <A, E, R>(
+      makeEffect: (
+        info: SandboxInfo,
+        sandbox: SandboxService,
+      ) => Effect.Effect<A, E, R>,
+    ): Effect.Effect<WithSandboxResult<A>, E, R> =>
+      makeEffect(info, sandbox).pipe(
+        Effect.map((value) => ({ value, preservedWorktreePath: undefined })),
+      ),
+  });
+
 export class SandboxConfig extends Context.Tag("SandboxConfig")<
   SandboxConfig,
   {
