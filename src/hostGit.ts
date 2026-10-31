@@ -18,12 +18,17 @@
  *    environment variables, which beat every config file. The value kept is
  *    the one from system or global config (or the caller's own environment),
  *    never the repository's; without one, a value that runs nothing.
- * 3. Spawns `git` with an argv (no shell) in the C locale, with terminal
+ * 3. Chooses which programs git may run without the repository's say:
+ *    `PATH` loses relative entries and entries inside the repo (so a planted
+ *    `git`, `ssh` or remote helper is never found), `git` itself is spawned
+ *    by absolute path, and `GIT_ALLOW_PROTOCOL` limits transports to
+ *    `file:git:http:https:ssh` unless the caller's environment sets it.
+ * 4. Spawns `git` with an argv (no shell) in the C locale, with terminal
  *    prompts off.
  */
 
 import { execFile } from "node:child_process";
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import { HostGitError } from "./errors.js";
 import type { Env } from "./hostGitConfig.js";
 import {
@@ -32,6 +37,12 @@ import {
   withConfigOverrides,
 } from "./hostGitConfig.js";
 import { resolveGitDirPins } from "./hostGitDir.js";
+import {
+  findGit,
+  pathOf,
+  repoRoots,
+  withTrustedPrograms,
+} from "./hostGitPath.js";
 
 /** Options for {@link hostGit}. */
 export interface HostGitOptions {
@@ -50,6 +61,7 @@ export interface HostGitOutput {
 const MAX_BUFFER = 10 * 1024 * 1024;
 
 interface SpawnOptions {
+  readonly git: string;
   readonly cwd: string;
   readonly env: Env;
   readonly input?: string;
@@ -60,11 +72,11 @@ const ignoreStdinError = (): undefined => undefined;
 /** Runs git with exactly `env`. */
 const spawnGit = (
   args: readonly string[],
-  { cwd, env, input = "" }: SpawnOptions,
+  { git, cwd, env, input = "" }: SpawnOptions,
 ): Effect.Effect<HostGitOutput, HostGitError> =>
   Effect.async((resume) => {
     const child = execFile(
-      "git",
+      git,
       [...args],
       { cwd, env, maxBuffer: MAX_BUFFER, encoding: "utf8" },
       (error, stdout, stderr) => {
@@ -106,21 +118,36 @@ export const hostGitOutput = (
 ): Effect.Effect<HostGitOutput, HostGitError> =>
   Effect.gen(function* () {
     const pins = yield* resolveGitDirPins(cwd, args);
-    const env: Env = {
-      ...process.env,
-      ...options?.env,
-      ...pins,
-      // Several callers match git's messages; under a localized locale they
-      // would silently stop matching (issue #595).
-      LC_ALL: "C",
-      GIT_TERMINAL_PROMPT: "0",
-    };
+    const env = yield* withTrustedPrograms(
+      {
+        ...process.env,
+        ...options?.env,
+        ...pins,
+        // Several callers match git's messages; under a localized locale they
+        // would silently stop matching (issue #595).
+        LC_ALL: "C",
+        GIT_TERMINAL_PROMPT: "0",
+      },
+      repoRoots(cwd, pins["GIT_COMMON_DIR"]),
+    );
+    const found = yield* findGit(pathOf(env), env);
+    if (Option.isNone(found)) {
+      return yield* new HostGitError({
+        message: "git was not found on PATH (outside the repository)",
+        args,
+        stdout: "",
+        stderr: "",
+      });
+    }
+    const git = found.value;
     const listed = yield* spawnGit(["config", "--list", "--show-scope", "-z"], {
+      git,
       cwd,
       env,
     }).pipe(Effect.orElseSucceed(() => ({ stdout: "", stderr: "" })));
     const overrides = hardeningOverrides(parseConfigList(listed.stdout));
     return yield* spawnGit(args, {
+      git,
       cwd,
       env: withConfigOverrides(env, overrides),
       input: options?.input,

@@ -9,7 +9,7 @@ import {
   SyncError,
   withTimeout,
 } from "./errors.js";
-import type { SandboxError } from "./errors.js";
+import type { SandboxError, SyncOutPathError } from "./errors.js";
 import { hostGit } from "./hostGit.js";
 import { execHostShell } from "./hostShell.js";
 import type { ExecResult, SandboxService } from "./SandboxFactory.js";
@@ -212,7 +212,10 @@ export interface SandboxLifecycleOptions {
   /** Called after agent work completes but before host-side git operations (merge, commit collection).
    *  For isolated providers, this syncs changes from the sandbox to the host worktree.
    *  For bind-mount providers, this is a no-op (filesystem is already shared). */
-  readonly applyToHost?: () => Effect.Effect<void, SyncError>;
+  readonly applyToHost?: () => Effect.Effect<
+    void,
+    SyncError | SyncOutPathError
+  >;
   /** AbortSignal passed through to lifecycle hooks so they can cooperatively cancel.
    *  When omitted, hooks receive a never-aborted signal. */
   readonly signal?: AbortSignal;
