@@ -172,6 +172,28 @@ const resolveVercelAuth = (
 };
 
 /**
+ * Run the setup of a sandbox that `create()` has just made. If it fails, stop
+ * the sandbox before rethrowing: no handle exists yet, so neither Sandcastle's
+ * teardown nor `close()` can reach it, and it would run until Vercel's
+ * timeout.
+ */
+const setUpOrStop = async (
+  sandbox: { stop: () => Promise<unknown> },
+  setUp: () => Promise<void>,
+): Promise<void> => {
+  try {
+    await setUp();
+  } catch (error) {
+    try {
+      await sandbox.stop();
+    } catch {
+      // Report the setup error, which says why create() failed.
+    }
+    throw error;
+  }
+};
+
+/**
  * Create a Vercel isolated sandbox provider.
  *
  * The returned provider creates Vercel Firecracker microVM sandboxes via
@@ -214,16 +236,18 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
       // Create the worktree folder with its parents: Vercel's default image
       // has no /vercel/sandbox (its user's home is /vercel), and `mkDir`
       // isn't recursive.
-      const mkdirResult = await sandbox.runCommand({
-        cmd: "mkdir",
-        args: ["-p", VERCEL_REPO_PATH],
+      await setUpOrStop(sandbox, async () => {
+        const mkdirResult = await sandbox.runCommand({
+          cmd: "mkdir",
+          args: ["-p", VERCEL_REPO_PATH],
+        });
+        if (mkdirResult.exitCode !== 0) {
+          const stderr = await mkdirResult.stderr();
+          throw new Error(
+            `vercel(): could not create ${VERCEL_REPO_PATH}: ${stderr.trim()}`,
+          );
+        }
       });
-      if (mkdirResult.exitCode !== 0) {
-        const stderr = await mkdirResult.stderr();
-        throw new Error(
-          `vercel(): could not create ${VERCEL_REPO_PATH}: ${stderr.trim()}`,
-        );
-      }
 
       const handle: IsolatedSandboxHandle = {
         worktreePath: VERCEL_REPO_PATH,

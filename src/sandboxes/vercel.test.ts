@@ -41,6 +41,7 @@ interface FakeSandbox {
   mkDir: (path: string) => Promise<void>;
   writeFiles: (files: { path: string; content: Uint8Array }[]) => Promise<void>;
   runCommand: (params: FakeRunCommandParams) => Promise<FakeResult>;
+  stop?: () => Promise<void>;
 }
 
 const sandboxCreate = vi.hoisted(() =>
@@ -186,6 +187,67 @@ describe("vercel() setup", () => {
       2,
       expect.objectContaining({ runtime: "python3.13" }),
     );
+  });
+});
+
+describe("vercel() when setup fails inside create()", () => {
+  beforeEach(() => {
+    vi.stubEnv("VERCEL_TOKEN", undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const failingSandbox = (setupError: Error, stop: () => Promise<void>) =>
+    ({
+      mkDir: async () => {},
+      writeFiles: async () => {},
+      runCommand: async () => {
+        throw setupError;
+      },
+      stop,
+    }) satisfies FakeSandbox;
+
+  it("stops the sandbox it created, then rethrows", async () => {
+    const stop = vi.fn<() => Promise<void>>(async () => {});
+    const setupError = new Error("error creating directory");
+    sandboxCreate.mockImplementationOnce(async () =>
+      failingSandbox(setupError, stop),
+    );
+
+    await expect(vercel().create({ env: {} })).rejects.toBe(setupError);
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops the sandbox when mkdir exits non-zero", async () => {
+    const stop = vi.fn<() => Promise<void>>(async () => {});
+    sandboxCreate.mockImplementationOnce(async () => ({
+      mkDir: async () => {},
+      writeFiles: async () => {},
+      runCommand: async () => ({
+        exitCode: 1,
+        stdout: async () => "",
+        stderr: async () => "mkdir: permission denied",
+      }),
+      stop,
+    }));
+
+    await expect(vercel().create({ env: {} })).rejects.toThrow(
+      /could not create .*permission denied/u,
+    );
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("rethrows the setup error even when stopping fails too", async () => {
+    const setupError = new Error("error creating directory");
+    sandboxCreate.mockImplementationOnce(async () =>
+      failingSandbox(setupError, async () => {
+        throw new Error("stop failed");
+      }),
+    );
+
+    await expect(vercel().create({ env: {} })).rejects.toBe(setupError);
   });
 });
 
