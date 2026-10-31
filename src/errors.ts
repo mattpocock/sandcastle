@@ -26,6 +26,11 @@ export class BwrapError extends Data.TaggedError("BwrapError")<{
   readonly message: string;
 }> {}
 
+/** Setting up a `seatbelt()` sandbox's private dirs failed */
+export class SeatbeltError extends Data.TaggedError("SeatbeltError")<{
+  readonly message: string;
+}> {}
+
 /** Docker infrastructure operation failed */
 export class DockerError extends Data.TaggedError("DockerError")<{
   readonly message: string;

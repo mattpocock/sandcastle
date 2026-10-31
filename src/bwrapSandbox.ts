@@ -1,13 +1,10 @@
 /**
  * The pieces of the `bwrap()` provider (src/sandboxes/bwrap.ts) that don't
  * run processes: the Bubblewrap arguments for a sandbox, its private dirs,
- * the in-sandbox to host path mapping, and output collection. Used only by
- * `bwrap()`.
+ * and the in-sandbox to host path mapping. Used only by `bwrap()`.
  */
 
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
-import { dirname, join, posix } from "node:path";
-import { createInterface } from "node:readline";
+import { join, posix } from "node:path";
 import { FileSystem } from "@effect/platform";
 import { Effect, Option } from "effect";
 import type { BindMountCreateOptions } from "./SandboxProvider.js";
@@ -15,9 +12,7 @@ import { hostPathToolchainFromEnv } from "./hostPathToolchain.js";
 import type { HostPathToolchain } from "./hostPathToolchain.js";
 import { resolveIdentityMounts } from "./identityMounts.js";
 import type { IdentityMount, MountConfig } from "./identityMounts.js";
-
-import { BoundedTail } from "./boundedTail.js";
-import { BwrapError, CopyError } from "./errors.js";
+import { BwrapError } from "./errors.js";
 
 /** The construction check, from its own module (it runs a process, synchronously). */
 export { assertBwrapUsable } from "./bwrapPreflight.js";
@@ -25,6 +20,8 @@ export type { IdentityMount, MountConfig } from "./identityMounts.js";
 /** Tracking and killing each exec's processes, from their own module. */
 export { INFO_FD, killSandboxProcess, parseChildPid } from "./bwrapProcess.js";
 export type { SandboxProcess } from "./bwrapProcess.js";
+/** Output collection and file copies, shared by the native sandbox providers. */
+export { collectOutput, copyCreatingParents } from "./nativeSandboxIo.js";
 
 /** The private home's path inside the sandbox. */
 export const SANDBOX_HOME = "/home/agent";
@@ -206,33 +203,6 @@ export const sandboxArgs = (
     ];
   });
 
-/** Collects a child's output: streamed line by line with a bounded tail, or whole. */
-export const collectOutput = (
-  proc: ChildProcessWithoutNullStreams,
-  onLine: ((line: string) => void) | undefined,
-  maxTailChars: number,
-): (() => { stdout: string; stderr: string }) => {
-  const streaming = onLine !== undefined;
-  const stdout = streaming
-    ? new BoundedTail(maxTailChars, "\n")
-    : new BoundedTail(Infinity);
-  const stderr = new BoundedTail(streaming ? maxTailChars : Infinity);
-  if (onLine === undefined) {
-    proc.stdout.on("data", (chunk: Buffer) => {
-      stdout.push(chunk.toString());
-    });
-  } else {
-    createInterface({ input: proc.stdout }).on("line", (line) => {
-      stdout.push(line);
-      onLine(line);
-    });
-  }
-  proc.stderr.on("data", (chunk: Buffer) => {
-    stderr.push(chunk.toString());
-  });
-  return () => ({ stdout: stdout.toString(), stderr: stderr.toString() });
-};
-
 /**
  * Maps an in-sandbox path to the host file behind it. Mounts sit at their
  * host paths; the private home and `/tmp` are the private dirs.
@@ -254,21 +224,3 @@ export const toHostPath = (
   }
   return p;
 };
-
-/** Copies a file, creating the target's parent dirs. */
-export const copyCreatingParents = (
-  from: string,
-  to: string,
-): Effect.Effect<void, CopyError, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    yield* fs.makeDirectory(dirname(to), { recursive: true });
-    yield* fs.copyFile(from, to);
-  }).pipe(
-    Effect.mapError(
-      (e) =>
-        new CopyError({
-          message: `Couldn't copy ${from} to ${to}: ${e.message}`,
-        }),
-    ),
-  );

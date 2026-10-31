@@ -1,0 +1,7 @@
+---
+"@ai-hero/sandcastle": minor
+---
+
+Add `seatbelt()`, a native sandbox provider for macOS 14 or later, at `@ai-hero/sandcastle/sandboxes/seatbelt`. It runs each command under the system `/usr/bin/sandbox-exec` with a deny-by-default Seatbelt profile, with no image and no daemon: the host's system toolchain and `PATH` dirs read-only, the worktree and git dirs read/write at their host paths, a private home and temp dir (both removed on close), the host network, and only the env vars Sandcastle passes in plus `PATH`, `HOME` and `TMPDIR`. The git control files stay read-only and the dirs holding them can't be renamed aside. The agent can't signal your processes, though Seatbelt can't fully hide them. Each `exec` leads its own process group, which is killed when it exits, on close and on shutdown. Copies to and from `/home/agent` land in the private home. Add other paths with `mounts` (each at its own host path, as for `bwrap()`). `exec` with `sudo: true` rejects, and `interactive()` throws `NativeInteractiveNotSupportedError`.
+
+Constructing `seatbelt()` checks once per process that Seatbelt works, and throws `NativeSandboxUnavailableError` if it doesn't: on a non-macOS OS (use `bwrap()` on Linux or WSL2), on macOS older than 14, or when `sandbox-exec` is missing or fails (for instance inside another Seatbelt sandbox). There is no install command on macOS, so the error has no `fixCommand` and points to `docker()`. It never falls back to running unsandboxed.
