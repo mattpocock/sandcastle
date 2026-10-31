@@ -11,7 +11,6 @@ import type {
 } from "./SandboxProvider.js";
 import { claudeCode } from "./AgentProvider.js";
 
-
 const mockText = vi.fn<(...args: unknown[]) => unknown>();
 vi.mock("@clack/prompts", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;

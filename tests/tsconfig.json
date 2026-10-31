@@ -1,0 +1,17 @@
+{
+  // The e2e tests see Sandcastle the way a user does: by package name. These
+  // paths mirror the aliases in vitest.config.ts, so the names resolve to the
+  // src entry files without a build.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "paths": {
+      "@ai-hero/sandcastle": ["../src/index.ts"],
+      "@ai-hero/sandcastle/sandboxes/*": ["../src/sandboxes/*.ts"]
+    }
+  },
+  "include": ["**/*.ts"]
+}

@@ -7,6 +7,7 @@
  */
 
 import { execSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { readFile, unlink, writeFile, mkdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -79,7 +80,11 @@ export interface VercelOptions {
 
   /**
    * The runtime of the sandbox (e.g. `"node24"`, `"node22"`, `"python3.13"`).
-   * Defaults to `"node24"`.
+   *
+   * Omit it to get Vercel's default image (`vercel/sandbox/universal` as of
+   * `@vercel/sandbox` 3.x), which ships coding agent CLIs such as `claude`.
+   * The named runtimes ship none: install your agent's CLI in an
+   * `onSandboxReady` hook.
    */
   readonly runtime?: string;
 
@@ -167,6 +172,28 @@ const resolveVercelAuth = (
 };
 
 /**
+ * Run the setup of a sandbox that `create()` has just made. If it fails, stop
+ * the sandbox before rethrowing: no handle exists yet, so neither Sandcastle's
+ * teardown nor `close()` can reach it, and it would run until Vercel's
+ * timeout.
+ */
+const setUpOrStop = async (
+  sandbox: { stop: () => Promise<unknown> },
+  setUp: () => Promise<void>,
+): Promise<void> => {
+  try {
+    await setUp();
+  } catch (error) {
+    try {
+      await sandbox.stop();
+    } catch {
+      // Report the setup error, which says why create() failed.
+    }
+    throw error;
+  }
+};
+
+/**
  * Create a Vercel isolated sandbox provider.
  *
  * The returned provider creates Vercel Firecracker microVM sandboxes via
@@ -206,8 +233,21 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
 
       const sandbox = await Sandbox.create(createParams);
 
-      // Ensure worktree directory exists
-      await sandbox.mkDir(VERCEL_REPO_PATH);
+      // Create the worktree folder with its parents: Vercel's default image
+      // has no /vercel/sandbox (its user's home is /vercel), and `mkDir`
+      // isn't recursive.
+      await setUpOrStop(sandbox, async () => {
+        const mkdirResult = await sandbox.runCommand({
+          cmd: "mkdir",
+          args: ["-p", VERCEL_REPO_PATH],
+        });
+        if (mkdirResult.exitCode !== 0) {
+          const stderr = await mkdirResult.stderr();
+          throw new Error(
+            `vercel(): could not create ${VERCEL_REPO_PATH}: ${stderr.trim()}`,
+          );
+        }
+      });
 
       const handle: IsolatedSandboxHandle = {
         worktreePath: VERCEL_REPO_PATH,
@@ -218,8 +258,23 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
             onLine?: (line: string) => void;
             cwd?: string;
             sudo?: boolean;
+            stdin?: string;
           },
         ): Promise<ExecResult> => {
+          let effectiveCommand = command;
+          if (opts?.stdin !== undefined) {
+            // `runCommand` gives a command no stdin unless it is detached:
+            // the command reads EOF. So write stdin to a file in the sandbox
+            // and redirect it in (a file, not an argument, keeps clear of the
+            // per-arg size limit). The redirect opens the file before the
+            // group runs, so the group can delete it straight away and leave
+            // nothing behind.
+            const stdinPath = `/tmp/sandcastle-stdin-${randomUUID()}`;
+            await sandbox.writeFiles([
+              { path: stdinPath, content: Buffer.from(opts.stdin) },
+            ]);
+            effectiveCommand = `{ rm -f ${stdinPath}; ${command}\n} < ${stdinPath}`;
+          }
           if (opts?.onLine) {
             const { onLine } = opts;
             const stdoutTail = new BoundedTail(maxOutputTailChars, "\n");
@@ -227,7 +282,7 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
             let partial = "";
 
             const stdoutWritable = new Writable({
-              write(chunk, _encoding, callback) {
+              write(chunk: Buffer, _encoding, callback) {
                 const text = partial + chunk.toString();
                 const lines = text.split("\n");
                 partial = lines.pop() ?? "";
@@ -248,7 +303,7 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
             });
 
             const stderrWritable = new Writable({
-              write(chunk, _encoding, callback) {
+              write(chunk: Buffer, _encoding, callback) {
                 stderrTail.push(chunk.toString());
                 callback();
               },
@@ -256,7 +311,7 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
 
             const result = await sandbox.runCommand({
               cmd: "sh",
-              args: ["-c", command],
+              args: ["-c", effectiveCommand],
               cwd: opts?.cwd ?? VERCEL_REPO_PATH,
               stdout: stdoutWritable,
               stderr: stderrWritable,
@@ -272,7 +327,7 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
 
           const result = await sandbox.runCommand({
             cmd: "sh",
-            args: ["-c", command],
+            args: ["-c", effectiveCommand],
             cwd: opts?.cwd ?? VERCEL_REPO_PATH,
             ...(opts?.sudo ? { sudo: true } : {}),
           });

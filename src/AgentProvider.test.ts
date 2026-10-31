@@ -1217,6 +1217,59 @@ describe("cursor factory", () => {
     ]);
   });
 
+  // Shapes from a real `cursor-agent` composer-2 run (2026-10-31), trimmed.
+  it("parseStreamLine extracts top-level tool_call shellToolCall as Bash (Cursor stream-json)", () => {
+    const provider = cursor("composer-2");
+    const line = JSON.stringify({
+      type: "tool_call",
+      subtype: "started",
+      call_id: "tool_c3c8b5b5",
+      tool_call: {
+        shellToolCall: {
+          args: {
+            command: "cat notes/notes1.md",
+            workingDirectory: "/home/agent/workspace",
+            timeout: 30_000,
+            simpleCommands: ["cat"],
+            description: "Cat notes/notes1.md",
+          },
+          description: "Cat notes/notes1.md",
+        },
+        toolCallId: "tool_c3c8b5b5",
+      },
+      session_id: "60cbceb8-65bb-4504-846b-6efc1b3d3e56",
+    });
+    expect(provider.parseStreamLine(line)).toStrictEqual([
+      { type: "tool_call", name: "Bash", args: "cat notes/notes1.md" },
+    ]);
+  });
+
+  it("parseStreamLine extracts top-level tool_call editToolCall as Edit (Cursor stream-json)", () => {
+    const provider = cursor("composer-2");
+    const line = JSON.stringify({
+      type: "tool_call",
+      subtype: "started",
+      call_id: "tool_d0facb6c",
+      tool_call: {
+        editToolCall: {
+          args: {
+            path: "/home/agent/workspace/cursor-a.txt",
+            streamContent: "hello from cursor a\n",
+          },
+        },
+        toolCallId: "tool_d0facb6c",
+      },
+      session_id: "60cbceb8-65bb-4504-846b-6efc1b3d3e56",
+    });
+    expect(provider.parseStreamLine(line)).toStrictEqual([
+      {
+        type: "tool_call",
+        name: "Edit",
+        args: "/home/agent/workspace/cursor-a.txt",
+      },
+    ]);
+  });
+
   it("parseStreamLine ignores tool_call completed events", () => {
     const provider = cursor("claude-sonnet-4-6");
     const line = JSON.stringify({
@@ -2321,6 +2374,12 @@ describe("sessionStorage", () => {
       await expect(
         sessionStorageOf(provider).existsOnHost(hostCwd, id),
       ).resolves.toBe(true);
+
+      // hostSessionFilePath (surfaced as IterationResult.sessionFilePath) is
+      // the captured JSONL itself, not its directory.
+      expect(provider.sessionStorage.hostSessionFilePath(hostCwd, id)).toBe(
+        expectedHostPath,
+      );
     } finally {
       await rm(hostDir, { recursive: true, force: true });
       await rm(sandboxDir, { recursive: true, force: true });
@@ -2379,7 +2438,7 @@ describe("sessionStorage", () => {
     }
   });
 
-  it("pi hostSessionFilePath returns the host-cwd-encoded directory", () => {
+  it("pi hostSessionFilePath falls back to the host-cwd-encoded directory before capture", () => {
     const provider = pi("claude-sonnet-4-6", {
       sessionStorage: { hostSessionsDir: "/tmp/sessions" },
     });

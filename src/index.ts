@@ -54,6 +54,7 @@ export type {
 } from "./Output.js";
 export { CwdError } from "./CwdError.js";
 export type { ForkNotSupportedError } from "./ForkNotSupportedError.js";
+export { SyncOutPathError } from "./SyncOutPathError.js";
 export {
   claudeCode,
   codex,

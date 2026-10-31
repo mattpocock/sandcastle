@@ -33,14 +33,14 @@ import {
   printFileDisplayStartup,
 } from "./run.js";
 import { withSandboxLifecycle, runHostHooks } from "./SandboxLifecycle.js";
+import type { SyncError, SyncOutPathError } from "./errors.js";
 import type { SandboxHooks } from "./SandboxLifecycle.js";
 import {
-  SandboxFactory,
+  reuseSandboxFactoryLayer,
   SANDBOX_REPO_DIR,
   resolveGitMounts,
-  makeSandboxFromHandle,
 } from "./SandboxFactory.js";
-import type { SandboxService } from "./SandboxFactory.js";
+import type { MountEntry, SandboxService } from "./SandboxFactory.js";
 import type {
   SandboxProvider,
   BindMountSandboxHandle,
@@ -55,7 +55,7 @@ import { syncOut } from "./syncOut.js";
 import * as WorktreeManager from "./WorktreeManager.js";
 import { copyToWorktree } from "./CopyToWorktree.js";
 import { resolveCwd } from "./resolveCwd.js";
-import { patchGitMountsForWindows } from "./mountUtils.js";
+import { patchGitMountsForWindows, removeMountTempDirs } from "./mountUtils.js";
 import {
   assertForkSupported,
   assertResumeSessionExists,
@@ -290,7 +290,7 @@ interface SandboxHandleContext {
   readonly providerTag: SandboxProvider["tag"];
   /** The sandbox provider's env, checked against each run's agent env for overlapping keys. */
   readonly sandboxProviderEnv: Record<string, string>;
-  readonly applyToHost: () => Effect.Effect<void, any>;
+  readonly applyToHost: () => Effect.Effect<void, SyncError | SyncOutPathError>;
   readonly timeouts?: Timeouts;
   /** Worktree branch strategy. Set only when the handle is backed by a
    *  `createWorktree(...)` handle; absent for top-level `createSandbox()`,
@@ -479,23 +479,15 @@ const buildSandboxHandle = (
             })()
           : silentDisplayLayer;
 
-      const reuseFactoryLayer = Layer.succeed(SandboxFactory, {
-        withSandbox: (makeEffect) =>
-          makeEffect(
-            {
-              hostWorktreePath: worktreePath,
-              sandboxRepoPath: sandboxRepoDir,
-              applyToHost,
-              bindMountHandle,
-            },
-            sandbox,
-          ).pipe(
-            Effect.map((value) => ({
-              value,
-              preservedWorktreePath: undefined,
-            })),
-          ) as any,
-      });
+      const reuseFactoryLayer = reuseSandboxFactoryLayer(
+        {
+          hostWorktreePath: worktreePath,
+          sandboxRepoPath: sandboxRepoDir,
+          applyToHost,
+          bindMountHandle,
+        },
+        sandbox,
+      );
 
       const streamEmitterLayer = agentStreamEmitterLayer(
         buildAgentStreamHandler(resolvedLogging),
@@ -703,8 +695,9 @@ const buildSandboxHandle = (
                 }),
             );
           }).pipe(
-            Effect.provide(ClackDisplay.layer),
-            Effect.provide(NodeContext.layer),
+            Effect.provide(
+              Layer.mergeAll(ClackDisplay.layer, NodeContext.layer),
+            ),
           ),
         );
       } catch (error: unknown) {
@@ -803,6 +796,8 @@ export const createSandboxFromWorktree = async (
   let sandbox: SandboxService;
   let sandboxRepoDir: string;
   const isIsolated = options.sandbox.tag === "isolated";
+  // Temp dirs behind the git mounts, removed once the sandbox is closed.
+  const mountsToClean: MountEntry[] = [];
 
   if (isTestMode) {
     sandbox = options._test.buildSandbox!(worktreePath);
@@ -844,6 +839,9 @@ export const createSandboxFromWorktree = async (
         Effect.flatMap((gitMounts) =>
           patchGitMountsForWindows(gitMounts, worktreePath, SANDBOX_REPO_DIR),
         ),
+        Effect.tap((gitMounts) => {
+          mountsToClean.push(...gitMounts);
+        }),
         Effect.flatMap((gitMounts) =>
           startSandbox({
             provider,
@@ -854,6 +852,7 @@ export const createSandboxFromWorktree = async (
             repoDir: SANDBOX_REPO_DIR,
           }),
         ),
+        Effect.onError(() => removeMountTempDirs(mountsToClean)),
       );
     }
 
@@ -880,13 +879,12 @@ export const createSandboxFromWorktree = async (
             sudo: hook.sudo,
           }),
         );
-        const allEffects = [...sandboxEffects] as Effect.Effect<
-          unknown,
-          unknown
-        >[];
-        if (hostOnReady?.length) {
-          allEffects.push(runHostHooks(hostOnReady, worktreePath));
-        }
+        const allEffects = [
+          ...sandboxEffects,
+          ...(hostOnReady?.length
+            ? [runHostHooks(hostOnReady, worktreePath)]
+            : []),
+        ];
         yield* Effect.all(allEffects, {
           concurrency: "unbounded",
         });
@@ -935,6 +933,7 @@ export const createSandboxFromWorktree = async (
       if (providerHandle) {
         await providerHandle.close();
       }
+      await Effect.runPromise(removeMountTempDirs(mountsToClean));
       return { preservedWorktreePath: undefined };
     },
   );
@@ -952,6 +951,8 @@ export const createSandbox = async (
   const isTestMode = !!options._test?.buildSandbox;
   const isIsolated = options.sandbox.tag === "isolated";
   validateTimeoutOptions(options);
+  // Temp dirs behind the git mounts, removed once the sandbox is closed.
+  const mountsToClean: MountEntry[] = [];
 
   // Resolve cwd, create the worktree, and set up the sandbox in a single Effect.
   // Once the worktree exists, any later failure (e.g. a missing image surfacing
@@ -1015,43 +1016,50 @@ export const createSandbox = async (
             });
 
             const provider = options.sandbox;
-            const startResult = yield* provider.tag === "isolated"
-              ? startSandbox({
+            const startResult = yield* (() => {
+              if (provider.tag === "isolated") {
+                return startSandbox({
                   provider,
                   hostRepoDir: worktreePath,
                   env,
                   copyPaths: options.copyToWorktree,
                   copySourceDir: hostRepoDir,
-                })
-              : provider.tag === "none"
-                ? startSandbox({
+                });
+              }
+              if (provider.tag === "none") {
+                return startSandbox({
+                  provider,
+                  hostRepoDir,
+                  env,
+                  worktreeOrRepoPath: worktreePath,
+                });
+              }
+              return resolveGitMounts(join(hostRepoDir, ".git")).pipe(
+                Effect.provide(NodeFileSystem.layer),
+                Effect.catchAll(() => Effect.succeed([])),
+                // Patch git mounts for Windows worktree compatibility (ADR-0006)
+                Effect.flatMap((gitMounts) =>
+                  patchGitMountsForWindows(
+                    gitMounts,
+                    worktreePath,
+                    SANDBOX_REPO_DIR,
+                  ),
+                ),
+                Effect.tap((gitMounts) => {
+                  mountsToClean.push(...gitMounts);
+                }),
+                Effect.flatMap((gitMounts) =>
+                  startSandbox({
                     provider,
                     hostRepoDir,
                     env,
                     worktreeOrRepoPath: worktreePath,
-                  })
-                : resolveGitMounts(join(hostRepoDir, ".git")).pipe(
-                    Effect.provide(NodeFileSystem.layer),
-                    Effect.catchAll(() => Effect.succeed([])),
-                    // Patch git mounts for Windows worktree compatibility (ADR-0006)
-                    Effect.flatMap((gitMounts) =>
-                      patchGitMountsForWindows(
-                        gitMounts,
-                        worktreePath,
-                        SANDBOX_REPO_DIR,
-                      ),
-                    ),
-                    Effect.flatMap((gitMounts) =>
-                      startSandbox({
-                        provider,
-                        hostRepoDir,
-                        env,
-                        worktreeOrRepoPath: worktreePath,
-                        gitMounts,
-                        repoDir: SANDBOX_REPO_DIR,
-                      }),
-                    ),
-                  );
+                    gitMounts,
+                    repoDir: SANDBOX_REPO_DIR,
+                  }),
+                ),
+              );
+            })();
 
             providerHandle = startResult.handle;
             sandbox = startResult.sandbox;
@@ -1075,19 +1083,19 @@ export const createSandbox = async (
                   sudo: hook.sudo,
                 }),
               );
-              const allEffects = [...sandboxEffects] as Effect.Effect<
-                unknown,
-                unknown
-              >[];
-              if (hostOnReady?.length) {
-                allEffects.push(runHostHooks(hostOnReady, worktreePath));
-              }
+              const allEffects = [
+                ...sandboxEffects,
+                ...(hostOnReady?.length
+                  ? [runHostHooks(hostOnReady, worktreePath)]
+                  : []),
+              ];
               yield* Effect.all(allEffects, { concurrency: "unbounded" });
             }).pipe(
               Effect.onError(() =>
-                providerHandle
+                (providerHandle
                   ? Effect.promise(() => providerHandle.close().catch(() => {}))
-                  : Effect.void,
+                  : Effect.void
+                ).pipe(Effect.andThen(removeMountTempDirs(mountsToClean))),
               ),
             );
           }
@@ -1097,6 +1105,7 @@ export const createSandbox = async (
           Effect.onError(() =>
             WorktreeManager.remove(worktreePath).pipe(
               Effect.catchAll(() => Effect.void),
+              Effect.andThen(removeMountTempDirs(mountsToClean)),
             ),
           ),
         );
@@ -1135,6 +1144,7 @@ export const createSandbox = async (
         if (providerHandle) {
           yield* Effect.promise(() => providerHandle.close());
         }
+        yield* removeMountTempDirs(mountsToClean);
 
         // Preserve the worktree when it has uncommitted changes; otherwise remove it.
         const isDirty = yield* WorktreeManager.hasUncommittedChanges(

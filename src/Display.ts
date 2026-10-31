@@ -1,7 +1,7 @@
 import * as clack from "@clack/prompts";
 import { FileSystem } from "@effect/platform";
 import { dirname } from "node:path";
-import { Context, Effect, Layer, Ref } from "effect";
+import { Clock, Context, DateTime, Effect, Layer, Ref } from "effect";
 import { styleText } from "node:util";
 
 export type Severity = "info" | "success" | "warn" | "error";
@@ -67,7 +67,7 @@ export interface DisplayService {
   ) => Effect.Effect<void>;
 }
 
-export class Display extends Context.Tag("Display")<
+export class Display extends Context.Tag("@ai-hero/sandcastle/Display")<
   Display,
   DisplayService
 >() {}
@@ -87,14 +87,14 @@ export const SilentDisplay = {
           { _tag: "status" as const, message, severity },
         ]),
 
-      spinner: (message, effect) =>
-        Effect.flatMap(
-          Ref.update(ref, (entries) => [
-            ...entries,
-            { _tag: "spinner" as const, message },
-          ]),
-          () => effect,
-        ),
+      spinner: <A, E, R>(
+        message: string,
+        effect: Effect.Effect<A, E, R>,
+      ): Effect.Effect<A, E, R> =>
+        Ref.update(ref, (entries) => [
+          ...entries,
+          { _tag: "spinner" as const, message },
+        ]).pipe(Effect.andThen(effect)),
 
       summary: (title, rows) =>
         Ref.update(ref, (entries) => [
@@ -152,7 +152,7 @@ export const FileDisplay = {
         yield* fs
           .makeDirectory(dirname(filePath), { recursive: true })
           .pipe(Effect.orDie);
-        const delimiter = `\n--- Run started: ${new Date().toISOString()} ---\n`;
+        const delimiter = `\n--- Run started: ${DateTime.formatIso(yield* DateTime.now)} ---\n`;
         yield* fs
           .writeFileString(filePath, delimiter, { flag: "a" })
           .pipe(Effect.orDie);
@@ -192,9 +192,12 @@ export const FileDisplay = {
           spinner: (message, effect) =>
             Effect.gen(function* () {
               yield* appendToLog(`${message}...`);
-              const start = Date.now();
+              const start = yield* Clock.currentTimeMillis;
               const result = yield* effect;
-              const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+              const elapsed = (
+                ((yield* Clock.currentTimeMillis) - start) /
+                1000
+              ).toFixed(1);
               yield* appendToLog(`${message} done (${elapsed}s)`);
               return result;
             }),
@@ -209,12 +212,15 @@ export const FileDisplay = {
           taskLog: (title, effect) =>
             Effect.gen(function* () {
               yield* appendToLog(title);
-              const start = Date.now();
+              const start = yield* Clock.currentTimeMillis;
               const messages: string[] = [];
               const result = yield* effect((msg) => {
                 messages.push(msg);
               });
-              const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+              const elapsed = (
+                ((yield* Clock.currentTimeMillis) - start) /
+                1000
+              ).toFixed(1);
               for (const msg of messages) {
                 yield* appendToLog(`  ${msg}`);
               }
@@ -248,6 +254,14 @@ export const terminalStyle = {
   toolCall: (text: string): string => styleText("dim", text),
 };
 
+/** Prints a text chunk via clack, dropping leading/trailing blank lines. */
+const printClackText = (text: string) => {
+  const trimmed = text.replaceAll(/^\n+|\n+$/g, "");
+  if (trimmed.trim().length > 0) {
+    clack.log.message(trimmed);
+  }
+};
+
 export const ClackDisplay = {
   layer: Layer.scoped(
     Display,
@@ -260,17 +274,10 @@ export const ClackDisplay = {
       // when the layer is released. Mirrors FileDisplay's `midLine`.
       let pendingText = "";
 
-      const printText = (text: string) => {
-        const trimmed = text.replaceAll(/^\n+|\n+$/g, "");
-        if (trimmed.trim().length > 0) {
-          clack.log.message(trimmed);
-        }
-      };
-
       const flushText = () => {
         const text = pendingText;
         pendingText = "";
-        printText(text);
+        printClackText(text);
       };
 
       const writeText = (chunk: string) => {
@@ -281,7 +288,7 @@ export const ClackDisplay = {
         }
         const complete = pendingText.slice(0, lastNewline);
         pendingText = pendingText.slice(lastNewline + 1);
-        printText(complete);
+        printClackText(complete);
       };
 
       const sync = (f: () => void) =>

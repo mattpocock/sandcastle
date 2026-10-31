@@ -272,20 +272,20 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
           args.push(containerName, "sh", "-c", command);
 
           return new Promise((resolve, reject) => {
-            const proc = spawn("docker", args, {
-              stdio: [
-                opts?.stdin === undefined ? "ignore" : "pipe",
-                "pipe",
-                "pipe",
-              ],
-            });
+            const stdin = opts?.stdin;
+            // Two literal `stdio` tuples, so the types know stdout and stderr
+            // are always piped.
+            const proc =
+              stdin === undefined
+                ? spawn("docker", args, { stdio: ["ignore", "pipe", "pipe"] })
+                : spawn("docker", args, { stdio: ["pipe", "pipe", "pipe"] });
 
-            if (opts?.stdin !== undefined) {
-              proc.stdin!.write(opts.stdin);
-              proc.stdin!.end();
+            if (stdin !== undefined) {
+              proc.stdin?.write(stdin);
+              proc.stdin?.end();
             }
 
-            proc.on("error", (error) => {
+            proc.on("error", (error: Error) => {
               reject(new Error(`docker exec failed: ${error.message}`));
             });
 
@@ -293,15 +293,15 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
               const { onLine } = opts;
               const stdoutTail = new BoundedTail(maxOutputTailChars, "\n");
               const stderrTail = new BoundedTail(maxOutputTailChars, "");
-              const rl = createInterface({ input: proc.stdout! });
+              const rl = createInterface({ input: proc.stdout });
               rl.on("line", (line) => {
                 stdoutTail.push(line);
                 onLine(line);
               });
-              proc.stderr!.on("data", (chunk: Buffer) => {
+              proc.stderr.on("data", (chunk: Buffer) => {
                 stderrTail.push(chunk.toString());
               });
-              proc.on("close", (code) => {
+              proc.on("close", (code: number | null) => {
                 resolve({
                   stdout: stdoutTail.toString(),
                   stderr: stderrTail.toString(),
@@ -311,13 +311,13 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
             } else {
               const stdoutChunks: string[] = [];
               const stderrChunks: string[] = [];
-              proc.stdout!.on("data", (chunk: Buffer) => {
+              proc.stdout.on("data", (chunk: Buffer) => {
                 stdoutChunks.push(chunk.toString());
               });
-              proc.stderr!.on("data", (chunk: Buffer) => {
+              proc.stderr.on("data", (chunk: Buffer) => {
                 stderrChunks.push(chunk.toString());
               });
-              proc.on("close", (code) => {
+              proc.on("close", (code: number | null) => {
                 resolve({
                   stdout: stdoutChunks.join(""),
                   stderr: stderrChunks.join(""),
@@ -427,13 +427,13 @@ const checkImageUid = async (
           );
           return;
         }
-        const imageUser = (stdout ?? "").toString().trim();
+        const imageUser = (stdout ?? "").trim();
         if (!imageUser) {
           // No USER directive in image — skip check
           resolve();
           return;
         }
-        const uidPart = imageUser.split(":")[0]!;
+        const uidPart = imageUser.split(":")[0] ?? "";
         const imageUid = Number.parseInt(uidPart, 10);
         if (isNaN(imageUid)) {
           // Non-numeric user (e.g. "agent") — can't compare, skip check
