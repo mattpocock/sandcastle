@@ -29,6 +29,10 @@
     "./sandboxes/no-sandbox": {
       "import": "./dist/sandboxes/no-sandbox.js",
       "types": "./dist/sandboxes/no-sandbox.d.ts"
+    },
+    "./sandboxes/bwrap": {
+      "import": "./dist/sandboxes/bwrap.js",
+      "types": "./dist/sandboxes/bwrap.d.ts"
     }
   },
   "bin": {

@@ -61,6 +61,7 @@ import {
   assertResumeSessionExists,
 } from "./resumePrecheck.js";
 import { registerShutdown } from "./shutdownRegistry.js";
+import { assertInteractiveSupported } from "./nativeSandboxProvider.js";
 import { raceAbortSignal } from "./raceAbortSignal.js";
 import { validateTimeoutOptions } from "./validateTimeouts.js";
 
@@ -288,6 +289,8 @@ interface SandboxHandleContext {
   readonly bindMountHandle: BindMountSandboxHandle | undefined;
   /** Provider tag, used by resumeSession to dispatch the host-side session lookup. */
   readonly providerTag: SandboxProvider["tag"];
+  /** The sandbox provider, checked before an interactive session starts. */
+  readonly sandboxProvider: SandboxProvider;
   /** The sandbox provider's env, checked against each run's agent env for overlapping keys. */
   readonly sandboxProviderEnv: Record<string, string>;
   readonly applyToHost: () => Effect.Effect<void, SyncError | SyncOutPathError>;
@@ -603,6 +606,7 @@ const buildSandboxHandle = (
     ): Promise<SandboxInteractiveResult> => {
       // If signal is already aborted, reject immediately without any setup
       interactiveOptions.signal?.throwIfAborted();
+      assertInteractiveSupported(ctx.sandboxProvider);
 
       const { agent: provider, prompt, promptFile } = interactiveOptions;
 
@@ -920,6 +924,7 @@ export const createSandboxFromWorktree = async (
       providerHandle,
       bindMountHandle,
       providerTag: options.sandbox.tag,
+      sandboxProvider: options.sandbox,
       sandboxProviderEnv: options.sandbox.env,
       applyToHost,
       timeouts: options.timeouts,
@@ -1181,6 +1186,7 @@ export const createSandbox = async (
       providerHandle,
       bindMountHandle,
       providerTag: options.sandbox.tag,
+      sandboxProvider: options.sandbox,
       sandboxProviderEnv: options.sandbox.env,
       applyToHost,
       timeouts: options.timeouts,

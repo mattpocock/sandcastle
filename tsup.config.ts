@@ -14,6 +14,7 @@ export default defineConfig({
     "sandboxes/vercel": "src/sandboxes/vercel.ts",
     "sandboxes/daytona": "src/sandboxes/daytona.ts",
     "sandboxes/no-sandbox": "src/sandboxes/no-sandbox.ts",
+    "sandboxes/bwrap": "src/sandboxes/bwrap.ts",
   },
   format: ["esm"],
   outDir: "dist",

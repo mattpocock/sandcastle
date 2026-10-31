@@ -1,5 +1,6 @@
 import { NodeContext, NodeFileSystem } from "@effect/platform-node";
 import { join } from "node:path";
+import { assertInteractiveSupported } from "./nativeSandboxProvider.js";
 import { Effect, Layer } from "effect";
 import type { AgentProvider } from "./AgentProvider.js";
 import { ClackDisplay, Display, FileDisplay } from "./Display.js";
@@ -298,6 +299,7 @@ export const createWorktree = async (
 
     const { prompt, promptFile, hooks, agent: provider } = opts;
     const resolvedSandbox = opts.sandbox ?? noSandbox();
+    assertInteractiveSupported(resolvedSandbox);
 
     // Validate buildInteractiveArgs is available
     if (!provider.buildInteractiveArgs) {
