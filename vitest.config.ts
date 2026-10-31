@@ -34,9 +34,13 @@ const entryAliases = await Promise.all(
   }),
 );
 
+// Each project's workers get their own git config.
+const setupFiles = ["src/testSetup.ts"];
+
 export default defineConfig({
   test: {
-    setupFiles: ["src/testSetup.ts"],
+    // Root only, so it runs once: a project that `extends: true` would run it
+    // again, nesting one private TMPDIR inside another.
     globalSetup: ["src/testGlobalSetup.ts"],
     // Off by default; scripts/coverage-gate.ts turns it on per run.
     coverage: {
@@ -52,14 +56,13 @@ export default defineConfig({
     },
     projects: [
       {
-        extends: true,
         resolve: { alias: entryAliases },
-        test: { name: "e2e", include: [...E2E_TESTS] },
+        test: { name: "e2e", include: [...E2E_TESTS], setupFiles },
       },
       {
-        extends: true,
         test: {
           name: "tooling",
+          setupFiles,
           include: [...TOOLING_TESTS],
           // `sandcastle` checks out worktrees under .sandcastle/worktrees/,
           // each a full copy of the repo. Their tests are not ours.
@@ -67,8 +70,7 @@ export default defineConfig({
         },
       },
       {
-        extends: true,
-        test: { name: "legacy", include: ["src/**/*.test.ts"] },
+        test: { name: "legacy", include: ["src/**/*.test.ts"], setupFiles },
       },
     ],
   },

@@ -55,17 +55,18 @@ export const execHostShell = (
       }
     };
 
-    const onAbort = (event: Event) => {
-      killTree();
-      reject(abortError(command, event.target as AbortSignal));
-    };
-    for (const s of signals) {
-      s.addEventListener("abort", onAbort);
-    }
+    const abortListeners = signals.map((signal) => {
+      const onAbort = () => {
+        killTree();
+        reject(abortError(command, signal));
+      };
+      signal.addEventListener("abort", onAbort);
+      return { signal, onAbort };
+    });
     const unregisterShutdown = registerShutdown(killTree);
     const cleanup = () => {
-      for (const s of signals) {
-        s.removeEventListener("abort", onAbort);
+      for (const { signal, onAbort } of abortListeners) {
+        signal.removeEventListener("abort", onAbort);
       }
       unregisterShutdown();
     };
