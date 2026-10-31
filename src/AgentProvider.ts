@@ -803,9 +803,7 @@ export const pi = (
     // id (reported on the stream's `session` header line), leaving the parent
     // untouched. Pi rejects `--fork` combined with `--session`.
     const sessionFlag = resumeSession
-      ? forkSession
-        ? ` --fork ${shellEscape(resumeSession)}`
-        : ` --session ${shellEscape(resumeSession)}`
+      ? ` --${forkSession ? "fork" : "session"} ${shellEscape(resumeSession)}`
       : "";
     return {
       command: `pi -p --mode json --model ${shellEscape(model)}${thinkingFlag}${sessionFlag}`,
@@ -1415,11 +1413,12 @@ export const claudeCode = (
     // permissionMode and --dangerously-skip-permissions are mutually exclusive
     // on Claude's CLI; an explicit mode on the provider takes precedence over
     // Sandcastle's default bypass.
+    const skipPermissionsFlag = dangerouslySkipPermissions
+      ? " --dangerously-skip-permissions"
+      : "";
     const permissionFlag = options?.permissionMode
       ? ` --permission-mode ${options.permissionMode}`
-      : dangerouslySkipPermissions
-        ? " --dangerously-skip-permissions"
-        : "";
+      : skipPermissionsFlag;
     const effortFlag = options?.effort ? ` --effort ${options.effort}` : "";
     const resumeFlag = resumeSession
       ? ` --resume ${shellEscape(resumeSession)}`

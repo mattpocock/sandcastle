@@ -128,11 +128,7 @@ export const startContainer = (
 
     const workdirFlags = options?.workdir ? ["-w", options.workdir] : [];
     const userFlags = options?.user ? ["--user", options.user] : [];
-    const networks = options?.network
-      ? Array.isArray(options.network)
-        ? options.network
-        : [options.network]
-      : [];
+    const networks = options?.network ? [options.network].flat() : [];
     const networkFlags = networks.flatMap((n) => ["--network", n]);
     const groupAddFlags = (options?.groups ?? []).flatMap((g) => [
       "--group-add",
