@@ -21,6 +21,7 @@ import type {
   InteractiveExecOptions,
 } from "../SandboxProvider.js";
 import { BoundedTail, MAX_TAIL_CHARS } from "../boundedTail.js";
+import { planWindowsExec, planWindowsSpawn } from "./windowsCommand.js";
 
 export interface NoSandboxOptions {
   /** Environment variables injected by this provider. Merged at launch time. */
@@ -66,32 +67,35 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
       ): Promise<ExecResult> => {
         // sudo is a no-op for no-sandbox — the user is already on the host
         const cwd = opts?.cwd ?? worktreePath;
-        const isWindows = process.platform === "win32";
-        // PowerShell and cmd.exe don't ship `sh`, so on Windows route the
-        // command string through cmd.exe instead. `/d` skips AutoRun, `/s`
-        // preserves the quoted command verbatim, `/c` runs it and exits.
-        // `windowsVerbatimArguments` keeps Node from re-quoting our args.
-        const shellCmd = isWindows ? "cmd.exe" : "sh";
-        const shellArgs = isWindows
-          ? ["/d", "/s", "/c", command]
-          : ["-c", command];
+        // Windows has no `sh`, and cmd.exe doesn't understand the POSIX
+        // quoting in Sandcastle's commands (#940): run simple commands as a
+        // direct spawn of their argv, and only the rest through cmd.exe.
+        const plan =
+          process.platform === "win32"
+            ? await planWindowsExec(command, processEnv, cwd)
+            : {
+                file: "sh",
+                args: ["-c", command],
+                windowsVerbatimArguments: false,
+                env: processEnv,
+              };
 
         return new Promise((resolve, reject) => {
           const spawnOptions = {
             cwd,
-            env: processEnv,
-            windowsVerbatimArguments: isWindows,
+            env: plan.env,
+            windowsVerbatimArguments: plan.windowsVerbatimArguments,
           };
           const stdin = opts?.stdin;
           // Two literal `stdio` tuples, so the types know stdout and stderr
           // are always piped.
           const proc =
             stdin === undefined
-              ? spawn(shellCmd, shellArgs, {
+              ? spawn(plan.file, plan.args, {
                   ...spawnOptions,
                   stdio: ["ignore", "pipe", "pipe"],
                 })
-              : spawn(shellCmd, shellArgs, {
+              : spawn(plan.file, plan.args, {
                   ...spawnOptions,
                   stdio: ["pipe", "pipe", "pipe"],
                 });
@@ -147,22 +151,35 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
       interactiveExec: async (
         args: string[],
         opts: InteractiveExecOptions,
-      ): Promise<{ exitCode: number }> =>
-        new Promise((resolve, reject) => {
+      ): Promise<{ exitCode: number }> => {
+        const cwd = opts.cwd ?? worktreePath;
+        const stdio = [opts.stdin, opts.stdout, opts.stderr] as StdioOptions;
+        // On Windows, spawn the resolved program with its argv (escaped for
+        // cmd.exe only when it is a `.cmd`/`.bat` npm shim, #940). If it
+        // isn't on PATH, fall back to `shell: true` so cmd.exe can try.
+        const plan =
+          process.platform === "win32"
+            ? await planWindowsSpawn(args, processEnv, cwd)
+            : undefined;
+        return new Promise((resolve, reject) => {
           const [cmd, ...rest] = args;
           if (cmd === undefined) {
             reject(new Error("interactiveExec needs a command to run"));
             return;
           }
-          // Agent CLIs on Windows are typically installed as `.cmd`/`.ps1`
-          // npm wrappers; bare `spawn("claude", …)` only resolves `.exe`
-          // without `shell: true`, so let cmd.exe handle PATHEXT lookup.
-          const proc = spawn(cmd, rest, {
-            cwd: opts.cwd ?? worktreePath,
-            env: processEnv,
-            stdio: [opts.stdin, opts.stdout, opts.stderr] as StdioOptions,
-            shell: process.platform === "win32",
-          });
+          const proc = plan
+            ? spawn(plan.file, plan.args, {
+                cwd,
+                env: processEnv,
+                stdio,
+                windowsVerbatimArguments: plan.windowsVerbatimArguments,
+              })
+            : spawn(cmd, rest, {
+                cwd,
+                env: processEnv,
+                stdio,
+                shell: process.platform === "win32",
+              });
 
           proc.on("error", (error: Error) => {
             reject(new Error(`exec failed: ${error.message}`));
@@ -171,7 +188,8 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
           proc.on("close", (code: number | null) => {
             resolve({ exitCode: code ?? 0 });
           });
-        }),
+        });
+      },
       close: async (): Promise<void> => {
         // No-op — no container to tear down
       },
