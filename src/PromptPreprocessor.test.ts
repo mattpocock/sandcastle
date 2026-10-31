@@ -292,7 +292,7 @@ describe("PromptPreprocessor", () => {
     const { error } = exit.cause;
     expect(error).toBeInstanceOf(PromptExpansionTimeoutError);
     if (!(error instanceof PromptExpansionTimeoutError)) {
-      throw new Error("unreachable");
+      throw new TypeError("unreachable");
     }
     expect(error.expression).toBe("sleep forever");
     expect(error.timeoutMs).toBe(30_000);
