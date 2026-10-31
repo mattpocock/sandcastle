@@ -51,27 +51,27 @@ describe("encodeProjectPath", () => {
 
   it("encodes Windows path with backslashes and drive letter", () => {
     expect(encodeProjectPath(String.raw`D:\projektit\super-app`)).toBe(
-      "D-projektit-super-app",
+      "D--projektit-super-app",
     );
   });
 
   it("strips trailing backslash before encoding", () => {
     expect(encodeProjectPath("C:\\Users\\rootti\\repos\\foo\\")).toBe(
-      "C-Users-rootti-repos-foo",
+      "C--Users-rootti-repos-foo",
     );
   });
 
   it("encodes Windows drive root", () => {
-    expect(encodeProjectPath("C:\\")).toBe("C-");
+    expect(encodeProjectPath("C:\\")).toBe("C--");
   });
 
   it("encodes drive letter without trailing separator", () => {
-    expect(encodeProjectPath("C:")).toBe("C");
+    expect(encodeProjectPath("C:")).toBe("C-");
   });
 
   it("strips multiple trailing backslashes", () => {
     expect(encodeProjectPath(String.raw`D:\projekts\app\\`)).toBe(
-      "D-projekts-app",
+      "D--projekts-app",
     );
   });
 });

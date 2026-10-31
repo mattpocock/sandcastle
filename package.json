@@ -45,9 +45,11 @@
   "scripts": {
     "build": "tsup",
     "postbuild": "rm -rf dist/templates && cp -r src/templates dist/templates && node scripts/check-public-types-effect-free.mjs",
+    "pretest": "tsx scripts/ensure-build.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tests/tsconfig.json",
+    "prelint": "tsx scripts/ensure-build.ts",
     "lint": "tsc --noEmit -p scripts/tsconfig.json && tsx scripts/lint-ratchet.ts",
     "lint:shrink": "tsx scripts/lint-ratchet.ts --shrink",
     "lint:report": "tsx scripts/lint-ratchet.ts --report",
