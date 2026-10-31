@@ -324,15 +324,13 @@ export const create = (
           return { path: normalize(collision.path), branch };
         }
         // Branch is checked out in the main working tree or external worktree
-        yield* Effect.fail(
-          new WorktreeError({
-            message:
-              `Branch '${branch}' is already checked out in worktree at '${collision.path}'. ` +
-              `Sandcastle's branch and merge-to-head strategies run the agent in a git worktree under .sandcastle/worktrees/, ` +
-              `and git refuses to check out the same branch in two worktrees at once (HEAD would become ambiguous). ` +
-              `Pick a different branch, or switch the main working tree to a different branch before re-running.`,
-          }),
-        );
+        return yield* new WorktreeError({
+          message:
+            `Branch '${branch}' is already checked out in worktree at '${collision.path}'. ` +
+            `Sandcastle's branch and merge-to-head strategies run the agent in a git worktree under .sandcastle/worktrees/, ` +
+            `and git refuses to check out the same branch in two worktrees at once (HEAD would become ambiguous). ` +
+            `Pick a different branch, or switch the main working tree to a different branch before re-running.`,
+        });
       }
       yield* execGit(
         [...NO_CONFIG_LOCK_FLAGS, "worktree", "add", worktreePath, branch],

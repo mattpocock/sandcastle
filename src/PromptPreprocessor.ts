@@ -61,23 +61,19 @@ export const preprocessPrompt = (
                 );
               if (Option.isNone(maybeResult)) {
                 const elapsedMs = (yield* Clock.currentTimeMillis) - start;
-                return yield* Effect.fail(
-                  new PromptExpansionTimeoutError({
-                    message: `Shell expression \`${command}\` timed out after ${elapsedMs}ms`,
-                    timeoutMs: PROMPT_EXPANSION_TIMEOUT_MS,
-                    expression: command,
-                    elapsedMs,
-                  }),
-                );
+                return yield* new PromptExpansionTimeoutError({
+                  message: `Shell expression \`${command}\` timed out after ${elapsedMs}ms`,
+                  timeoutMs: PROMPT_EXPANSION_TIMEOUT_MS,
+                  expression: command,
+                  elapsedMs,
+                });
               }
               const execResult = maybeResult.value;
               if (execResult.exitCode !== 0) {
-                return yield* Effect.fail(
-                  new PromptError({
-                    message: `Command \`${command}\` exited with code ${execResult.exitCode}: ${execResult.stderr}`,
-                    exitCode: execResult.exitCode,
-                  }),
-                );
+                return yield* new PromptError({
+                  message: `Command \`${command}\` exited with code ${execResult.exitCode}: ${execResult.stderr}`,
+                  exitCode: execResult.exitCode,
+                });
               }
               return { ...block, output: execResult.stdout.trimEnd() };
             });
