@@ -228,8 +228,8 @@ describe("withSandboxLifecycle (worktree mode)", () => {
         execCalls.push({ command, options });
         return Effect.succeed({ stdout: "", stderr: "", exitCode: 0 });
       },
-      copyIn: () => Effect.succeed(undefined as never),
-      copyFileOut: () => Effect.succeed(undefined as never),
+      copyIn: () => Effect.void,
+      copyFileOut: () => Effect.void,
     };
 
     await Effect.runPromise(
@@ -288,8 +288,8 @@ describe("withSandboxLifecycle (worktree mode)", () => {
         }
         return Effect.succeed({ stdout: "", stderr: "", exitCode: 0 });
       },
-      copyIn: () => Effect.succeed(undefined as never),
-      copyFileOut: () => Effect.succeed(undefined as never),
+      copyIn: () => Effect.void,
+      copyFileOut: () => Effect.void,
     };
 
     await Effect.runPromise(
@@ -1307,8 +1307,8 @@ describe("withSandboxLifecycle (worktree mode)", () => {
         }
         return Effect.succeed({ stdout: "", stderr: "", exitCode: 0 });
       },
-      copyIn: () => Effect.succeed(undefined as never),
-      copyFileOut: () => Effect.succeed(undefined as never),
+      copyIn: () => Effect.void,
+      copyFileOut: () => Effect.void,
     };
 
     const result = Effect.runPromise(
@@ -1425,8 +1425,8 @@ describe("withSandboxLifecycle (worktree mode)", () => {
           }
           return { stdout: "", stderr: "", exitCode: 0 };
         }),
-      copyIn: () => Effect.succeed(undefined as never),
-      copyFileOut: () => Effect.succeed(undefined as never),
+      copyIn: () => Effect.void,
+      copyFileOut: () => Effect.void,
     };
 
     const result = await Effect.runPromise(
@@ -1458,8 +1458,8 @@ describe("withSandboxLifecycle (worktree mode)", () => {
           }
           return { stdout: "", stderr: "", exitCode: 0 };
         }),
-      copyIn: () => Effect.succeed(undefined as never),
-      copyFileOut: () => Effect.succeed(undefined as never),
+      copyIn: () => Effect.void,
+      copyFileOut: () => Effect.void,
     };
 
     await expect(
@@ -1495,8 +1495,8 @@ describe("withSandboxLifecycle (worktree mode)", () => {
         }
         return Effect.succeed({ stdout: "", stderr: "", exitCode: 0 });
       },
-      copyIn: () => Effect.succeed(undefined as never),
-      copyFileOut: () => Effect.succeed(undefined as never),
+      copyIn: () => Effect.void,
+      copyFileOut: () => Effect.void,
     };
 
     const result = Effect.runPromise(
@@ -1612,8 +1612,8 @@ describe("withSandboxLifecycle (worktree mode)", () => {
           }
           return { stdout: "", stderr: "", exitCode: 0 };
         }),
-      copyIn: () => Effect.succeed(undefined as never),
-      copyFileOut: () => Effect.succeed(undefined as never),
+      copyIn: () => Effect.void,
+      copyFileOut: () => Effect.void,
     };
 
     await expect(
