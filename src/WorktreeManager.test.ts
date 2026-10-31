@@ -97,18 +97,14 @@ const setupRepoWithOrigin = async () => {
 
 /** Run an Effect and return its success value, throwing on failure. */
 const run = async <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem>) =>
-  Effect.runPromise(
-    effect.pipe(Effect.provide(NodeFileSystem.layer)) as Effect.Effect<A>,
-  );
+  Effect.runPromise(effect.pipe(Effect.provide(NodeFileSystem.layer)));
 
 /** Run an Effect and return the error, throwing if it succeeds. */
 const runFail = async <A, E>(
   effect: Effect.Effect<A, E, FileSystem.FileSystem>,
 ) =>
   Effect.runPromise(
-    Effect.flip(effect).pipe(
-      Effect.provide(NodeFileSystem.layer),
-    ) as Effect.Effect<E>,
+    Effect.flip(effect).pipe(Effect.provide(NodeFileSystem.layer)),
   );
 
 describe("sanitizeName", () => {
