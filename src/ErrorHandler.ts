@@ -63,7 +63,6 @@ const showErrorAndExit = (error: SandboxError) =>
 export const withFriendlyErrors = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
 ): Effect.Effect<A, Exclude<E, SandboxError>, R | Display> =>
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   Effect.catchTags(effect as Effect.Effect<A, SandboxError, R>, {
     ExecError: showErrorAndExit,
     ExecHostError: showErrorAndExit,
