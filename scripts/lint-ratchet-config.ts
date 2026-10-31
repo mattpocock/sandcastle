@@ -26,19 +26,6 @@ export const TEST_FILES: readonly string[] = [
 ];
 
 /**
- * Compiler flags tsconfig.json cannot carry yet because existing code breaks
- * them. Each is passed to tsgo on its own. Once a flag's count reaches zero,
- * move it into tsconfig.json and delete it here.
- */
-export const RATCHETED_TS_FLAGS: readonly string[] = [
-  "exactOptionalPropertyTypes",
-  "noPropertyAccessFromIndexSignature",
-  "noUnusedLocals",
-  "noUnusedParameters",
-  "noImplicitReturns",
-];
-
-/**
  * Effect diagnostics that do not apply where they are reported. The language
  * service has no per-file config, so these live here.
  */

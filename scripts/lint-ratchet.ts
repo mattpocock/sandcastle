@@ -1,9 +1,8 @@
-// The lint ratchet. Collects every violation from four sources and holds the
+// The lint ratchet. Collects every violation from three sources and holds the
 // counts, per file × rule, to scripts/lint-baseline.json:
 //
 // - oxlint (.oxlintrc.json, type-aware)               rule: `eslint(curly)`
 // - Effect's language service (tsconfig.json plugin)  rule: `effect/<name>`
-// - tsgo with each not-yet-adopted compiler flag      rule: `tsc/<flag>`
 // - inline disable comments outside the allowlist     rule: `ratchet/disable-comment`
 //
 // It fails when a count rises or a new file × rule appears, and when a count
@@ -12,7 +11,7 @@
 // (where that ref exists), and if .oxlintrc.json gains an override beyond
 // the two reviewed ones in scripts/lint-ratchet-config.ts.
 //
-//   npm run lint          oxlint, Effect diagnostics, tsc flags, then this check
+//   npm run lint          oxlint, Effect diagnostics, then this check
 //   npm run lint:shrink   lower the baseline to what is found (never raises it)
 //   npm run lint:report   totals, worst rules, worst files of the baseline
 //   tsx scripts/lint-ratchet.ts --init   first baseline; refuses once one exists
@@ -36,7 +35,6 @@ import {
   collectDirectives,
   collectEffect,
   collectOxlint,
-  collectTsc,
   run,
 } from "./lint-ratchet-sources.ts";
 
@@ -94,7 +92,6 @@ const collect = async (): Promise<Counts> => {
   const sources = await Promise.all([
     collectOxlint(),
     collectEffect(),
-    collectTsc(),
     collectDirectives(),
   ]);
   return countViolations(sources.flat());

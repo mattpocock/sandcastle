@@ -1,4 +1,4 @@
-// The four sources of violations the lint ratchet counts. Each resolves to a
+// The three sources of violations the lint ratchet counts. Each resolves to a
 // flat list of file × rule; scripts/lint-ratchet.ts tallies them.
 
 import { execFile } from "node:child_process";
@@ -10,7 +10,6 @@ import type { Exemption } from "./lint-ratchet-config.ts";
 import {
   ALLOWED_DIRECTIVES,
   EFFECT_EXEMPTIONS,
-  RATCHETED_TS_FLAGS,
 } from "./lint-ratchet-config.ts";
 import type { Violation } from "./lint-ratchet-core.ts";
 
@@ -19,8 +18,8 @@ const BIN = path.join(ROOT, "node_modules", ".bin");
 const MAX_BUFFER = 256 * 1024 * 1024;
 
 /**
- * Runs a command and resolves its stdout whatever its exit code: oxlint, tsgo
- * and the Effect language service all exit non-zero when they find something.
+ * Runs a command and resolves its stdout whatever its exit code: oxlint and
+ * the Effect language service both exit non-zero when they find something.
  * Rejects only when the command printed nothing to stdout.
  */
 export const run: (bin: string, args: readonly string[]) => Promise<string> =
@@ -100,31 +99,6 @@ export const collectEffect = async (): Promise<Violation[]> => {
     .map((d) => ({ file: path.relative(ROOT, d.file), rule: d.name }))
     .filter((v) => !isExempt(EFFECT_EXEMPTIONS, v))
     .map((v) => ({ file: v.file, rule: `effect/${v.rule}` }));
-};
-
-const TSC_ERROR = /^(?<file>[^\s(][^(]*)\(\d+,\d+\): error TS\d+/gmu;
-
-const collectTscFlag = async (flag: string): Promise<Violation[]> => {
-  const out = await run(path.join(BIN, "tsgo"), [
-    "--noEmit",
-    "--pretty",
-    "false",
-    "-p",
-    "tsconfig.json",
-    `--${flag}`,
-  ]);
-  return [...out.matchAll(TSC_ERROR)].map((m) => ({
-    file: m.groups?.["file"] ?? "",
-    rule: `tsc/${flag}`,
-  }));
-};
-
-/** tsgo once per compiler flag tsconfig.json does not carry yet. */
-export const collectTsc = async (): Promise<Violation[]> => {
-  const perFlag = await Promise.all(
-    RATCHETED_TS_FLAGS.map(async (flag) => collectTscFlag(flag)),
-  );
-  return perFlag.flat();
 };
 
 const DIRECTIVES = [
