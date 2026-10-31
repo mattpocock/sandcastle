@@ -212,7 +212,7 @@ describe("copyToWorktree", () => {
   });
 
   it.skipIf(process.platform === "win32")(
-    "kills the cp process when the copy times out",
+    "kills the cp process when the copy times out, and spawns no fallback cp",
     async () => {
       const hostDir = await mkdtemp(join(tmpdir(), "cw-test-"));
       const worktreeDir = await mkdtemp(join(tmpdir(), "cw-wt-"));
@@ -220,9 +220,10 @@ describe("copyToWorktree", () => {
       // cp blocks opening a FIFO destination that has no reader.
       const dest = join(worktreeDir, "stuck.txt");
       execFileSync("mkfifo", [dest]);
+      const cpPattern = `cp .*${dest}`;
       const cpAlive = () => {
         try {
-          execFileSync("pgrep", ["-f", `cp .*${dest}`]);
+          execFileSync("pgrep", ["-f", cpPattern]);
           return true;
         } catch {
           return false;
@@ -235,14 +236,18 @@ describe("copyToWorktree", () => {
         );
         expect(Exit.isFailure(exit)).toBe(true);
 
-        const deadline = Date.now() + 2000;
-        while (cpAlive() && Date.now() < deadline) {
-          await new Promise((r) => setTimeout(r, 50));
-        }
+        // Yield to the event loop so the killed cp's exit callback runs: a
+        // fallback cp spawned from it would block on the FIFO forever.
+        await new Promise((r) => setTimeout(r, 500));
         expect(cpAlive()).toBe(false);
       } finally {
-        // Unblock any surviving cp by opening the FIFO for reading.
-        execFileSync("sh", ["-c", `timeout 1 cat "${dest}" || true`]);
+        // Kill any surviving cp before deleting the FIFO: once the FIFO is
+        // unlinked nothing can open it for reading, so cp would never exit.
+        try {
+          execFileSync("pkill", ["-KILL", "-f", cpPattern]);
+        } catch {
+          // No cp left to kill.
+        }
         await rm(hostDir, { recursive: true, force: true });
         await rm(worktreeDir, { recursive: true, force: true });
       }
