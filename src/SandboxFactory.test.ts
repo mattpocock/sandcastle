@@ -6,7 +6,15 @@ import { mkdtemp, mkdir, readdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import {
+  assert,
+  describe,
+  expect,
+  it,
+  beforeEach,
+  afterEach,
+  vi,
+} from "vitest";
 import { AgentError, AgentIdleTimeoutError } from "./errors.js";
 import { SilentDisplay } from "./Display.js";
 import type { DisplayEntry } from "./Display.js";
@@ -29,6 +37,7 @@ import {
   WorktreeDockerSandboxFactory,
   SANDBOX_REPO_DIR,
 } from "./SandboxFactory.js";
+import type { SandboxInfo } from "./SandboxFactory.js";
 
 const execAsync = promisify(exec);
 
@@ -63,11 +72,14 @@ const findCreatedWorktree = async (
   if (!existsSync(worktreesDir)) {
     return undefined;
   }
-  const entries = await readdir(worktreesDir);
-  if (entries.length === 0) {
-    return undefined;
-  }
-  return join(worktreesDir, entries[0]!);
+  const [entry] = await readdir(worktreesDir);
+  return entry === undefined ? undefined : join(worktreesDir, entry);
+};
+
+/** The host worktree path of a sandbox, failing the test if it has none. */
+const worktreePathOf = (info: SandboxInfo): string => {
+  assert.isDefined(info.hostWorktreePath, "sandbox has no host worktree");
+  return info.hostWorktreePath;
 };
 
 /** Get the branch checked out at a worktree directory. */
@@ -156,7 +168,7 @@ describe("WorktreeDockerSandboxFactory", () => {
         const factory = yield* SandboxFactory;
         yield* factory.withSandbox((info) =>
           Effect.promise(async () => {
-            observedBranch = await branchAt(info.hostWorktreePath!);
+            observedBranch = await branchAt(worktreePathOf(info));
           }),
         );
       }).pipe(Effect.provide(layerWithBranch)),
@@ -172,7 +184,7 @@ describe("WorktreeDockerSandboxFactory", () => {
         const factory = yield* SandboxFactory;
         yield* factory.withSandbox((info) =>
           Effect.promise(async () => {
-            observedBranch = await branchAt(info.hostWorktreePath!);
+            observedBranch = await branchAt(worktreePathOf(info));
           }),
         );
       }).pipe(Effect.provide(makeLayer())),
@@ -258,7 +270,8 @@ describe("WorktreeDockerSandboxFactory", () => {
     );
 
     expect(observedWorktreePath).toBeDefined();
-    expect(existsSync(observedWorktreePath!)).toBe(false);
+    assert.isDefined(observedWorktreePath);
+    expect(existsSync(observedWorktreePath)).toBe(false);
   });
 
   it("closes provider handle on release", async () => {
@@ -282,8 +295,8 @@ describe("WorktreeDockerSandboxFactory", () => {
             Effect.gen(function* () {
               observedWorktreePath = info.hostWorktreePath;
               // Create an uncommitted change inside the worktree
-              yield* Effect.promise(async () =>
-                writeFile(join(info.hostWorktreePath!, "dirty.txt"), "dirty"),
+              yield* Effect.promise(() =>
+                writeFile(join(worktreePathOf(info), "dirty.txt"), "dirty"),
               );
               return yield* Effect.die("boom");
             }),
@@ -293,7 +306,8 @@ describe("WorktreeDockerSandboxFactory", () => {
     ).rejects.toThrow();
 
     expect(observedWorktreePath).toBeDefined();
-    expect(existsSync(observedWorktreePath!)).toBe(true);
+    assert.isDefined(observedWorktreePath);
+    expect(existsSync(observedWorktreePath)).toBe(true);
   });
 
   it("attaches preservedWorktreePath to AgentIdleTimeoutError on failure with dirty worktree", async () => {
@@ -304,8 +318,8 @@ describe("WorktreeDockerSandboxFactory", () => {
         yield* factory.withSandbox((info) =>
           Effect.gen(function* () {
             observedWorktreePath = info.hostWorktreePath;
-            yield* Effect.promise(async () =>
-              writeFile(join(info.hostWorktreePath!, "dirty.txt"), "dirty"),
+            yield* Effect.promise(() =>
+              writeFile(join(worktreePathOf(info), "dirty.txt"), "dirty"),
             );
             return yield* Effect.fail(
               new AgentIdleTimeoutError({
@@ -340,8 +354,8 @@ describe("WorktreeDockerSandboxFactory", () => {
         yield* factory.withSandbox((info) =>
           Effect.gen(function* () {
             observedWorktreePath = info.hostWorktreePath;
-            yield* Effect.promise(async () =>
-              writeFile(join(info.hostWorktreePath!, "dirty.txt"), "dirty"),
+            yield* Effect.promise(() =>
+              writeFile(join(worktreePathOf(info), "dirty.txt"), "dirty"),
             );
             return yield* Effect.fail(
               new AgentError({ message: "agent failed" }),
@@ -413,7 +427,9 @@ describe("WorktreeDockerSandboxFactory", () => {
       }).pipe(Effect.provide(makeLayer())),
     );
 
-    expect(existsSync(observedWorktreePath!)).toBe(false);
+    assert.isDefined(observedWorktreePath);
+
+    expect(existsSync(observedWorktreePath)).toBe(false);
     expect(stderrSpy).not.toHaveBeenCalled();
     stderrSpy.mockRestore();
   });
@@ -426,8 +442,8 @@ describe("WorktreeDockerSandboxFactory", () => {
         return yield* factory.withSandbox((info) =>
           Effect.gen(function* () {
             observedWorktreePath = info.hostWorktreePath;
-            yield* Effect.promise(async () =>
-              writeFile(join(info.hostWorktreePath!, "dirty.txt"), "dirty"),
+            yield* Effect.promise(() =>
+              writeFile(join(worktreePathOf(info), "dirty.txt"), "dirty"),
             );
             return "done";
           }),
@@ -437,7 +453,8 @@ describe("WorktreeDockerSandboxFactory", () => {
 
     expect(result.preservedWorktreePath).toBe(observedWorktreePath);
     expect(result.value).toBe("done");
-    expect(existsSync(observedWorktreePath!)).toBe(true);
+    assert.isDefined(observedWorktreePath);
+    expect(existsSync(observedWorktreePath)).toBe(true);
   });
 
   it("prints uncommitted changes message on success with dirty worktree", async () => {
@@ -450,8 +467,8 @@ describe("WorktreeDockerSandboxFactory", () => {
         yield* factory.withSandbox((info) =>
           Effect.gen(function* () {
             observedWorktreePath = info.hostWorktreePath;
-            yield* Effect.promise(async () =>
-              writeFile(join(info.hostWorktreePath!, "dirty.txt"), "dirty"),
+            yield* Effect.promise(() =>
+              writeFile(join(worktreePathOf(info), "dirty.txt"), "dirty"),
             );
           }),
         );
@@ -479,7 +496,8 @@ describe("WorktreeDockerSandboxFactory", () => {
     ).rejects.toThrow();
 
     expect(observedWorktreePath).toBeDefined();
-    expect(existsSync(observedWorktreePath!)).toBe(false);
+    assert.isDefined(observedWorktreePath);
+    expect(existsSync(observedWorktreePath)).toBe(false);
   });
 
   it("merge-to-head: deletes the temp branch when the run fails with no commits on it", async () => {
@@ -507,7 +525,7 @@ describe("WorktreeDockerSandboxFactory", () => {
             yield* factory.withSandbox((info) =>
               Effect.promise(async () =>
                 commitFile(
-                  info.hostWorktreePath!,
+                  worktreePathOf(info),
                   "agent.txt",
                   "agent",
                   "agent commit",
@@ -934,7 +952,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
         const factory = yield* SandboxFactory;
         yield* factory.withSandbox((info) =>
           Effect.promise(async () => {
-            observedBranch = await branchAt(info.hostWorktreePath!);
+            observedBranch = await branchAt(worktreePathOf(info));
           }),
         );
       }).pipe(Effect.provide(layer)),
@@ -960,7 +978,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
     );
 
     expect(receivedInfo?.hostWorktreePath).toBeDefined();
-    expect(receivedInfo!.hostWorktreePath).toContain(
+    expect(receivedInfo?.hostWorktreePath).toContain(
       join(hostDir, ".sandcastle", "worktrees"),
     );
   });
@@ -982,7 +1000,9 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
       }).pipe(Effect.provide(makeIsolatedLayer(hostDir))),
     );
 
-    expect(existsSync(observedWorktreePath!)).toBe(false);
+    assert.isDefined(observedWorktreePath);
+
+    expect(existsSync(observedWorktreePath)).toBe(false);
   });
 
   it("preserves worktree on failure with dirty worktree", async () => {
@@ -998,8 +1018,8 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
           yield* factory.withSandbox((info) =>
             Effect.gen(function* () {
               observedWorktreePath = info.hostWorktreePath;
-              yield* Effect.promise(async () =>
-                writeFile(join(info.hostWorktreePath!, "dirty.txt"), "dirty"),
+              yield* Effect.promise(() =>
+                writeFile(join(worktreePathOf(info), "dirty.txt"), "dirty"),
               );
               return yield* Effect.die("boom");
             }),
@@ -1008,7 +1028,9 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
       ),
     ).rejects.toThrow();
 
-    expect(existsSync(observedWorktreePath!)).toBe(true);
+    assert.isDefined(observedWorktreePath);
+
+    expect(existsSync(observedWorktreePath)).toBe(true);
   });
 
   it("removes worktree when isolated sandbox start fails", async () => {
@@ -1171,7 +1193,8 @@ describe("WorktreeDockerSandboxFactory — no-sandbox provider", () => {
     expect(observedWorktreePath).toContain(
       join(hostDir, ".sandcastle", "worktrees"),
     );
-    expect(existsSync(observedWorktreePath!)).toBe(false);
+    assert.isDefined(observedWorktreePath);
+    expect(existsSync(observedWorktreePath)).toBe(false);
   });
 
   it("worktree mode: removes worktree when sandbox start fails", async () => {
@@ -1235,13 +1258,10 @@ describe("WorktreeDockerSandboxFactory — interruption preserves the worktree",
     return dir;
   };
 
+  const bindMountProvider = (): SandboxProvider =>
+    testStubProvider({ name: "test-provider", worktreePath: "/w" }).provider;
   const providers: [string, () => SandboxProvider][] = [
-    [
-      "bind-mount",
-      () =>
-        testStubProvider({ name: "test-provider", worktreePath: "/w" })
-          .provider,
-    ],
+    ["bind-mount", bindMountProvider],
     ["isolated", () => testIsolated()],
     ["no-sandbox", () => noSandbox()],
   ];
@@ -1291,7 +1311,8 @@ describe("WorktreeDockerSandboxFactory — interruption preserves the worktree",
       ).rejects.toThrow();
 
       expect(observedWorktreePath).toBeDefined();
-      expect(existsSync(observedWorktreePath!)).toBe(true);
+      assert.isDefined(observedWorktreePath);
+      expect(existsSync(observedWorktreePath)).toBe(true);
       expect(errors).toHaveBeenCalledWith(
         `\nWorktree preserved at ${observedWorktreePath}`,
       );
@@ -1313,11 +1334,13 @@ describe("WorktreeDockerSandboxFactory — interruption preserves the worktree",
           }),
         );
       }).pipe(
-        Effect.provide(makeLayer(hostDir, providers[0]![1](), ac.signal)),
+        Effect.provide(makeLayer(hostDir, bindMountProvider(), ac.signal)),
       ),
     );
 
-    expect(existsSync(observedWorktreePath!)).toBe(false);
+    assert.isDefined(observedWorktreePath);
+
+    expect(existsSync(observedWorktreePath)).toBe(false);
   });
 
   it("still removes a clean worktree on a plain failure (no abort)", async () => {
@@ -1337,12 +1360,14 @@ describe("WorktreeDockerSandboxFactory — interruption preserves the worktree",
             }),
           );
         }).pipe(
-          Effect.provide(makeLayer(hostDir, providers[0]![1](), ac.signal)),
+          Effect.provide(makeLayer(hostDir, bindMountProvider(), ac.signal)),
         ),
       ),
     ).rejects.toThrow();
 
-    expect(existsSync(observedWorktreePath!)).toBe(false);
+    assert.isDefined(observedWorktreePath);
+
+    expect(existsSync(observedWorktreePath)).toBe(false);
   });
 
   for (const [label, makeProvider] of providers) {
@@ -1382,7 +1407,7 @@ describe("WorktreeDockerSandboxFactory — interruption preserves the worktree",
       Effect.gen(function* () {
         const factory = yield* SandboxFactory;
         yield* factory.withSandbox(() => Effect.void);
-      }).pipe(Effect.provide(makeLayer(hostDir, providers[0]![1]()))),
+      }).pipe(Effect.provide(makeLayer(hostDir, bindMountProvider()))),
     );
     process.emit("SIGINT");
 
