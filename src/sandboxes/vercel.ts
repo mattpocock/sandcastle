@@ -7,6 +7,7 @@
  */
 
 import { execSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { readFile, unlink, writeFile, mkdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -233,8 +234,23 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
             onLine?: (line: string) => void;
             cwd?: string;
             sudo?: boolean;
+            stdin?: string;
           },
         ): Promise<ExecResult> => {
+          let effectiveCommand = command;
+          if (opts?.stdin !== undefined) {
+            // `runCommand` gives a command no stdin unless it is detached:
+            // the command reads EOF. So write stdin to a file in the sandbox
+            // and redirect it in (a file, not an argument, keeps clear of the
+            // per-arg size limit). The redirect opens the file before the
+            // group runs, so the group can delete it straight away and leave
+            // nothing behind.
+            const stdinPath = `/tmp/sandcastle-stdin-${randomUUID()}`;
+            await sandbox.writeFiles([
+              { path: stdinPath, content: Buffer.from(opts.stdin) },
+            ]);
+            effectiveCommand = `{ rm -f ${stdinPath}; ${command}\n} < ${stdinPath}`;
+          }
           if (opts?.onLine) {
             const { onLine } = opts;
             const stdoutTail = new BoundedTail(maxOutputTailChars, "\n");
@@ -271,7 +287,7 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
 
             const result = await sandbox.runCommand({
               cmd: "sh",
-              args: ["-c", command],
+              args: ["-c", effectiveCommand],
               cwd: opts?.cwd ?? VERCEL_REPO_PATH,
               stdout: stdoutWritable,
               stderr: stderrWritable,
@@ -287,7 +303,7 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
 
           const result = await sandbox.runCommand({
             cmd: "sh",
-            args: ["-c", command],
+            args: ["-c", effectiveCommand],
             cwd: opts?.cwd ?? VERCEL_REPO_PATH,
             ...(opts?.sudo ? { sudo: true } : {}),
           });
