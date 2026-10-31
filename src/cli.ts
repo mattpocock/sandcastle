@@ -30,6 +30,8 @@ import {
   buildImageShellCommand,
   parseBdVersion,
   beadsVersionWarning,
+  sandboxProviderPreflightWarning,
+  agentCliWarning,
 } from "./InitService.js";
 import { defaultImageName } from "./sandboxes/docker.js";
 import { ConfigDirError, InitError } from "./errors.js";
@@ -497,6 +499,25 @@ const initCommand = Command.make(
           ),
         ),
       );
+
+      // A native provider runs on the host's own sandbox tool. Check it works
+      // now, so a missing tool shows up at init, not on the first run.
+      const preflightWarning = sandboxProviderPreflightWarning(
+        selectedSandboxProvider,
+      );
+      if (preflightWarning !== undefined) {
+        yield* d.status(preflightWarning, "warn");
+      }
+      // ...and the agent CLI it runs is installed on the host.
+      if (selectedSandboxProvider.image === undefined) {
+        const agentWarning = yield* agentCliWarning(
+          selectedAgent,
+          selectedSandboxProvider,
+        );
+        if (agentWarning !== undefined) {
+          yield* d.status(agentWarning, "warn");
+        }
+      }
 
       // Beads sandboxes open the host's .beads/ with the image's bd, so a
       // different host bd breaks one side or the other (see beadsVersionWarning).
