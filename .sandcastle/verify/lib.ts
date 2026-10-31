@@ -56,8 +56,28 @@ const CHEAP_MODELS: Record<Agent, string> = {
   copilot: "claude-haiku-4.5", // 0.33x premium requests
 };
 
+/**
+ * Factory options the cheap model needs to work at all, written as the
+ * source of an object literal. They belong to the model above, so
+ * VERIFY_MODEL drops them.
+ */
+const CHEAP_MODEL_OPTIONS: Partial<Record<Agent, string>> = {
+  // pi defaults to `--thinking medium`, sent as thinking.type.enabled, which
+  // claude-haiku-5-5 rejects with a 400 (pi 0.73.1).
+  pi: '{ thinking: "off" }',
+};
+
 export const cheapModel = (agent: Agent): string =>
   process.env.VERIFY_MODEL || CHEAP_MODELS[agent];
+
+/** The agent factory call to put in the world's main file, e.g.
+ *  `pi("anthropic/claude-haiku-5-5", { thinking: "off" })`. */
+export const cheapAgentCall = (agent: Agent): string => {
+  const options = process.env.VERIFY_MODEL
+    ? undefined
+    : CHEAP_MODEL_OPTIONS[agent];
+  return `${agent}(${JSON.stringify(cheapModel(agent))}${options ? `, ${options}` : ""})`;
+};
 
 /** The `sandcastle init --agent` value for each factory. */
 export const INIT_AGENT: Record<Agent, string> = {

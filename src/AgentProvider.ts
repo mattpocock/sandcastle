@@ -637,7 +637,12 @@ const parsePiStreamLine = (line: string): ParsedStreamEvent[] => {
 
 /** Options for the pi agent provider. */
 export interface PiOptions {
-  /** Reasoning effort level. Maps to the CLI's --thinking flag. */
+  /**
+   * Reasoning effort level. Maps to the CLI's --thinking flag. When omitted,
+   * no flag is passed and pi uses its own default (`medium`), which some
+   * models reject: with pi 0.73.1, `anthropic/claude-haiku-5-5` returns a 400.
+   * Pass `"off"` for those.
+   */
   readonly thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
   /** Environment variables injected by this agent provider. */
   readonly env?: Record<string, string>;

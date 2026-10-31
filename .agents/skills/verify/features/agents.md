@@ -2,7 +2,9 @@
 
 Each is a factory `(model, options?) => AgentProvider` exported from `@ai-hero/sandcastle` (`src/AgentProvider.ts`).
 
-- **Model:** every run uses the cheapest model, which `doctor` prints and `VERIFY_MODEL` overrides.
+- **Model:** every run uses the cheapest model. `doctor` prints the whole factory call for it, options included, and `VERIFY_MODEL` overrides the model.
+  - Write that call into the main file exactly as printed. `init --model` sets only the model, so after `init`, add any options by hand.
+  - pi's call carries `{ thinking: "off" }`. Without it, pi sends its default thinking (`medium`), and claude-haiku-5-5 rejects that with a 400.
 - **Keys:** a missing key makes the run UNVERIFIABLE, naming the key. Matt adds keys with `.sandcastle/setup-verify-keys.sh`.
 - **Image:** the agent's CLI lives in the image that `init --agent <x>` writes, so each agent needs its own world or its own `init`.
 
