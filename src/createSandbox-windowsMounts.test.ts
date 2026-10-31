@@ -8,7 +8,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 
 const execAsync = promisify(exec);
@@ -106,7 +106,8 @@ describe("createSandbox Windows mount patching", () => {
 
     try {
       expect(mockPatchGitMountsForWindows).toHaveBeenCalledTimes(1);
-      const call = mockPatchGitMountsForWindows.mock.calls[0]!;
+      const [call] = mockPatchGitMountsForWindows.mock.calls;
+      assert.isDefined(call);
       const gitMounts = call[0];
       const calledWorktreePath = call[1];
       const sandboxRepoDir = call[2];
@@ -143,7 +144,8 @@ describe("createSandbox Windows mount patching", () => {
 
     try {
       expect(mockPatchGitMountsForWindows).toHaveBeenCalledTimes(1);
-      const call = mockPatchGitMountsForWindows.mock.calls[0]!;
+      const [call] = mockPatchGitMountsForWindows.mock.calls;
+      assert.isDefined(call);
       const gitMounts = call[0];
       const patchWorktreePath = call[1];
       const sandboxRepoDir = call[2];

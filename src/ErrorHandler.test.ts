@@ -1,5 +1,13 @@
 import { Effect, Ref } from "effect";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  assert,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { SilentDisplay } from "./Display.js";
 import type { DisplayEntry, Display } from "./Display.js";
 import {
@@ -179,9 +187,9 @@ describe("withFriendlyErrors", () => {
       ),
     );
     const s = statusOf(entries);
-    expect(s).toBeDefined();
-    expect(s!.severity).toBe("error");
-    expect(s!.message).toContain("daemon not running");
+    assert.isDefined(s);
+    expect(s.severity).toBe("error");
+    expect(s.message).toContain("daemon not running");
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 
@@ -195,7 +203,7 @@ describe("withFriendlyErrors", () => {
         ),
       ),
     );
-    expect(statusOf(entries)!.message).toContain("No .sandcastle/");
+    expect(statusOf(entries)?.message).toContain("No .sandcastle/");
   });
 
   it("routes AgentIdleTimeoutError through Display with timeout seconds", async () => {
@@ -211,8 +219,9 @@ describe("withFriendlyErrors", () => {
       ),
     );
     const s = statusOf(entries);
-    expect(s!.message).toContain("600");
-    expect(s!.severity).toBe("error");
+    assert.isDefined(s);
+    expect(s.message).toContain("600");
+    expect(s.severity).toBe("error");
   });
 
   it("passes through successful effects unchanged", async () => {
