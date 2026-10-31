@@ -1331,9 +1331,6 @@
     "import(consistent-type-specifier-style)": 3,
     "node(no-sync)": 1,
     "typescript(no-unnecessary-type-assertion)": 1,
-    "typescript(no-unsafe-argument)": 1,
-    "typescript(no-unsafe-call)": 2,
-    "typescript(no-unsafe-member-access)": 2,
     "typescript(prefer-nullish-coalescing)": 6,
     "typescript(strict-boolean-expressions)": 15
   },

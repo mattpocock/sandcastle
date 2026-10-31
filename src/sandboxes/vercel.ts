@@ -229,7 +229,7 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
             let partial = "";
 
             const stdoutWritable = new Writable({
-              write(chunk, _encoding, callback) {
+              write(chunk: Buffer, _encoding, callback) {
                 const text = partial + chunk.toString();
                 const lines = text.split("\n");
                 partial = lines.pop() ?? "";
@@ -250,7 +250,7 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
             });
 
             const stderrWritable = new Writable({
-              write(chunk, _encoding, callback) {
+              write(chunk: Buffer, _encoding, callback) {
                 stderrTail.push(chunk.toString());
                 callback();
               },
