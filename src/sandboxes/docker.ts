@@ -305,7 +305,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
                 resolve({
                   stdout: stdoutTail.toString(),
                   stderr: stderrTail.toString(),
-                  exitCode: code ?? 0,
+                  exitCode: code ?? 1,
                 });
               });
             } else {
@@ -321,7 +321,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
                 resolve({
                   stdout: stdoutChunks.join(""),
                   stderr: stderrChunks.join(""),
-                  exitCode: code ?? 0,
+                  exitCode: code ?? 1,
                 });
               });
             }
@@ -357,7 +357,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
             });
 
             proc.on("close", (code: number | null) => {
-              resolve({ exitCode: code ?? 0 });
+              resolve({ exitCode: code ?? 1 });
             });
           }),
         copyFileIn: async (
