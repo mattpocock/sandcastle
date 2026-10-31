@@ -186,6 +186,17 @@ export const withTimeout =
       }),
     );
 
+/**
+ * `.fork()` was called on an agent provider whose CLI resumes a session but
+ * has no native fork. Thrown before any sandbox starts.
+ */
+export class ForkNotSupportedError extends Data.TaggedError(
+  "ForkNotSupportedError",
+)<{
+  readonly message: string;
+  readonly agentProvider: string;
+}> {}
+
 /** Session capture (read, rewrite, or write) failed */
 export class SessionCaptureError extends Data.TaggedError(
   "SessionCaptureError",

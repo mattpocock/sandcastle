@@ -11,6 +11,7 @@ import {
   pi,
 } from "./AgentProvider.js";
 import type { AgentCommandOptions, AgentProvider } from "./AgentProvider.js";
+import { ForkNotSupportedError } from "./errors.js";
 import type { BindMountSandboxHandle } from "./SandboxProvider.js";
 
 /** Builds interactive args, failing the test if the provider has no interactive mode. */
@@ -1700,9 +1701,48 @@ describe("copilot factory", () => {
     expect(provider.name).toBe("copilot");
   });
 
-  it("does not capture sessions by default", () => {
+  it("captures sessions by default, and can opt out", () => {
+    expect(copilot("claude-sonnet-4.5").captureSessions).toBe(true);
+    expect(
+      copilot("claude-sonnet-4.5", { captureSessions: false }).captureSessions,
+    ).toBe(false);
+  });
+
+  it("buildPrintCommand resumes a session with --resume=<id>", () => {
     const provider = copilot("claude-sonnet-4.5");
-    expect(provider.captureSessions).toBe(false);
+    const { command } = provider.buildPrintCommand({
+      ...opts("test"),
+      resumeSession: "abc-123",
+    });
+    expect(command).toContain("--resume='abc-123'");
+  });
+
+  it("buildPrintCommand omits --resume on a fresh run", () => {
+    const provider = copilot("claude-sonnet-4.5");
+    const { command } = provider.buildPrintCommand(opts("test"));
+    expect(command).not.toContain("--resume");
+  });
+
+  it("declares that it cannot fork (the CLI has no fork flag)", () => {
+    expect(copilot("claude-sonnet-4.5").sessionStorage.canFork).toBe(false);
+  });
+
+  it("buildPrintCommand throws ForkNotSupportedError naming copilot when asked to fork", () => {
+    const provider = copilot("claude-sonnet-4.5");
+    expect(() =>
+      provider.buildPrintCommand({
+        ...opts("test"),
+        resumeSession: "abc-123",
+        forkSession: true,
+      }),
+    ).toThrow(ForkNotSupportedError);
+    expect(() =>
+      provider.buildPrintCommand({
+        ...opts("test"),
+        resumeSession: "abc-123",
+        forkSession: true,
+      }),
+    ).toThrow(/copilot/u);
   });
 
   it("buildPrintCommand includes the model and -p prompt", () => {
@@ -1756,17 +1796,6 @@ describe("copilot factory", () => {
     const provider = copilot("claude-sonnet-4.5");
     const { command } = provider.buildPrintCommand(opts("test"));
     expect(command).not.toContain("--effort");
-  });
-
-  it("buildPrintCommand ignores resumeSession (resume not yet supported)", () => {
-    const provider = copilot("claude-sonnet-4.5");
-    const { command } = provider.buildPrintCommand({
-      prompt: "test",
-      dangerouslySkipPermissions: true,
-      resumeSession: "abc-123",
-    });
-    expect(command).not.toContain("--resume");
-    expect(command).not.toContain("abc-123");
   });
 
   it("buildInteractiveArgs includes copilot binary, --model, and prompt", () => {
@@ -2185,16 +2214,17 @@ describe("sessionStorage", () => {
   /** Bind-mount handle backed by the host filesystem (sandbox path == host path). */
   const fsBindMountHandle = (): BindMountSandboxHandle => ({
     worktreePath: "/workspace",
-    exec: async (command) => {
+    exec: async (command, options) => {
       const { exec } = await import("node:child_process");
       return new Promise((resolve) => {
-        exec(command, (err, stdout, stderr) => {
+        const child = exec(command, (err, stdout, stderr) => {
           resolve({
             stdout: stdout.toString(),
             stderr: stderr.toString(),
             exitCode: err && typeof err.code === "number" ? err.code : 0,
           });
         });
+        child.stdin?.end(options?.stdin);
       });
     },
     copyFileIn: async (hostPath, sandboxPath) => {
@@ -2661,6 +2691,140 @@ describe("sessionStorage", () => {
     } finally {
       await rm(hostDir, { recursive: true, force: true });
       await rm(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  /** The `data.context` of each event in a Copilot `events.jsonl`. */
+  const copilotContexts = (jsonl: string): unknown[] =>
+    jsonl
+      .split("\n")
+      .filter((line) => line !== "")
+      .map((line): unknown => {
+        const event: unknown = JSON.parse(line);
+        return typeof event === "object" && event !== null && "data" in event
+          ? event.data
+          : undefined;
+      });
+
+  it("copilot captureToHost copies events.jsonl to the host with the context cwd rewritten", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-copilot-host-"));
+    const sandboxDir = await mkdtemp(join(tmpdir(), "sandcastle-copilot-sbx-"));
+    try {
+      const id = "9f2885bc-f7a6-44ad-8c8e-4e22ca99fa26";
+      await mkdir(join(sandboxDir, id), { recursive: true });
+      const start = {
+        type: "session.start",
+        data: {
+          sessionId: id,
+          context: {
+            cwd: "/sandbox/repo",
+            gitRoot: "/sandbox/repo",
+            branch: "main",
+          },
+        },
+      };
+      const message = {
+        type: "user.message",
+        data: { content: "cwd is /sandbox/repo" },
+      };
+      await writeFile(
+        join(sandboxDir, id, "events.jsonl"),
+        `${JSON.stringify(start)}\n${JSON.stringify(message)}\n`,
+      );
+      const { sessionStorage } = copilot("claude-haiku-4.5", {
+        sessionStorage: {
+          hostSessionsDir: hostDir,
+          sandboxSessionsDir: sandboxDir,
+        },
+      });
+      await expect(sessionStorage.existsOnHost("/host/repo", id)).resolves.toBe(
+        false,
+      );
+
+      await sessionStorage.captureToHost({
+        hostCwd: "/host/repo",
+        sandboxCwd: "/sandbox/repo",
+        sessionId: id,
+        handle: fsBindMountHandle(),
+      });
+
+      const hostPath = join(hostDir, id, "events.jsonl");
+      expect(sessionStorage.hostSessionFilePath("/host/repo", id)).toBe(
+        hostPath,
+      );
+      // Only the structured context moves; free text is left alone.
+      expect(copilotContexts(await readFile(hostPath, "utf8"))).toStrictEqual([
+        {
+          sessionId: id,
+          context: { cwd: "/host/repo", gitRoot: "/host/repo", branch: "main" },
+        },
+        { content: "cwd is /sandbox/repo" },
+      ]);
+      await expect(sessionStorage.existsOnHost("/host/repo", id)).resolves.toBe(
+        true,
+      );
+      await expect(sessionStorage.findByIdOnHost(id)).resolves.toStrictEqual({
+        path: hostPath,
+        searchedRoot: hostDir,
+      });
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it("copilot resumeIntoSandbox writes events.jsonl into the sandbox session-state with the cwd rewritten", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-copilot-host-"));
+    const sandboxDir = await mkdtemp(join(tmpdir(), "sandcastle-copilot-sbx-"));
+    try {
+      const id = "b8c6a68f-e6fe-4253-8574-e1230d699808";
+      await mkdir(join(hostDir, id), { recursive: true });
+      const start = {
+        type: "session.start",
+        data: { context: { cwd: "/host/repo", gitRoot: "/host/repo" } },
+      };
+      await writeFile(
+        join(hostDir, id, "events.jsonl"),
+        `${JSON.stringify(start)}\n`,
+      );
+      const { sessionStorage } = copilot("claude-haiku-4.5", {
+        sessionStorage: {
+          hostSessionsDir: hostDir,
+          sandboxSessionsDir: sandboxDir,
+        },
+      });
+
+      await sessionStorage.resumeIntoSandbox({
+        hostCwd: "/host/repo",
+        sandboxCwd: "/sandbox/repo",
+        sessionId: id,
+        handle: fsBindMountHandle(),
+      });
+
+      const content = await readFile(
+        join(sandboxDir, id, "events.jsonl"),
+        "utf8",
+      );
+      expect(copilotContexts(content)).toStrictEqual([
+        { context: { cwd: "/sandbox/repo", gitRoot: "/sandbox/repo" } },
+      ]);
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it("copilot findByIdOnHost reports the searched root when the session is missing", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-copilot-host-"));
+    try {
+      const { sessionStorage } = copilot("claude-haiku-4.5", {
+        sessionStorage: { hostSessionsDir: hostDir },
+      });
+      await expect(
+        sessionStorage.findByIdOnHost("missing"),
+      ).resolves.toStrictEqual({ path: undefined, searchedRoot: hostDir });
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
     }
   });
 });
