@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, mkdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Exit } from "effect";
@@ -77,6 +77,86 @@ describe("copyToWorktree", () => {
     }
   });
 
+  it("merges a directory into one that already exists in the worktree", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cw-test-"));
+    const worktreeDir = await mkdtemp(join(tmpdir(), "cw-wt-"));
+
+    // Host: cfg/tracked.txt (tracked, so already in the worktree) and
+    // cfg/secret.txt (gitignored, so only on the host)
+    await mkdir(join(hostDir, "cfg", "sub"), { recursive: true });
+    await writeFile(join(hostDir, "cfg", "tracked.txt"), "tracked");
+    await writeFile(join(hostDir, "cfg", "secret.txt"), "secret");
+    await writeFile(join(hostDir, "cfg", "sub", "deep.txt"), "deep");
+    await mkdir(join(worktreeDir, "cfg"));
+    await writeFile(join(worktreeDir, "cfg", "tracked.txt"), "tracked");
+
+    try {
+      await Effect.runPromise(copyToWorktree(["cfg"], hostDir, worktreeDir));
+
+      expect(
+        await readFile(join(worktreeDir, "cfg", "secret.txt"), "utf8"),
+      ).toBe("secret");
+      expect(
+        await readFile(join(worktreeDir, "cfg", "sub", "deep.txt"), "utf8"),
+      ).toBe("deep");
+      expect(existsSync(join(worktreeDir, "cfg", "cfg"))).toBe(false);
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(worktreeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("copies a directory that does not exist in the worktree to the same path", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cw-test-"));
+    const worktreeDir = await mkdtemp(join(tmpdir(), "cw-wt-"));
+
+    await mkdir(join(hostDir, "ignoredir"));
+    await writeFile(join(hostDir, "ignoredir", "x.txt"), "x");
+
+    try {
+      await Effect.runPromise(
+        copyToWorktree(["ignoredir"], hostDir, worktreeDir),
+      );
+
+      expect(
+        await readFile(join(worktreeDir, "ignoredir", "x.txt"), "utf8"),
+      ).toBe("x");
+      expect(existsSync(join(worktreeDir, "ignoredir", "ignoredir"))).toBe(
+        false,
+      );
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(worktreeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("creates missing parent directories for a nested path", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cw-test-"));
+    const worktreeDir = await mkdtemp(join(tmpdir(), "cw-wt-"));
+
+    // deep/ is gitignored, so none of it exists in the worktree
+    await mkdir(join(hostDir, "deep", "a", "b"), { recursive: true });
+    await writeFile(join(hostDir, "deep", "a", "b", "c.txt"), "c");
+    await mkdir(join(hostDir, "nested", "dir"), { recursive: true });
+    await writeFile(join(hostDir, "nested", "dir", "d.txt"), "d");
+
+    try {
+      await Effect.runPromise(
+        copyToWorktree(["deep/a/b/c.txt", "nested/dir"], hostDir, worktreeDir),
+      );
+
+      expect(
+        await readFile(join(worktreeDir, "deep", "a", "b", "c.txt"), "utf8"),
+      ).toBe("c");
+      expect(
+        await readFile(join(worktreeDir, "nested", "dir", "d.txt"), "utf8"),
+      ).toBe("d");
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(worktreeDir, { recursive: true, force: true });
+    }
+  });
+
   it("skips missing source paths without error", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cw-test-"));
     const worktreeDir = await mkdtemp(join(tmpdir(), "cw-wt-"));
@@ -103,12 +183,7 @@ describe("copyToWorktree", () => {
     try {
       const customTimeout = 500;
       const exitPromise = Effect.runPromiseExit(
-        copyToWorktree(
-          ["big-file.txt"],
-          hostDir,
-          worktreeDir,
-          customTimeout,
-        ),
+        copyToWorktree(["big-file.txt"], hostDir, worktreeDir, customTimeout),
       );
 
       // Advance past the custom timeout
