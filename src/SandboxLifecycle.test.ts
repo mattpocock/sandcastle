@@ -514,7 +514,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     );
 
     // The message says the merge was aborted and names a retry that works
-    const message = (error as { message: string }).message;
+    const { message } = error as { message: string };
     expect(message).toMatch(/aborted/i);
     expect(message).toContain("git merge sandcastle/test");
     // git's own output is included, not swallowed
@@ -563,7 +563,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       ).pipe(Effect.flip, Effect.provide(testDisplayLayer)),
     );
 
-    const message = (error as { message: string }).message;
+    const { message } = error as { message: string };
     expect(message).toMatch(/would be overwritten/);
     expect(message).not.toMatch(/aborted/);
     await expect(readFile(join(hostDir, "file.txt"), "utf8")).resolves.toBe(

@@ -686,7 +686,7 @@ const buildSandboxHandle = (
                   });
 
                   // Race exec with abort signal if provided
-                  const signal = interactiveOptions.signal;
+                  const { signal } = interactiveOptions;
                   const result = yield* Effect.promise(() => {
                     if (!signal) return execPromise;
                     if (signal.aborted) return Promise.reject(signal.reason);

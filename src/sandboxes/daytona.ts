@@ -23,7 +23,7 @@ import type {
 } from "@daytona/sdk";
 
 const shellEscape = (s: string): string =>
-  `'${s.replace(/'/g, String.raw`'\''`)}'`;
+  `'${s.replaceAll("'", String.raw`'\''`)}'`;
 
 /** Options for the Daytona sandbox provider. */
 export interface DaytonaOptions {
@@ -152,7 +152,7 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
             effectiveCommand = `{ rm -f ${stdinPath}; ${effectiveCommand}\n} < ${stdinPath}`;
           }
           if (opts?.onLine) {
-            const onLine = opts.onLine;
+            const { onLine } = opts;
             const sessionId = `sandcastle-${crypto.randomUUID()}`;
             const pidPath = `/tmp/${sessionId}.pid`;
             await sandbox.process.createSession(sessionId);

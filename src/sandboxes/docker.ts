@@ -290,7 +290,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
             });
 
             if (opts?.onLine) {
-              const onLine = opts.onLine;
+              const { onLine } = opts;
               const stdoutTail = new BoundedTail(maxOutputTailChars, "\n");
               const stderrTail = new BoundedTail(maxOutputTailChars, "");
               const rl = createInterface({ input: proc.stdout! });
@@ -425,7 +425,7 @@ const checkImageUid = (imageName: string, expectedUid: number): Promise<void> =>
           return;
         }
         const uidPart = imageUser.split(":")[0]!;
-        const imageUid = parseInt(uidPart, 10);
+        const imageUid = Number.parseInt(uidPart, 10);
         if (isNaN(imageUid)) {
           // Non-numeric user (e.g. "agent") — can't compare, skip check
           resolve();

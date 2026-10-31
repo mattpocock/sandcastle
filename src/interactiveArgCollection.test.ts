@@ -102,7 +102,7 @@ describe("interactive arg collection", () => {
     expect(mockText).toHaveBeenCalledWith(
       expect.objectContaining({ message: "Enter value for {{COMPONENT}}" }),
     );
-    const promptArg = receivedArgs[receivedArgs.length - 1]!;
+    const promptArg = receivedArgs.at(-1)!;
     expect(promptArg).toContain("LoginForm");
     expect(promptArg).not.toContain("{{COMPONENT}}");
   });
@@ -123,7 +123,7 @@ describe("interactive arg collection", () => {
     });
 
     expect(mockText).not.toHaveBeenCalled();
-    const promptArg = receivedArgs[receivedArgs.length - 1]!;
+    const promptArg = receivedArgs.at(-1)!;
     expect(promptArg).toContain("LoginForm");
   });
 
@@ -177,7 +177,7 @@ describe("interactive arg collection", () => {
       2,
       expect.objectContaining({ message: "Enter value for {{ISSUE_NUM}}" }),
     );
-    const promptArg = receivedArgs[receivedArgs.length - 1]!;
+    const promptArg = receivedArgs.at(-1)!;
     expect(promptArg).toContain("LoginForm");
     expect(promptArg).toContain("42");
   });
@@ -200,7 +200,7 @@ describe("interactive arg collection", () => {
 
     // Only ISSUE_NUM should be prompted (COMPONENT was provided)
     expect(mockText).toHaveBeenCalledTimes(1);
-    const promptArg = receivedArgs[receivedArgs.length - 1]!;
+    const promptArg = receivedArgs.at(-1)!;
     expect(promptArg).toContain("LoginForm");
     expect(promptArg).toContain("42");
   });

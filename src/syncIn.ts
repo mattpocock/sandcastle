@@ -122,7 +122,7 @@ export const syncIn = (
         });
 
         // Clone from bundle into the worktree
-        const worktreePath = handle.worktreePath;
+        const { worktreePath } = handle;
         yield* execOk(
           handle,
           `git clone "${bundleSandboxPath}" "${worktreePath}_clone"`,

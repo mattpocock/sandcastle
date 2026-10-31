@@ -240,7 +240,7 @@ describe("startSandbox", () => {
 
       expect(Exit.isFailure(exit)).toBe(true);
       if (Exit.isFailure(exit) && exit.cause._tag === "Fail") {
-        const error = exit.cause.error;
+        const { error } = exit.cause;
         expect(error).toBeInstanceOf(CopyToWorktreeTimeoutError);
         const timeoutError = error as CopyToWorktreeTimeoutError;
         expect(timeoutError.timeoutMs).toBe(COPY_PATHS_TIMEOUT_MS);

@@ -48,7 +48,7 @@ export const createTempSandbox = async (
     },
   ): Promise<ExecResult> => {
     if (options?.onLine) {
-      const onLine = options.onLine;
+      const { onLine } = options;
       return new Promise((resolve, reject) => {
         const proc = spawn("sh", ["-c", command], {
           cwd: options?.cwd ?? worktreePath,

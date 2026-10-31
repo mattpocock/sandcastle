@@ -179,7 +179,7 @@ export const interactive = async (
       agentProviderEnv: provider.env,
       sandboxProviderEnv: sandboxProvider.env,
     });
-    const effectiveEnv = { ...env, ...(options.env ?? {}) };
+    const effectiveEnv = { ...env, ...options.env };
 
     // 3. Capture host's current branch
     const currentHostBranch = yield* getCurrentBranch(hostRepoDir);
@@ -364,7 +364,7 @@ export const interactive = async (
 
       // Build sandbox service and run withSandboxLifecycle
       const sandbox = makeSandboxFromHandle(handle);
-      const worktreePath = handle.worktreePath;
+      const { worktreePath } = handle;
 
       const applyToHost =
         sandboxProvider.tag === "isolated" && worktreeInfo

@@ -24,13 +24,13 @@ describe("buildInteractiveArgs with prompts", () => {
     const provider = claudeCode("claude-opus-4-8");
     const args = provider.buildInteractiveArgs!(interactiveOpts("fix the bug"));
     expect(args[0]).toBe("claude");
-    expect(args[args.length - 1]).toBe("fix the bug");
+    expect(args.at(-1)).toBe("fix the bug");
   });
 
   it("claudeCode omits prompt when empty string", () => {
     const provider = claudeCode("claude-opus-4-8");
     const args = provider.buildInteractiveArgs!(interactiveOpts(""));
-    expect(args[args.length - 1]).not.toBe("");
+    expect(args.at(-1)).not.toBe("");
     expect(args).toContain("--model");
   });
 
@@ -38,7 +38,7 @@ describe("buildInteractiveArgs with prompts", () => {
     const provider = pi("claude-sonnet-4-6");
     const args = provider.buildInteractiveArgs!(interactiveOpts("fix the bug"));
     expect(args[0]).toBe("pi");
-    expect(args[args.length - 1]).toBe("fix the bug");
+    expect(args.at(-1)).toBe("fix the bug");
   });
 
   it("pi omits prompt when empty string", () => {
@@ -51,7 +51,7 @@ describe("buildInteractiveArgs with prompts", () => {
     const provider = codex("gpt-5.4-mini");
     const args = provider.buildInteractiveArgs!(interactiveOpts("fix the bug"));
     expect(args[0]).toBe("codex");
-    expect(args[args.length - 1]).toBe("fix the bug");
+    expect(args.at(-1)).toBe("fix the bug");
   });
 
   it("codex omits prompt when empty string", () => {
@@ -306,7 +306,7 @@ describe("interactive()", () => {
     // Should have called interactiveExec with args from buildInteractiveArgs (empty prompt)
     expect(receivedArgs[0]).toBe("claude");
     // Prompt should not appear in args (empty string is omitted by buildInteractiveArgs)
-    expect(receivedArgs[receivedArgs.length - 1]).not.toBe("");
+    expect(receivedArgs.at(-1)).not.toBe("");
   });
 
   it("skips promptArgs substitution when no prompt is provided", async () => {
@@ -418,7 +418,7 @@ describe("interactive()", () => {
     });
 
     // The substituted prompt should contain "LoginForm" not "{{COMPONENT}}"
-    const promptArg = receivedArgs[receivedArgs.length - 1]!;
+    const promptArg = receivedArgs.at(-1)!;
     expect(promptArg).toContain("LoginForm");
     expect(promptArg).not.toContain("{{COMPONENT}}");
   });
@@ -445,7 +445,7 @@ describe("interactive()", () => {
       promptFile: promptPath,
     });
 
-    const promptArg = receivedArgs[receivedArgs.length - 1]!;
+    const promptArg = receivedArgs.at(-1)!;
     expect(promptArg).toContain(currentBranch);
     expect(promptArg).not.toContain("{{TARGET_BRANCH}}");
   });
@@ -470,7 +470,7 @@ describe("interactive()", () => {
     });
 
     // The shell expression should be expanded to the actual branch name
-    const promptArg = receivedArgs[receivedArgs.length - 1]!;
+    const promptArg = receivedArgs.at(-1)!;
     expect(promptArg).not.toContain("!`");
     // The expanded value should be a branch name (from the sandbox worktree)
     expect(promptArg).toMatch(/Current branch: .+/);
@@ -558,7 +558,7 @@ describe("interactive()", () => {
     let actualBranch: string | undefined;
 
     const provider = makeTestProvider(async (args, opts) => {
-      promptArg = args[args.length - 1];
+      promptArg = args.at(-1);
       actualBranch = execSync("git rev-parse --abbrev-ref HEAD", {
         cwd: opts.cwd!,
         encoding: "utf8",

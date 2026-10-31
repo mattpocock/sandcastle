@@ -39,7 +39,7 @@ const randomBranchSuffix = (): string => randomBytes(3).toString("hex");
 
 /** Sanitize a name for use in branch names and directory names. */
 export const sanitizeName = (name: string): string =>
-  name.toLowerCase().replace(/[^a-z0-9]/g, "-");
+  name.toLowerCase().replaceAll(/[^a-z0-9]/g, "-");
 
 const execGit = (
   args: string[],
@@ -116,7 +116,7 @@ export interface WorktreeEntry {
  * the two without normalizing fails on Windows, so all path comparisons in
  * this module run both sides through this first.
  */
-const normalizePath = (p: string): string => p.replace(/\\/g, "/");
+const normalizePath = (p: string): string => p.replaceAll("\\", "/");
 
 /**
  * Finds an existing worktree that collides with `branch` or `worktreePath`.
@@ -317,10 +317,10 @@ export const create = (
 
     if (opts?.branch) {
       branch = opts.branch;
-      worktreeName = branch.replace(/\//g, "-");
+      worktreeName = branch.replaceAll("/", "-");
     } else {
       branch = opts?.tempBranch ?? generateTempBranchName(opts?.name);
-      worktreeName = branch.replace(/\//g, "-");
+      worktreeName = branch.replaceAll("/", "-");
     }
 
     const worktreePath = join(worktreesDir, worktreeName);
@@ -491,7 +491,7 @@ export const deleteTempBranchIfUnused = (
       ],
       repoDir,
     );
-    const unmergedCommits = parseInt(count.trim(), 10) || 0;
+    const unmergedCommits = Number.parseInt(count.trim(), 10) || 0;
     if (unmergedCommits > 0) {
       return { unmergedCommits };
     }

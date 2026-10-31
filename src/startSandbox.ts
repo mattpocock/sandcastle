@@ -176,7 +176,7 @@ const startBindMountSandbox = (
       );
       const worktreePath =
         process.platform === "win32"
-          ? options.worktreeOrRepoPath.replace(/\\/g, "/")
+          ? options.worktreeOrRepoPath.replaceAll("\\", "/")
           : options.worktreeOrRepoPath;
       return options.provider.create({
         worktreePath,
@@ -252,7 +252,7 @@ const startIsolatedSandbox = (
 
       if (options.copyPaths && options.copyPaths.length > 0) {
         const pathsToCopy = options.copyPaths;
-        const copySourceDir = options.copySourceDir;
+        const { copySourceDir } = options;
         yield* Effect.gen(function* () {
           for (const relativePath of pathsToCopy) {
             const hostPath = join(copySourceDir, relativePath);

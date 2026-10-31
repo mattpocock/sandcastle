@@ -80,10 +80,10 @@ const doctor = (world?: World): number => {
     const cmdOk = !need.command || works(need.command);
     const why = [
       ...(cmdOk ? [] : [`\`${need.command!.join(" ")}\` fails`]),
-      ...(missing.length ? [`missing ${missing.join(", ")}`] : []),
+      ...(missing.length > 0 ? [`missing ${missing.join(", ")}`] : []),
     ];
     console.log(
-      `  ${s.padEnd(8)} ${why.length ? `UNVERIFIABLE (${why.join("; ")})` : "ready"}`,
+      `  ${s.padEnd(8)} ${why.length > 0 ? `UNVERIFIABLE (${why.join("; ")})` : "ready"}`,
     );
   }
   console.log(
@@ -92,7 +92,7 @@ const doctor = (world?: World): number => {
   for (const a of AGENTS) {
     const missing = missingKeys(AGENT_KEYS[a]);
     console.log(
-      `  ${a.padEnd(10)} ${cheapAgentCall(a).padEnd(56)} ${missing.length ? `UNVERIFIABLE (missing ${missing.join(", ")})` : "ready"}`,
+      `  ${a.padEnd(10)} ${cheapAgentCall(a).padEnd(56)} ${missing.length > 0 ? `UNVERIFIABLE (missing ${missing.join(", ")})` : "ready"}`,
     );
   }
   console.log(

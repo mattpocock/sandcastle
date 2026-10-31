@@ -132,7 +132,7 @@ describe("testIsolated()", () => {
   it("close cleans up the temp directory", async () => {
     const provider = testIsolated();
     const handle = await provider.create({ env: {} });
-    const worktreePath = handle.worktreePath;
+    const { worktreePath } = handle;
 
     // Worktree should exist before close
     expect(existsSync(worktreePath)).toBe(true);

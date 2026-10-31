@@ -23,7 +23,7 @@ vi.mock("@clack/prompts", () => {
 
 const { ClackDisplay, Display } = await import("./Display.js");
 
-const strip = (s: string) => s.replace(/\u001B\[[0-9;]*m/g, "");
+const strip = (s: string) => s.replaceAll(/\u001B\[[0-9;]*m/g, "");
 
 const runWith = (
   program: Effect.Effect<void, never, InstanceType<typeof Display>>,

@@ -289,7 +289,7 @@ describe("PromptPreprocessor", () => {
     if (!Exit.isFailure(exit) || exit.cause._tag !== "Fail") {
       throw new Error("Expected Fail cause");
     }
-    const error = exit.cause.error;
+    const { error } = exit.cause;
     expect(error).toBeInstanceOf(PromptExpansionTimeoutError);
     if (!(error instanceof PromptExpansionTimeoutError)) {
       throw new Error("unreachable");

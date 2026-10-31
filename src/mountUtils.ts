@@ -42,7 +42,7 @@ export const defaultImageName = (repoDir: string): string => {
       .replace(/[\\/]+$/, "")
       .split(/[\\/]/)
       .pop() ?? "local";
-  const sanitized = dirName.toLowerCase().replace(/[^a-z0-9_.-]/g, "-");
+  const sanitized = dirName.toLowerCase().replaceAll(/[^a-z0-9_.-]/g, "-");
   return `sandcastle:${sanitized || "local"}`;
 };
 
@@ -151,11 +151,11 @@ export const normalizeMounts = <
     return mounts;
   }
 
-  const normalizedWorktree = worktreeHostPath.replace(/\\/g, "/");
+  const normalizedWorktree = worktreeHostPath.replaceAll("\\", "/");
 
   return mounts.map((m) => {
-    const hostPath = m.hostPath.replace(/\\/g, "/");
-    let sandboxPath = m.sandboxPath;
+    const hostPath = m.hostPath.replaceAll("\\", "/");
+    let { sandboxPath } = m;
 
     // If sandboxPath is already a valid POSIX absolute path (e.g., user-specified
     // sandbox paths like /mnt/data or /home/agent/workspace), leave it as-is.
@@ -163,7 +163,7 @@ export const normalizeMounts = <
     // setting sandboxPath === hostPath) need remapping.
     if (/^[A-Za-z]:[/\\]/.test(sandboxPath) || sandboxPath.includes("\\")) {
       // This is a Windows-style path — remap it
-      const normalizedSandboxPath = sandboxPath.replace(/\\/g, "/");
+      const normalizedSandboxPath = sandboxPath.replaceAll("\\", "/");
 
       if (normalizedSandboxPath.startsWith(`${normalizedWorktree}/`)) {
         // Under the worktree: derive sandbox path relative to sandboxRepoDir
@@ -193,7 +193,7 @@ export const normalizeMounts = <
 export const parseGitdirPath = (
   gitdirPath: string,
 ): { parentGitDir: string; worktreeName: string } => {
-  const normalized = gitdirPath.replace(/\\/g, "/").replace(/\/+$/, "");
+  const normalized = gitdirPath.replaceAll("\\", "/").replace(/\/+$/, "");
   const segments = normalized.split("/");
   const worktreeName = segments.pop()!; // <name>
   segments.pop(); // "worktrees"
@@ -302,14 +302,14 @@ export const patchGitMountsForWindows = (
     });
 
     // Build corrected mounts
-    const normalizedParentGitDir = parentGitDir.replace(/\\/g, "/");
-    const gitFileHostPath = gitEntryPath.replace(/\\/g, "/");
+    const normalizedParentGitDir = parentGitDir.replaceAll("\\", "/");
+    const gitFileHostPath = gitEntryPath.replaceAll("\\", "/");
 
     const correctedMounts: { hostPath: string; sandboxPath: string }[] = [];
     let replacedGitFile = false;
 
     for (const m of gitMounts) {
-      const normalizedHostPath = m.hostPath.replace(/\\/g, "/");
+      const normalizedHostPath = m.hostPath.replaceAll("\\", "/");
       if (normalizedHostPath === normalizedParentGitDir) {
         // Remap parent .git dir to deterministic sandbox path
         correctedMounts.push({ ...m, sandboxPath: PARENT_GIT_SANDBOX_DIR });
