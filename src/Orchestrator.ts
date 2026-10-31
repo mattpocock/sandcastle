@@ -9,7 +9,7 @@ import {
 } from "./errors.js";
 import type { SandboxError } from "./errors.js";
 import type { SandboxService } from "./SandboxFactory.js";
-import { SandboxFactory, SANDBOX_REPO_DIR } from "./SandboxFactory.js";
+import { SandboxFactory } from "./SandboxFactory.js";
 import { withSandboxLifecycle } from "./SandboxLifecycle.js";
 import type { SandboxHooks } from "./SandboxLifecycle.js";
 import type { AgentProvider, IterationUsage } from "./AgentProvider.js";
