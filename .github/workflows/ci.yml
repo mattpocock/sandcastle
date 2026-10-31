@@ -50,7 +50,7 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
-      - run: npx vitest run src/sandboxes/no-sandbox.windows.test.ts src/sandboxes/no-sandbox.test.ts src/sandboxes/posixSimpleCommand.test.ts
+      - run: npx vitest run tests/no-sandbox.windows.test.ts src/sandboxes/no-sandbox.test.ts
 
   # The end-to-end tests (tests/) on Windows. They run from src through the
   # vitest alias, so no build is needed.

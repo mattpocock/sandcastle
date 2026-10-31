@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
+import type { AgentProvider } from "@ai-hero/sandcastle";
 import {
   claudeCode,
   codex,
@@ -19,12 +20,14 @@ import {
   cursor,
   opencode,
   pi,
-  shellEscape,
-} from "../AgentProvider.js";
-import type { AgentProvider } from "../AgentProvider.js";
-import { noSandbox } from "./no-sandbox.js";
+} from "@ai-hero/sandcastle";
+import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
 
 const isWindows = process.platform === "win32";
+
+/** POSIX single-quoting, the way Sandcastle quotes the commands it builds. */
+const shellEscape = (s: string): string =>
+  `'${s.replaceAll("'", String.raw`'\''`)}'`;
 
 /** Prints what it was given: argv, stdin (when asked) and one env var. */
 const ARGV_PRINTER = `
