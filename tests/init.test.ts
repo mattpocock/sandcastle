@@ -41,6 +41,7 @@ describe("sandcastle init (non-interactive)", () => {
     expect(existsSync(join(repo.dir, ".sandcastle", "main.mts"))).toBe(true);
     expect(existsSync(join(repo.dir, ".sandcastle", "Dockerfile"))).toBe(true);
   }, 60_000);
+
   // A native provider runs the host's own toolchain, so init scaffolds no
   // image: no Dockerfile, no build-image prompt, no build-image next step.
   // The scaffolded text is the same on every OS, so seatbelt runs here too.
@@ -72,14 +73,14 @@ describe("sandcastle init (non-interactive)", () => {
       expect(main).toContain(
         `import { ${provider} } from "@ai-hero/sandcastle/sandboxes/${provider}";`,
       );
-      expect(main).not.toMatch(/\bdocker\b/);
+      expect(main).not.toMatch(/\bdocker\b/u);
       expect(existsSync(join(repo.dir, ".sandcastle", "Dockerfile"))).toBe(
         false,
       );
       expect(existsSync(join(repo.dir, ".sandcastle", "Containerfile"))).toBe(
         false,
       );
-      expect(`${result.stdout}${result.stderr}`).not.toMatch(/build-image/i);
+      expect(`${result.stdout}${result.stderr}`).not.toMatch(/build-image/iu);
     },
     60_000,
   );
