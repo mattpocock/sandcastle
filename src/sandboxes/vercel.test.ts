@@ -234,7 +234,7 @@ describe("vercel() when setup fails inside create()", () => {
     }));
 
     await expect(vercel().create({ env: {} })).rejects.toThrow(
-      /could not create .*permission denied/,
+      /could not create .*permission denied/u,
     );
     expect(stop).toHaveBeenCalledTimes(1);
   });
