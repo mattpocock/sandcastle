@@ -1008,43 +1008,47 @@ export const createSandbox = async (
             });
 
             const provider = options.sandbox;
-            const startResult = yield* provider.tag === "isolated"
-              ? startSandbox({
+            const startResult = yield* (() => {
+              if (provider.tag === "isolated") {
+                return startSandbox({
                   provider,
                   hostRepoDir: worktreePath,
                   env,
                   copyPaths: options.copyToWorktree,
                   copySourceDir: hostRepoDir,
-                })
-              : provider.tag === "none"
-                ? startSandbox({
+                });
+              }
+              if (provider.tag === "none") {
+                return startSandbox({
+                  provider,
+                  hostRepoDir,
+                  env,
+                  worktreeOrRepoPath: worktreePath,
+                });
+              }
+              return resolveGitMounts(join(hostRepoDir, ".git")).pipe(
+                Effect.provide(NodeFileSystem.layer),
+                Effect.catchAll(() => Effect.succeed([])),
+                // Patch git mounts for Windows worktree compatibility (ADR-0006)
+                Effect.flatMap((gitMounts) =>
+                  patchGitMountsForWindows(
+                    gitMounts,
+                    worktreePath,
+                    SANDBOX_REPO_DIR,
+                  ),
+                ),
+                Effect.flatMap((gitMounts) =>
+                  startSandbox({
                     provider,
                     hostRepoDir,
                     env,
                     worktreeOrRepoPath: worktreePath,
-                  })
-                : resolveGitMounts(join(hostRepoDir, ".git")).pipe(
-                    Effect.provide(NodeFileSystem.layer),
-                    Effect.catchAll(() => Effect.succeed([])),
-                    // Patch git mounts for Windows worktree compatibility (ADR-0006)
-                    Effect.flatMap((gitMounts) =>
-                      patchGitMountsForWindows(
-                        gitMounts,
-                        worktreePath,
-                        SANDBOX_REPO_DIR,
-                      ),
-                    ),
-                    Effect.flatMap((gitMounts) =>
-                      startSandbox({
-                        provider,
-                        hostRepoDir,
-                        env,
-                        worktreeOrRepoPath: worktreePath,
-                        gitMounts,
-                        repoDir: SANDBOX_REPO_DIR,
-                      }),
-                    ),
-                  );
+                    gitMounts,
+                    repoDir: SANDBOX_REPO_DIR,
+                  }),
+                ),
+              );
+            })();
 
             providerHandle = startResult.handle;
             sandbox = startResult.sandbox;
