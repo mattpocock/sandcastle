@@ -569,6 +569,8 @@ const buildSandboxHandle = (
           ): Promise<SandboxRunResult> =>
             sandboxHandle.run({
               ...runOptions,
+              // The follow-up prompt is inline: drop the template's arguments.
+              promptArgs: undefined,
               ...resumeOptions,
               prompt: nextPrompt,
               promptFile: undefined,
@@ -581,6 +583,8 @@ const buildSandboxHandle = (
           ): Promise<SandboxRunResult> =>
             sandboxHandle.run({
               ...runOptions,
+              // The follow-up prompt is inline: drop the template's arguments.
+              promptArgs: undefined,
               ...forkOptions,
               prompt: nextPrompt,
               promptFile: undefined,

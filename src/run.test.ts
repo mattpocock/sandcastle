@@ -1634,3 +1634,84 @@ describe("merge-to-head temp branch name", () => {
     }
   });
 });
+
+describe("resume/fork after a promptFile + promptArgs run", () => {
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    consoleSpy.mockRestore();
+  });
+
+  it("runs the follow-up prompt inline, without the original promptArgs", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sandcastle-resume-args-"));
+    const hostProjectsDir = join(dir, "projects");
+    const sessionId = "sess-resume-args";
+    const sessionPath = claudeHostSessionPath(
+      process.cwd(),
+      sessionId,
+      hostProjectsDir,
+    );
+    mkdirSync(dirname(sessionPath), { recursive: true });
+    writeFileSync(
+      sessionPath,
+      JSON.stringify({ type: "system", cwd: process.cwd() }) + "\n",
+    );
+    const promptFile = join(dir, "prompt.md");
+    writeFileSync(promptFile, "Remember {{TOKEN}}");
+
+    const agentStdin: (string | undefined)[] = [];
+    const sandbox = createBindMountSandboxProvider({
+      name: "resume-args",
+      create: async () => ({
+        worktreePath: process.cwd(),
+        exec: async (
+          _command: string,
+          options?: { onLine?: (line: string) => void; stdin?: string },
+        ) => {
+          if (options?.onLine) {
+            agentStdin.push(options.stdin);
+            options.onLine(
+              `{"type":"system","subtype":"init","session_id":"${sessionId}"}`,
+            );
+            options.onLine('{"type":"result","result":"ok"}');
+          }
+          return { stdout: "", stderr: "", exitCode: 0 };
+        },
+        copyFileIn: async () => {},
+        copyFileOut: async () => {},
+        close: async () => {},
+      }),
+    });
+
+    try {
+      const first = await run({
+        agent: claudeCode("claude-opus-4-8", {
+          captureSessions: false,
+          sessionStorage: { hostProjectsDir },
+        }),
+        sandbox,
+        promptFile,
+        promptArgs: { TOKEN: "tok-123" },
+        branchStrategy: { type: "head" },
+        logging: { type: "file", path: join(dir, "run.log") },
+      });
+
+      const resumed = await first.resume!("repeat {{TOKEN}}");
+      const forked = await first.fork!("fork {{TOKEN}}");
+
+      expect(resumed.iterations.length).toBe(1);
+      expect(forked.iterations.length).toBe(1);
+      // The follow-up prompts are inline: passed as-is, never substituted.
+      expect(agentStdin).toEqual([
+        "Remember tok-123",
+        "repeat {{TOKEN}}",
+        "fork {{TOKEN}}",
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
