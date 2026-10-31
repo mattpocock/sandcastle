@@ -56,6 +56,16 @@ export const EFFECT_EXEMPTIONS: readonly Exemption[] = [
     ],
     why: "vitest tests are async functions that set up the world directly",
   },
+  {
+    files: ["src/templates/**/*"],
+    rules: ["globalConsole"],
+    why: "templates are scripts users scaffold and run; console is their output",
+  },
+  {
+    files: ["src/sandboxes/**/*"],
+    rules: ["newPromise"],
+    why: "sandbox providers wrap Node child processes and SDK callbacks in promises",
+  },
 ];
 
 /**

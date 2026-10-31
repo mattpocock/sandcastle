@@ -10,7 +10,6 @@
     "eslint(no-useless-return)": 1,
     "import(consistent-type-specifier-style)": 2,
     "node(no-sync)": 3,
-    "typescript(consistent-return)": 1,
     "typescript(no-unsafe-type-assertion)": 1,
     "typescript(strict-boolean-expressions)": 2,
     "unicorn(no-array-sort)": 1,
@@ -22,7 +21,6 @@
   },
   ".sandcastle/agent-workflows/explore/batch.ts": {
     "eslint(curly)": 1,
-    "eslint(max-statements)": 1,
     "typescript(no-base-to-string)": 7,
     "typescript(no-non-null-assertion)": 1,
     "typescript(no-unsafe-type-assertion)": 2,
@@ -42,7 +40,6 @@
     "node(no-sync)": 8,
     "typescript(no-unsafe-type-assertion)": 1,
     "typescript(strict-boolean-expressions)": 1,
-    "unicorn(no-process-exit)": 2,
     "unicorn(prefer-type-error)": 1
   },
   ".sandcastle/agent-workflows/shared/diff-lines.ts": {
@@ -55,7 +52,6 @@
   },
   ".sandcastle/agent-workflows/shared/review-context.ts": {
     "eslint(max-lines-per-function)": 1,
-    "eslint(max-statements)": 1,
     "eslint(prefer-named-capture-group)": 1,
     "eslint(require-unicode-regexp)": 1,
     "typescript(no-unsafe-type-assertion)": 3,
@@ -74,8 +70,7 @@
   },
   ".sandcastle/agent-workflows/update-branch/update-branch.ts": {
     "eslint(func-style)": 1,
-    "node(no-sync)": 3,
-    "unicorn(no-process-exit)": 2
+    "node(no-sync)": 3
   },
   ".sandcastle/run.ts": {
     "eslint(no-await-in-loop)": 3,
@@ -100,7 +95,6 @@
   ".sandcastle/verify/attribution.ts": {
     "eslint(curly)": 7,
     "eslint(max-params)": 1,
-    "eslint(max-statements)": 1,
     "eslint(no-implicit-coercion)": 1,
     "eslint(prefer-named-capture-group)": 6,
     "eslint(require-unicode-regexp)": 5,
@@ -113,14 +107,12 @@
     "vitest(prefer-strict-equal)": 2
   },
   ".sandcastle/verify/envLeaks.ts": {
-    "eslint(curly)": 2,
-    "eslint(max-statements)": 1
+    "eslint(curly)": 2
   },
   ".sandcastle/verify/ledger.ts": {
     "eslint(curly)": 27,
     "eslint(max-lines-per-function)": 1,
     "eslint(max-lines)": 1,
-    "eslint(max-statements)": 5,
     "eslint(prefer-named-capture-group)": 1,
     "eslint(prefer-template)": 1,
     "eslint(require-unicode-regexp)": 1,
@@ -130,9 +122,6 @@
     "typescript(no-unsafe-type-assertion)": 2,
     "unicorn(explicit-length-check)": 3
   },
-  ".sandcastle/verify/lib.test.ts": {
-    "vitest(require-top-level-describe)": 1
-  },
   ".sandcastle/verify/lib.ts": {
     "eslint(curly)": 6,
     "eslint(prefer-named-capture-group)": 4,
@@ -141,7 +130,6 @@
     "typescript(no-non-null-assertion)": 1,
     "typescript(no-unnecessary-type-assertion)": 1,
     "typescript(no-unsafe-type-assertion)": 1,
-    "typescript(prefer-nullish-coalescing)": 1,
     "typescript(strict-boolean-expressions)": 7,
     "unicorn(prefer-import-meta-properties)": 1
   },
@@ -153,7 +141,6 @@
     "import(consistent-type-specifier-style)": 2,
     "node(no-sync)": 2,
     "promise(catch-or-return)": 1,
-    "promise(prefer-await-to-then)": 1,
     "promise(prefer-catch)": 1,
     "typescript(no-non-null-assertion)": 2,
     "typescript(no-unnecessary-type-assertion)": 1,
@@ -163,7 +150,6 @@
     "unicorn(explicit-length-check)": 3,
     "unicorn(no-array-callback-reference)": 1,
     "unicorn(no-lonely-if)": 1,
-    "unicorn(no-process-exit)": 2,
     "unicorn(prefer-top-level-await)": 1,
     "unicorn(switch-case-braces)": 3
   },
@@ -172,7 +158,7 @@
     "eslint(max-lines-per-function)": 2,
     "eslint(max-lines)": 1,
     "eslint(max-params)": 2,
-    "eslint(max-statements)": 3,
+    "eslint(max-statements)": 1,
     "eslint(no-implicit-coercion)": 2,
     "eslint(prefer-named-capture-group)": 2,
     "eslint(prefer-template)": 5,
@@ -188,7 +174,6 @@
     "unicorn(consistent-function-scoping)": 1,
     "unicorn(no-array-callback-reference)": 3,
     "unicorn(no-array-sort)": 1,
-    "unicorn(no-useless-undefined)": 3,
     "unicorn(prefer-string-replace-all)": 1
   },
   "lint-staged.config.mjs": {
@@ -206,8 +191,7 @@
     "typescript(no-unsafe-assignment)": 1
   },
   "scripts/check-no-partially-staged.test.ts": {
-    "unicorn(relative-url-style)": 1,
-    "vitest(require-top-level-describe)": 2
+    "unicorn(relative-url-style)": 1
   },
   "scripts/check-public-types-effect-free.mjs": {
     "eslint(func-style)": 1,
@@ -237,7 +221,6 @@
     "effect/globalConsole": 1,
     "effect/globalDate": 2,
     "effect/globalRandom": 2,
-    "effect/nodeBuiltinImport": 2,
     "effect/processEnv": 1,
     "eslint(complexity)": 6,
     "eslint(curly)": 47,
@@ -246,7 +229,7 @@
     "eslint(max-lines-per-function)": 9,
     "eslint(max-lines)": 1,
     "eslint(max-params)": 1,
-    "eslint(max-statements)": 8,
+    "eslint(max-statements)": 5,
     "eslint(no-await-in-loop)": 1,
     "eslint(no-empty-function)": 2,
     "eslint(no-nested-ternary)": 2,
@@ -265,7 +248,6 @@
     "typescript(strict-boolean-expressions)": 23,
     "unicorn(catch-error-name)": 1,
     "unicorn(no-negated-condition)": 1,
-    "unicorn(no-useless-undefined)": 3,
     "unicorn(prefer-string-raw)": 1,
     "unicorn(prefer-string-replace-all)": 1,
     "unicorn(text-encoding-identifier-case)": 7
@@ -303,7 +285,6 @@
   },
   "src/cli.ts": {
     "effect/missingReturnYieldStar": 18,
-    "effect/nodeBuiltinImport": 2,
     "effect/unnecessaryFailYieldableError": 12,
     "eslint(complexity)": 1,
     "eslint(curly)": 8,
@@ -313,12 +294,10 @@
     "import(max-dependencies)": 1,
     "node(no-sync)": 2,
     "typescript(no-non-null-assertion)": 7,
-    "typescript(no-unnecessary-boolean-literal-compare)": 1,
     "typescript(no-unnecessary-template-expression)": 1,
     "typescript(no-unsafe-type-assertion)": 4,
     "typescript(promise-function-async)": 5,
     "unicorn(consistent-function-scoping)": 1,
-    "unicorn(no-useless-undefined)": 1,
     "unicorn(prefer-ternary)": 1
   },
   "src/ContextWindow.test.ts": {
@@ -344,15 +323,12 @@
   },
   "src/CopyToWorktree.ts": {
     "effect/effectSucceedWithVoid": 2,
-    "effect/nodeBuiltinImport": 4,
     "eslint(max-lines-per-function)": 2,
     "eslint(max-params)": 1,
-    "eslint(max-statements)": 1,
     "import(consistent-type-specifier-style)": 1,
     "node(no-sync)": 2,
     "typescript(no-invalid-void-type)": 1,
-    "typescript(promise-function-async)": 1,
-    "unicorn(no-useless-undefined)": 2
+    "typescript(promise-function-async)": 1
   },
   "src/createSandbox-windowsMounts.test.ts": {
     "eslint(max-params)": 1,
@@ -361,7 +337,6 @@
     "typescript(array-type)": 3,
     "typescript(no-non-null-assertion)": 2,
     "typescript(no-unsafe-type-assertion)": 1,
-    "typescript(require-await)": 2,
     "typescript(strict-void-return)": 1,
     "unicorn(filename-case)": 1,
     "vitest(prefer-import-in-mock)": 1,
@@ -376,7 +351,6 @@
     "typescript(no-confusing-void-expression)": 1,
     "typescript(no-non-null-assertion)": 3,
     "typescript(promise-function-async)": 1,
-    "typescript(require-await)": 1,
     "typescript(strict-void-return)": 2,
     "unicorn(no-negated-condition)": 1
   },
@@ -397,7 +371,6 @@
     "typescript(no-unsafe-call)": 1,
     "typescript(no-unsafe-member-access)": 4,
     "typescript(promise-function-async)": 2,
-    "typescript(require-await)": 32,
     "typescript(strict-boolean-expressions)": 1,
     "typescript(strict-void-return)": 1,
     "unicorn(no-immediate-mutation)": 2,
@@ -416,12 +389,11 @@
     "effect/globalConsole": 3,
     "effect/multipleEffectProvide": 1,
     "effect/newPromise": 1,
-    "effect/nodeBuiltinImport": 1,
     "eslint(complexity)": 3,
     "eslint(curly)": 6,
     "eslint(max-lines-per-function)": 8,
     "eslint(max-lines)": 1,
-    "eslint(max-statements)": 6,
+    "eslint(max-statements)": 3,
     "eslint(no-empty-function)": 1,
     "eslint(no-implicit-coercion)": 2,
     "eslint(no-nested-ternary)": 1,
@@ -460,7 +432,6 @@
     "typescript(array-type)": 2,
     "typescript(no-non-null-assertion)": 2,
     "typescript(no-unsafe-type-assertion)": 1,
-    "typescript(require-await)": 5,
     "typescript(strict-void-return)": 1,
     "unicorn(filename-case)": 1,
     "unicorn(no-immediate-mutation)": 1,
@@ -481,7 +452,6 @@
     "typescript(no-unsafe-assignment)": 3,
     "typescript(no-unsafe-call)": 2,
     "typescript(no-unsafe-member-access)": 5,
-    "typescript(require-await)": 24,
     "typescript(strict-void-return)": 1,
     "unicorn(catch-error-name)": 1,
     "unicorn(no-await-expression-member)": 1,
@@ -499,13 +469,12 @@
   },
   "src/createWorktree.ts": {
     "effect/multipleEffectProvide": 2,
-    "effect/nodeBuiltinImport": 1,
     "eslint(arrow-body-style)": 1,
     "eslint(complexity)": 1,
     "eslint(curly)": 1,
     "eslint(max-lines-per-function)": 6,
     "eslint(max-lines)": 1,
-    "eslint(max-statements)": 5,
+    "eslint(max-statements)": 2,
     "eslint(no-empty-function)": 2,
     "eslint(no-shadow)": 1,
     "eslint(prefer-destructuring)": 6,
@@ -526,7 +495,6 @@
     "unicorn(no-useless-fallback-in-spread)": 2
   },
   "src/CwdError.ts": {
-    "eslint(no-redeclare)": 1,
     "typescript(no-unnecessary-type-assertion)": 1,
     "typescript(no-unsafe-type-assertion)": 1
   },
@@ -539,7 +507,6 @@
     "typescript(array-type)": 3,
     "typescript(no-unsafe-type-assertion)": 1,
     "unicorn(escape-case)": 6,
-    "unicorn(no-useless-undefined)": 1,
     "unicorn(text-encoding-identifier-case)": 2,
     "vitest(prefer-strict-equal)": 9
   },
@@ -547,7 +514,6 @@
     "effect/deterministicKeys": 1,
     "effect/globalDateInEffect": 5,
     "effect/missingEffectContext": 2,
-    "effect/nodeBuiltinImport": 1,
     "eslint(curly)": 3,
     "eslint(max-lines-per-function)": 4,
     "eslint(max-lines)": 1,
@@ -569,17 +535,14 @@
     "typescript(no-unsafe-type-assertion)": 42,
     "vitest(no-conditional-in-test)": 20,
     "vitest(prefer-import-in-mock)": 1,
-    "vitest(require-mock-type-parameters)": 2,
-    "vitest(require-top-level-describe)": 1
+    "vitest(require-mock-type-parameters)": 2
   },
   "src/DockerLifecycle.ts": {
     "effect/missingReturnYieldStar": 1,
-    "effect/nodeBuiltinImport": 2,
     "effect/unnecessaryFailYieldableError": 1,
     "eslint(complexity)": 1,
     "eslint(max-lines-per-function)": 2,
     "eslint(max-params)": 1,
-    "eslint(max-statements)": 1,
     "eslint(no-nested-ternary)": 1,
     "import(consistent-type-specifier-style)": 1,
     "typescript(no-unnecessary-type-conversion)": 2,
@@ -598,13 +561,10 @@
     "vitest(prefer-strict-equal)": 6
   },
   "src/EnvResolver.ts": {
-    "effect/nodeBuiltinImport": 1,
     "effect/processEnvInEffect": 1,
     "eslint(curly)": 3,
-    "eslint(max-statements)": 1,
     "eslint(prefer-named-capture-group)": 1,
     "eslint(require-unicode-regexp)": 1,
-    "typescript(prefer-nullish-coalescing)": 1,
     "typescript(prefer-string-starts-ends-with)": 4,
     "typescript(strict-boolean-expressions)": 2,
     "unicorn(prefer-at)": 2,
@@ -627,11 +587,9 @@
     "effect/unsafeEffectTypeAssertion": 1,
     "oxlint(unused-disable-directive)": 1,
     "ratchet/disable-comment": 1,
-    "typescript(consistent-return)": 1,
     "typescript(no-unnecessary-template-expression)": 2,
     "typescript(no-unnecessary-type-assertion)": 2,
     "typescript(no-unsafe-type-assertion)": 1,
-    "unicorn(no-process-exit)": 1,
     "unicorn(switch-case-braces)": 12
   },
   "src/errors.test.ts": {
@@ -642,12 +600,10 @@
     "vitest(no-conditional-in-test)": 1
   },
   "src/errors.ts": {
-    "eslint(max-classes-per-file)": 1,
     "import(first)": 1
   },
   "src/extractStructuredOutput.test.ts": {
     "typescript(no-unsafe-type-assertion)": 9,
-    "typescript(require-await)": 1,
     "unicorn(catch-error-name)": 7,
     "vitest(no-conditional-expect)": 24,
     "vitest(prefer-strict-equal)": 12
@@ -655,7 +611,6 @@
   "src/extractStructuredOutput.ts": {
     "effect/asyncFunction": 2,
     "eslint(curly)": 2,
-    "eslint(max-statements)": 2,
     "eslint(prefer-named-capture-group)": 1,
     "eslint(require-unicode-regexp)": 1,
     "import(consistent-type-specifier-style)": 3,
@@ -666,10 +621,8 @@
   },
   "src/hostShell.ts": {
     "effect/newPromise": 1,
-    "effect/nodeBuiltinImport": 1,
     "eslint(curly)": 5,
     "eslint(max-lines-per-function)": 2,
-    "eslint(max-statements)": 1,
     "promise(avoid-new)": 1,
     "typescript(array-type)": 1,
     "typescript(no-unsafe-type-assertion)": 1,
@@ -702,7 +655,6 @@
     "typescript(no-non-null-assertion)": 49,
     "typescript(prefer-regexp-exec)": 1,
     "typescript(promise-function-async)": 2,
-    "typescript(require-await)": 1,
     "unicorn(text-encoding-identifier-case)": 128,
     "vitest(no-conditional-expect)": 10,
     "vitest(no-conditional-in-test)": 15,
@@ -714,7 +666,6 @@
   "src/InitService.ts": {
     "effect/globalErrorInEffectFailure": 23,
     "effect/missingReturnYieldStar": 2,
-    "effect/nodeBuiltinImport": 1,
     "effect/preferSchemaOverJson": 4,
     "effect/tryCatchInEffectGen": 3,
     "eslint(curly)": 9,
@@ -722,7 +673,7 @@
     "eslint(max-lines-per-function)": 6,
     "eslint(max-lines)": 1,
     "eslint(max-params)": 3,
-    "eslint(max-statements)": 5,
+    "eslint(max-statements)": 2,
     "eslint(no-else-return)": 1,
     "eslint(no-useless-escape)": 1,
     "eslint(prefer-destructuring)": 1,
@@ -730,7 +681,6 @@
     "eslint(require-unicode-regexp)": 9,
     "oxc(branches-sharing-code)": 1,
     "typescript(array-type)": 1,
-    "typescript(consistent-return)": 2,
     "typescript(no-non-null-assertion)": 2,
     "typescript(no-unnecessary-type-arguments)": 1,
     "typescript(no-unnecessary-type-assertion)": 1,
@@ -751,7 +701,6 @@
     "typescript(array-type)": 2,
     "typescript(no-non-null-assertion)": 2,
     "typescript(no-unsafe-type-assertion)": 1,
-    "typescript(require-await)": 3,
     "typescript(strict-void-return)": 1,
     "unicorn(filename-case)": 1,
     "vitest(prefer-import-in-mock)": 1,
@@ -763,7 +712,6 @@
     "import(consistent-type-specifier-style)": 3,
     "typescript(no-confusing-void-expression)": 2,
     "typescript(no-non-null-assertion)": 25,
-    "typescript(require-await)": 33,
     "unicorn(catch-error-name)": 1,
     "unicorn(numeric-separators-style)": 1,
     "unicorn(prefer-at)": 9,
@@ -778,18 +726,16 @@
   "src/interactive.ts": {
     "effect/globalErrorInEffectFailure": 1,
     "effect/multipleEffectProvide": 1,
-    "effect/nodeBuiltinImport": 1,
     "eslint(complexity)": 2,
     "eslint(curly)": 1,
     "eslint(max-lines-per-function)": 4,
     "eslint(max-lines)": 1,
-    "eslint(max-statements)": 4,
+    "eslint(max-statements)": 2,
     "eslint(no-else-return)": 1,
     "eslint(no-empty-function)": 1,
     "eslint(prefer-destructuring)": 1,
     "import(consistent-type-specifier-style)": 2,
     "import(max-dependencies)": 1,
-    "typescript(consistent-return)": 1,
     "typescript(no-deprecated)": 1,
     "typescript(no-non-null-assertion)": 8,
     "typescript(no-unnecessary-type-assertion)": 1,
@@ -804,7 +750,6 @@
     "typescript(no-non-null-assertion)": 4,
     "typescript(no-unsafe-return)": 1,
     "typescript(no-unsafe-type-assertion)": 1,
-    "typescript(require-await)": 8,
     "unicorn(prefer-at)": 4,
     "unicorn(text-encoding-identifier-case)": 1,
     "vitest(prefer-called-exactly-once-with)": 1,
@@ -825,8 +770,6 @@
     "typescript(consistent-type-imports)": 1,
     "typescript(no-non-null-assertion)": 25,
     "typescript(promise-function-async)": 1,
-    "typescript(require-await)": 2,
-    "unicorn(no-useless-undefined)": 2,
     "unicorn(prefer-string-raw)": 24,
     "unicorn(text-encoding-identifier-case)": 2,
     "vitest(prefer-import-in-mock)": 2,
@@ -835,12 +778,11 @@
   },
   "src/mountUtils.ts": {
     "effect/asyncFunction": 2,
-    "effect/nodeBuiltinImport": 3,
     "eslint(curly)": 10,
     "eslint(max-lines-per-function)": 2,
     "eslint(max-lines)": 1,
     "eslint(max-params)": 2,
-    "eslint(max-statements)": 2,
+    "eslint(max-statements)": 1,
     "eslint(prefer-destructuring)": 1,
     "eslint(prefer-named-capture-group)": 1,
     "eslint(prefer-template)": 4,
@@ -850,7 +792,6 @@
     "typescript(array-type)": 5,
     "typescript(method-signature-style)": 1,
     "typescript(no-non-null-assertion)": 2,
-    "typescript(prefer-nullish-coalescing)": 1,
     "typescript(prefer-regexp-exec)": 1,
     "typescript(promise-function-async)": 4,
     "typescript(strict-boolean-expressions)": 3,
@@ -880,7 +821,6 @@
     "typescript(no-unnecessary-type-assertion)": 2,
     "typescript(no-unsafe-type-assertion)": 9,
     "typescript(promise-function-async)": 15,
-    "typescript(require-await)": 31,
     "typescript(strict-boolean-expressions)": 1,
     "typescript(strict-void-return)": 4,
     "unicorn(no-array-method-this-argument)": 1,
@@ -904,7 +844,7 @@
     "eslint(max-lines-per-function)": 8,
     "eslint(max-lines)": 1,
     "eslint(max-params)": 1,
-    "eslint(max-statements)": 5,
+    "eslint(max-statements)": 3,
     "eslint(no-restricted-properties)": 12,
     "eslint(no-unused-vars)": 1,
     "eslint(prefer-destructuring)": 2,
@@ -936,7 +876,6 @@
     "vitest(require-mock-type-parameters)": 2
   },
   "src/PodmanLifecycle.ts": {
-    "effect/nodeBuiltinImport": 2,
     "typescript(no-unnecessary-type-conversion)": 2,
     "typescript(strict-boolean-expressions)": 1,
     "unicorn(prefer-ternary)": 1
@@ -957,7 +896,6 @@
     "eslint(curly)": 4,
     "eslint(eqeqeq)": 2,
     "eslint(max-lines-per-function)": 1,
-    "eslint(max-statements)": 2,
     "eslint(no-eq-null)": 2,
     "eslint(prefer-named-capture-group)": 2,
     "eslint(require-unicode-regexp)": 3,
@@ -986,7 +924,6 @@
   "src/PromptPreprocessor.ts": {
     "effect/unnecessaryFailYieldableError": 2,
     "eslint(max-lines-per-function)": 4,
-    "eslint(max-statements)": 1,
     "eslint(require-unicode-regexp)": 1,
     "typescript(no-non-null-assertion)": 6,
     "typescript(no-unnecessary-type-assertion)": 1,
@@ -1005,7 +942,6 @@
     "eslint(curly)": 1,
     "eslint(no-empty-function)": 1,
     "eslint(no-restricted-properties)": 1,
-    "promise(prefer-await-to-then)": 1,
     "typescript(no-confusing-void-expression)": 1,
     "typescript(no-unnecessary-type-arguments)": 2,
     "typescript(no-unnecessary-type-assertion)": 1
@@ -1023,11 +959,9 @@
     "unicorn(prefer-single-call)": 7
   },
   "src/resolveCwd.test.ts": {
-    "eslint(require-unicode-regexp)": 2,
-    "unicorn(no-useless-undefined)": 1
+    "eslint(require-unicode-regexp)": 2
   },
   "src/resolveCwd.ts": {
-    "effect/nodeBuiltinImport": 1,
     "unicorn(no-negated-condition)": 1
   },
   "src/resolveGitVolumeMounts.test.ts": {
@@ -1039,7 +973,6 @@
   },
   "src/resumePrecheck.ts": {
     "effect/asyncFunction": 1,
-    "eslint(max-statements)": 1,
     "typescript(strict-boolean-expressions)": 2
   },
   "src/run.test.ts": {
@@ -1051,7 +984,6 @@
     "typescript(no-non-null-assertion)": 15,
     "typescript(no-unsafe-type-assertion)": 3,
     "typescript(promise-function-async)": 1,
-    "typescript(require-await)": 13,
     "typescript(use-unknown-in-catch-callback-variable)": 2,
     "unicorn(catch-error-name)": 5,
     "unicorn(escape-case)": 1,
@@ -1068,12 +1000,11 @@
   },
   "src/run.ts": {
     "effect/globalConsole": 2,
-    "effect/nodeBuiltinImport": 2,
     "eslint(complexity)": 1,
     "eslint(curly)": 3,
     "eslint(max-lines-per-function)": 2,
     "eslint(max-lines)": 1,
-    "eslint(max-statements)": 2,
+    "eslint(max-statements)": 1,
     "eslint(no-nested-ternary)": 1,
     "eslint(no-shadow)": 2,
     "eslint(prefer-template)": 2,
@@ -1096,10 +1027,8 @@
     "typescript(no-unnecessary-type-assertion)": 2,
     "typescript(no-unsafe-argument)": 2,
     "typescript(no-unsafe-type-assertion)": 2,
-    "typescript(require-await)": 6,
     "vitest(prefer-import-in-mock)": 1,
-    "vitest(prefer-strict-equal)": 1,
-    "vitest(require-top-level-describe)": 1
+    "vitest(prefer-strict-equal)": 1
   },
   "src/sandboxes/daytona.test.ts": {
     "eslint(curly)": 6,
@@ -1110,27 +1039,22 @@
     "eslint(require-unicode-regexp)": 1,
     "import(first)": 1,
     "promise(catch-or-return)": 1,
-    "promise(prefer-await-to-then)": 1,
     "promise(prefer-catch)": 1,
     "typescript(no-non-null-assertion)": 2,
-    "typescript(require-await)": 8,
     "typescript(strict-boolean-expressions)": 1,
     "typescript(strict-void-return)": 2,
     "unicorn(numeric-separators-style)": 1,
     "vitest(no-conditional-in-test)": 1,
     "vitest(prefer-import-in-mock)": 1,
-    "vitest(prefer-strict-equal)": 3,
-    "vitest(require-top-level-describe)": 1
+    "vitest(prefer-strict-equal)": 3
   },
   "src/sandboxes/daytona.ts": {
     "effect/globalTimers": 2,
-    "effect/newPromise": 1,
-    "effect/nodeBuiltinImport": 2,
     "eslint(curly)": 5,
     "eslint(eqeqeq)": 1,
     "eslint(max-lines-per-function)": 3,
     "eslint(max-lines)": 1,
-    "eslint(max-statements)": 2,
+    "eslint(max-statements)": 1,
     "eslint(no-await-in-loop)": 2,
     "eslint(no-empty-function)": 3,
     "eslint(no-eq-null)": 1,
@@ -1139,7 +1063,6 @@
     "eslint(require-unicode-regexp)": 1,
     "import(consistent-type-specifier-style)": 3,
     "promise(avoid-new)": 1,
-    "promise(prefer-await-to-then)": 1,
     "typescript(consistent-type-imports)": 1,
     "typescript(no-confusing-void-expression)": 1,
     "typescript(no-explicit-any)": 1,
@@ -1150,7 +1073,6 @@
     "typescript(no-unsafe-type-assertion)": 1,
     "typescript(strict-boolean-expressions)": 4,
     "typescript(strict-void-return)": 2,
-    "unicorn(no-useless-undefined)": 1,
     "unicorn(prefer-string-raw)": 1,
     "unicorn(prefer-string-replace-all)": 1
   },
@@ -1174,18 +1096,14 @@
     "vitest(prefer-import-in-mock)": 1,
     "vitest(prefer-mock-return-shorthand)": 1,
     "vitest(prefer-strict-equal)": 5,
-    "vitest(require-mock-type-parameters)": 3,
-    "vitest(require-top-level-describe)": 1
+    "vitest(require-mock-type-parameters)": 3
   },
   "src/sandboxes/docker.ts": {
-    "effect/newPromise": 6,
-    "effect/nodeBuiltinImport": 1,
     "eslint(arrow-body-style)": 1,
     "eslint(complexity)": 1,
     "eslint(curly)": 4,
     "eslint(max-lines-per-function)": 4,
     "eslint(max-lines)": 1,
-    "eslint(max-statements)": 3,
     "eslint(no-await-in-loop)": 1,
     "eslint(prefer-destructuring)": 1,
     "import(consistent-type-specifier-style)": 6,
@@ -1209,11 +1127,8 @@
     "vitest(prefer-to-have-length)": 1
   },
   "src/sandboxes/no-sandbox.ts": {
-    "effect/newPromise": 2,
-    "effect/nodeBuiltinImport": 1,
     "eslint(arrow-body-style)": 1,
     "eslint(max-lines-per-function)": 4,
-    "eslint(max-statements)": 1,
     "eslint(prefer-destructuring)": 2,
     "import(consistent-type-specifier-style)": 1,
     "promise(avoid-new)": 2,
@@ -1243,18 +1158,15 @@
     "vitest(prefer-import-in-mock)": 1,
     "vitest(prefer-mock-return-shorthand)": 1,
     "vitest(prefer-strict-equal)": 6,
-    "vitest(require-mock-type-parameters)": 3,
-    "vitest(require-top-level-describe)": 1
+    "vitest(require-mock-type-parameters)": 3
   },
   "src/sandboxes/podman.ts": {
-    "effect/newPromise": 9,
-    "effect/nodeBuiltinImport": 1,
     "eslint(arrow-body-style)": 1,
     "eslint(complexity)": 1,
     "eslint(curly)": 4,
     "eslint(max-lines-per-function)": 4,
     "eslint(max-lines)": 1,
-    "eslint(max-statements)": 2,
+    "eslint(max-statements)": 1,
     "eslint(no-await-in-loop)": 1,
     "eslint(no-nested-ternary)": 1,
     "eslint(prefer-destructuring)": 1,
@@ -1277,7 +1189,6 @@
     "unicorn(text-encoding-identifier-case)": 4
   },
   "src/sandboxes/test-bind-mount.ts": {
-    "effect/nodeBuiltinImport": 2,
     "import(consistent-type-specifier-style)": 2
   },
   "src/sandboxes/test-isolated.test.ts": {
@@ -1287,12 +1198,9 @@
     "vitest(prefer-strict-equal)": 1
   },
   "src/sandboxes/test-isolated.ts": {
-    "effect/nodeBuiltinImport": 2,
     "import(consistent-type-specifier-style)": 2
   },
   "src/sandboxes/test-shared.ts": {
-    "effect/newPromise": 2,
-    "effect/nodeBuiltinImport": 3,
     "eslint(max-lines-per-function)": 2,
     "eslint(no-empty-function)": 2,
     "eslint(prefer-destructuring)": 1,
@@ -1310,9 +1218,7 @@
     "eslint(require-unicode-regexp)": 1,
     "typescript(no-non-null-assertion)": 1,
     "typescript(no-unsafe-type-assertion)": 5,
-    "typescript(require-await)": 1,
     "unicorn(catch-error-name)": 1,
-    "unicorn(no-useless-undefined)": 1,
     "vitest(prefer-expect-type-of)": 1,
     "vitest(prefer-import-in-mock)": 1,
     "vitest(prefer-strict-equal)": 2,
@@ -1320,12 +1226,10 @@
   },
   "src/sandboxes/vercel.ts": {
     "effect/globalDate": 2,
-    "effect/nodeBuiltinImport": 3,
     "eslint(complexity)": 2,
     "eslint(curly)": 6,
     "eslint(max-lines-per-function)": 3,
     "eslint(max-lines)": 1,
-    "eslint(max-statements)": 4,
     "eslint(no-empty-function)": 1,
     "eslint(prefer-destructuring)": 2,
     "import(consistent-type-specifier-style)": 3,
@@ -1334,12 +1238,10 @@
     "typescript(no-unsafe-argument)": 1,
     "typescript(no-unsafe-call)": 2,
     "typescript(no-unsafe-member-access)": 2,
-    "typescript(prefer-nullish-coalescing)": 6,
     "typescript(strict-boolean-expressions)": 15
   },
   "src/sandboxExec.ts": {
     "effect/asyncFunction": 2,
-    "effect/nodeBuiltinImport": 1,
     "eslint(preserve-caught-error)": 1,
     "typescript(strict-void-return)": 1
   },
@@ -1349,7 +1251,6 @@
     "import(max-dependencies)": 1,
     "typescript(array-type)": 1,
     "typescript(promise-function-async)": 1,
-    "typescript(require-await)": 2,
     "typescript(strict-void-return)": 1
   },
   "src/SandboxFactory.test.ts": {
@@ -1370,10 +1271,8 @@
     "typescript(no-unsafe-return)": 2,
     "typescript(no-unsafe-type-assertion)": 7,
     "typescript(promise-function-async)": 11,
-    "typescript(require-await)": 3,
     "typescript(strict-void-return)": 1,
     "unicorn(no-object-as-default-parameter)": 2,
-    "unicorn(no-useless-undefined)": 2,
     "vitest(expect-expect)": 1,
     "vitest(no-conditional-in-test)": 9,
     "vitest(prefer-each)": 2,
@@ -1388,13 +1287,10 @@
     "effect/effectSucceedWithVoid": 2,
     "effect/globalConsole": 4,
     "effect/globalConsoleInEffect": 4,
-    "effect/nodeBuiltinImport": 1,
     "eslint(curly)": 1,
-    "eslint(max-classes-per-file)": 1,
     "eslint(max-lines-per-function)": 3,
     "eslint(max-lines)": 1,
     "eslint(max-params)": 1,
-    "eslint(max-statements)": 2,
     "eslint(no-unused-vars)": 1,
     "eslint(prefer-named-capture-group)": 1,
     "eslint(require-unicode-regexp)": 1,
@@ -1409,8 +1305,7 @@
     "typescript(prefer-regexp-exec)": 1,
     "typescript(promise-function-async)": 9,
     "typescript(restrict-template-expressions)": 2,
-    "typescript(strict-boolean-expressions)": 7,
-    "unicorn(no-useless-undefined)": 7
+    "typescript(strict-boolean-expressions)": 7
   },
   "src/SandboxLifecycle.test.ts": {
     "effect/effectSucceedWithVoid": 14,
@@ -1445,7 +1340,6 @@
   },
   "src/SandboxLifecycle.ts": {
     "effect/asyncFunction": 7,
-    "effect/nodeBuiltinImport": 1,
     "effect/runEffectInsideEffect": 1,
     "eslint(complexity)": 2,
     "eslint(curly)": 2,
@@ -1480,7 +1374,6 @@
   },
   "src/SandboxProvider.test.ts": {
     "import(consistent-type-specifier-style)": 3,
-    "typescript(require-await)": 10,
     "vitest(require-mock-type-parameters)": 10
   },
   "src/SandboxProvider.ts": {
@@ -1499,12 +1392,10 @@
   },
   "src/SessionStore.ts": {
     "effect/asyncFunction": 12,
-    "effect/nodeBuiltinImport": 2,
     "effect/processEnv": 8,
     "eslint(curly)": 11,
     "eslint(max-lines)": 1,
     "eslint(max-params)": 1,
-    "eslint(max-statements)": 3,
     "eslint(no-await-in-loop)": 3,
     "eslint(prefer-destructuring)": 2,
     "eslint(prefer-named-capture-group)": 1,
@@ -1524,12 +1415,10 @@
     "typescript(no-unsafe-type-assertion)": 1,
     "typescript(strict-void-return)": 7,
     "unicorn(no-array-for-each)": 1,
-    "unicorn(no-useless-undefined)": 1,
     "vitest(prefer-strict-equal)": 5
   },
   "src/shutdownRegistry.ts": {
-    "eslint(curly)": 4,
-    "unicorn(no-process-exit)": 1
+    "eslint(curly)": 4
   },
   "src/startSandbox.test.ts": {
     "effect/anyUnknownInErrorContext": 1,
@@ -1547,7 +1436,6 @@
     "typescript(no-unsafe-member-access)": 3,
     "typescript(no-unsafe-type-assertion)": 1,
     "typescript(promise-function-async)": 3,
-    "typescript(require-await)": 8,
     "typescript(strict-void-return)": 4,
     "vitest(expect-expect)": 1,
     "vitest(no-conditional-expect)": 3,
@@ -1555,7 +1443,6 @@
     "vitest(prefer-strict-equal)": 2
   },
   "src/startSandbox.ts": {
-    "effect/nodeBuiltinImport": 2,
     "eslint(max-lines-per-function)": 2,
     "eslint(no-empty-function)": 1,
     "eslint(no-unused-vars)": 1,
@@ -1564,7 +1451,6 @@
     "import(consistent-type-specifier-style)": 3,
     "import(no-cycle)": 2,
     "node(no-sync)": 1,
-    "promise(prefer-await-to-then)": 2,
     "typescript(consistent-type-imports)": 1,
     "typescript(method-signature-style)": 1,
     "typescript(no-unsafe-type-assertion)": 3,
@@ -1579,10 +1465,8 @@
   "src/syncIn.ts": {
     "effect/asyncFunction": 1,
     "effect/missingReturnYieldStar": 1,
-    "effect/nodeBuiltinImport": 2,
     "effect/unnecessaryFailYieldableError": 1,
     "eslint(max-lines-per-function)": 3,
-    "eslint(max-statements)": 1,
     "eslint(prefer-destructuring)": 1,
     "typescript(promise-function-async)": 5,
     "typescript(strict-void-return)": 1,
@@ -1600,12 +1484,11 @@
     "effect/asyncFunction": 6,
     "effect/globalConsoleInEffect": 1,
     "effect/globalDateInEffect": 1,
-    "effect/nodeBuiltinImport": 3,
     "eslint(complexity)": 1,
     "eslint(curly)": 2,
     "eslint(max-lines-per-function)": 2,
     "eslint(max-lines)": 1,
-    "eslint(max-statements)": 2,
+    "eslint(max-statements)": 1,
     "eslint(no-await-in-loop)": 3,
     "eslint(prefer-destructuring)": 1,
     "import(consistent-type-specifier-style)": 1,
@@ -1621,20 +1504,17 @@
   },
   "src/templates/parallel-planner-with-review/main.mts": {
     "effect/asyncFunction": 1,
-    "effect/globalConsole": 10,
     "eslint(no-await-in-loop)": 3,
     "eslint(prefer-destructuring)": 1,
     "typescript(no-non-null-assertion)": 3
   },
   "src/templates/parallel-planner/main.mts": {
-    "effect/globalConsole": 10,
     "eslint(no-await-in-loop)": 3,
     "eslint(prefer-destructuring)": 1,
     "typescript(no-non-null-assertion)": 3,
     "typescript(promise-function-async)": 1
   },
   "src/templates/sequential-reviewer/main.mts": {
-    "effect/globalConsole": 6,
     "effect/globalDate": 1,
     "eslint(no-await-in-loop)": 4,
     "unicorn(explicit-length-check)": 1
@@ -1652,7 +1532,6 @@
     "unicorn(no-hex-escape)": 1
   },
   "src/testGlobalSetup.ts": {
-    "effect/nodeBuiltinImport": 2,
     "effect/processEnv": 4,
     "eslint(curly)": 2,
     "eslint(prefer-named-capture-group)": 1,
@@ -1688,13 +1567,11 @@
   },
   "src/vercel-sandbox.d.ts": {
     "typescript(array-type)": 1,
-    "typescript(method-signature-style)": 7,
-    "typescript(no-extraneous-class)": 1
+    "typescript(method-signature-style)": 7
   },
   "src/version.ts": {
     "typescript(no-unsafe-type-assertion)": 1,
-    "unicorn(no-negated-condition)": 1,
-    "unicorn(no-typeof-undefined)": 1
+    "unicorn(no-negated-condition)": 1
   },
   "src/WorktreeManager.test.ts": {
     "effect/unsafeEffectTypeAssertion": 2,
@@ -1722,12 +1599,11 @@
     "effect/globalConsoleInEffect": 6,
     "effect/globalDate": 1,
     "effect/missingReturnYieldStar": 1,
-    "effect/nodeBuiltinImport": 2,
     "effect/unnecessaryFailYieldableError": 1,
     "eslint(curly)": 4,
     "eslint(max-lines-per-function)": 6,
     "eslint(max-lines)": 1,
-    "eslint(max-statements)": 4,
+    "eslint(max-statements)": 1,
     "eslint(prefer-destructuring)": 1,
     "eslint(require-unicode-regexp)": 4,
     "oxc(branches-sharing-code)": 1,
