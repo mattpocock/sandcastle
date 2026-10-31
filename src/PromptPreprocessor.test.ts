@@ -1,18 +1,11 @@
-import {
-  Duration,
-  Effect,
-  Exit,
-  Layer,
-  Ref,
-  TestClock,
-  TestContext,
-} from "effect";
+import type { Layer } from "effect";
+import { Duration, Effect, Exit, Ref, TestClock, TestContext } from "effect";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
-import { Display, SilentDisplay } from "./Display.js";
-import type { DisplayEntry } from "./Display.js";
+import { assert, describe, expect, it } from "vitest";
+import { SilentDisplay } from "./Display.js";
+import type { DisplayEntry, Display } from "./Display.js";
 import { preprocessPrompt } from "./PromptPreprocessor.js";
 import { substitutePromptArgs } from "./PromptArgumentSubstitution.js";
 import type { SandboxService } from "./SandboxFactory.js";
@@ -78,13 +71,10 @@ describe("PromptPreprocessor", () => {
         Effect.provide(displayLayer),
       ),
     );
-    expect(result).toBeInstanceOf(PromptError);
+    assert.instanceOf(result, PromptError);
     expect(result._tag).toBe("PromptError");
     expect(result.message).toContain("exit 7");
     expect(result.message).toContain("exited with code 7");
-    if (result._tag !== "PromptError") {
-      throw new Error("unreachable");
-    }
     expect(result.exitCode).toBe(7);
   });
 
@@ -115,8 +105,8 @@ describe("PromptPreprocessor", () => {
           }
           return { stdout: "", stderr: "", exitCode: 0 };
         }),
-      copyIn: () => Effect.succeed(undefined as never),
-      copyFileOut: () => Effect.succeed(undefined as never),
+      copyIn: () => Effect.void,
+      copyFileOut: () => Effect.void,
     };
 
     const displayLayer = SilentDisplay.layer(
@@ -136,7 +126,7 @@ describe("PromptPreprocessor", () => {
     );
 
     expect(result).toBe("First: hello\nSecond: world");
-    expect(events).toEqual([
+    expect(events).toStrictEqual([
       "start:echo hello",
       "start:echo world",
       "end:echo hello",
@@ -150,19 +140,17 @@ describe("PromptPreprocessor", () => {
     await run(prompt, sandbox, displayLayer, sandboxDir);
     const entries = await Effect.runPromise(Ref.get(displayRef));
     const taskLogEntry = entries.find((e) => e._tag === "taskLog");
-    expect(taskLogEntry).toBeDefined();
-    if (taskLogEntry!._tag !== "taskLog") {
-      throw new Error("unreachable");
-    }
+    assert.isDefined(taskLogEntry);
+    assert(taskLogEntry._tag === "taskLog", "expected a taskLog entry");
     const helloTokens = Math.ceil("hello".length / 4);
     const worldTokens = Math.ceil("world".length / 4);
-    expect(taskLogEntry!.messages[0]).toBe(
+    expect(taskLogEntry.messages[0]).toBe(
       `echo hello → ~${helloTokens} tokens`,
     );
-    expect(taskLogEntry!.messages[1]).toBe(
+    expect(taskLogEntry.messages[1]).toBe(
       `echo world → ~${worldTokens} tokens`,
     );
-    expect(taskLogEntry!.messages).toHaveLength(2);
+    expect(taskLogEntry.messages).toHaveLength(2);
   });
 
   it("executes template shell blocks with {{KEY}} substituted into the command", async () => {
@@ -262,8 +250,8 @@ describe("PromptPreprocessor", () => {
     const { sandboxDir, displayLayer } = await setup();
     const hangingSandbox: SandboxService = {
       exec: () => Effect.never,
-      copyIn: () => Effect.succeed(undefined as never),
-      copyFileOut: () => Effect.succeed(undefined as never),
+      copyIn: () => Effect.void,
+      copyFileOut: () => Effect.void,
     };
 
     const marked = await Effect.runPromise(
@@ -286,14 +274,10 @@ describe("PromptPreprocessor", () => {
     const exit = await Effect.runPromise(program);
 
     expect(Exit.isFailure(exit)).toBe(true);
-    if (!Exit.isFailure(exit) || exit.cause._tag !== "Fail") {
-      throw new Error("Expected Fail cause");
-    }
+    assert(Exit.isFailure(exit), "Expected a failure");
+    assert(exit.cause._tag === "Fail", "Expected Fail cause");
     const { error } = exit.cause;
-    expect(error).toBeInstanceOf(PromptExpansionTimeoutError);
-    if (!(error instanceof PromptExpansionTimeoutError)) {
-      throw new TypeError("unreachable");
-    }
+    assert.instanceOf(error, PromptExpansionTimeoutError);
     expect(error.expression).toBe("sleep forever");
     expect(error.timeoutMs).toBe(30_000);
     expect(error.elapsedMs).toBeGreaterThanOrEqual(30_000);

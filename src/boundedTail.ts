@@ -57,7 +57,10 @@ export class BoundedTail {
       bounded.length + (this.items.length > 0 ? this.separator.length : 0);
     this.items.push(bounded);
     while (this.totalChars > this.maxChars && this.items.length > 1) {
-      const dropped = this.items.shift()!;
+      const dropped = this.items.shift();
+      if (dropped === undefined) {
+        break;
+      }
       this.totalChars -= dropped.length + this.separator.length;
     }
   }

@@ -65,10 +65,9 @@ describe("tagged errors", () => {
   });
 
   it("errors can be discriminated with Effect.catchTag", async () => {
-    const program = Effect.gen(function* () {
-      yield* Effect.fail(new ExecError({ message: "boom", command: "ls" }));
-      return "unreachable";
-    });
+    const program: Effect.Effect<string, ExecError> = Effect.fail(
+      new ExecError({ message: "boom", command: "ls" }),
+    );
 
     const result = await Effect.runPromise(
       program.pipe(
@@ -82,11 +81,8 @@ describe("tagged errors", () => {
   });
 
   it("errors propagate when catchTag doesn't match", async () => {
-    const program: Effect.Effect<string, ExecError | CopyError> = Effect.gen(
-      function* () {
-        yield* Effect.fail(new CopyError({ message: "copy failed" }));
-        return "unreachable";
-      },
+    const program: Effect.Effect<string, ExecError | CopyError> = Effect.fail(
+      new CopyError({ message: "copy failed" }),
     );
 
     const error = await Effect.runPromise(
@@ -108,9 +104,9 @@ describe("tagged errors", () => {
     // Both errors compose into a single chain
     const program = Effect.gen(function* () {
       if (Math.random() > 2) {
-        yield* execFail;
+        return yield* execFail;
       }
-      yield* copyFail;
+      return yield* copyFail;
     });
 
     const error = await Effect.runPromise(program.pipe(Effect.flip));

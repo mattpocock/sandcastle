@@ -21,8 +21,26 @@ export const ENTRY_POINTS: readonly string[] = [
 /** Mirrors the second override in .oxlintrc.json. */
 export const TEST_FILES: readonly string[] = [
   "**/*.test.ts",
+  "tests/**/*.ts",
   "src/testSetup.ts",
   "src/testSandbox.ts",
+];
+
+/**
+ * The end-to-end tests: the only place a new test may go. Mirrors the `e2e`
+ * project in vitest.config.ts. A test file anywhere else, outside
+ * TOOLING_TESTS, counts as `ratchet/test-outside-tests` in
+ * scripts/test-baseline.json.
+ */
+export const E2E_TESTS: readonly string[] = ["tests/**/*.test.ts"];
+
+/**
+ * Tests of the repo's own tooling, not of the package. Mirrors the `tooling`
+ * project in vitest.config.ts; out of scope for the move to tests/.
+ */
+export const TOOLING_TESTS: readonly string[] = [
+  "scripts/**/*.test.ts",
+  ".sandcastle/**/*.test.ts",
 ];
 
 /**
