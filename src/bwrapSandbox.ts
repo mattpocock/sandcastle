@@ -11,8 +11,15 @@ import { createInterface } from "node:readline";
 import { FileSystem } from "@effect/platform";
 import { Effect, Option } from "effect";
 import type { BindMountCreateOptions } from "./SandboxProvider.js";
+import { hostPathToolchainFromEnv } from "./hostPathToolchain.js";
+import type { HostPathToolchain } from "./hostPathToolchain.js";
+import { resolveIdentityMounts } from "./identityMounts.js";
+import type { IdentityMount, MountConfig } from "./identityMounts.js";
+
 import { BoundedTail } from "./boundedTail.js";
 import { BwrapError, CopyError } from "./errors.js";
+
+export type { IdentityMount, MountConfig } from "./identityMounts.js";
 
 /** The private home's path inside the sandbox. */
 export const SANDBOX_HOME = "/home/agent";
@@ -31,8 +38,11 @@ const SYSTEM_DIRS = [
   "/opt",
 ];
 
-/** PATH dirs a sandbox can run from: those inside the system dirs. */
-const SYSTEM_PATH_ROOTS = ["/usr", "/bin", "/sbin", "/opt"];
+/**
+ * Host dirs that stay hidden even when the host PATH names them: WSL2's
+ * Windows drives and interop, so a planted `.exe` can't run.
+ */
+const DENIED_ROOTS = ["/mnt", "/run/WSL"];
 const FALLBACK_PATH = "/usr/local/bin:/usr/bin:/bin";
 
 const isWithin = (path: string, root: string): boolean =>
@@ -73,21 +83,32 @@ const resolvConfArgs: Effect.Effect<string[], never, FileSystem.FileSystem> =
       : ["--ro-bind", target.value, target.value];
   });
 
-/** Every core mount at its host path, in order, so read-only overlays land on their writable parents. */
-const coreMountArgs = (mounts: BindMountCreateOptions["mounts"]): string[] =>
+/** Every mount at its host path, in order, so read-only overlays land on their writable parents. */
+const mountArgs = (
+  mounts: readonly { readonly hostPath: string; readonly readonly?: boolean }[],
+): string[] =>
   mounts.flatMap((m) => [
     m.readonly === true ? "--ro-bind" : "--bind",
     m.hostPath,
     m.hostPath,
   ]);
 
-/** The host PATH, keeping only the dirs the sandbox can see. */
-const sandboxPath = (hostPath: string): string => {
-  const dirs = hostPath
-    .split(":")
-    .filter((dir) => SYSTEM_PATH_ROOTS.some((root) => isWithin(dir, root)));
-  return dirs.length > 0 ? dirs.join(":") : FALLBACK_PATH;
-};
+/**
+ * Checks `bwrap()`'s `mounts` option: each mount, after resolution, must sit
+ * at its own host path. Throws at construction otherwise.
+ */
+export const bwrapMounts = (mounts: readonly MountConfig[]): IdentityMount[] =>
+  resolveIdentityMounts("bwrap", mounts, SANDBOX_HOME);
+
+/** The host PATH toolchain: each readable dir `--ro-bind`, each symlinked PATH dir recreated. */
+const toolchainArgs = (toolchain: HostPathToolchain): string[] => [
+  ...toolchain.readableDirs.flatMap((dir) => ["--ro-bind", dir, dir]),
+  ...toolchain.symlinks.flatMap((link) => [
+    "--symlink",
+    link.target,
+    link.path,
+  ]),
+];
 
 const envArgs = (env: Record<string, string>): string[] =>
   Object.entries(env).flatMap(([key, value]) => ["--setenv", key, value]);
@@ -135,9 +156,13 @@ export const removePrivateDirs = (
 export const sandboxArgs = (
   options: BindMountCreateOptions,
   dirs: PrivateDirs,
-  hostPath: string,
+  userMounts: readonly IdentityMount[],
 ): Effect.Effect<string[], never, FileSystem.FileSystem> =>
   Effect.gen(function* () {
+    const toolchain = yield* hostPathToolchainFromEnv({
+      coveredRoots: SYSTEM_DIRS,
+      deniedRoots: DENIED_ROOTS,
+    });
     return [
       ...(yield* systemDirArgs),
       ...(yield* resolvConfArgs),
@@ -153,11 +178,19 @@ export const sandboxArgs = (
       "--bind",
       dirs.tmp,
       SANDBOX_TMP,
-      ...coreMountArgs(options.mounts),
+      ...toolchainArgs(toolchain),
+      ...mountArgs(options.mounts),
+      ...mountArgs(userMounts),
+      // The read-only core mounts (the #1261 overlays) again, so no user
+      // mount can uncover them.
+      ...mountArgs(options.mounts.filter((m) => m.readonly === true)),
       "--clearenv",
       ...envArgs({
         ...options.env,
-        PATH: sandboxPath(hostPath),
+        PATH:
+          toolchain.pathEntries.length > 0
+            ? toolchain.pathEntries.join(":")
+            : FALLBACK_PATH,
         HOME: SANDBOX_HOME,
         TMPDIR: SANDBOX_TMP,
       }),
