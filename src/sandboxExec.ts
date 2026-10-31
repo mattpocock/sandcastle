@@ -17,7 +17,9 @@ export const execHost = async (
     return stdout;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Host command failed: ${command}\n${message}`);
+    throw new Error(`Host command failed: ${command}\n${message}`, {
+      cause: error,
+    });
   }
 };
 

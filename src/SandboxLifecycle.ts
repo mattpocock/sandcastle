@@ -509,6 +509,7 @@ export const withSandboxLifecycle = <A>(
                   }The temporary branch '${resolvedBranch}' has been preserved. ` +
                     `To retry: git merge ${resolvedBranch} (resolve any conflicts and commit), ` +
                     `then clean up: git branch -D ${resolvedBranch}`,
+                  { cause: e },
                 );
               }
             },
