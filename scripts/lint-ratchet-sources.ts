@@ -1,5 +1,8 @@
-// The three sources of violations the lint ratchet counts. Each resolves to a
-// flat list of file × rule; scripts/lint-ratchet.ts tallies them.
+// The sources of violations the ratchets count. Each resolves to a flat list
+// of file × rule; scripts/lint-ratchet.ts tallies them.
+//
+// - lint ratchet: oxlint, Effect diagnostics, disable comments
+// - test ratchet: test files outside tests/, dependency-cruiser violations
 
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
@@ -9,7 +12,9 @@ import { z } from "zod";
 import type { Exemption } from "./lint-ratchet-config.ts";
 import {
   ALLOWED_DIRECTIVES,
+  E2E_TESTS,
   EFFECT_EXEMPTIONS,
+  TOOLING_TESTS,
 } from "./lint-ratchet-config.ts";
 import type { Violation } from "./lint-ratchet-core.ts";
 
@@ -54,15 +59,14 @@ const globToRegExp = (glob: string): RegExp =>
     "u",
   );
 
+const matchesAny = (globs: readonly string[], file: string): boolean =>
+  globs.some((glob) => globToRegExp(glob).test(file));
+
 const isExempt = (
   exemptions: readonly Exemption[],
   { file, rule }: Violation,
 ): boolean =>
-  exemptions.some(
-    (e) =>
-      e.rules.includes(rule) &&
-      e.files.some((glob) => globToRegExp(glob).test(file)),
-  );
+  exemptions.some((e) => e.rules.includes(rule) && matchesAny(e.files, file));
 
 const OxlintOutput = z.object({
   diagnostics: z.array(
@@ -125,19 +129,61 @@ const directivesIn = async (file: string): Promise<Violation[]> => {
     .map(() => ({ file, rule: "ratchet/disable-comment" }));
 };
 
-/** Inline disable comments outside ALLOWED_DIRECTIVES. */
-export const collectDirectives = async (): Promise<Violation[]> => {
+/** Tracked and untracked files, minus the gitignored ones. */
+const listFiles = async (): Promise<string[]> => {
   const listed = await run("git", [
     "ls-files",
     "--cached",
     "--others",
     "--exclude-standard",
   ]);
-  const files = listed
-    .split("\n")
-    .filter((f) => SCANNED_EXTENSIONS.has(path.extname(f)));
+  return listed.split("\n").filter((f) => f !== "");
+};
+
+/** Inline disable comments outside ALLOWED_DIRECTIVES. */
+export const collectDirectives = async (): Promise<Violation[]> => {
+  const listed = await listFiles();
+  const files = listed.filter((f) => SCANNED_EXTENSIONS.has(path.extname(f)));
   const perFile = await Promise.all(
     files.map(async (file) => directivesIn(file)),
   );
   return perFile.flat();
+};
+
+const TEST_FILE = /\.test\.[cm]?tsx?$/u;
+
+/** Each test file outside tests/ and the tooling tests, once. */
+export const collectLegacyTests = async (): Promise<Violation[]> => {
+  const listed = await listFiles();
+  return listed
+    .filter(
+      (f) =>
+        TEST_FILE.test(f) &&
+        !matchesAny(E2E_TESTS, f) &&
+        !matchesAny(TOOLING_TESTS, f),
+    )
+    .map((file) => ({ file, rule: "ratchet/test-outside-tests" }));
+};
+
+const DepcruiseOutput = z.object({
+  summary: z.object({
+    violations: z.array(
+      z.object({ from: z.string(), rule: z.object({ name: z.string() }) }),
+    ),
+  }),
+});
+
+/** dependency-cruiser, configured by .dependency-cruiser.mjs. */
+export const collectDepcruise = async (): Promise<Violation[]> => {
+  const out = await run(path.join(BIN, "depcruise"), [
+    "src",
+    "tests",
+    "--output-type",
+    "json",
+  ]);
+  const { summary } = DepcruiseOutput.parse(JSON.parse(out));
+  return summary.violations.map((v) => ({
+    file: v.from,
+    rule: `depcruise/${v.rule.name}`,
+  }));
 };

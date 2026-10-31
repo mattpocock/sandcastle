@@ -6,16 +6,16 @@ import { ClackDisplay, Display, FileDisplay } from "./Display.js";
 import { preprocessPrompt } from "./PromptPreprocessor.js";
 import { resolvePrompt } from "./PromptResolver.js";
 import {
-  SandboxFactory,
+  reuseSandboxFactoryLayer,
   makeSandboxFromHandle,
   resolveGitMounts,
   SANDBOX_REPO_DIR,
 } from "./SandboxFactory.js";
-import { patchGitMountsForWindows } from "./mountUtils.js";
+import type { MountEntry } from "./SandboxFactory.js";
+import { patchGitMountsForWindows, removeMountTempDirs } from "./mountUtils.js";
 import { withSandboxLifecycle, runHostHooks } from "./SandboxLifecycle.js";
 import type { SandboxHooks } from "./SandboxLifecycle.js";
 import type {
-  AnySandboxProvider,
   SandboxProvider,
   MergeToHeadBranchStrategy,
   NamedBranchStrategy,
@@ -87,7 +87,7 @@ export interface WorktreeInteractiveOptions {
   /** Agent provider to use (e.g. claudeCode("claude-opus-4-8")) */
   readonly agent: AgentProvider;
   /** Sandbox provider (e.g. docker(), noSandbox()). Defaults to noSandbox(). */
-  readonly sandbox?: AnySandboxProvider;
+  readonly sandbox?: SandboxProvider;
   /** Inline prompt string (mutually exclusive with promptFile). */
   readonly prompt?: string;
   /** Path to a prompt file (mutually exclusive with prompt). */
@@ -232,18 +232,18 @@ export const createWorktree = async (
   const isMergeToHead = options.branchStrategy.type === "merge-to-head";
 
   const { hostRepoDir, worktreeInfo } = await Effect.gen(function* () {
-    const hostRepoDir = yield* resolveCwd(options.cwd);
-    yield* WorktreeManager.pruneStale(hostRepoDir).pipe(
+    const repoDir = yield* resolveCwd(options.cwd);
+    yield* WorktreeManager.pruneStale(repoDir).pipe(
       Effect.catchAll(() => Effect.void),
     );
-    const info = yield* WorktreeManager.create(hostRepoDir, {
+    const info = yield* WorktreeManager.create(repoDir, {
       branch,
       baseBranch,
     });
     if (options.copyToWorktree && options.copyToWorktree.length > 0) {
       yield* copyToWorktree(
         options.copyToWorktree,
-        hostRepoDir,
+        repoDir,
         info.path,
         options.timeouts?.copyToWorktreeMs,
       );
@@ -252,7 +252,7 @@ export const createWorktree = async (
     if (options.hooks?.host?.onWorktreeReady?.length) {
       yield* runHostHooks(options.hooks.host.onWorktreeReady, info.path);
     }
-    return { hostRepoDir, worktreeInfo: info };
+    return { hostRepoDir: repoDir, worktreeInfo: info };
   }).pipe(Effect.provide(NodeContext.layer), Effect.runPromise);
 
   let closed = false;
@@ -360,6 +360,8 @@ export const createWorktree = async (
       });
 
       // 4. Start sandbox
+      // Temp dirs behind the git mounts, removed once the sandbox is closed.
+      const mountsToClean: MountEntry[] = [];
       let handle:
         | BindMountSandboxHandle
         | IsolatedSandboxHandle
@@ -391,6 +393,7 @@ export const createWorktree = async (
           worktreeInfo.path,
           SANDBOX_REPO_DIR,
         );
+        mountsToClean.push(...gitMounts);
         const startResult = yield* d.taskLog("Starting sandbox", () =>
           startSandbox({
             provider: resolvedSandbox,
@@ -488,7 +491,9 @@ export const createWorktree = async (
       }).pipe(
         // Always close sandbox handle
         Effect.ensuring(
-          Effect.promise(async () => handle.close().catch(() => {})),
+          Effect.promise(async () => handle.close().catch(() => {})).pipe(
+            Effect.andThen(removeMountTempDirs(mountsToClean)),
+          ),
         ),
       );
     });
@@ -577,6 +582,8 @@ export const createWorktree = async (
       }
 
       // 4. Start sandbox
+      // Temp dirs behind the git mounts, removed once the sandbox is closed.
+      const mountsToClean: MountEntry[] = [];
       let handle:
         | BindMountSandboxHandle
         | IsolatedSandboxHandle
@@ -610,6 +617,7 @@ export const createWorktree = async (
           worktreeInfo.path,
           SANDBOX_REPO_DIR,
         );
+        mountsToClean.push(...gitMounts);
         const startResult = yield* startSandbox({
           provider: sandboxProvider,
           hostRepoDir,
@@ -663,23 +671,15 @@ export const createWorktree = async (
           : undefined;
 
       // 6. Build a SandboxFactory that reuses the started sandbox
-      const reuseFactoryLayer = Layer.succeed(SandboxFactory, {
-        withSandbox: (makeEffect) =>
-          makeEffect(
-            {
-              hostWorktreePath: worktreeInfo.path,
-              sandboxRepoPath: sandboxRepoDir,
-              applyToHost,
-              bindMountHandle,
-            },
-            sandbox,
-          ).pipe(
-            Effect.map((value) => ({
-              value,
-              preservedWorktreePath: undefined,
-            })),
-          ) as any,
-      });
+      const reuseFactoryLayer = reuseSandboxFactoryLayer(
+        {
+          hostWorktreePath: worktreeInfo.path,
+          sandboxRepoPath: sandboxRepoDir,
+          applyToHost,
+          bindMountHandle,
+        },
+        sandbox,
+      );
 
       const streamEmitterLayer = agentStreamEmitterLayer(
         buildAgentStreamHandler(resolvedLogging),
@@ -734,7 +734,9 @@ export const createWorktree = async (
         Effect.provide(runLayer),
         // Always close sandbox handle
         Effect.ensuring(
-          Effect.promise(async () => handle.close().catch(() => {})),
+          Effect.promise(async () => handle.close().catch(() => {})).pipe(
+            Effect.andThen(removeMountTempDirs(mountsToClean)),
+          ),
         ),
       );
 

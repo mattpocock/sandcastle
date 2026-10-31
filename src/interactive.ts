@@ -11,11 +11,12 @@ import {
   resolveGitMounts,
   SANDBOX_REPO_DIR,
 } from "./SandboxFactory.js";
-import { patchGitMountsForWindows } from "./mountUtils.js";
+import type { MountEntry } from "./SandboxFactory.js";
+import { patchGitMountsForWindows, removeMountTempDirs } from "./mountUtils.js";
 import { withSandboxLifecycle, runHostHooks } from "./SandboxLifecycle.js";
 import type { SandboxHooks } from "./SandboxLifecycle.js";
 import type {
-  AnySandboxProvider,
+  SandboxProvider,
   BranchStrategy,
   BindMountSandboxHandle,
   IsolatedSandboxHandle,
@@ -46,7 +47,7 @@ export interface InteractiveOptions {
   /** Agent provider to use (e.g. claudeCode("claude-opus-4-8")) */
   readonly agent: AgentProvider;
   /** Sandbox provider (e.g. docker(), noSandbox()). */
-  readonly sandbox?: AnySandboxProvider;
+  readonly sandbox?: SandboxProvider;
   /** Inline prompt string (mutually exclusive with promptFile). */
   readonly prompt?: string;
   /** Path to a prompt file (mutually exclusive with prompt). */
@@ -148,7 +149,8 @@ export const interactive = async (
   }
 
   // Validate buildInteractiveArgs is available
-  if (!provider.buildInteractiveArgs) {
+  const buildInteractiveArgs = provider.buildInteractiveArgs?.bind(provider);
+  if (!buildInteractiveArgs) {
     throw new Error(
       `Agent provider "${provider.name}" does not support buildInteractiveArgs, required for interactive sessions.`,
     );
@@ -265,10 +267,16 @@ export const interactive = async (
         ),
       );
     }
+    // Where the agent works on the host: the worktree, or the repo itself in
+    // head mode (the only mode without a worktree).
+    const hostWorkPath = worktreeInfo?.path ?? hostRepoDir;
+    const copyPaths = options.copyToWorktree;
 
     // 6. Prepare the worktree and start the sandbox. If any step fails after the
     // worktree exists (copying, hooks, or sandbox start), remove the worktree so
     // it is not orphaned on disk.
+    // Temp dirs behind the git mounts, removed once the sandbox is closed.
+    const mountsToClean: MountEntry[] = [];
     const handle:
       | BindMountSandboxHandle
       | IsolatedSandboxHandle
@@ -278,14 +286,14 @@ export const interactive = async (
         if (
           (sandboxProvider.tag === "bind-mount" ||
             sandboxProvider.tag === "none") &&
-          options.copyToWorktree &&
-          options.copyToWorktree.length > 0
+          copyPaths &&
+          copyPaths.length > 0
         ) {
           yield* d.taskLog("Copying files to worktree", () =>
             copyToWorktree(
-              options.copyToWorktree!,
+              copyPaths,
               hostRepoDir,
-              worktreeInfo!.path,
+              hostWorkPath,
               options.timeouts?.copyToWorktreeMs,
             ),
           );
@@ -293,7 +301,7 @@ export const interactive = async (
 
         // Run host.onWorktreeReady hooks
         if (hooks?.host?.onWorktreeReady?.length) {
-          yield* runHostHooks(hooks.host.onWorktreeReady, worktreeInfo!.path);
+          yield* runHostHooks(hooks.host.onWorktreeReady, hostWorkPath);
         }
       } else if (hooks?.host?.onWorktreeReady?.length) {
         // Head strategy: cwd is the host repo root
@@ -303,10 +311,9 @@ export const interactive = async (
       // Start sandbox
       if (sandboxProvider.tag === "none") {
         // No-sandbox: run directly on the host, no container
-        const worktreePath = isHeadMode ? hostRepoDir : worktreeInfo!.path;
         return yield* Effect.promise(async () =>
           sandboxProvider.create({
-            worktreePath,
+            worktreePath: hostWorkPath,
             env: effectiveEnv,
           }),
         );
@@ -314,7 +321,7 @@ export const interactive = async (
         const startResult = yield* d.taskLog("Starting sandbox", () =>
           startSandbox({
             provider: sandboxProvider,
-            hostRepoDir: worktreeInfo!.path,
+            hostRepoDir: hostWorkPath,
             env: effectiveEnv,
             copyPaths: options.copyToWorktree,
             copySourceDir: hostRepoDir,
@@ -324,18 +331,18 @@ export const interactive = async (
       }
       const gitPath = join(hostRepoDir, ".git");
       const rawGitMounts = yield* resolveGitMounts(gitPath);
-      const worktreeOrRepoPath = isHeadMode ? hostRepoDir : worktreeInfo!.path;
       const gitMounts = yield* patchGitMountsForWindows(
         rawGitMounts,
-        worktreeOrRepoPath,
+        hostWorkPath,
         SANDBOX_REPO_DIR,
       );
+      mountsToClean.push(...gitMounts);
       const startResult = yield* d.taskLog("Starting sandbox", () =>
         startSandbox({
           provider: sandboxProvider,
           hostRepoDir,
           env: effectiveEnv,
-          worktreeOrRepoPath,
+          worktreeOrRepoPath: hostWorkPath,
           gitMounts,
           repoDir: SANDBOX_REPO_DIR,
         }),
@@ -349,6 +356,7 @@ export const interactive = async (
             )
           : Effect.void,
       ),
+      Effect.onError(() => removeMountTempDirs(mountsToClean)),
     );
 
     // Run lifecycle with guaranteed cleanup of handle and worktree
@@ -368,7 +376,7 @@ export const interactive = async (
 
       const applyToHost =
         sandboxProvider.tag === "isolated" && worktreeInfo
-          ? () => syncOut(worktreeInfo.path, handle as IsolatedSandboxHandle)
+          ? () => syncOut(hostWorkPath, handle as IsolatedSandboxHandle)
           : () => Effect.void; // bind-mount and no-sandbox don't need sync
 
       const lifecycleEffect = withSandboxLifecycle(
@@ -396,7 +404,7 @@ export const interactive = async (
                   );
 
             // Build interactive args and run the session
-            const interactiveArgs = provider.buildInteractiveArgs!({
+            const interactiveArgs = buildInteractiveArgs({
               prompt: fullPrompt,
               dangerouslySkipPermissions: sandboxProvider.tag !== "none",
             });
@@ -466,7 +474,9 @@ export const interactive = async (
       ),
       // Always close sandbox handle
       Effect.ensuring(
-        Effect.promise(async () => handle.close().catch(() => {})),
+        Effect.promise(async () => handle.close().catch(() => {})).pipe(
+          Effect.andThen(removeMountTempDirs(mountsToClean)),
+        ),
       ),
     );
   });

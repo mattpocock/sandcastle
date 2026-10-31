@@ -2,7 +2,6 @@ import { Effect, Layer, Ref } from "effect";
 import { exec } from "node:child_process";
 import { constants, existsSync } from "node:fs";
 import {
-  chmod,
   mkdir,
   mkdtemp,
   open,
@@ -229,8 +228,8 @@ describe("withSandboxLifecycle (worktree mode)", () => {
         execCalls.push({ command, options });
         return Effect.succeed({ stdout: "", stderr: "", exitCode: 0 });
       },
-      copyIn: () => Effect.succeed(undefined as never),
-      copyFileOut: () => Effect.succeed(undefined as never),
+      copyIn: () => Effect.void,
+      copyFileOut: () => Effect.void,
     };
 
     await Effect.runPromise(
@@ -289,8 +288,8 @@ describe("withSandboxLifecycle (worktree mode)", () => {
         }
         return Effect.succeed({ stdout: "", stderr: "", exitCode: 0 });
       },
-      copyIn: () => Effect.succeed(undefined as never),
-      copyFileOut: () => Effect.succeed(undefined as never),
+      copyIn: () => Effect.void,
+      copyFileOut: () => Effect.void,
     };
 
     await Effect.runPromise(
@@ -1007,12 +1006,12 @@ describe("withSandboxLifecycle (worktree mode)", () => {
           },
           sandbox,
           (ctx) =>
-            Effect.gen(function* () {
-              yield* ctx.sandbox.exec(
+            ctx.sandbox
+              .exec(
                 String.raw`sh -c "echo new > sync-file.txt && git add sync-file.txt && git commit -m \"sync commit\""`,
                 { cwd: ctx.sandboxRepoDir },
-              );
-            }),
+              )
+              .pipe(Effect.asVoid),
         );
         return yield* Ref.get(displayRef);
       }).pipe(Effect.provide(displayLayer)),
@@ -1206,10 +1205,10 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       ).pipe(Effect.provide(testDisplayLayer)),
     );
 
-    setTimeout(() => {
-      ac.abort("cancelled");
-    }, 50);
-    await expect(promise).rejects.toThrow();
+    setTimeout(() => ac.abort("cancelled"), 50);
+    await expect(promise).rejects.toThrow(
+      "Command aborted: sleep 60 (cancelled)",
+    );
   });
 
   it("sandbox.onSandboxReady hook is killed when signal fires", async () => {
@@ -1234,10 +1233,8 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       ).pipe(Effect.provide(testDisplayLayer)),
     );
 
-    setTimeout(() => {
-      ac.abort("cancelled");
-    }, 50);
-    await expect(promise).rejects.toThrow();
+    setTimeout(() => ac.abort("cancelled"), 50);
+    await expect(promise).rejects.toThrow("Aborted: cancelled");
   });
 
   it("hooks receive never-aborted signal when no signal is provided", async () => {
@@ -1310,8 +1307,8 @@ describe("withSandboxLifecycle (worktree mode)", () => {
         }
         return Effect.succeed({ stdout: "", stderr: "", exitCode: 0 });
       },
-      copyIn: () => Effect.succeed(undefined as never),
-      copyFileOut: () => Effect.succeed(undefined as never),
+      copyIn: () => Effect.void,
+      copyFileOut: () => Effect.void,
     };
 
     const result = Effect.runPromise(
@@ -1428,8 +1425,8 @@ describe("withSandboxLifecycle (worktree mode)", () => {
           }
           return { stdout: "", stderr: "", exitCode: 0 };
         }),
-      copyIn: () => Effect.succeed(undefined as never),
-      copyFileOut: () => Effect.succeed(undefined as never),
+      copyIn: () => Effect.void,
+      copyFileOut: () => Effect.void,
     };
 
     const result = await Effect.runPromise(
@@ -1461,8 +1458,8 @@ describe("withSandboxLifecycle (worktree mode)", () => {
           }
           return { stdout: "", stderr: "", exitCode: 0 };
         }),
-      copyIn: () => Effect.succeed(undefined as never),
-      copyFileOut: () => Effect.succeed(undefined as never),
+      copyIn: () => Effect.void,
+      copyFileOut: () => Effect.void,
     };
 
     await expect(
@@ -1498,8 +1495,8 @@ describe("withSandboxLifecycle (worktree mode)", () => {
         }
         return Effect.succeed({ stdout: "", stderr: "", exitCode: 0 });
       },
-      copyIn: () => Effect.succeed(undefined as never),
-      copyFileOut: () => Effect.succeed(undefined as never),
+      copyIn: () => Effect.void,
+      copyFileOut: () => Effect.void,
     };
 
     const result = Effect.runPromise(
@@ -1555,16 +1552,16 @@ describe("withSandboxLifecycle (worktree mode)", () => {
   it("respects a mergeToHostMs timeout override", async () => {
     const { hostDir, worktreeDir, sandbox } = await setupWorktree();
 
-    // A post-merge hook that blocks on the FIFO holds the host-side
-    // `git merge` open until released, so only the 1ms override (not the 30s
-    // default) can end it.
+    // Host-side git runs hooks from nowhere, so gate the merge on config
+    // instead: once the work has committed, the host checkout (on `main`)
+    // includes the FIFO, so the host-side `git merge` blocks reading its
+    // config until released, and only the 1ms override (not the 30s default)
+    // can end it. The worktree is on its own branch, so the commit count read
+    // there before the merge is not gated.
     const gate = await makeFifoGate(hostDir);
-    const hook = join(hostDir, ".git", "hooks", "post-merge");
-    await writeFile(hook, `#!/bin/sh\ncat "${gate.path}" > /dev/null\n`);
-    await chmod(hook, 0o755);
 
     // Merge-to-head path (no explicit branch) with a real commit, so the
-    // host-side merge runs and hits the gated hook.
+    // host-side merge runs and hits the gate.
     const result = Effect.runPromise(
       withSandboxLifecycle(
         {
@@ -1584,6 +1581,12 @@ describe("withSandboxLifecycle (worktree mode)", () => {
             yield* ctx.sandbox.exec(
               String.raw`sh -c "echo wt > wt.txt && git add wt.txt && git commit -m \"wt commit\""`,
               { cwd: ctx.sandboxRepoDir },
+            );
+            yield* Effect.promise(async () =>
+              execAsync(
+                `git config "includeIf.onbranch:main.path" "${gate.path}"`,
+                { cwd: hostDir },
+              ),
             );
           }),
       ).pipe(Effect.provide(testDisplayLayer)),
@@ -1609,8 +1612,8 @@ describe("withSandboxLifecycle (worktree mode)", () => {
           }
           return { stdout: "", stderr: "", exitCode: 0 };
         }),
-      copyIn: () => Effect.succeed(undefined as never),
-      copyFileOut: () => Effect.succeed(undefined as never),
+      copyIn: () => Effect.void,
+      copyFileOut: () => Effect.void,
     };
 
     await expect(
@@ -1717,7 +1720,9 @@ describe("runHostHooks", () => {
       ac.abort("cancelled");
     }, 50);
 
-    await expect(promise).rejects.toThrow();
+    await expect(promise).rejects.toThrow(
+      "Command aborted: sleep 60 (cancelled)",
+    );
   });
 
   it("works normally when signal is not provided", async () => {
@@ -1766,7 +1771,7 @@ describe("runHostHooks", () => {
       Effect.runPromise(
         runHostHooks([{ command: ORPHAN_HOOK }], dir, ac.signal),
       ),
-    ).rejects.toThrow();
+    ).rejects.toThrow("Command aborted");
 
     await waitForProcessGone(await readPid(dir));
   });
