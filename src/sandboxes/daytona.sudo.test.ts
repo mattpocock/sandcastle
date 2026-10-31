@@ -69,7 +69,7 @@ describe("daytona() exec with sudo", () => {
   };
 
   it("elevates the whole compound command, not just its first part", async () => {
-    const handle = await daytona().create({ env: {} } as any);
+    const handle = await daytona().create({ env: {} });
 
     await handle.exec("echo a > /dev/null && echo b > /dev/null", {
       sudo: true,
@@ -82,7 +82,7 @@ describe("daytona() exec with sudo", () => {
   });
 
   it("elevates the whole compound command when streaming", async () => {
-    const handle = await daytona().create({ env: {} } as any);
+    const handle = await daytona().create({ env: {} });
 
     await handle.exec("a; b", { sudo: true, onLine: () => {} });
 

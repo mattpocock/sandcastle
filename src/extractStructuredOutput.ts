@@ -1,8 +1,8 @@
-import {
-  StructuredOutputError,
-  type OutputDefinition,
-  type OutputObjectDefinition,
-  type OutputStringDefinition,
+import { StructuredOutputError } from "./Output.js";
+import type {
+  OutputDefinition,
+  OutputObjectDefinition,
+  OutputStringDefinition,
 } from "./Output.js";
 
 interface ExtractionContext {

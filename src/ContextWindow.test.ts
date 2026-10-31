@@ -8,13 +8,13 @@ import {
   cursor,
   opencode,
   pi,
-  type AgentProvider,
 } from "./AgentProvider.js";
+import type { AgentProvider } from "./AgentProvider.js";
 import {
   buildContextWindowLines,
   formatContextWindow,
-  type ContextWindow,
 } from "./ContextWindow.js";
+import type { ContextWindow } from "./ContextWindow.js";
 
 /**
  * The fixtures are real stdout lines (and one real codex rollout) kept from

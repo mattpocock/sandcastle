@@ -1,25 +1,27 @@
 import { NodeContext, NodeFileSystem } from "@effect/platform-node";
 import { join } from "node:path";
 import { Effect, Layer, Ref } from "effect";
-import { shellEscape, type AgentProvider } from "./AgentProvider.js";
+import { shellEscape } from "./AgentProvider.js";
+import type { AgentProvider } from "./AgentProvider.js";
 import {
   ClackDisplay,
   Display,
   FileDisplay,
   SilentDisplay,
-  type DisplayEntry,
 } from "./Display.js";
+import type { DisplayEntry } from "./Display.js";
 import { resolveEnv } from "./EnvResolver.js";
 import { mergeProviderEnv } from "./mergeProviderEnv.js";
-import { orchestrate, type IterationResult } from "./Orchestrator.js";
+import { orchestrate } from "./Orchestrator.js";
+import type { IterationResult } from "./Orchestrator.js";
 import { agentStreamEmitterLayer } from "./AgentStreamEmitter.js";
 import {
-  type PromptArgs,
   substitutePromptArgs,
   validateNoArgsWithInlinePrompt,
   validateNoBuiltInArgOverride,
   BUILT_IN_PROMPT_ARG_KEYS,
 } from "./PromptArgumentSubstitution.js";
+import type { PromptArgs } from "./PromptArgumentSubstitution.js";
 import { resolvePrompt } from "./PromptResolver.js";
 import { preprocessPrompt } from "./PromptPreprocessor.js";
 import type { LoggingOption, Timeouts } from "./run.js";
@@ -30,18 +32,15 @@ import {
   buildLogFilename,
   printFileDisplayStartup,
 } from "./run.js";
+import { withSandboxLifecycle, runHostHooks } from "./SandboxLifecycle.js";
+import type { SandboxHooks } from "./SandboxLifecycle.js";
 import {
-  withSandboxLifecycle,
-  runHostHooks,
-  type SandboxHooks,
-} from "./SandboxLifecycle.js";
-import {
-  type SandboxService,
   SandboxFactory,
   SANDBOX_REPO_DIR,
   resolveGitMounts,
   makeSandboxFromHandle,
 } from "./SandboxFactory.js";
+import type { SandboxService } from "./SandboxFactory.js";
 import type {
   SandboxProvider,
   BindMountSandboxHandle,
@@ -817,9 +816,9 @@ export const createSandboxFromWorktree = async (
   const isIsolated = options.sandbox.tag === "isolated";
 
   if (isTestMode) {
-    sandbox = options._test!.buildSandbox!(worktreePath);
+    sandbox = options._test.buildSandbox!(worktreePath);
     sandboxRepoDir = worktreePath;
-    providerHandle = options._test!.bindMountHandle;
+    providerHandle = options._test.bindMountHandle;
   } else {
     const resolvedEnv = await Effect.runPromise(
       resolveEnv(hostRepoDir).pipe(Effect.provide(NodeContext.layer)),
@@ -1011,9 +1010,9 @@ export const createSandbox = async (
           let sandboxRepoDir: string;
 
           if (isTestMode) {
-            sandbox = options._test!.buildSandbox!(worktreePath);
+            sandbox = options._test.buildSandbox!(worktreePath);
             sandboxRepoDir = worktreePath;
-            providerHandle = options._test!.bindMountHandle;
+            providerHandle = options._test.bindMountHandle;
           } else {
             const resolvedEnv = yield* resolveEnv(hostRepoDir);
             const env = mergeProviderEnv({
@@ -1094,9 +1093,7 @@ export const createSandbox = async (
             }).pipe(
               Effect.onError(() =>
                 providerHandle
-                  ? Effect.promise(() =>
-                      providerHandle!.close().catch(() => {}),
-                    )
+                  ? Effect.promise(() => providerHandle.close().catch(() => {}))
                   : Effect.void,
               ),
             );

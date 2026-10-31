@@ -9,9 +9,8 @@ import {
   ExecError,
   SyncError,
   WorktreeError,
-  type DockerError,
-  type SandboxError,
 } from "./errors.js";
+import type { DockerError, SandboxError } from "./errors.js";
 import type { Timeouts } from "./run.js";
 import * as WorktreeManager from "./WorktreeManager.js";
 import { copyToWorktree } from "./CopyToWorktree.js";
@@ -24,7 +23,8 @@ import type {
   IsolatedSandboxHandle,
   NoSandboxHandle,
 } from "./SandboxProvider.js";
-import { runHostHooks, type SandboxHooks } from "./SandboxLifecycle.js";
+import { runHostHooks } from "./SandboxLifecycle.js";
+import type { SandboxHooks } from "./SandboxLifecycle.js";
 import { startSandbox } from "./startSandbox.js";
 import { syncOut } from "./syncOut.js";
 import { patchGitMountsForWindows } from "./mountUtils.js";

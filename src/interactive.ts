@@ -12,11 +12,8 @@ import {
   SANDBOX_REPO_DIR,
 } from "./SandboxFactory.js";
 import { patchGitMountsForWindows } from "./mountUtils.js";
-import {
-  withSandboxLifecycle,
-  runHostHooks,
-  type SandboxHooks,
-} from "./SandboxLifecycle.js";
+import { withSandboxLifecycle, runHostHooks } from "./SandboxLifecycle.js";
+import type { SandboxHooks } from "./SandboxLifecycle.js";
 import type {
   AnySandboxProvider,
   BranchStrategy,
@@ -32,13 +29,13 @@ import { syncOut } from "./syncOut.js";
 import * as WorktreeManager from "./WorktreeManager.js";
 import { generateTempBranchName, getCurrentBranch } from "./WorktreeManager.js";
 import {
-  type PromptArgs,
   substitutePromptArgs,
   validateNoArgsWithInlinePrompt,
   validateNoBuiltInArgOverride,
   findMissingPromptArgKeys,
   BUILT_IN_PROMPT_ARG_KEYS,
 } from "./PromptArgumentSubstitution.js";
+import type { PromptArgs } from "./PromptArgumentSubstitution.js";
 import { noSandbox } from "./sandboxes/no-sandbox.js";
 import { raceAbortSignal } from "./raceAbortSignal.js";
 import { resolveCwd } from "./resolveCwd.js";
@@ -372,7 +369,7 @@ export const interactive = async (
 
       const applyToHost =
         sandboxProvider.tag === "isolated" && worktreeInfo
-          ? () => syncOut(worktreeInfo!.path, handle as IsolatedSandboxHandle)
+          ? () => syncOut(worktreeInfo.path, handle as IsolatedSandboxHandle)
           : () => Effect.void; // bind-mount and no-sandbox don't need sync
 
       const lifecycleEffect = withSandboxLifecycle(

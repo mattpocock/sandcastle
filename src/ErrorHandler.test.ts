@@ -1,7 +1,7 @@
 import { Effect, Ref } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Display, SilentDisplay } from "./Display.js";
-import type { DisplayEntry } from "./Display.js";
+import { SilentDisplay } from "./Display.js";
+import type { DisplayEntry, Display } from "./Display.js";
 import {
   AgentError,
   AgentIdleTimeoutError,
@@ -170,9 +170,7 @@ describe("withFriendlyErrors", () => {
   };
 
   const statusOf = (entries: readonly DisplayEntry[]) =>
-    entries.find((e) => e._tag === "status") as
-      | Extract<DisplayEntry, { _tag: "status" }>
-      | undefined;
+    entries.find((e) => e._tag === "status");
 
   it("routes DockerError through Display as error severity", async () => {
     const entries = await runWithDisplay(

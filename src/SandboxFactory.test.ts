@@ -8,13 +8,16 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { AgentError, AgentIdleTimeoutError } from "./errors.js";
-import { SilentDisplay, type DisplayEntry } from "./Display.js";
+import { SilentDisplay } from "./Display.js";
+import type { DisplayEntry } from "./Display.js";
 import {
   createBindMountSandboxProvider,
   createIsolatedSandboxProvider,
-  type SandboxProvider,
-  type BranchStrategy,
-  type NoSandboxProvider,
+} from "./SandboxProvider.js";
+import type {
+  SandboxProvider,
+  BranchStrategy,
+  NoSandboxProvider,
 } from "./SandboxProvider.js";
 import { testIsolated } from "./sandboxes/test-isolated.js";
 import { testStubProvider } from "./sandboxes/test-shared.js";

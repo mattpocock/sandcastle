@@ -6,11 +6,11 @@ import { Effect, Layer, Ref } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   Display,
-  type DisplayEntry,
   FileDisplay,
   SilentDisplay,
   terminalStyle,
 } from "./Display.js";
+import type { DisplayEntry } from "./Display.js";
 
 describe("SilentDisplay", () => {
   const setup = () => {

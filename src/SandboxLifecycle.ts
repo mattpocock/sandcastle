@@ -10,10 +10,10 @@ import {
   MergeToHostTimeoutError,
   SyncError,
   withTimeout,
-  type SandboxError,
 } from "./errors.js";
+import type { SandboxError } from "./errors.js";
 import { execHostShell } from "./hostShell.js";
-import { type ExecResult, type SandboxService } from "./SandboxFactory.js";
+import type { ExecResult, SandboxService } from "./SandboxFactory.js";
 import type { Timeouts } from "./run.js";
 import { countCommitsToSync } from "./syncOut.js";
 
@@ -84,7 +84,7 @@ const execOkWithGitTimeout = (
 
 const execAsync = promisify(exec);
 
-export type SandboxHooks = {
+export interface SandboxHooks {
   readonly host?: {
     readonly onWorktreeReady?: readonly {
       readonly command: string;
@@ -102,7 +102,7 @@ export type SandboxHooks = {
       readonly timeoutMs?: number;
     }[];
   };
-};
+}
 
 /**
  * Runs an array of host-side hook commands sequentially.
@@ -328,11 +328,7 @@ export const withSandboxLifecycle = <A>(
                   }),
               ),
             ),
-            Deferred.await(abortDeferred) as Effect.Effect<
-              never,
-              ExecError,
-              never
-            >,
+            Deferred.await(abortDeferred),
           );
         });
 

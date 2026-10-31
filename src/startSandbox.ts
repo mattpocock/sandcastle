@@ -8,8 +8,8 @@ import {
   SyncInTimeoutError,
   WorktreeError,
   withTimeout,
-  type DockerError,
 } from "./errors.js";
+import type { DockerError } from "./errors.js";
 import type {
   SandboxProvider,
   BindMountSandboxProvider,
@@ -19,12 +19,8 @@ import type {
   NoSandboxProvider,
   NoSandboxHandle,
 } from "./SandboxProvider.js";
-import {
-  type SandboxService,
-  type MountEntry,
-  makeSandboxFromHandle,
-  SANDBOX_REPO_DIR,
-} from "./SandboxFactory.js";
+import { makeSandboxFromHandle, SANDBOX_REPO_DIR } from "./SandboxFactory.js";
+import type { SandboxService, MountEntry } from "./SandboxFactory.js";
 import { syncIn } from "./syncIn.js";
 import { normalizeMounts } from "./mountUtils.js";
 

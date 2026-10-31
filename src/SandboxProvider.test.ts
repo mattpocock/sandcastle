@@ -2,9 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createBindMountSandboxProvider,
   createIsolatedSandboxProvider,
-  type BindMountSandboxHandle,
-  type IsolatedSandboxHandle,
-  type SandboxProvider,
+} from "./SandboxProvider.js";
+import type {
+  BindMountSandboxHandle,
+  IsolatedSandboxHandle,
+  SandboxProvider,
 } from "./SandboxProvider.js";
 
 describe("createBindMountSandboxProvider", () => {

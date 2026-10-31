@@ -81,10 +81,7 @@ export const Output = {
   }): OutputObjectDefinition<StandardSchemaV1.InferOutput<Schema>> => ({
     _tag: "object",
     tag: opts.tag,
-    schema: opts.schema as StandardSchemaV1<
-      unknown,
-      StandardSchemaV1.InferOutput<Schema>
-    >,
+    schema: opts.schema,
     maxRetries: opts.maxRetries,
   }),
 

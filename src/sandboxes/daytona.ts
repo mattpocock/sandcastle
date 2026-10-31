@@ -7,11 +7,11 @@
 
 import { readdir, stat } from "node:fs/promises";
 import { join, posix, relative } from "node:path";
-import {
-  createIsolatedSandboxProvider,
-  type ExecResult,
-  type IsolatedSandboxHandle,
-  type IsolatedSandboxProvider,
+import { createIsolatedSandboxProvider } from "../SandboxProvider.js";
+import type {
+  ExecResult,
+  IsolatedSandboxHandle,
+  IsolatedSandboxProvider,
 } from "../SandboxProvider.js";
 import { BoundedTail, MAX_TAIL_CHARS } from "../boundedTail.js";
 

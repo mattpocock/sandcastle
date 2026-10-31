@@ -8,10 +8,8 @@ import { describe, expect, it } from "vitest";
 import { claudeCode } from "./AgentProvider.js";
 import { createSandbox } from "./createSandbox.js";
 import { createWorktree } from "./createWorktree.js";
-import {
-  createBindMountSandboxProvider,
-  type ExecResult,
-} from "./SandboxProvider.js";
+import { createBindMountSandboxProvider } from "./SandboxProvider.js";
+import type { ExecResult } from "./SandboxProvider.js";
 
 const execAsync = promisify(exec);
 

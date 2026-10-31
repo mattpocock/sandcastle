@@ -482,7 +482,7 @@ const initCommand = Command.make(
           Effect.mapError(
             (e) =>
               new InitError({
-                message: `${e instanceof Error ? e.message : e}`,
+                message: e instanceof Error ? e.message : e,
               }),
           ),
         ),

@@ -184,9 +184,7 @@ export const hostHasDependency = (
       ];
       return depMaps.some((key) => {
         const deps = parsed[key];
-        return (
-          typeof deps === "object" && deps !== null && pkg in (deps as object)
-        );
+        return typeof deps === "object" && deps !== null && pkg in deps;
       });
     } catch {
       return false;
@@ -758,9 +756,7 @@ function getTemplatesDir(): string {
   return join(dirname(thisFile), "templates");
 }
 
-const getTemplateDir = (
-  templateName: string,
-): Effect.Effect<string, Error, never> =>
+const getTemplateDir = (templateName: string): Effect.Effect<string, Error> =>
   Effect.gen(function* () {
     const template = TEMPLATES.find((t) => t.name === templateName);
     if (!template) {

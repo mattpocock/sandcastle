@@ -1,8 +1,8 @@
-import {
-  run,
-  type OutputObjectDefinition,
-  type RunOptions,
-  type RunResult,
+import { run } from "@ai-hero/sandcastle";
+import type {
+  OutputObjectDefinition,
+  RunOptions,
+  RunResult,
 } from "@ai-hero/sandcastle";
 
 export interface RunWithExtractionOptions<T> extends Omit<

@@ -11,11 +11,11 @@ import { readFile, unlink, writeFile, mkdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Writable } from "node:stream";
-import {
-  createIsolatedSandboxProvider,
-  type ExecResult,
-  type IsolatedSandboxHandle,
-  type IsolatedSandboxProvider,
+import { createIsolatedSandboxProvider } from "../SandboxProvider.js";
+import type {
+  ExecResult,
+  IsolatedSandboxHandle,
+  IsolatedSandboxProvider,
 } from "../SandboxProvider.js";
 import { BoundedTail, MAX_TAIL_CHARS } from "../boundedTail.js";
 
@@ -204,9 +204,7 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
 
       Object.assign(createParams, resolveVercelAuth(options));
 
-      const sandbox = await Sandbox.create(
-        createParams as Parameters<typeof Sandbox.create>[0],
-      );
+      const sandbox = await Sandbox.create(createParams);
 
       // Ensure worktree directory exists
       await sandbox.mkDir(VERCEL_REPO_PATH);

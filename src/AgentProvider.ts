@@ -18,8 +18,8 @@ import {
   transferClaudeSession,
   transferCodexSession,
   transferPiSession,
-  type HostSessionLookup,
 } from "./SessionStore.js";
+import type { HostSessionLookup } from "./SessionStore.js";
 import type { BindMountSandboxHandle } from "./SandboxProvider.js";
 import type { ContextWindow } from "./ContextWindow.js";
 

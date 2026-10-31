@@ -42,9 +42,8 @@ import {
   saveWorld,
   worldContainer,
   worldTmp,
-  type Engine,
-  type World,
 } from "./world.ts";
+import type { Engine, World } from "./world.ts";
 
 loadKeys();
 const TSX = join(REPO_ROOT, "node_modules", ".bin", "tsx");
@@ -197,7 +196,7 @@ const main = async (): Promise<number> => {
         );
       return verb === "tsx"
         ? runInWorld(world, "tsx", TSX, args)
-        : runInWorld(world, "sh", args[0]!, args.slice(1));
+        : runInWorld(world, "sh", args[0], args.slice(1));
     }
     case "ledger": {
       const { text, leaks, file } = runLedger(loadWorld(rest[0]));

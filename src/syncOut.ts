@@ -27,7 +27,8 @@ import { basename, dirname, join } from "node:path";
 import { Effect } from "effect";
 import type { ExecResult, SandboxService } from "./SandboxFactory.js";
 import type { IsolatedSandboxHandle } from "./SandboxProvider.js";
-import { buildRecoveryMessage, type FailedStep } from "./RecoveryMessage.js";
+import { buildRecoveryMessage } from "./RecoveryMessage.js";
+import type { FailedStep } from "./RecoveryMessage.js";
 import { SyncError } from "./errors.js";
 
 /**
@@ -176,7 +177,7 @@ export const countCommitsToSync = (
   sandbox: SandboxService,
   cwd: string,
   hostHead: string,
-): Effect.Effect<number, never> =>
+): Effect.Effect<number> =>
   Effect.gen(function* () {
     const baseResult = yield* sandbox
       .exec(`git rev-parse --verify --quiet ${SYNC_BASE_REF}`, { cwd })

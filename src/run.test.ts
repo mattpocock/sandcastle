@@ -19,15 +19,10 @@ import {
   printFileDisplayStartup,
   run,
   sanitizeBranchForFilename,
-  type RunOptions,
-  type RunResult,
 } from "./run.js";
-import {
-  claudeCode,
-  cursor,
-  opencode,
-  type AgentProvider,
-} from "./AgentProvider.js";
+import type { RunOptions, RunResult } from "./run.js";
+import { claudeCode, cursor, opencode } from "./AgentProvider.js";
+import type { AgentProvider } from "./AgentProvider.js";
 import { Output, StructuredOutputError } from "./Output.js";
 import { claudeHostSessionPath } from "./SessionStore.js";
 import type { InteractiveOptions } from "./interactive.js";

@@ -2180,7 +2180,7 @@ describe("sessionStorage", () => {
         sessionStorage: { hostProjectsDir: dir },
       });
       // Path is purely a function of (cwd, id) — available before any capture.
-      const path = provider.sessionStorage!.hostSessionFilePath(
+      const path = provider.sessionStorage.hostSessionFilePath(
         "/some/cwd",
         "abc-123",
       );
@@ -2225,7 +2225,7 @@ describe("sessionStorage", () => {
         },
       });
 
-      await provider.sessionStorage!.captureToHost({
+      await provider.sessionStorage.captureToHost({
         hostCwd,
         sandboxCwd,
         sessionId: id,
@@ -2251,7 +2251,7 @@ describe("sessionStorage", () => {
 
       // existsOnHost finds the captured session by globbing the dir.
       await expect(
-        provider.sessionStorage!.existsOnHost(hostCwd, id),
+        provider.sessionStorage.existsOnHost(hostCwd, id),
       ).resolves.toBe(true);
     } finally {
       await rm(hostDir, { recursive: true, force: true });
@@ -2288,7 +2288,7 @@ describe("sessionStorage", () => {
         },
       });
 
-      await provider.sessionStorage!.resumeIntoSandbox({
+      await provider.sessionStorage.resumeIntoSandbox({
         hostCwd,
         sandboxCwd,
         sessionId: id,
@@ -2314,7 +2314,7 @@ describe("sessionStorage", () => {
     const provider = pi("claude-sonnet-4-6", {
       sessionStorage: { hostSessionsDir: "/tmp/sessions" },
     });
-    const path = provider.sessionStorage!.hostSessionFilePath(
+    const path = provider.sessionStorage.hostSessionFilePath(
       "/some/cwd",
       "abc-123",
     );
@@ -2328,7 +2328,7 @@ describe("sessionStorage", () => {
         sessionStorage: { hostSessionsDir: hostDir },
       });
       await expect(
-        provider.sessionStorage!.existsOnHost("/some/cwd", "missing-id"),
+        provider.sessionStorage.existsOnHost("/some/cwd", "missing-id"),
       ).resolves.toBe(false);
     } finally {
       await rm(hostDir, { recursive: true, force: true });
@@ -2366,10 +2366,10 @@ describe("sessionStorage", () => {
 
       // Before capture, the path is unknown.
       expect(
-        provider.sessionStorage!.hostSessionFilePath("/host/repo", id),
+        provider.sessionStorage.hostSessionFilePath("/host/repo", id),
       ).toBeUndefined();
 
-      await provider.sessionStorage!.captureToHost({
+      await provider.sessionStorage.captureToHost({
         hostCwd: "/host/repo",
         sandboxCwd: "/sandbox/repo",
         sessionId: id,
@@ -2377,7 +2377,7 @@ describe("sessionStorage", () => {
       });
 
       // After capture, the path resolves to the rewritten rollout under hostDir.
-      const captured = provider.sessionStorage!.hostSessionFilePath(
+      const captured = provider.sessionStorage.hostSessionFilePath(
         "/host/repo",
         id,
       );
@@ -2416,7 +2416,7 @@ describe("sessionStorage", () => {
         },
       });
 
-      await provider.sessionStorage!.captureToHost({
+      await provider.sessionStorage.captureToHost({
         hostCwd,
         sandboxCwd,
         sessionId: id,
@@ -2478,7 +2478,7 @@ describe("sessionStorage", () => {
         },
       });
 
-      await provider.sessionStorage!.captureToHost({
+      await provider.sessionStorage.captureToHost({
         hostCwd,
         sandboxCwd,
         sessionId: id,
@@ -2582,7 +2582,7 @@ describe("sessionStorage", () => {
             sandboxProjectsDir: sandboxDir,
           },
         });
-        await provider.sessionStorage!.captureToHost({
+        await provider.sessionStorage.captureToHost({
           hostCwd,
           sandboxCwd,
           sessionId: id,

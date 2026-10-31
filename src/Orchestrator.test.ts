@@ -14,7 +14,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it, vi } from "vitest";
-import { Display, type DisplayEntry, SilentDisplay } from "./Display.js";
+import { Display, SilentDisplay } from "./Display.js";
+import type { DisplayEntry } from "./Display.js";
 import { makeLocalSandbox } from "./testSandbox.js";
 import { orchestrate } from "./Orchestrator.js";
 import { substitutePromptArgs } from "./PromptArgumentSubstitution.js";
@@ -30,10 +31,8 @@ import type { DockerError, SandboxError } from "./errors.js";
 import { AgentError, AgentIdleTimeoutError } from "./errors.js";
 import { SandboxFactory } from "./SandboxFactory.js";
 import { encodeProjectPath } from "./SessionStore.js";
-import {
-  agentStreamEmitterLayer,
-  type AgentStreamEvent,
-} from "./AgentStreamEmitter.js";
+import { agentStreamEmitterLayer } from "./AgentStreamEmitter.js";
+import type { AgentStreamEvent } from "./AgentStreamEmitter.js";
 import type { BindMountSandboxHandle } from "./SandboxProvider.js";
 
 const noopAgentStreamEmitterLayer = agentStreamEmitterLayer();
@@ -3349,7 +3348,7 @@ describe("Session capture integration", () => {
                 bindMountHandle: handle,
               },
               sandbox,
-            ) as Effect.Effect<A, E | DockerError, R>;
+            );
           },
           (_branchName) =>
             Effect.promise(async () => {
@@ -3697,7 +3696,7 @@ describe("Session capture integration", () => {
                 bindMountHandle: handle,
               },
               sandbox,
-            ) as Effect.Effect<A, E | DockerError, R>;
+            );
           },
           () =>
             Effect.promise(async () => {

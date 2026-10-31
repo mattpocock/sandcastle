@@ -23,10 +23,12 @@ import { claudeCode, codex } from "./AgentProvider.js";
 import {
   createBindMountSandboxProvider,
   createIsolatedSandboxProvider,
-  type BindMountSandboxHandle,
-  type InteractiveExecOptions,
-  type ExecResult,
-  type SandboxProvider,
+} from "./SandboxProvider.js";
+import type {
+  BindMountSandboxHandle,
+  InteractiveExecOptions,
+  ExecResult,
+  SandboxProvider,
 } from "./SandboxProvider.js";
 import { encodeProjectPath } from "./SessionStore.js";
 import { makeLocalSandbox } from "./testSandbox.js";

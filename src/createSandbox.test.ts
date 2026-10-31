@@ -14,14 +14,15 @@ import { promisify } from "node:util";
 import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 import { claudeCode, codex, pi } from "./AgentProvider.js";
-import { createSandbox, type CreateSandboxOptions } from "./createSandbox.js";
+import { createSandbox } from "./createSandbox.js";
+import type { CreateSandboxOptions } from "./createSandbox.js";
 import { createWorktree } from "./createWorktree.js";
 import type { SandboxService } from "./SandboxFactory.js";
 import {
   createBindMountSandboxProvider,
   createIsolatedSandboxProvider,
-  type BindMountSandboxHandle,
 } from "./SandboxProvider.js";
+import type { BindMountSandboxHandle } from "./SandboxProvider.js";
 import { encodeProjectPath } from "./SessionStore.js";
 import { testIsolated } from "./sandboxes/test-isolated.js";
 import { makeLocalSandbox } from "./testSandbox.js";

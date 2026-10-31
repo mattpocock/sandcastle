@@ -8,8 +8,10 @@ import { promisify } from "node:util";
 import {
   createBindMountSandboxProvider,
   createIsolatedSandboxProvider,
-  type BindMountSandboxHandle,
-  type IsolatedSandboxHandle,
+} from "./SandboxProvider.js";
+import type {
+  BindMountSandboxHandle,
+  IsolatedSandboxHandle,
 } from "./SandboxProvider.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 import {

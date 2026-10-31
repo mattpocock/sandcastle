@@ -8,10 +8,10 @@
 
 import { copyFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import {
-  createBindMountSandboxProvider,
-  type BindMountSandboxHandle,
-  type BindMountSandboxProvider,
+import { createBindMountSandboxProvider } from "../SandboxProvider.js";
+import type {
+  BindMountSandboxHandle,
+  BindMountSandboxProvider,
 } from "../SandboxProvider.js";
 import { createTempSandbox } from "./test-shared.js";
 

@@ -6,11 +6,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-import { SilentDisplay, type DisplayEntry } from "./Display.js";
-import {
-  createBindMountSandboxProvider,
-  type BindMountSandboxHandle,
-  type SandboxProvider,
+import { SilentDisplay } from "./Display.js";
+import type { DisplayEntry } from "./Display.js";
+import { createBindMountSandboxProvider } from "./SandboxProvider.js";
+import type {
+  BindMountSandboxHandle,
+  SandboxProvider,
 } from "./SandboxProvider.js";
 import {
   SandboxConfig,

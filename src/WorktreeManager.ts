@@ -213,7 +213,7 @@ const listWorktrees = (
 const fastForwardFromOrigin = (
   worktreePath: string,
   branch: string,
-): Effect.Effect<void, never> =>
+): Effect.Effect<void> =>
   Effect.gen(function* () {
     // `symbolic-ref --quiet HEAD` exits non-zero when HEAD is detached;
     // map both failure and an unexpected target to "" so the predicate
