@@ -502,7 +502,7 @@ describe("WorktreeDockerSandboxFactory", () => {
       ),
     ).rejects.toThrow("agent failed");
 
-    await expect(sandcastleBranches(hostRepoDir)).resolves.toEqual([]);
+    await expect(sandcastleBranches(hostRepoDir)).resolves.toStrictEqual([]);
   });
 
   it("merge-to-head: keeps the temp branch, and says so, when the failed run left commits on it", async () => {
@@ -1060,7 +1060,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
     const worktree = await findCreatedWorktree(hostDir);
     expect(worktree).toBeUndefined();
     // ...and no merge-to-head temp branch either
-    await expect(sandcastleBranches(hostDir)).resolves.toEqual([]);
+    await expect(sandcastleBranches(hostDir)).resolves.toStrictEqual([]);
   });
 
   it("provides applyToHost callback that syncs commits to worktree", async () => {
@@ -1225,7 +1225,7 @@ describe("WorktreeDockerSandboxFactory — no-sandbox provider", () => {
 
     const worktree = await findCreatedWorktree(hostDir);
     expect(worktree).toBeUndefined();
-    await expect(sandcastleBranches(hostDir)).resolves.toEqual([]);
+    await expect(sandcastleBranches(hostDir)).resolves.toStrictEqual([]);
   });
 });
 

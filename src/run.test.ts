@@ -1366,7 +1366,7 @@ describe("output.maxRetries end-to-end", () => {
           maxRetries: 1,
         }),
       });
-      expect(result.output).toEqual({ answer: 42 });
+      expect(result.output).toStrictEqual({ answer: 42 });
     } finally {
       rmSync(hostProjectsDir, { recursive: true, force: true });
     }
@@ -1592,7 +1592,7 @@ describe("resume/fork after a promptFile + promptArgs run", () => {
       expect(resumed.iterations).toHaveLength(1);
       expect(forked.iterations).toHaveLength(1);
       // The follow-up prompts are inline: passed as-is, never substituted.
-      expect(agentStdin).toEqual([
+      expect(agentStdin).toStrictEqual([
         "Remember tok-123",
         "repeat {{TOKEN}}",
         "fork {{TOKEN}}",
@@ -1685,7 +1685,7 @@ describe("resume/fork after a structured-output run", () => {
       expect(forked.iterations).toHaveLength(1);
       expect("output" in resumed).toBe(false);
       expect("output" in forked).toBe(false);
-      expect(agentStdin).toEqual([
+      expect(agentStdin).toStrictEqual([
         "Summarise inside <summary> tags",
         "write the word DONE into done.txt",
         "write the word DONE into done.txt",

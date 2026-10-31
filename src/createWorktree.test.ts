@@ -957,7 +957,7 @@ describe("worktree.run()", () => {
         logging: { type: "file", path: logPath },
       });
 
-      expect(firstIteration(result).usage).toEqual({
+      expect(result.iterations[0]!.usage).toStrictEqual({
         inputTokens: 50_000,
         cacheCreationInputTokens: 0,
         cacheReadInputTokens: 0,
@@ -1227,7 +1227,7 @@ describe("worktree.run()", () => {
         cwd: hostDir,
       });
       const messages = log.trim().split("\n");
-      expect(messages).toEqual(["agent commit 2", "agent commit 1"]);
+      expect(messages).toStrictEqual(["agent commit 2", "agent commit 1"]);
     } finally {
       await ws.close();
       await rm(hostDir, { recursive: true, force: true });

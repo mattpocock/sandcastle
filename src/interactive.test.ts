@@ -650,7 +650,7 @@ describe("interactive()", () => {
       },
     });
 
-    expect(executionOrder).toEqual(["interactive-after-hook"]);
+    expect(executionOrder).toStrictEqual(["interactive-after-hook"]);
   });
 
   it("removes the worktree when sandbox start fails (no orphan)", async () => {
