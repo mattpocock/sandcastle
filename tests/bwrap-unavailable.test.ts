@@ -71,7 +71,7 @@ describe.skipIf(process.platform === "linux")("bwrap() off Linux", () => {
     expect(error).toBeInstanceOf(NativeSandboxUnavailableError);
     expect(error).toMatchObject({
       message: "bwrap() needs Linux or WSL2; on macOS use seatbelt()",
-      fixCommand: undefined,
     });
+    expect(error).not.toHaveProperty("fixCommand");
   });
 });
