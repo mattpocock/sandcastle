@@ -594,6 +594,8 @@ Commands run **inside the sandbox** after `sandbox.onSandboxReady` hooks complet
 
 If any command exits with a non-zero code, the run fails immediately with an error.
 
+Shell expressions inside HTML comments (`<!-- … -->`) are not run; they reach the agent as written. Use a comment to keep an example or a disabled command in the prompt.
+
 ### Prompt arguments with `{{KEY}}`
 
 Use `{{KEY}}` placeholders in your prompt to inject values from the `promptArgs` option. This is useful for reusing the same prompt file across multiple runs with different parameters.

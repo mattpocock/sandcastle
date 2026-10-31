@@ -84,6 +84,19 @@ export const findMissingPromptArgKeys = (
   return missing;
 };
 
+const HTML_COMMENT_PATTERN = /<!--[\s\S]*?(?:-->|$)/g;
+
+const markShellBlocks = (prompt: string): string => {
+  const commentRanges = [...prompt.matchAll(HTML_COMMENT_PATTERN)].map(
+    (m) => [m.index!, m.index! + m[0].length] as const,
+  );
+  return prompt.replace(SHELL_BLOCK_PATTERN, (block, command, offset) =>
+    commentRanges.some(([start, end]) => offset >= start && offset < end)
+      ? block
+      : `!${SHELL_BLOCK_MARKER}\`${command}\``,
+  );
+};
+
 export const substitutePromptArgs = (
   prompt: string,
   args: PromptArgs,
@@ -91,10 +104,13 @@ export const substitutePromptArgs = (
 ): Effect.Effect<string, PromptError, Display> => {
   // Mark shell blocks written in the raw template so the preprocessor can
   // distinguish them from `!`...`` patterns that arrive via arg substitution.
-  // Strip any markers already present in raw input so they can't be forged.
-  const markedPrompt = prompt
-    .replaceAll(SHELL_BLOCK_MARKER, "")
-    .replace(SHELL_BLOCK_PATTERN, `!${SHELL_BLOCK_MARKER}\`$1\``);
+  // Shell blocks inside HTML comments stay unmarked, so commented-out examples
+  // never run. Comment ranges come from the raw template, so an arg value
+  // can't open or close one. Strip any markers already present in raw input
+  // so they can't be forged.
+  const markedPrompt = markShellBlocks(
+    prompt.replaceAll(SHELL_BLOCK_MARKER, ""),
+  );
   const sanitizedArgs: PromptArgs = Object.fromEntries(
     Object.entries(args).map(([key, value]) => [
       key,
