@@ -14,6 +14,10 @@ import { withSandboxLifecycle, type SandboxHooks } from "./SandboxLifecycle.js";
 import type { AgentProvider, IterationUsage } from "./AgentProvider.js";
 import type { Timeouts } from "./run.js";
 import { TextDeltaBuffer } from "./TextDeltaBuffer.js";
+import {
+  buildContextWindowLines,
+  type ContextWindow,
+} from "./ContextWindow.js";
 
 export type { ParsedStreamEvent, IterationUsage } from "./AgentProvider.js";
 
@@ -32,6 +36,7 @@ const invokeAgent = (
   onRawLine: (line: string) => void,
   onIdleWarning: (minutes: number) => void,
   onCompletionTimeout: (timeoutMs: number) => void,
+  onContextWindow: (contextWindow: ContextWindow) => void,
   idleWarningIntervalMs: number = IDLE_WARNING_INTERVAL_MS,
   resumeSession?: string,
   forkSession?: boolean,
@@ -168,6 +173,8 @@ const invokeAgent = (
             if (parsed.type === "text") {
               onText(parsed.text);
               accumulatedOutput += parsed.text;
+            } else if (parsed.type === "context_window") {
+              onContextWindow(parsed.contextWindow);
             } else if (parsed.type === "result") {
               resultText = parsed.result;
               accumulatedOutput += parsed.result;
@@ -322,6 +329,8 @@ export interface IterationResult {
   readonly sessionFilePath?: string;
   /** Token usage snapshot from the last assistant message in the session, or undefined when capture is disabled or provider does not support usage parsing. */
   readonly usage?: IterationUsage;
+  /** Input tokens of the iteration's last model call (cache included), plus the model's limit when the agent reports it. Undefined when the agent reports no per-call figure. */
+  readonly contextWindow?: ContextWindow;
 }
 
 export interface OrchestrateResult {
@@ -381,208 +390,240 @@ export const orchestrate = (
       yield* checkAbort();
       yield* display.status(label(`Iteration ${i}/${iterations}`), "info");
 
-      const sandboxResult = yield* factory.withSandbox(
-        (
-          { hostWorktreePath, sandboxRepoPath, applyToHost, bindMountHandle },
-          sandbox,
-        ) =>
-          withSandboxLifecycle(
-            {
-              hostRepoDir,
-              sandboxRepoDir: sandboxRepoPath,
-              hooks,
-              branch,
-              hostWorktreePath,
-              applyToHost,
-              signal: options.signal,
-              timeouts: options.timeouts,
-              keepSourceBranch: options.keepSourceBranch,
-            },
+      const sandboxResult = yield* factory
+        .withSandbox(
+          (
+            { hostWorktreePath, sandboxRepoPath, applyToHost, bindMountHandle },
             sandbox,
-            (ctx) =>
-              Effect.gen(function* () {
-                // Resume session: transfer JSONL from host to sandbox before iteration 1
-                const iterationResumeSession =
-                  i === 1 ? options.resumeSession : undefined;
-                const iterationForkSession =
-                  i === 1 ? options.forkSession : undefined;
-                if (
-                  iterationResumeSession &&
-                  bindMountHandle &&
-                  provider.sessionStorage
-                ) {
-                  yield* display.status(label("Resuming session"), "info");
-                  yield* Effect.tryPromise({
-                    try: () =>
-                      provider.sessionStorage!.resumeIntoSandbox({
-                        hostCwd: hostRepoDir,
-                        sandboxCwd: ctx.sandboxRepoDir,
-                        sessionId: iterationResumeSession,
-                        handle: bindMountHandle,
-                      }),
-                    catch: (e) =>
-                      new SessionCaptureError({
-                        message: `Session resume failed: ${e instanceof Error ? e.message : String(e)}`,
-                        sessionId: iterationResumeSession,
-                      }),
-                  });
-                }
+          ) =>
+            withSandboxLifecycle(
+              {
+                hostRepoDir,
+                sandboxRepoDir: sandboxRepoPath,
+                hooks,
+                branch,
+                hostWorktreePath,
+                applyToHost,
+                signal: options.signal,
+                timeouts: options.timeouts,
+                keepSourceBranch: options.keepSourceBranch,
+              },
+              sandbox,
+              (ctx) =>
+                Effect.gen(function* () {
+                  // Resume session: transfer JSONL from host to sandbox before iteration 1
+                  const iterationResumeSession =
+                    i === 1 ? options.resumeSession : undefined;
+                  const iterationForkSession =
+                    i === 1 ? options.forkSession : undefined;
+                  if (
+                    iterationResumeSession &&
+                    bindMountHandle &&
+                    provider.sessionStorage
+                  ) {
+                    yield* display.status(label("Resuming session"), "info");
+                    yield* Effect.tryPromise({
+                      try: () =>
+                        provider.sessionStorage!.resumeIntoSandbox({
+                          hostCwd: hostRepoDir,
+                          sandboxCwd: ctx.sandboxRepoDir,
+                          sessionId: iterationResumeSession,
+                          handle: bindMountHandle,
+                        }),
+                      catch: (e) =>
+                        new SessionCaptureError({
+                          message: `Session resume failed: ${e instanceof Error ? e.message : String(e)}`,
+                          sessionId: iterationResumeSession,
+                        }),
+                    });
+                  }
 
-                // Preprocess prompt (run !`command` expressions inside sandbox).
-                // Inline prompts pass through literally — skip expansion.
-                const fullPrompt = options.skipPromptExpansion
-                  ? prompt
-                  : yield* preprocessPrompt(
-                      prompt,
-                      ctx.sandbox,
-                      ctx.sandboxRepoDir,
+                  // Preprocess prompt (run !`command` expressions inside sandbox).
+                  // Inline prompts pass through literally — skip expansion.
+                  const fullPrompt = options.skipPromptExpansion
+                    ? prompt
+                    : yield* preprocessPrompt(
+                        prompt,
+                        ctx.sandbox,
+                        ctx.sandboxRepoDir,
+                      );
+
+                  yield* display.status(label("Agent started"), "success");
+
+                  // Invoke the agent — buffer text deltas so Pi's single-token
+                  // chunks are displayed as readable multi-word lines.
+                  const textBuffer = new TextDeltaBuffer((chunk) => {
+                    Effect.runPromise(display.textChunk(chunk));
+                    Effect.runPromise(
+                      streamEmitter.emit({
+                        type: "text",
+                        message: chunk,
+                        iteration: i,
+                        timestamp: new Date(),
+                      }),
                     );
-
-                yield* display.status(label("Agent started"), "success");
-
-                // Invoke the agent — buffer text deltas so Pi's single-token
-                // chunks are displayed as readable multi-word lines.
-                const textBuffer = new TextDeltaBuffer((chunk) => {
-                  Effect.runPromise(display.textChunk(chunk));
-                  Effect.runPromise(
-                    streamEmitter.emit({
-                      type: "text",
-                      message: chunk,
-                      iteration: i,
-                      timestamp: new Date(),
-                    }),
-                  );
-                });
-                const onText = (text: string) => {
-                  textBuffer.write(text);
-                };
-                const onToolCall = (name: string, formattedArgs: string) => {
-                  textBuffer.flush();
-                  Effect.runPromise(display.toolCall(name, formattedArgs));
-                  Effect.runPromise(
-                    streamEmitter.emit({
-                      type: "toolCall",
-                      name,
-                      formattedArgs,
-                      iteration: i,
-                      timestamp: new Date(),
-                    }),
-                  );
-                };
-                const onRawLine = (line: string) => {
-                  Effect.runPromise(
-                    streamEmitter.emit({
-                      type: "raw",
-                      line,
-                      iteration: i,
-                      timestamp: new Date(),
-                    }),
-                  );
-                };
-                const onIdleWarning = (minutes: number) => {
-                  const msg =
-                    minutes === 1
-                      ? "Agent idle for 1 minute"
-                      : `Agent idle for ${minutes} minutes`;
-                  Effect.runPromise(display.status(label(msg), "warn"));
-                };
-                const onCompletionTimeout = (timeoutMs: number) => {
-                  Effect.runPromise(
-                    display.status(
-                      label(
-                        `Completion signal seen but agent process is hanging — force-completing after ${timeoutMs / 1000}s grace window.`,
+                  });
+                  const onText = (text: string) => {
+                    textBuffer.write(text);
+                  };
+                  const onToolCall = (name: string, formattedArgs: string) => {
+                    textBuffer.flush();
+                    Effect.runPromise(display.toolCall(name, formattedArgs));
+                    Effect.runPromise(
+                      streamEmitter.emit({
+                        type: "toolCall",
+                        name,
+                        formattedArgs,
+                        iteration: i,
+                        timestamp: new Date(),
+                      }),
+                    );
+                  };
+                  const onRawLine = (line: string) => {
+                    Effect.runPromise(
+                      streamEmitter.emit({
+                        type: "raw",
+                        line,
+                        iteration: i,
+                        timestamp: new Date(),
+                      }),
+                    );
+                  };
+                  const onIdleWarning = (minutes: number) => {
+                    const msg =
+                      minutes === 1
+                        ? "Agent idle for 1 minute"
+                        : `Agent idle for ${minutes} minutes`;
+                    Effect.runPromise(display.status(label(msg), "warn"));
+                  };
+                  const onCompletionTimeout = (timeoutMs: number) => {
+                    Effect.runPromise(
+                      display.status(
+                        label(
+                          `Completion signal seen but agent process is hanging — force-completing after ${timeoutMs / 1000}s grace window.`,
+                        ),
+                        "warn",
                       ),
-                      "warn",
-                    ),
-                  );
-                };
-                const {
-                  result: agentOutput,
-                  sessionId,
-                  usage: streamUsage,
-                } = yield* invokeAgent(
-                  ctx.sandbox,
-                  ctx.sandboxRepoDir,
-                  fullPrompt,
-                  provider,
-                  idleTimeoutMs,
-                  completionTimeoutMs,
-                  completionSignals,
-                  onText,
-                  onToolCall,
-                  onRawLine,
-                  onIdleWarning,
-                  onCompletionTimeout,
-                  options._idleWarningIntervalMs,
-                  iterationResumeSession,
-                  iterationForkSession,
-                  options.signal,
-                );
-
-                // Flush any remaining buffered text deltas
-                textBuffer.dispose();
-
-                yield* display.status(label("Agent stopped"), "info");
-
-                // Capture session while sandbox is still alive. Usage from the
-                // stream (e.g. Codex's turn.completed) is the baseline; a
-                // session-parsed value below overrides it when available.
-                let sessionFilePath: string | undefined;
-                let usage: IterationUsage | undefined = streamUsage;
-                if (
-                  provider.captureSessions &&
-                  provider.sessionStorage &&
-                  sessionId &&
-                  bindMountHandle
-                ) {
-                  yield* display.status(label("Capturing session"), "info");
-                  yield* Effect.tryPromise({
-                    try: () =>
-                      provider.sessionStorage!.captureToHost({
-                        hostCwd: hostRepoDir,
-                        sandboxCwd: ctx.sandboxRepoDir,
-                        sessionId,
-                        handle: bindMountHandle,
-                      }),
-                    catch: (e) =>
-                      new SessionCaptureError({
-                        message: `Session capture failed: ${e instanceof Error ? e.message : String(e)}`,
-                        sessionId,
-                      }),
-                  });
-                  sessionFilePath = provider.sessionStorage.hostSessionFilePath(
-                    hostRepoDir,
-                    sessionId,
-                  );
-
-                  // Parse token usage from the captured session JSONL
-                  if (provider.parseSessionUsage) {
-                    const content = yield* Effect.promise(() =>
-                      provider
-                        .sessionStorage!.readHostSession(hostRepoDir, sessionId)
-                        .catch(() => undefined as string | undefined),
                     );
-                    if (content) {
-                      const parsedUsage = provider.parseSessionUsage(content);
-                      if (parsedUsage) usage = parsedUsage;
+                  };
+                  // Last call wins: each event is one model call, and the last
+                  // call's input is the context size (see ContextWindow).
+                  let contextWindow: ContextWindow | undefined;
+                  const onContextWindow = (cw: ContextWindow) => {
+                    contextWindow = cw;
+                  };
+                  const {
+                    result: agentOutput,
+                    sessionId,
+                    usage: streamUsage,
+                  } = yield* invokeAgent(
+                    ctx.sandbox,
+                    ctx.sandboxRepoDir,
+                    fullPrompt,
+                    provider,
+                    idleTimeoutMs,
+                    completionTimeoutMs,
+                    completionSignals,
+                    onText,
+                    onToolCall,
+                    onRawLine,
+                    onIdleWarning,
+                    onCompletionTimeout,
+                    onContextWindow,
+                    options._idleWarningIntervalMs,
+                    iterationResumeSession,
+                    iterationForkSession,
+                    options.signal,
+                  );
+
+                  // Flush any remaining buffered text deltas
+                  textBuffer.dispose();
+
+                  yield* display.status(label("Agent stopped"), "info");
+
+                  // Capture session while sandbox is still alive. Usage from the
+                  // stream (e.g. Codex's turn.completed) is the baseline; a
+                  // session-parsed value below overrides it when available.
+                  let sessionFilePath: string | undefined;
+                  let usage: IterationUsage | undefined = streamUsage;
+                  if (
+                    provider.captureSessions &&
+                    provider.sessionStorage &&
+                    sessionId &&
+                    bindMountHandle
+                  ) {
+                    yield* display.status(label("Capturing session"), "info");
+                    yield* Effect.tryPromise({
+                      try: () =>
+                        provider.sessionStorage!.captureToHost({
+                          hostCwd: hostRepoDir,
+                          sandboxCwd: ctx.sandboxRepoDir,
+                          sessionId,
+                          handle: bindMountHandle,
+                        }),
+                      catch: (e) =>
+                        new SessionCaptureError({
+                          message: `Session capture failed: ${e instanceof Error ? e.message : String(e)}`,
+                          sessionId,
+                        }),
+                    });
+                    sessionFilePath =
+                      provider.sessionStorage.hostSessionFilePath(
+                        hostRepoDir,
+                        sessionId,
+                      );
+
+                    // Parse token usage and the context window from the
+                    // captured session JSONL
+                    if (
+                      provider.parseSessionUsage ||
+                      provider.parseSessionContextWindow
+                    ) {
+                      const content = yield* Effect.promise(() =>
+                        provider
+                          .sessionStorage!.readHostSession(
+                            hostRepoDir,
+                            sessionId,
+                          )
+                          .catch(() => undefined as string | undefined),
+                      );
+                      if (content) {
+                        const parsedUsage =
+                          provider.parseSessionUsage?.(content);
+                        if (parsedUsage) usage = parsedUsage;
+                        const parsedContextWindow =
+                          provider.parseSessionContextWindow?.(content);
+                        if (parsedContextWindow) {
+                          contextWindow = parsedContextWindow;
+                        }
+                      }
                     }
                   }
-                }
 
-                // Check completion signal
-                const matchedSignal = completionSignals.find((sig) =>
-                  agentOutput.includes(sig),
-                );
-                return {
-                  completionSignal: matchedSignal,
-                  stdout: agentOutput,
-                  sessionId,
-                  sessionFilePath,
-                  usage,
-                } as const;
-              }),
+                  // Check completion signal
+                  const matchedSignal = completionSignals.find((sig) =>
+                    agentOutput.includes(sig),
+                  );
+                  return {
+                    completionSignal: matchedSignal,
+                    stdout: agentOutput,
+                    sessionId,
+                    sessionFilePath,
+                    usage,
+                    contextWindow,
+                  } as const;
+                }),
+            ),
+        )
+        .pipe(
+          // A failed iteration ends the run before run() prints the context
+          // window lines, so print the completed iterations' lines here.
+          Effect.tapError(() =>
+            Effect.forEach(buildContextWindowLines(allIterations), (line) =>
+              display.text(line),
+            ),
           ),
-      );
+        );
 
       const lifecycleResult = sandboxResult.value;
       iterationPreservedPath = sandboxResult.preservedWorktreePath;
@@ -595,6 +636,7 @@ export const orchestrate = (
         sessionId: lifecycleResult.result.sessionId,
         sessionFilePath: lifecycleResult.result.sessionFilePath,
         usage: lifecycleResult.result.usage,
+        contextWindow: lifecycleResult.result.contextWindow,
       });
 
       if (lifecycleResult.result.completionSignal !== undefined) {

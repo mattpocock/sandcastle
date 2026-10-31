@@ -870,11 +870,21 @@ Removes the Podman image.
 
 ### `IterationResult`
 
-| Field             | Type              | Description                                                                                                                         |
-| ----------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `sessionId`       | string?           | Agent session ID from the provider stream, or `undefined` if the provider does not emit one                                         |
-| `sessionFilePath` | string?           | Absolute host path to the captured session JSONL, or `undefined` when capture is off                                                |
-| `usage`           | `IterationUsage`? | Token usage snapshot from the last assistant message, or `undefined` when capture is off or provider does not support usage parsing |
+| Field             | Type              | Description                                                                                                                                                                        |
+| ----------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sessionId`       | string?           | Agent session ID from the provider stream, or `undefined` if the provider does not emit one                                                                                        |
+| `sessionFilePath` | string?           | Absolute host path to the captured session JSONL, or `undefined` when capture is off                                                                                               |
+| `usage`           | `IterationUsage`? | Token usage snapshot from the last assistant message, or `undefined` when capture is off or provider does not support usage parsing                                                |
+| `contextWindow`   | `ContextWindow`?  | Input tokens of the iteration's last model call, cache included (shown as `Context window: NNNk` after the run), or `undefined` when the agent reports no per-call figure (cursor) |
+
+### `ContextWindow`
+
+| Field    | Type    | Description                                                                           |
+| -------- | ------- | ------------------------------------------------------------------------------------- |
+| `tokens` | number  | Input tokens of the last model call, cached and uncached together. Never a turn total |
+| `limit`  | number? | The model's context window size, only when the agent reports it (codex)               |
+
+Sources: claudeCode, pi, opencode and copilot read it from the agent's stream, so it works on every sandbox. codex reads it from its captured session, so it needs a bind-mount sandbox (docker, podman) with `captureSessions` on. cursor reports only a whole-turn total, so it has none.
 
 ### `IterationUsage`
 
