@@ -20,6 +20,7 @@ import {
   listIssueTrackers,
   getIssueTracker,
   listSandboxProviders,
+  listSandboxProviderChoices,
   getSandboxProvider,
   getNextStepsLines,
   detectPackageManager,
@@ -145,7 +146,9 @@ const initModelOption = Options.text("model").pipe(
 );
 
 const sandboxOption = Options.text("sandbox").pipe(
-  Options.withDescription("Sandbox provider to use (e.g. docker, podman)"),
+  Options.withDescription(
+    "Sandbox provider to use (bwrap, seatbelt, docker or podman)",
+  ),
   Options.optional,
 );
 
@@ -392,7 +395,10 @@ const initCommand = Command.make(
           ? modelFlag.value
           : selectedAgent.defaultModel;
 
-      // No default sandbox provider — the user must choose.
+      // No silent default sandbox provider: the user must choose. The host
+      // OS's native provider is listed first and preselected.
+      const sandboxChoices = listSandboxProviderChoices(process.platform);
+      const recommendedSandbox = sandboxChoices.find((c) => c.recommended);
       const selectedSandboxProvider = getSandboxProvider(
         yield* selectName({
           flag: sandboxFlag,
@@ -401,9 +407,12 @@ const initCommand = Command.make(
           cancelMessage: "Sandbox provider selection cancelled.",
           prompt: {
             message: "Select a sandbox provider:",
-            options: listSandboxProviders().map((p) => ({
-              value: p.name,
-              label: p.label,
+            ...(recommendedSandbox === undefined
+              ? {}
+              : { initialValue: recommendedSandbox.entry.name }),
+            options: sandboxChoices.map(({ entry, recommended }) => ({
+              value: entry.name,
+              label: recommended ? `${entry.label} (recommended)` : entry.label,
             })),
           },
         }),

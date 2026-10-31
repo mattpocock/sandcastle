@@ -706,6 +706,12 @@ export interface SandboxProviderEntry {
    * version warning) runs only when this is set.
    */
   readonly image?: SandboxProviderImage;
+  /**
+   * The one host OS a native provider runs on. Set only for native
+   * providers, which init offers first (and preselects) on that OS and
+   * doesn't offer on any other. `--sandbox <name>` still accepts it anywhere.
+   */
+  readonly nativePlatform?: NodeJS.Platform;
 }
 
 // A non-empty tuple type, so `[0]` (the default) is known to exist.
@@ -723,10 +729,35 @@ const SANDBOX_PROVIDER_REGISTRY: [
     label: "Podman",
     image: { containerfileName: "Containerfile", cliNamespace: "podman" },
   },
+  { name: "bwrap", label: "Bubblewrap", nativePlatform: "linux" },
+  { name: "seatbelt", label: "Seatbelt", nativePlatform: "darwin" },
 ];
 
 export const listSandboxProviders = (): SandboxProviderEntry[] =>
   SANDBOX_PROVIDER_REGISTRY;
+
+/**
+ * The providers init's interactive prompt offers on `platform`, in order: the
+ * host's native provider first (the one to preselect, marked recommended),
+ * then the image-based ones. Other OSes' native providers aren't offered.
+ */
+export const listSandboxProviderChoices = (
+  platform: NodeJS.Platform,
+): {
+  readonly entry: SandboxProviderEntry;
+  readonly recommended: boolean;
+}[] => {
+  const native = SANDBOX_PROVIDER_REGISTRY.filter(
+    (p) => p.nativePlatform === platform,
+  );
+  const others = SANDBOX_PROVIDER_REGISTRY.filter(
+    (p) => p.nativePlatform === undefined,
+  );
+  return [
+    ...native.map((entry) => ({ entry, recommended: true })),
+    ...others.map((entry) => ({ entry, recommended: false })),
+  ];
+};
 
 export const getSandboxProvider = (
   name: string,

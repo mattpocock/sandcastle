@@ -2572,9 +2572,14 @@ const declaredKeys = (envExample: string): string[] =>
     .filter((k): k is string => k !== undefined);
 
 describe("init scaffold consistency (every agent x template x sandbox x tracker)", () => {
+  // Image-based providers only: a native provider scaffolds no containerfile
+  // and takes no image name (covered end to end in tests/init.test.ts).
+  const imageProviders = listSandboxProviders().filter(
+    (p) => p.image !== undefined,
+  );
   const combos = listAgents().flatMap((agent) =>
     listTemplates().flatMap((template) =>
-      listSandboxProviders().flatMap((sandboxProvider) =>
+      imageProviders.flatMap((sandboxProvider) =>
         listIssueTrackers().map((issueTracker) => ({
           agent,
           template: template.name,
