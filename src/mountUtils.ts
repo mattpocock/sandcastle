@@ -5,13 +5,14 @@
  * validation, image naming, and Windows path normalization.
  */
 
-import { existsSync, statSync } from "node:fs";
+import { existsSync, rm as rmCallback, statSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { isAbsolute, resolve, join, dirname } from "node:path";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { Effect } from "effect";
 import type { MountConfig } from "./MountConfig.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
+import type { MountEntry } from "./SandboxFactory.js";
 import { WorktreeError } from "./errors.js";
 
 /**
@@ -208,7 +209,9 @@ export const parseGitdirPath = (
  * Two fixes are applied:
  * 1. The parent `.git` directory mount is remapped to `PARENT_GIT_SANDBOX_DIR`.
  * 2. A corrected `.git` file (with a POSIX `gitdir:` path) is created and
- *    mounted at `sandboxRepoDir/.git`, overlaying the original.
+ *    mounted read-only at `sandboxRepoDir/.git`, overlaying the original. Its
+ *    temp dir is named on the mount (`tempDir`) and removed by `startSandbox`
+ *    when the sandbox closes.
  *
  * On non-Windows platforms, or when the worktree's `.git` is a directory
  * (not a worktree pointer), returns the mounts unchanged.
@@ -221,13 +224,13 @@ export const parseGitdirPath = (
  * @param platform - Override for `process.platform` (injectable for tests).
  */
 export const patchGitMountsForWindows = (
-  gitMounts: { hostPath: string; sandboxPath: string }[],
+  gitMounts: MountEntry[],
   worktreeHostPath: string,
   sandboxRepoDir: string,
   readFile?: (path: string) => Promise<string>,
   statFile?: (path: string) => Promise<"file" | "directory">,
   platform: string = process.platform,
-): Effect.Effect<{ hostPath: string; sandboxPath: string }[], WorktreeError> =>
+): Effect.Effect<MountEntry[], WorktreeError> =>
   Effect.gen(function* () {
     if (platform !== "win32") {
       return gitMounts;
@@ -299,13 +302,19 @@ export const patchGitMountsForWindows = (
         new WorktreeError({
           message: `Failed to write git override file: ${e instanceof Error ? e.message : String(e)}`,
         }),
-    });
+    }).pipe(
+      Effect.tapError(() =>
+        removeMountTempDirs([
+          { hostPath: tempGitFile, sandboxPath: "", tempDir },
+        ]),
+      ),
+    );
 
     // Build corrected mounts
     const normalizedParentGitDir = parentGitDir.replaceAll("\\", "/");
     const gitFileHostPath = gitEntryPath.replaceAll("\\", "/");
 
-    const correctedMounts: { hostPath: string; sandboxPath: string }[] = [];
+    const correctedMounts: MountEntry[] = [];
     let replacedGitFile = false;
 
     for (const m of gitMounts) {
@@ -319,6 +328,8 @@ export const patchGitMountsForWindows = (
           ...m,
           hostPath: tempGitFile,
           sandboxPath: `${sandboxRepoDir}/.git`,
+          readonly: true,
+          tempDir,
         });
         replacedGitFile = true;
       } else {
@@ -332,11 +343,33 @@ export const patchGitMountsForWindows = (
       correctedMounts.push({
         hostPath: tempGitFile,
         sandboxPath: `${sandboxRepoDir}/.git`,
+        readonly: true,
+        tempDir,
       });
     }
 
     return correctedMounts;
   });
+
+/**
+ * Removes the temp dirs `patchGitMountsForWindows` created for `mounts`
+ * (none off Windows). Run it once the sandbox using the mounts has closed, or
+ * failed to start.
+ */
+export const removeMountTempDirs = (
+  mounts: readonly MountEntry[],
+): Effect.Effect<void> =>
+  Effect.forEach(
+    mounts.flatMap((m) => (m.tempDir === undefined ? [] : [m.tempDir])),
+    (dir) =>
+      // A dir that can't be removed is left behind; nothing depends on it.
+      Effect.async<NodeJS.ErrnoException | null>((resume) => {
+        rmCallback(dir, { recursive: true, force: true }, (error) => {
+          resume(Effect.succeed(error));
+        });
+      }),
+    { discard: true },
+  );
 
 /**
  * Format a bind mount into a `-v` style string for container runtimes.

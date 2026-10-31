@@ -11,7 +11,8 @@ import {
   resolveGitMounts,
   SANDBOX_REPO_DIR,
 } from "./SandboxFactory.js";
-import { patchGitMountsForWindows } from "./mountUtils.js";
+import type { MountEntry } from "./SandboxFactory.js";
+import { patchGitMountsForWindows, removeMountTempDirs } from "./mountUtils.js";
 import { withSandboxLifecycle, runHostHooks } from "./SandboxLifecycle.js";
 import type { SandboxHooks } from "./SandboxLifecycle.js";
 import type {
@@ -359,6 +360,8 @@ export const createWorktree = async (
       });
 
       // 4. Start sandbox
+      // Temp dirs behind the git mounts, removed once the sandbox is closed.
+      const mountsToClean: MountEntry[] = [];
       let handle:
         | BindMountSandboxHandle
         | IsolatedSandboxHandle
@@ -390,6 +393,7 @@ export const createWorktree = async (
           worktreeInfo.path,
           SANDBOX_REPO_DIR,
         );
+        mountsToClean.push(...gitMounts);
         const startResult = yield* d.taskLog("Starting sandbox", () =>
           startSandbox({
             provider: resolvedSandbox,
@@ -487,7 +491,9 @@ export const createWorktree = async (
       }).pipe(
         // Always close sandbox handle
         Effect.ensuring(
-          Effect.promise(async () => handle.close().catch(() => {})),
+          Effect.promise(async () => handle.close().catch(() => {})).pipe(
+            Effect.andThen(removeMountTempDirs(mountsToClean)),
+          ),
         ),
       );
     });
@@ -576,6 +582,8 @@ export const createWorktree = async (
       }
 
       // 4. Start sandbox
+      // Temp dirs behind the git mounts, removed once the sandbox is closed.
+      const mountsToClean: MountEntry[] = [];
       let handle:
         | BindMountSandboxHandle
         | IsolatedSandboxHandle
@@ -609,6 +617,7 @@ export const createWorktree = async (
           worktreeInfo.path,
           SANDBOX_REPO_DIR,
         );
+        mountsToClean.push(...gitMounts);
         const startResult = yield* startSandbox({
           provider: sandboxProvider,
           hostRepoDir,
@@ -725,7 +734,9 @@ export const createWorktree = async (
         Effect.provide(runLayer),
         // Always close sandbox handle
         Effect.ensuring(
-          Effect.promise(async () => handle.close().catch(() => {})),
+          Effect.promise(async () => handle.close().catch(() => {})).pipe(
+            Effect.andThen(removeMountTempDirs(mountsToClean)),
+          ),
         ),
       );
 

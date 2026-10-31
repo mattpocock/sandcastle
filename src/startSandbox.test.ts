@@ -383,12 +383,24 @@ describe("startSandbox", () => {
     const makeSlowCreate = () => {
       let resolveCreate!: () => void;
       const released = new Promise<void>((r) => (resolveCreate = r));
+      let markStarted = (): void => undefined;
+      const started = new Promise<void>((resolve) => {
+        markStarted = () => {
+          resolve();
+        };
+      });
       let closeCalls = 0;
       const close = async () => {
         closeCalls++;
       };
       return {
-        released,
+        /** Resolves once the provider's create() has been called. */
+        started,
+        /** What create() awaits: marks it started, then waits for release. */
+        wait: async () => {
+          markStarted();
+          await released;
+        },
         resolveCreate: () => {
           resolveCreate();
         },
@@ -404,7 +416,9 @@ describe("startSandbox", () => {
       const exit = await Effect.runPromise(
         Effect.gen(function* () {
           const fiber = yield* Effect.fork(start);
-          yield* Effect.yieldNow();
+          // Start-up work before create() (resolving mounts) is real I/O, so
+          // wait for create() to begin before moving the clock past the timeout.
+          yield* Effect.promise(async () => slow.started);
           yield* TestClock.adjust(
             Duration.millis(CONTAINER_START_TIMEOUT_MS + 1),
           );
@@ -431,7 +445,7 @@ describe("startSandbox", () => {
       const provider = createIsolatedSandboxProvider({
         name: "slow-isolated",
         create: async () => {
-          await slow.released;
+          await slow.wait();
           return {
             worktreePath: "/home/agent/workspace",
             exec: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
@@ -456,7 +470,7 @@ describe("startSandbox", () => {
       const provider = createBindMountSandboxProvider({
         name: "slow-bind-mount",
         create: async () => {
-          await slow.released;
+          await slow.wait();
           return {
             worktreePath: SANDBOX_REPO_DIR,
             exec: async () => ({ stdout: "", stderr: "", exitCode: 0 }),

@@ -30,6 +30,7 @@ import type { IsolatedSandboxHandle } from "./SandboxProvider.js";
 import { buildRecoveryMessage } from "./RecoveryMessage.js";
 import type { FailedStep } from "./RecoveryMessage.js";
 import { SyncError } from "./errors.js";
+import { hostGit } from "./hostGit.js";
 
 /**
  * Sandbox-owned ref tracking the last-synced commit. Lives inside the sandbox's
@@ -38,30 +39,19 @@ import { SyncError } from "./errors.js";
  */
 export const SYNC_BASE_REF = "refs/sandcastle/sync-base";
 
-/**
- * Execute a command on the host side, returning stdout.
- * Fails with SyncError on non-zero exit.
- */
-const execHost = (
-  command: string,
+/** Run host git, failing with SyncError on non-zero exit. */
+const execHostGit = (
+  args: readonly string[],
   cwd: string,
 ): Effect.Effect<string, SyncError> =>
-  Effect.tryPromise({
-    try: async () => {
-      const { exec } = await import("node:child_process");
-      const { promisify } = await import("node:util");
-      const execAsync = promisify(exec);
-      const { stdout } = await execAsync(command, {
-        cwd,
-        maxBuffer: 10 * 1024 * 1024,
-      });
-      return stdout;
-    },
-    catch: (e) =>
-      new SyncError({
-        message: `Host command failed: ${command}\n${e instanceof Error ? e.message : String(e)}`,
-      }),
-  });
+  hostGit(args, cwd).pipe(
+    Effect.mapError(
+      (e) =>
+        new SyncError({
+          message: `Host command failed: git ${args.join(" ")}\n${e.message}`,
+        }),
+    ),
+  );
 
 /**
  * Execute a command in the sandbox, failing with SyncError if it exits non-zero.
@@ -229,8 +219,8 @@ export const syncOut = (
   Effect.gen(function* () {
     const { worktreePath } = handle;
 
-    const hostHead = (yield* execHost(
-      "git rev-parse HEAD",
+    const hostHead = (yield* execHostGit(
+      ["rev-parse", "HEAD"],
       hostRepoDir,
     )).trim();
     const sandboxHead = (yield* execOk(handle, "git rev-parse HEAD", {
@@ -366,12 +356,11 @@ export const syncOut = (
     // Apply committed patches
     if (nonEmptyPatches.length > 0) {
       const abortResult = yield* Effect.either(
-        execHost("git am --abort", hostRepoDir),
+        execHostGit(["am", "--abort"], hostRepoDir),
       );
       void abortResult; // ignore abort failures
-      const patchArgs = nonEmptyPatches.map((p) => `"${p}"`).join(" ");
       const applyResult = yield* Effect.either(
-        execHost(`git am --3way ${patchArgs}`, hostRepoDir),
+        execHostGit(["am", "--3way", ...nonEmptyPatches], hostRepoDir),
       );
       if (applyResult._tag === "Left") {
         failedStep = "commits";
@@ -382,7 +371,7 @@ export const syncOut = (
     if (!failedStep && hasDiff) {
       const diffPath = join(patchDir, "changes.patch");
       const applyResult = yield* Effect.either(
-        execHost(`git apply "${diffPath}"`, hostRepoDir),
+        execHostGit(["apply", diffPath], hostRepoDir),
       );
       if (applyResult._tag === "Left") {
         failedStep = "diff";

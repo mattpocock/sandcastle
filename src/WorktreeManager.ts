@@ -1,9 +1,9 @@
 import { Effect, Option } from "effect";
 import { FileSystem } from "@effect/platform";
-import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { join, normalize } from "node:path";
 import { WorktreeError, WorktreeTimeoutError, withTimeout } from "./errors.js";
+import { hostGit } from "./hostGit.js";
 
 const WORKTREE_TIMEOUT_MS = 30_000;
 
@@ -43,30 +43,9 @@ const execGit = (
   args: string[],
   cwd: string,
 ): Effect.Effect<string, WorktreeError> =>
-  Effect.async((resume) => {
-    // Force the C locale so git emits English, machine-stable messages. Several
-    // callers match git's stderr (e.g. "invalid reference") to decide control
-    // flow; under a localized locale gettext translates those strings and the
-    // matches silently fail, breaking worktree creation (issue #595).
-    execFile(
-      "git",
-      args,
-      { cwd, env: { ...process.env, LC_ALL: "C" } },
-      (error, stdout, stderr) => {
-        if (error) {
-          resume(
-            Effect.fail(
-              new WorktreeError({
-                message: stderr?.trim() || error.message,
-              }),
-            ),
-          );
-        } else {
-          resume(Effect.succeed(stdout));
-        }
-      },
-    );
-  });
+  hostGit(args, cwd).pipe(
+    Effect.mapError((e) => new WorktreeError({ message: e.message })),
+  );
 
 /**
  * Generates a temporary branch name.

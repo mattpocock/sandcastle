@@ -555,6 +555,8 @@ Sandcastle uses a **branch strategy** configured on the sandbox provider to cont
 
 For bind-mount providers (like Docker), the worktree directory is bind-mounted into the container — the agent writes directly to the host filesystem through the mount, so no sync is needed.
 
+The repo's `.git` is mounted too, so the agent can commit. The files that decide what git runs are mounted read-only: `.git/config`, `.git/hooks`, `.git/info`, the worktree's `.git` file and its `commondir`. So `git config` without `--global` fails inside the sandbox. The git commands Sandcastle itself runs on the host ignore the repository's hooks and any repository config that names a program (fsmonitor, filter, diff and merge drivers, credential helpers, and so on); your global and system git config still applies. A custom bind-mount provider must honour `readonly` on the mounts it is given.
+
 From your point of view, you just configure `branchStrategy: { type: 'branch', branch: 'foo' }` on `run()`, and get a commit on branch `foo` once it's complete. All 100% local.
 
 ## Prompts
