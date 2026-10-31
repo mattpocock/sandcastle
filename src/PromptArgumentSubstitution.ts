@@ -35,7 +35,9 @@ const PLACEHOLDER_PATTERN = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
 export const validateNoArgsWithInlinePrompt = (
   args: PromptArgs,
 ): Effect.Effect<void, PromptError> => {
-  if (Object.keys(args).length === 0) return Effect.void;
+  if (Object.keys(args).length === 0) {
+    return Effect.void;
+  }
   return Effect.fail(
     new PromptError({
       message:
@@ -74,10 +76,16 @@ export const findMissingPromptArgKeys = (
 
   for (const m of matches) {
     const key = m[1]!;
-    if (seen.has(key)) continue;
+    if (seen.has(key)) {
+      continue;
+    }
     seen.add(key);
-    if (builtInSet.has(key)) continue;
-    if (key in providedArgs && providedArgs[key] != null) continue;
+    if (builtInSet.has(key)) {
+      continue;
+    }
+    if (key in providedArgs && providedArgs[key] != null) {
+      continue;
+    }
     missing.push(key);
   }
 

@@ -135,14 +135,18 @@ export const addDependencyCommand = (
   pkg: string,
 ): string => {
   switch (packageManager) {
-    case "pnpm":
+    case "pnpm": {
       return `pnpm add ${pkg}`;
-    case "yarn":
+    }
+    case "yarn": {
       return `yarn add ${pkg}`;
-    case "bun":
+    }
+    case "bun": {
       return `bun add ${pkg}`;
-    case "npm":
+    }
+    case "npm": {
       return `npm install ${pkg}`;
+    }
   }
 };
 
@@ -706,45 +710,44 @@ export function getNextStepsLines(
       `5. ${runStep}`,
     );
     return lines;
-  } else {
-    const hasReviewer = template.includes("review");
-    const needsPlanSchema =
-      getTemplateDependencies(template).includes("zod") &&
-      !installedDependencies.includes("zod");
-    let step = 1;
-    const lines: string[] = [
-      "Next steps:",
-      `${step++}. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
-    ];
-    if (agent.name === "claude-code") {
-      lines.push(
-        "   To use your Claude subscription instead of an API key, run `claude setup-token` on your host and paste the result into CLAUDE_CODE_OAUTH_TOKEN.",
-      );
-    }
-    lines.push(
-      `${step++}. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
-      `${step++}. Templates use \`copyToWorktree: ["node_modules"]\` to copy your host node_modules into the sandbox for fast startup — the \`npm install\` in the onSandboxReady hook is a safety net for platform-specific binaries. ${
-        packageManager === "npm"
-          ? "Adjust both if you use a different package manager"
-          : `This project uses ${packageManager}, so change the hook to \`${installCommand(packageManager)}\` and check \`copyToWorktree\` suits it`
-      }`,
-    );
-    if (needsPlanSchema) {
-      lines.push(
-        `${step++}. Install a schema validator for the planner's \`<plan>\` output — the template uses Zod (\`${addDependencyCommand(packageManager, "zod")}\`), but Valibot, ArkType, or any Standard Schema library works (https://standardschema.dev)`,
-      );
-    }
-    lines.push(
-      `${step++}. Read and customize the prompt files in .sandcastle/ — they shape what the agent does`,
-    );
-    if (hasReviewer) {
-      lines.push(
-        `${step++}. Customize .sandcastle/CODING_STANDARDS.md with your project's standards — the reviewer agent loads it during review`,
-      );
-    }
-    lines.push(`${step++}. ${runStep}`);
-    return lines;
   }
+  const hasReviewer = template.includes("review");
+  const needsPlanSchema =
+    getTemplateDependencies(template).includes("zod") &&
+    !installedDependencies.includes("zod");
+  let step = 1;
+  const lines: string[] = [
+    "Next steps:",
+    `${step++}. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
+  ];
+  if (agent.name === "claude-code") {
+    lines.push(
+      "   To use your Claude subscription instead of an API key, run `claude setup-token` on your host and paste the result into CLAUDE_CODE_OAUTH_TOKEN.",
+    );
+  }
+  lines.push(
+    `${step++}. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
+    `${step++}. Templates use \`copyToWorktree: ["node_modules"]\` to copy your host node_modules into the sandbox for fast startup — the \`npm install\` in the onSandboxReady hook is a safety net for platform-specific binaries. ${
+      packageManager === "npm"
+        ? "Adjust both if you use a different package manager"
+        : `This project uses ${packageManager}, so change the hook to \`${installCommand(packageManager)}\` and check \`copyToWorktree\` suits it`
+    }`,
+  );
+  if (needsPlanSchema) {
+    lines.push(
+      `${step++}. Install a schema validator for the planner's \`<plan>\` output — the template uses Zod (\`${addDependencyCommand(packageManager, "zod")}\`), but Valibot, ArkType, or any Standard Schema library works (https://standardschema.dev)`,
+    );
+  }
+  lines.push(
+    `${step++}. Read and customize the prompt files in .sandcastle/ — they shape what the agent does`,
+  );
+  if (hasReviewer) {
+    lines.push(
+      `${step++}. Customize .sandcastle/CODING_STANDARDS.md with your project's standards — the reviewer agent loads it during review`,
+    );
+  }
+  lines.push(`${step++}. ${runStep}`);
+  return lines;
 }
 
 // ---------------------------------------------------------------------------
@@ -1040,7 +1043,7 @@ export const buildImageShellCommand = (
   imageName?: string,
 ): string =>
   `sandcastle ${sandboxProvider.cliNamespace} build-image${
-    imageName !== undefined ? ` --image-name ${imageName}` : ""
+    imageName === undefined ? "" : ` --image-name ${imageName}`
   }`;
 
 const buildSetupIssueTrackerDoc = (buildCommand: string): string =>

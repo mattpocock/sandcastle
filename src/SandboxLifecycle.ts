@@ -46,15 +46,15 @@ const execOk = (
   options?: { cwd?: string; sudo?: boolean },
 ): Effect.Effect<ExecResult, ExecError> =>
   Effect.flatMap(sandbox.exec(command, options), (result) =>
-    result.exitCode !== 0
-      ? Effect.fail(
+    result.exitCode === 0
+      ? Effect.succeed(result)
+      : Effect.fail(
           new ExecError({
             command,
             exitCode: result.exitCode,
             message: `Command failed (exit ${result.exitCode}): ${command}\n${result.stderr}`,
           }),
-        )
-      : Effect.succeed(result),
+        ),
   );
 
 const execOkWithGitTimeout = (
@@ -203,15 +203,15 @@ export const withSandboxLifecycle = <A>(
     const signal = options.signal ?? new AbortController().signal;
 
     // Without an explicit branch, record host's current branch for cherry-pick
-    const hostCurrentBranch: string | null = !branch
-      ? yield* Effect.promise(async () => {
+    const hostCurrentBranch: string | null = branch
+      ? null
+      : yield* Effect.promise(async () => {
           const { stdout } = await execAsync(
             "git rev-parse --abbrev-ref HEAD",
             { cwd: hostRepoDir },
           );
           return stdout.trim();
-        })
-      : null;
+        });
 
     // Read host git identity before entering the sandbox
     const [hostGitName, hostGitEmail] = yield* Effect.promise(async () => {
@@ -308,7 +308,9 @@ export const withSandboxLifecycle = <A>(
             ).catch(() => {});
           };
           signal.addEventListener("abort", onAbort, { once: true });
-          abortCleanup = () => signal.removeEventListener("abort", onAbort);
+          abortCleanup = () => {
+            signal.removeEventListener("abort", onAbort);
+          };
         }
 
         const sandboxHookEffects = (sandboxHooks ?? []).map((hook) => {
@@ -396,7 +398,7 @@ export const withSandboxLifecycle = <A>(
 
       yield* display.taskLog(
         commitCount > 0
-          ? `Syncing ${commitCount} commit${commitCount !== 1 ? "s" : ""} to host`
+          ? `Syncing ${commitCount} commit${commitCount === 1 ? "" : "s"} to host`
           : "No commits to sync out",
         () => options.applyToHost!(),
       );
@@ -406,7 +408,38 @@ export const withSandboxLifecycle = <A>(
     let commits: { sha: string }[];
     let finalBranch: string;
 
-    if (hostCurrentBranch !== null) {
+    if (hostCurrentBranch === null) {
+      // Explicit branch: commits stay on that branch
+      commits = yield* display.taskLog("Collecting commits", () =>
+        Effect.promise(async () => {
+          try {
+            const { stdout } = await execAsync(
+              `git rev-list "${baseHead}..refs/heads/${targetBranch}" --reverse`,
+              { cwd: hostRepoDir },
+            );
+            const lines = stdout.trim();
+            if (!lines) {
+              return [];
+            }
+            return lines.split("\n").map((sha) => ({ sha }));
+          } catch {
+            // Branch doesn't exist on host (no commits were produced)
+            return [];
+          }
+        }).pipe(
+          withTimeout(
+            commitCollectionTimeoutMs,
+            () =>
+              new CommitCollectionTimeoutError({
+                message: `Commit collection timed out after ${commitCollectionTimeoutMs}ms`,
+                timeoutMs: commitCollectionTimeoutMs,
+              }),
+          ),
+        ),
+      );
+
+      finalBranch = targetBranch;
+    } else {
       // Temp branch mode: merge temp branch into host branch, then delete temp branch.
       // We use merge instead of cherry-pick because cherry-pick breaks when the
       // temp branch contains merge commits (e.g. a merge agent merging multiple parallel
@@ -518,7 +551,9 @@ export const withSandboxLifecycle = <A>(
               { cwd: hostRepoDir },
             );
             const lines = stdout.trim();
-            if (!lines) return [];
+            if (!lines) {
+              return [];
+            }
             return lines.split("\n").map((sha) => ({ sha }));
           } catch {
             return [];
@@ -536,35 +571,6 @@ export const withSandboxLifecycle = <A>(
       );
 
       finalBranch = hostCurrentBranch;
-    } else {
-      // Explicit branch: commits stay on that branch
-      commits = yield* display.taskLog("Collecting commits", () =>
-        Effect.promise(async () => {
-          try {
-            const { stdout } = await execAsync(
-              `git rev-list "${baseHead}..refs/heads/${targetBranch}" --reverse`,
-              { cwd: hostRepoDir },
-            );
-            const lines = stdout.trim();
-            if (!lines) return [];
-            return lines.split("\n").map((sha) => ({ sha }));
-          } catch {
-            // Branch doesn't exist on host (no commits were produced)
-            return [];
-          }
-        }).pipe(
-          withTimeout(
-            commitCollectionTimeoutMs,
-            () =>
-              new CommitCollectionTimeoutError({
-                message: `Commit collection timed out after ${commitCollectionTimeoutMs}ms`,
-                timeoutMs: commitCollectionTimeoutMs,
-              }),
-          ),
-        ),
-      );
-
-      finalBranch = targetBranch;
     }
 
     return { result, branch: finalBranch, commits };

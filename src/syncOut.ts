@@ -82,13 +82,13 @@ const execOk = (
       }),
   }).pipe(
     Effect.flatMap((result) =>
-      result.exitCode !== 0
-        ? Effect.fail(
+      result.exitCode === 0
+        ? Effect.succeed(result)
+        : Effect.fail(
             new SyncError({
               message: `Sandbox command failed (exit ${result.exitCode}): ${command}\n${result.stderr}`,
             }),
-          )
-        : Effect.succeed(result),
+          ),
     ),
   );
 
@@ -120,7 +120,9 @@ const isEmptyPatch = (patchPath: string): Effect.Effect<boolean, SyncError> =>
   Effect.tryPromise({
     try: async () => {
       const info = await stat(patchPath);
-      if (info.size === 0) return true;
+      if (info.size === 0) {
+        return true;
+      }
       const content = await readFile(patchPath, "utf8");
       return !content.includes("diff --git");
     },
@@ -205,7 +207,9 @@ export const countCommitsToSync = (
           }),
         ),
       );
-    if (countResult.exitCode !== 0) return 0;
+    if (countResult.exitCode !== 0) {
+      return 0;
+    }
     const parsed = parseInt(countResult.stdout.trim(), 10);
     return Number.isNaN(parsed) ? 0 : parsed;
   });

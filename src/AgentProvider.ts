@@ -1077,7 +1077,7 @@ const parseOpenCodeStreamLine = (line: string): ParsedStreamEvent[] => {
       const input = state.input;
       if (!input) return [];
       const argField = OPENCODE_TOOL_ARG_FIELDS[part.tool];
-      const argValue = argField !== undefined ? input[argField] : undefined;
+      const argValue = argField === undefined ? undefined : input[argField];
       const args =
         typeof argValue === "string" ? argValue : JSON.stringify(input);
       return [{ type: "tool_call", name: part.tool, args }];

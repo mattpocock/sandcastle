@@ -1203,7 +1203,9 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       ).pipe(Effect.provide(testDisplayLayer)),
     );
 
-    setTimeout(() => ac.abort("cancelled"), 50);
+    setTimeout(() => {
+      ac.abort("cancelled");
+    }, 50);
     await expect(promise).rejects.toThrow();
   });
 
@@ -1229,7 +1231,9 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       ).pipe(Effect.provide(testDisplayLayer)),
     );
 
-    setTimeout(() => ac.abort("cancelled"), 50);
+    setTimeout(() => {
+      ac.abort("cancelled");
+    }, 50);
     await expect(promise).rejects.toThrow();
   });
 
@@ -1706,7 +1710,9 @@ describe("runHostHooks", () => {
     );
 
     // Give the process time to start, then abort
-    setTimeout(() => ac.abort("cancelled"), 50);
+    setTimeout(() => {
+      ac.abort("cancelled");
+    }, 50);
 
     await expect(promise).rejects.toThrow();
   });
@@ -1749,7 +1755,9 @@ describe("runHostHooks", () => {
   it("kills the hook's whole process tree when the signal aborts", async () => {
     const dir = await mkdtemp(join(tmpdir(), "host-hooks-"));
     const ac = new AbortController();
-    setTimeout(() => ac.abort("cancelled"), 500);
+    setTimeout(() => {
+      ac.abort("cancelled");
+    }, 500);
 
     await expect(
       Effect.runPromise(

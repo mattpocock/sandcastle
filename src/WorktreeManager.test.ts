@@ -142,7 +142,9 @@ describe("generateTempBranchName", () => {
 
   it("returns different names when called within the same second (random suffix)", () => {
     const names = new Set<string>();
-    for (let i = 0; i < 16; i++) names.add(generateTempBranchName());
+    for (let i = 0; i < 16; i++) {
+      names.add(generateTempBranchName());
+    }
     expect(names.size).toBe(16);
   });
 
@@ -861,7 +863,9 @@ describe("WorktreeManager git locale", () => {
   // asserting the module invokes git in the C locale even when the parent
   // process is set to a different one.
   it("invokes git with LC_ALL=C even when the process locale is non-English", async () => {
-    if (process.platform === "win32") return; // POSIX shell shim
+    if (process.platform === "win32") {
+      return;
+    } // POSIX shell shim
     const repoDir = await setupRepo();
     const shimDir = await mkdtemp(join(tmpdir(), "wt-git-shim-"));
     const logPath = join(shimDir, "lc_all.log");
@@ -880,10 +884,16 @@ describe("WorktreeManager git locale", () => {
       const branch = await run(getCurrentBranch(repoDir));
       expect(branch).toBe("main");
     } finally {
-      if (originalPath === undefined) delete process.env.PATH;
-      else process.env.PATH = originalPath;
-      if (originalLcAll === undefined) delete process.env.LC_ALL;
-      else process.env.LC_ALL = originalLcAll;
+      if (originalPath === undefined) {
+        delete process.env.PATH;
+      } else {
+        process.env.PATH = originalPath;
+      }
+      if (originalLcAll === undefined) {
+        delete process.env.LC_ALL;
+      } else {
+        process.env.LC_ALL = originalLcAll;
+      }
     }
 
     await expect(readFile(logPath, "utf8")).resolves.toBe("C");

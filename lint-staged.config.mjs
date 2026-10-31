@@ -10,7 +10,9 @@ const formattable = (files) =>
 export default {
   "*.{ts,tsx,js,jsx,json,md}": (files) => {
     const real = formattable(files);
-    if (real.length === 0) return [];
+    if (real.length === 0) {
+      return [];
+    }
     return `prettier --write ${real.map((f) => JSON.stringify(f)).join(" ")}`;
   },
 };

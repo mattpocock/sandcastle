@@ -215,7 +215,9 @@ const cleanupTempBranch = (
   WorktreeManager.deleteTempBranchIfUnused(hostRepoDir, tempBranch).pipe(
     Effect.tap(({ unmergedCommits }) =>
       Effect.sync(() => {
-        if (unmergedCommits === 0) return;
+        if (unmergedCommits === 0) {
+          return;
+        }
         const s = unmergedCommits === 1 ? "" : "s";
         console.error(
           `\nTemporary branch '${tempBranch}' kept: it has ${unmergedCommits} commit${s} not on any other branch.`,
@@ -392,12 +394,12 @@ export const WorktreeDockerSandboxFactory = {
           // does, instead of leaving it behind silently.
           Effect.map((info) => ({
             ...info,
-            unregisterShutdown: registerShutdown(() =>
+            unregisterShutdown: registerShutdown(() => {
               printWorktreePreservedMessage(
                 info.path,
                 `Worktree preserved at ${info.path}`,
-              ),
-            ),
+              );
+            }),
           })),
         );
 

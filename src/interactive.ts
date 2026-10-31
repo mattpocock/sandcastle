@@ -204,7 +204,9 @@ export const interactive = async (
           clack.text({
             message: `Enter value for {{${key}}}`,
             validate: (v) => {
-              if (!v) return `A value is required for {{${key}}}`;
+              if (!v) {
+                return `A value is required for {{${key}}}`;
+              }
             },
           }),
         );
@@ -319,29 +321,26 @@ export const interactive = async (
           }),
         );
         return startResult.handle;
-      } else {
-        const gitPath = join(hostRepoDir, ".git");
-        const rawGitMounts = yield* resolveGitMounts(gitPath);
-        const worktreeOrRepoPath = isHeadMode
-          ? hostRepoDir
-          : worktreeInfo!.path;
-        const gitMounts = yield* patchGitMountsForWindows(
-          rawGitMounts,
-          worktreeOrRepoPath,
-          SANDBOX_REPO_DIR,
-        );
-        const startResult = yield* d.taskLog("Starting sandbox", () =>
-          startSandbox({
-            provider: sandboxProvider,
-            hostRepoDir,
-            env: effectiveEnv,
-            worktreeOrRepoPath,
-            gitMounts,
-            repoDir: SANDBOX_REPO_DIR,
-          }),
-        );
-        return startResult.handle;
       }
+      const gitPath = join(hostRepoDir, ".git");
+      const rawGitMounts = yield* resolveGitMounts(gitPath);
+      const worktreeOrRepoPath = isHeadMode ? hostRepoDir : worktreeInfo!.path;
+      const gitMounts = yield* patchGitMountsForWindows(
+        rawGitMounts,
+        worktreeOrRepoPath,
+        SANDBOX_REPO_DIR,
+      );
+      const startResult = yield* d.taskLog("Starting sandbox", () =>
+        startSandbox({
+          provider: sandboxProvider,
+          hostRepoDir,
+          env: effectiveEnv,
+          worktreeOrRepoPath,
+          gitMounts,
+          repoDir: SANDBOX_REPO_DIR,
+        }),
+      );
+      return startResult.handle;
     }).pipe(
       Effect.tapError(() =>
         worktreeInfo

@@ -56,8 +56,12 @@ const defaultUidBuildArgs = (): Record<string, string> => {
   const args: Record<string, string> = {};
   const uid = process.getuid?.();
   const gid = process.getgid?.();
-  if (uid !== undefined) args.AGENT_UID = String(uid);
-  if (gid !== undefined) args.AGENT_GID = String(gid);
+  if (uid !== undefined) {
+    args.AGENT_UID = String(uid);
+  }
+  if (gid !== undefined) {
+    args.AGENT_GID = String(gid);
+  }
   return args;
 };
 
@@ -263,7 +267,9 @@ const initCommand = Command.make(
         cancelMessage: string;
       }): Effect.Effect<boolean, InitError> =>
         Effect.gen(function* () {
-          if (params.choice._tag === "Some") return params.choice.value;
+          if (params.choice._tag === "Some") {
+            return params.choice.value;
+          }
           if (!isInteractive) {
             yield* failIfNonInteractive(params.flag);
           }
@@ -288,10 +294,18 @@ const initCommand = Command.make(
       if (!isInteractive) {
         const tracker = Option.getOrUndefined(issueTrackerFlag);
         const missing: string[] = [];
-        if (agentFlag._tag === "None") missing.push("--agent");
-        if (sandboxFlag._tag === "None") missing.push("--sandbox");
-        if (tracker === undefined) missing.push("--issue-tracker");
-        if (template._tag === "None") missing.push("--template");
+        if (agentFlag._tag === "None") {
+          missing.push("--agent");
+        }
+        if (sandboxFlag._tag === "None") {
+          missing.push("--sandbox");
+        }
+        if (tracker === undefined) {
+          missing.push("--issue-tracker");
+        }
+        if (template._tag === "None") {
+          missing.push("--template");
+        }
         if (tracker === "github-issues" && createLabelChoice._tag === "None") {
           missing.push("--create-label");
         }
@@ -518,7 +532,9 @@ const initCommand = Command.make(
                 return false;
               }
             });
-            if (installed) installedDependencies.push("zod");
+            if (installed) {
+              installedDependencies.push("zod");
+            }
             yield* installed
               ? d.status(`Installed zod with ${packageManager}.`, "success")
               : d.status(

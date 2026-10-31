@@ -14,6 +14,6 @@ const fallbackVersion = (): string => {
  * is undefined, so we fall back to reading `package.json` at runtime.
  */
 export const VERSION: string =
-  typeof __SANDCASTLE_VERSION__ !== "undefined"
-    ? __SANDCASTLE_VERSION__
-    : fallbackVersion();
+  typeof __SANDCASTLE_VERSION__ === "undefined"
+    ? fallbackVersion()
+    : __SANDCASTLE_VERSION__;

@@ -81,7 +81,9 @@ const invokeAgent = (
     const interruptFiber = (
       fiber: Fiber.RuntimeFiber<unknown, unknown> | null,
     ) => {
-      if (fiber !== null) Effect.runFork(Fiber.interrupt(fiber));
+      if (fiber !== null) {
+        Effect.runFork(Fiber.interrupt(fiber));
+      }
     };
 
     const startWarningInterval = () => {
@@ -144,7 +146,9 @@ const invokeAgent = (
         Effect.runFork(Deferred.die(abortDeferred, signal.reason));
       };
       signal.addEventListener("abort", onAbort, { once: true });
-      abortCleanup = () => signal.removeEventListener("abort", onAbort);
+      abortCleanup = () => {
+        signal.removeEventListener("abort", onAbort);
+      };
     }
 
     resetTimer();
@@ -158,7 +162,9 @@ const invokeAgent = (
       });
       const execResult = yield* sandbox.exec(printCmd.command, {
         onLine: (line) => {
-          if (settled) return;
+          if (settled) {
+            return;
+          }
           // Surface the raw line FIRST so verbose mode/forwarders see every
           // stdout line the agent produced, including ones parseStreamLine
           // drops. Errors thrown by the callback are caught by the emitter
@@ -587,7 +593,9 @@ export const orchestrate = (
                       if (content) {
                         const parsedUsage =
                           provider.parseSessionUsage?.(content);
-                        if (parsedUsage) usage = parsedUsage;
+                        if (parsedUsage) {
+                          usage = parsedUsage;
+                        }
                         const parsedContextWindow =
                           provider.parseSessionContextWindow?.(content);
                         if (parsedContextWindow) {

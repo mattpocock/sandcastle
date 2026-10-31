@@ -168,8 +168,9 @@ const main = async (): Promise<number> => {
       console.log(world.runId);
       return 0;
     }
-    case "doctor":
+    case "doctor": {
       return doctor(rest[0] ? loadWorld(rest[0]) : undefined);
+    }
     case "sandcastle":
     case "tsx":
     case "sh": {
@@ -210,14 +211,16 @@ const main = async (): Promise<number> => {
       for (const w of worlds) cleanup(w);
       return 0;
     }
-    case "dir":
+    case "dir": {
       console.log(loadWorld(rest[0]).dir);
       return 0;
-    default:
+    }
+    default: {
       console.error(
         "verbs: world | doctor [run] | sandcastle <run> … | tsx <run> <file> … | sh <run> <cmd> … | ledger <run> | cleanup <run>|--all | dir <run>",
       );
       return 2;
+    }
   }
 };
 

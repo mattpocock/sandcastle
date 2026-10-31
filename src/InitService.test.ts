@@ -793,7 +793,9 @@ describe("InitService scaffold", () => {
               zodInstalled ? ["zod"] : [],
             ).join("\n");
             expect(joined).toContain(`Run \`${run}\``);
-            if (pm !== "npm") expect(joined).not.toMatch(/\bnpm run/);
+            if (pm !== "npm") {
+              expect(joined).not.toMatch(/\bnpm run/);
+            }
             if (zodInstalled) {
               expect(joined).not.toContain("zod");
               expect(joined).not.toContain("schema validator");
@@ -809,7 +811,9 @@ describe("InitService scaffold", () => {
         it(`blank, ${pm}: run step uses ${run}`, () => {
           const joined = next("blank", "main.ts", pm).join("\n");
           expect(joined).toContain(`Run \`${run}\``);
-          if (pm !== "npm") expect(joined).not.toMatch(/\bnpm run/);
+          if (pm !== "npm") {
+            expect(joined).not.toMatch(/\bnpm run/);
+          }
         });
       }
 

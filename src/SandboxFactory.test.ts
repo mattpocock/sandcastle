@@ -60,9 +60,13 @@ const findCreatedWorktree = async (
   hostDir: string,
 ): Promise<string | undefined> => {
   const worktreesDir = join(hostDir, ".sandcastle", "worktrees");
-  if (!existsSync(worktreesDir)) return undefined;
+  if (!existsSync(worktreesDir)) {
+    return undefined;
+  }
   const entries = await readdir(worktreesDir);
-  if (entries.length === 0) return undefined;
+  if (entries.length === 0) {
+    return undefined;
+  }
   return join(worktreesDir, entries[0]!);
 };
 
@@ -315,9 +319,13 @@ describe("WorktreeDockerSandboxFactory", () => {
     );
 
     expect(Exit.isFailure(exit)).toBe(true);
-    if (!Exit.isFailure(exit)) throw new Error("unreachable");
+    if (!Exit.isFailure(exit)) {
+      throw new Error("unreachable");
+    }
     expect(exit.cause._tag).toBe("Fail");
-    if (exit.cause._tag !== "Fail") throw new Error("unreachable");
+    if (exit.cause._tag !== "Fail") {
+      throw new Error("unreachable");
+    }
     expect(exit.cause.error).toBeInstanceOf(AgentIdleTimeoutError);
     expect(
       (exit.cause.error as AgentIdleTimeoutError).preservedWorktreePath,
@@ -344,9 +352,13 @@ describe("WorktreeDockerSandboxFactory", () => {
     );
 
     expect(Exit.isFailure(exit)).toBe(true);
-    if (!Exit.isFailure(exit)) throw new Error("unreachable");
+    if (!Exit.isFailure(exit)) {
+      throw new Error("unreachable");
+    }
     expect(exit.cause._tag).toBe("Fail");
-    if (exit.cause._tag !== "Fail") throw new Error("unreachable");
+    if (exit.cause._tag !== "Fail") {
+      throw new Error("unreachable");
+    }
     expect(exit.cause.error).toBeInstanceOf(AgentError);
     expect((exit.cause.error as AgentError).preservedWorktreePath).toBe(
       observedWorktreePath,
@@ -616,9 +628,13 @@ describe("WorktreeDockerSandboxFactory", () => {
     );
 
     expect(Exit.isFailure(exit)).toBe(true);
-    if (!Exit.isFailure(exit)) throw new Error("unreachable");
+    if (!Exit.isFailure(exit)) {
+      throw new Error("unreachable");
+    }
     expect(exit.cause._tag).toBe("Fail");
-    if (exit.cause._tag !== "Fail") throw new Error("unreachable");
+    if (exit.cause._tag !== "Fail") {
+      throw new Error("unreachable");
+    }
     expect(exit.cause.error).toBeInstanceOf(AgentIdleTimeoutError);
     expect(
       (exit.cause.error as AgentIdleTimeoutError).preservedWorktreePath,
@@ -1057,8 +1073,9 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
               'echo "new content" > new-file.txt && git add new-file.txt && git commit -m "sandbox commit"',
             );
             commitMade = true;
-            if (!info.applyToHost)
+            if (!info.applyToHost) {
               throw new Error("applyToHost not provided for isolated sandbox");
+            }
             yield* info.applyToHost();
           }),
         );

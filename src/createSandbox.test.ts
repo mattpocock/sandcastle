@@ -66,8 +66,8 @@ const toStreamJson = (output: string): string => {
       type: "assistant",
       message: { content: [{ type: "text", text: output }] },
     }),
+    JSON.stringify({ type: "result", result: output }),
   );
-  lines.push(JSON.stringify({ type: "result", result: output }));
   return lines.join("\n");
 };
 
@@ -82,8 +82,6 @@ const toPiStreamJson = (output: string): string => {
       type: "message_update",
       assistantMessageEvent: { type: "text_delta", delta: output },
     }),
-  );
-  lines.push(
     JSON.stringify({
       type: "agent_end",
       messages: [
@@ -785,7 +783,9 @@ describe("createSandbox", () => {
                 }),
                 JSON.stringify({ type: "result", result: "ok" }),
               ];
-              for (const line of streamLines) onLine(line);
+              for (const line of streamLines) {
+                onLine(line);
+              }
               return {
                 stdout: streamLines.join("\n"),
                 stderr: "",
@@ -1502,7 +1502,9 @@ describe("createSandbox", () => {
             if (cmd.startsWith("claude ") && execOpts?.onLine) {
               const onLine = execOpts.onLine;
               const output = toStreamJson("mock output");
-              for (const line of output.split("\n")) onLine(line);
+              for (const line of output.split("\n")) {
+                onLine(line);
+              }
               return { stdout: output, stderr: "", exitCode: 0 };
             }
             if (cmd.startsWith("claude ")) {
@@ -1510,8 +1512,9 @@ describe("createSandbox", () => {
             }
             const result = await execAsync(cmd, { cwd, env: isolatedEnv });
             if (execOpts?.onLine) {
-              for (const line of result.stdout.split("\n"))
+              for (const line of result.stdout.split("\n")) {
                 execOpts.onLine(line);
+              }
             }
             return {
               stdout: result.stdout,
@@ -1582,11 +1585,14 @@ describe("createSandbox", () => {
           if (cmd.startsWith("claude ") && execOpts?.onLine) {
             const onLine = execOpts.onLine;
             const output = toStreamJson("mock");
-            for (const line of output.split("\n")) onLine(line);
+            for (const line of output.split("\n")) {
+              onLine(line);
+            }
             return { stdout: output, stderr: "", exitCode: 0 };
           }
-          if (cmd.startsWith("claude "))
+          if (cmd.startsWith("claude ")) {
             return { stdout: "mock", stderr: "", exitCode: 0 };
+          }
           const result = await execAsync(cmd, { cwd, env: isolatedEnv });
           return {
             stdout: result.stdout,
@@ -1862,7 +1868,9 @@ describe("createSandbox", () => {
           const cwd = execOpts?.cwd ?? opts.worktreePath;
           const result = await execAsync(cmd, { cwd });
           if (execOpts?.onLine) {
-            for (const line of result.stdout.split("\n")) execOpts.onLine(line);
+            for (const line of result.stdout.split("\n")) {
+              execOpts.onLine(line);
+            }
           }
           return {
             stdout: result.stdout,

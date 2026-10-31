@@ -19,7 +19,9 @@ export const raceAbortSignal = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
   signal?: AbortSignal,
 ): Effect.Effect<A, E, R> => {
-  if (!signal) return effect;
+  if (!signal) {
+    return effect;
+  }
 
   return Effect.gen(function* () {
     if (signal.aborted) {
@@ -36,7 +38,9 @@ export const raceAbortSignal = <A, E, R>(
 
     return yield* Effect.raceFirst(effect, Deferred.await(abortDeferred)).pipe(
       Effect.ensuring(
-        Effect.sync(() => signal.removeEventListener("abort", onAbort)),
+        Effect.sync(() => {
+          signal.removeEventListener("abort", onAbort);
+        }),
       ),
     );
   });

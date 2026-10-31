@@ -34,7 +34,7 @@ export const makeLocalSandbox = (sandboxDir: string): SandboxService => {
         const proc = spawn("sh", ["-c", command], {
           cwd: options?.cwd ?? sandboxDir,
           stdio: [
-            options?.stdin !== undefined ? "pipe" : "ignore",
+            options?.stdin === undefined ? "ignore" : "pipe",
             "pipe",
             "pipe",
           ],

@@ -625,8 +625,8 @@ const toStreamJson = (output: string): string => {
       type: "assistant",
       message: { content: [{ type: "text", text: output }] },
     }),
+    JSON.stringify({ type: "result", result: output }),
   );
-  lines.push(JSON.stringify({ type: "result", result: output }));
   return lines.join("\n");
 };
 

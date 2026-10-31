@@ -412,8 +412,9 @@ describe("patchGitMountsForWindows", () => {
     ) => {
       const result = await Effect.runPromise(effect);
       for (const m of result) {
-        if (m.hostPath.endsWith("git-override"))
+        if (m.hostPath.endsWith("git-override")) {
           tempDirs.push(dirname(m.hostPath));
+        }
       }
       return result;
     };

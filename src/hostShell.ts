@@ -41,10 +41,15 @@ export const execHostShell = (
 
     let exited = false;
     const killTree = () => {
-      if (exited || child.pid === undefined) return;
+      if (exited || child.pid === undefined) {
+        return;
+      }
       try {
-        if (usesProcessGroup) process.kill(-child.pid, "SIGKILL");
-        else child.kill("SIGKILL");
+        if (usesProcessGroup) {
+          process.kill(-child.pid, "SIGKILL");
+        } else {
+          child.kill("SIGKILL");
+        }
       } catch {
         // Already gone.
       }
@@ -54,10 +59,14 @@ export const execHostShell = (
       killTree();
       reject(abortError(command, event.target as AbortSignal));
     };
-    for (const s of signals) s.addEventListener("abort", onAbort);
+    for (const s of signals) {
+      s.addEventListener("abort", onAbort);
+    }
     const unregisterShutdown = registerShutdown(killTree);
     const cleanup = () => {
-      for (const s of signals) s.removeEventListener("abort", onAbort);
+      for (const s of signals) {
+        s.removeEventListener("abort", onAbort);
+      }
       unregisterShutdown();
     };
 

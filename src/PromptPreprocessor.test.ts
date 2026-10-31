@@ -82,7 +82,9 @@ describe("PromptPreprocessor", () => {
     expect(result._tag).toBe("PromptError");
     expect(result.message).toContain("exit 7");
     expect(result.message).toContain("exited with code 7");
-    if (result._tag !== "PromptError") throw new Error("unreachable");
+    if (result._tag !== "PromptError") {
+      throw new Error("unreachable");
+    }
     expect(result.exitCode).toBe(7);
   });
 
@@ -149,7 +151,9 @@ describe("PromptPreprocessor", () => {
     const entries = await Effect.runPromise(Ref.get(displayRef));
     const taskLogEntry = entries.find((e) => e._tag === "taskLog");
     expect(taskLogEntry).toBeDefined();
-    if (taskLogEntry!._tag !== "taskLog") throw new Error("unreachable");
+    if (taskLogEntry!._tag !== "taskLog") {
+      throw new Error("unreachable");
+    }
     const helloTokens = Math.ceil("hello".length / 4);
     const worldTokens = Math.ceil("world".length / 4);
     expect(taskLogEntry!.messages[0]).toBe(

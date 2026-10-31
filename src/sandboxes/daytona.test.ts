@@ -58,7 +58,9 @@ vi.mock("@daytona/sdk", async () => {
           },
           uploadFile: async (file: Buffer | string, remotePath: string) => {
             sdk.uploadedPaths.push(remotePath);
-            if (Buffer.isBuffer(file)) writeFileSync(remotePath, file);
+            if (Buffer.isBuffer(file)) {
+              writeFileSync(remotePath, file);
+            }
           },
         },
         process: {
@@ -83,10 +85,16 @@ vi.mock("@daytona/sdk", async () => {
             onStderr: (chunk: string) => void,
           ) => {
             const r = sessionCommands.get(cmdId)!;
-            if (r.stdout) onStdout(r.stdout);
-            if (r.stderr) onStderr(r.stderr);
+            if (r.stdout) {
+              onStdout(r.stdout);
+            }
+            if (r.stderr) {
+              onStderr(r.stderr);
+            }
             // The session shell died: the stream never closes.
-            if (r.exitCode === undefined) await new Promise(() => {});
+            if (r.exitCode === undefined) {
+              await new Promise(() => {});
+            }
           },
           getSessionCommand: async (_sessionId: string, cmdId: string) => ({
             exitCode: sessionCommands.get(cmdId)!.exitCode,
@@ -182,8 +190,9 @@ describe("daytona()", () => {
       await handle.exec("cat", { cwd, stdin: prompt, onLine: () => {} });
 
       expect(sdk.uploadedPaths).toHaveLength(2);
-      for (const path of sdk.uploadedPaths)
+      for (const path of sdk.uploadedPaths) {
         expect(existsSync(path)).toBe(false);
+      }
     });
 
     it("returns a streamed command's exit code when it exits the shell", async () => {
@@ -229,8 +238,9 @@ describe("daytona()", () => {
           () => (settled = true),
           () => (settled = true),
         );
-        for (let i = 0; i < 20 && !settled; i++)
+        for (let i = 0; i < 20 && !settled; i++) {
           await vi.advanceTimersByTimeAsync(5000);
+        }
 
         await expect(outcome).rejects.toThrow(
           /session shell exited before the command finished/,

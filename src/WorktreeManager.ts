@@ -156,7 +156,9 @@ export const isOrphanedWorktreePath = (
 ): boolean => {
   const normalizedEntry = normalizePath(entryPath);
   for (const active of activeWorktreePaths) {
-    if (normalizePath(active) === normalizedEntry) return false;
+    if (normalizePath(active) === normalizedEntry) {
+      return false;
+    }
   }
   return true;
 };
@@ -473,7 +475,9 @@ export const deleteTempBranchIfUnused = (
       Effect.as(true),
       Effect.catchAll(() => Effect.succeed(false)),
     );
-    if (!exists) return { unmergedCommits: 0 };
+    if (!exists) {
+      return { unmergedCommits: 0 };
+    }
 
     const count = yield* execGit(
       // `--exclude` patterns for `--branches` are matched without `refs/heads/`.
@@ -488,7 +492,9 @@ export const deleteTempBranchIfUnused = (
       repoDir,
     );
     const unmergedCommits = parseInt(count.trim(), 10) || 0;
-    if (unmergedCommits > 0) return { unmergedCommits };
+    if (unmergedCommits > 0) {
+      return { unmergedCommits };
+    }
 
     yield* execGit(["branch", "-D", branch], repoDir);
     return { unmergedCommits: 0 };
@@ -524,7 +530,9 @@ export const pruneStale = (
       Effect.mapError((e) => new WorktreeError({ message: e.message })),
     );
 
-    if (entries === null) return;
+    if (entries === null) {
+      return;
+    }
 
     // `git worktree list` canonicalizes paths via realpath. If repoDir or
     // .sandcastle is a symlink, joining the un-canonicalized prefix produces

@@ -19,7 +19,9 @@ const assertPositive = (
   unit: "seconds" | "milliseconds",
   value: unknown,
 ): void => {
-  if (value === undefined) return;
+  if (value === undefined) {
+    return;
+  }
   // `!(value > 0)` also rejects NaN. Infinity stays allowed (no timeout).
   if (typeof value !== "number" || !(value > 0)) {
     throw new Error(
