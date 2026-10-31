@@ -42,6 +42,16 @@ export class SyncError extends Data.TaggedError("SyncError")<{
 }> {}
 
 /**
+ * Sync-out refused to write a file on the host because its path, as reported
+ * by the sandbox, would land outside the host worktree (or in its `.git`).
+ */
+export class SyncOutPathError extends Data.TaggedError("SyncOutPathError")<{
+  readonly message: string;
+  /** The offending path, as the sandbox reported it. */
+  readonly path: string;
+}> {}
+
+/**
  * A host-side git command failed, or was refused because the repository's
  * `.git` did not lead where it should.
  */
@@ -218,6 +228,7 @@ export type SandboxError =
   | PodmanError
   | ImageNotFoundError
   | SyncError
+  | SyncOutPathError
   | WorktreeError
   | PromptError
   | AgentError

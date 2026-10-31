@@ -42,6 +42,7 @@ export const formatErrorMessage = (error: SandboxError): string => {
     case "CommitCollectionTimeoutError":
     case "MergeToHostTimeoutError":
     case "SessionCaptureError":
+    case "SyncOutPathError":
     case "CwdError":
     case "ImageNotFoundError":
       return error.message;
@@ -70,6 +71,7 @@ export const withFriendlyErrors = <A, E, R>(
     DockerError: showErrorAndExit,
     PodmanError: showErrorAndExit,
     SyncError: showErrorAndExit,
+    SyncOutPathError: showErrorAndExit,
     WorktreeError: showErrorAndExit,
     PromptError: showErrorAndExit,
     AgentError: showErrorAndExit,

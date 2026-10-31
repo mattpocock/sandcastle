@@ -1006,12 +1006,12 @@ describe("withSandboxLifecycle (worktree mode)", () => {
           },
           sandbox,
           (ctx) =>
-            Effect.gen(function* () {
-              yield* ctx.sandbox.exec(
+            ctx.sandbox
+              .exec(
                 String.raw`sh -c "echo new > sync-file.txt && git add sync-file.txt && git commit -m \"sync commit\""`,
                 { cwd: ctx.sandboxRepoDir },
-              );
-            }),
+              )
+              .pipe(Effect.asVoid),
         );
         return yield* Ref.get(displayRef);
       }).pipe(Effect.provide(displayLayer)),

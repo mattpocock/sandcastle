@@ -33,7 +33,7 @@ import {
   printFileDisplayStartup,
 } from "./run.js";
 import { withSandboxLifecycle, runHostHooks } from "./SandboxLifecycle.js";
-import type { SyncError } from "./errors.js";
+import type { SyncError, SyncOutPathError } from "./errors.js";
 import type { SandboxHooks } from "./SandboxLifecycle.js";
 import {
   reuseSandboxFactoryLayer,
@@ -287,7 +287,7 @@ interface SandboxHandleContext {
   readonly providerTag: SandboxProvider["tag"];
   /** The sandbox provider's env, checked against each run's agent env for overlapping keys. */
   readonly sandboxProviderEnv: Record<string, string>;
-  readonly applyToHost: () => Effect.Effect<void, SyncError>;
+  readonly applyToHost: () => Effect.Effect<void, SyncError | SyncOutPathError>;
   readonly timeouts?: Timeouts;
   /** Worktree branch strategy. Set only when the handle is backed by a
    *  `createWorktree(...)` handle; absent for top-level `createSandbox()`,

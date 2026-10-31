@@ -10,7 +10,7 @@ import {
   SyncError,
   WorktreeError,
 } from "./errors.js";
-import type { DockerError, SandboxError } from "./errors.js";
+import type { DockerError, SandboxError, SyncOutPathError } from "./errors.js";
 import type { Timeouts } from "./run.js";
 import * as WorktreeManager from "./WorktreeManager.js";
 import { copyToWorktree } from "./CopyToWorktree.js";
@@ -140,7 +140,10 @@ export interface SandboxInfo {
   /** Absolute path to the worktree inside the sandbox, as reported by the provider. */
   readonly sandboxRepoPath: string;
   /** Sync changes from the sandbox to the host worktree (isolated providers only). */
-  readonly applyToHost?: () => Effect.Effect<void, SyncError>;
+  readonly applyToHost?: () => Effect.Effect<
+    void,
+    SyncError | SyncOutPathError
+  >;
   /** The bind-mount sandbox handle, available when the provider is a bind-mount provider. Used for session capture. */
   readonly bindMountHandle?: BindMountSandboxHandle;
 }
