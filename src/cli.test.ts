@@ -4,7 +4,7 @@ import { mkdtemp, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 
 const execAsync = promisify(exec);
 
@@ -29,6 +29,28 @@ const cliPath = join(import.meta.dirname, "..", "dist", "main.js");
 
 const runCli = async (args: string, cwd: string) =>
   execAsync(`node ${cliPath} ${args}`, { cwd });
+
+/** Runs the CLI, fails the test unless it exits non-zero, and returns its
+ *  combined stdout and stderr. */
+const runCliExpectingFailure = async (
+  args: string,
+  cwd: string,
+): Promise<string> => {
+  try {
+    await runCli(args, cwd);
+  } catch (error) {
+    assert(
+      error instanceof Error &&
+        "stdout" in error &&
+        typeof error.stdout === "string" &&
+        "stderr" in error &&
+        typeof error.stderr === "string",
+      "expected an exec error carrying stdout and stderr",
+    );
+    return error.stdout + error.stderr;
+  }
+  return expect.fail(`Expected \`sandcastle ${args}\` to fail`);
+};
 
 describe("sandcastle CLI", () => {
   it("shows help with --help flag", async () => {
@@ -59,14 +81,8 @@ describe("sandcastle CLI", () => {
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
-    try {
-      await runCli("docker build-image", hostDir);
-      expect.fail("Expected command to fail");
-    } catch (err: unknown) {
-      const { stdout, stderr } = err as { stdout: string; stderr: string };
-      const output = stdout + stderr;
-      expect(output).toContain("No .sandcastle/ found");
-    }
+    const output = await runCliExpectingFailure("docker build-image", hostDir);
+    expect(output).toContain("No .sandcastle/ found");
   });
 
   it("init --help shows --template flag", async () => {
@@ -93,51 +109,38 @@ describe("sandcastle CLI", () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
 
-    try {
-      await runCli("init --sandbox nonexistent", hostDir);
-      expect.fail("Expected command to fail");
-    } catch (err: unknown) {
-      const { stdout, stderr } = err as { stdout: string; stderr: string };
-      const output = stdout + stderr;
-      expect(output).toContain("nonexistent");
-      expect(output).toContain("docker");
-      expect(output).toContain("podman");
-    }
+    const output = await runCliExpectingFailure(
+      "init --sandbox nonexistent",
+      hostDir,
+    );
+    expect(output).toContain("nonexistent");
+    expect(output).toContain("docker");
+    expect(output).toContain("podman");
   });
 
   it("init --template nonexistent produces error listing available templates", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
 
-    try {
-      await runCli("init --agent claude-code --template nonexistent", hostDir);
-      expect.fail("Expected command to fail");
-    } catch (err: unknown) {
-      const { stdout, stderr } = err as { stdout: string; stderr: string };
-      const output = stdout + stderr;
-      expect(output).toContain("nonexistent");
-      expect(output).toContain("blank");
-      expect(output).toContain("simple-loop");
-    }
+    const output = await runCliExpectingFailure(
+      "init --agent claude-code --template nonexistent",
+      hostDir,
+    );
+    expect(output).toContain("nonexistent");
+    expect(output).toContain("blank");
+    expect(output).toContain("simple-loop");
   });
 
   it("old top-level build-image command no longer works", async () => {
-    try {
-      await runCli("build-image", process.cwd());
-      expect.fail("Expected command to fail");
-    } catch (err: unknown) {
-      // Command should fail since build-image is no longer a top-level command
-      expect(err).toBeDefined();
-    }
+    await expect(runCli("build-image", process.cwd())).rejects.toBeInstanceOf(
+      Error,
+    );
   });
 
   it("old top-level remove-image command no longer works", async () => {
-    try {
-      await runCli("remove-image", process.cwd());
-      expect.fail("Expected command to fail");
-    } catch (err: unknown) {
-      expect(err).toBeDefined();
-    }
+    await expect(runCli("remove-image", process.cwd())).rejects.toBeInstanceOf(
+      Error,
+    );
   });
 
   it("--help shows podman namespace", async () => {
@@ -164,29 +167,20 @@ describe("sandcastle CLI", () => {
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
-    try {
-      await runCli("podman build-image", hostDir);
-      expect.fail("Expected command to fail");
-    } catch (err: unknown) {
-      const { stdout, stderr } = err as { stdout: string; stderr: string };
-      const output = stdout + stderr;
-      expect(output).toContain("No .sandcastle/ found");
-    }
+    const output = await runCliExpectingFailure("podman build-image", hostDir);
+    expect(output).toContain("No .sandcastle/ found");
   });
 
   it("init --agent nonexistent produces error listing available agents", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
 
-    try {
-      await runCli("init --agent nonexistent", hostDir);
-      expect.fail("Expected command to fail");
-    } catch (err: unknown) {
-      const { stdout, stderr } = err as { stdout: string; stderr: string };
-      const output = stdout + stderr;
-      expect(output).toContain("nonexistent");
-      expect(output).toContain("claude-code");
-    }
+    const output = await runCliExpectingFailure(
+      "init --agent nonexistent",
+      hostDir,
+    );
+    expect(output).toContain("nonexistent");
+    expect(output).toContain("claude-code");
   });
 
   it("init --help exposes --issue-tracker flag", async () => {
@@ -213,17 +207,14 @@ describe("sandcastle CLI", () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
 
-    try {
-      await runCli("init --issue-tracker nonexistent", hostDir);
-      expect.fail("Expected command to fail");
-    } catch (err: unknown) {
-      const { stdout, stderr } = err as { stdout: string; stderr: string };
-      const output = stdout + stderr;
-      expect(output).toContain("nonexistent");
-      expect(output).toContain("github-issues");
-      expect(output).toContain("beads");
-      expect(output).toContain("custom");
-    }
+    const output = await runCliExpectingFailure(
+      "init --issue-tracker nonexistent",
+      hostDir,
+    );
+    expect(output).toContain("nonexistent");
+    expect(output).toContain("github-issues");
+    expect(output).toContain("beads");
+    expect(output).toContain("custom");
   });
 
   it("init with full flag set scaffolds non-interactively in a non-TTY env", async () => {
@@ -248,51 +239,36 @@ describe("sandcastle CLI", () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
 
-    try {
-      await runCli("init --template blank --sandbox docker", hostDir);
-      expect.fail("Expected command to fail");
-    } catch (err: unknown) {
-      const { stdout, stderr } = err as { stdout: string; stderr: string };
-      const output = stdout + stderr;
-      expect(output).toContain("--agent");
-      expect(output).toContain("non-interactive");
-    }
+    const output = await runCliExpectingFailure(
+      "init --template blank --sandbox docker",
+      hostDir,
+    );
+    expect(output).toContain("--agent");
+    expect(output).toContain("non-interactive");
   });
 
   it("init --issue-tracker github-issues without --create-label fails fast in non-interactive mode", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
 
-    try {
-      await runCli(
-        "init --agent claude-code --template blank --sandbox docker --issue-tracker github-issues",
-        hostDir,
-      );
-      expect.fail("Expected command to fail");
-    } catch (err: unknown) {
-      const { stdout, stderr } = err as { stdout: string; stderr: string };
-      const output = stdout + stderr;
-      expect(output).toContain("--create-label");
-      expect(output).toContain("non-interactive");
-    }
+    const output = await runCliExpectingFailure(
+      "init --agent claude-code --template blank --sandbox docker --issue-tracker github-issues",
+      hostDir,
+    );
+    expect(output).toContain("--create-label");
+    expect(output).toContain("non-interactive");
   });
 
   it("init without --build-image fails before writing .sandcastle/ in non-interactive mode", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
 
-    try {
-      await runCli(
-        "init --agent claude-code --template blank --sandbox docker --issue-tracker github-issues --create-label false",
-        hostDir,
-      );
-      expect.fail("Expected command to fail");
-    } catch (err: unknown) {
-      const { stdout, stderr } = err as { stdout: string; stderr: string };
-      const output = stdout + stderr;
-      expect(output).toContain("--build-image");
-      expect(output).toContain("non-interactive");
-    }
+    const output = await runCliExpectingFailure(
+      "init --agent claude-code --template blank --sandbox docker --issue-tracker github-issues --create-label false",
+      hostDir,
+    );
+    expect(output).toContain("--build-image");
+    expect(output).toContain("non-interactive");
     expect(existsSync(join(hostDir, ".sandcastle"))).toBe(false);
   });
 
@@ -300,18 +276,12 @@ describe("sandcastle CLI", () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
 
-    try {
-      await runCli(
-        "init --agent claude-code --template parallel-planner --sandbox docker --issue-tracker beads --build-image false",
-        hostDir,
-      );
-      expect.fail("Expected command to fail");
-    } catch (err: unknown) {
-      const { stdout, stderr } = err as { stdout: string; stderr: string };
-      const output = stdout + stderr;
-      expect(output).toContain("--install-template-deps");
-      expect(output).toContain("non-interactive");
-    }
+    const output = await runCliExpectingFailure(
+      "init --agent claude-code --template parallel-planner --sandbox docker --issue-tracker beads --build-image false",
+      hostDir,
+    );
+    expect(output).toContain("--install-template-deps");
+    expect(output).toContain("non-interactive");
     expect(existsSync(join(hostDir, ".sandcastle"))).toBe(false);
   });
 
@@ -319,20 +289,14 @@ describe("sandcastle CLI", () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
 
-    try {
-      await runCli(
-        "init --template blank --sandbox docker --issue-tracker github-issues",
-        hostDir,
-      );
-      expect.fail("Expected command to fail");
-    } catch (err: unknown) {
-      const { stdout, stderr } = err as { stdout: string; stderr: string };
-      const output = stdout + stderr;
-      expect(output).toContain("--agent");
-      expect(output).toContain("--create-label");
-      expect(output).toContain("--build-image");
-      expect(output).toContain("non-interactive");
-    }
+    const output = await runCliExpectingFailure(
+      "init --template blank --sandbox docker --issue-tracker github-issues",
+      hostDir,
+    );
+    expect(output).toContain("--agent");
+    expect(output).toContain("--create-label");
+    expect(output).toContain("--build-image");
+    expect(output).toContain("non-interactive");
     expect(existsSync(join(hostDir, ".sandcastle"))).toBe(false);
   });
 
