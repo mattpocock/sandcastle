@@ -9,15 +9,59 @@ import {
 } from "vitest";
 import { vercel } from "./vercel.js";
 
+// A fake @vercel/sandbox modelling Vercel's default image: the user's
+// home is /vercel, and /vercel/sandbox doesn't exist. `mkDir` isn't recursive,
+// as on Vercel; a `mkdir -p` command creates the parents.
+const fs = vi.hoisted(() => ({ dirs: new Set<string>() }));
+
+interface FakeResult {
+  exitCode: number;
+  stdout: () => Promise<string>;
+  stderr: () => Promise<string>;
+}
+
+interface FakeSandbox {
+  mkDir: (path: string) => Promise<void>;
+  runCommand: (params: { cmd: string; args?: string[] }) => Promise<FakeResult>;
+}
+
 const sandboxCreate = vi.hoisted(() =>
-  vi
-    .fn<
-      (
-        params: Record<string, unknown>,
-      ) => Promise<{ mkDir: () => Promise<void> }>
-    >()
-    .mockResolvedValue({ mkDir: async () => {} }),
+  vi.fn<(params: Record<string, unknown>) => Promise<FakeSandbox>>(async () => {
+    const parentOf = (path: string) => path.slice(0, path.lastIndexOf("/"));
+    return {
+      mkDir: async (path: string) => {
+        if (!fs.dirs.has(parentOf(path))) {
+          throw new Error(
+            "Status code 400 is not ok: error creating directory: No such file or directory",
+          );
+        }
+        fs.dirs.add(path);
+      },
+      runCommand: async ({ cmd, args }: { cmd: string; args?: string[] }) => {
+        const [flag, target] = args ?? [];
+        if (cmd === "mkdir" && flag === "-p" && target !== undefined) {
+          for (let path = target; path !== ""; path = parentOf(path)) {
+            fs.dirs.add(path);
+          }
+          return {
+            exitCode: 0,
+            stdout: async () => "",
+            stderr: async () => "",
+          };
+        }
+        return {
+          exitCode: 127,
+          stdout: async () => "",
+          stderr: async () => "",
+        };
+      },
+    };
+  }),
 );
+
+beforeEach(() => {
+  fs.dirs = new Set(["/vercel"]);
+});
 
 vi.mock("@vercel/sandbox", () => ({
   Sandbox: { create: sandboxCreate },
@@ -59,6 +103,46 @@ describe("vercel()", () => {
   it("defaults env to empty object when not provided", () => {
     const provider = vercel();
     expect(provider.env).toStrictEqual({});
+  });
+});
+
+describe("vercel() setup", () => {
+  beforeEach(() => {
+    sandboxCreate.mockClear();
+    vi.stubEnv("VERCEL_TOKEN", undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("creates the worktree folder on a runtime with no /vercel/sandbox", async () => {
+    const handle = await vercel().create({ env: {} });
+
+    expect(handle.worktreePath).toBe("/vercel/sandbox/workspace");
+    expect(fs.dirs.has("/vercel/sandbox/workspace")).toBe(true);
+  });
+
+  it("leaves the runtime unset by default, so Vercel uses its default image, which ships the claude CLI", async () => {
+    await vercel().create({ env: {} });
+
+    expect(sandboxCreate.mock.lastCall?.[0]).not.toHaveProperty("runtime");
+  });
+
+  it("passes the runtime option, then the template alias", async () => {
+    await vercel({ runtime: "node22", template: "python3.13" }).create({
+      env: {},
+    });
+    await vercel({ template: "python3.13" }).create({ env: {} });
+
+    expect(sandboxCreate).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ runtime: "node22" }),
+    );
+    expect(sandboxCreate).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ runtime: "python3.13" }),
+    );
   });
 });
 

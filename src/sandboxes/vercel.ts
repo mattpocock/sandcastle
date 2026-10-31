@@ -79,7 +79,11 @@ export interface VercelOptions {
 
   /**
    * The runtime of the sandbox (e.g. `"node24"`, `"node22"`, `"python3.13"`).
-   * Defaults to `"node24"`.
+   *
+   * Omit it to get Vercel's default image (`vercel/sandbox/universal` as of
+   * `@vercel/sandbox` 3.x), which ships coding agent CLIs such as `claude`.
+   * The named runtimes ship none: install your agent's CLI in an
+   * `onSandboxReady` hook.
    */
   readonly runtime?: string;
 
@@ -206,8 +210,19 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
 
       const sandbox = await Sandbox.create(createParams);
 
-      // Ensure worktree directory exists
-      await sandbox.mkDir(VERCEL_REPO_PATH);
+      // Create the worktree folder with its parents: Vercel's default image
+      // has no /vercel/sandbox (its user's home is /vercel), and `mkDir`
+      // isn't recursive.
+      const mkdirResult = await sandbox.runCommand({
+        cmd: "mkdir",
+        args: ["-p", VERCEL_REPO_PATH],
+      });
+      if (mkdirResult.exitCode !== 0) {
+        const stderr = await mkdirResult.stderr();
+        throw new Error(
+          `vercel(): could not create ${VERCEL_REPO_PATH}: ${stderr.trim()}`,
+        );
+      }
 
       const handle: IsolatedSandboxHandle = {
         worktreePath: VERCEL_REPO_PATH,
