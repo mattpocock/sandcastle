@@ -8,7 +8,15 @@ import {
 import { execSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import {
+  assert,
+  describe,
+  expect,
+  it,
+  vi,
+  beforeEach,
+  afterEach,
+} from "vitest";
 import {
   buildAgentStreamHandler,
   buildCompletionMessage,
@@ -148,7 +156,8 @@ describe("buildAgentStreamHandler (verbose file mode)", () => {
         type: "file",
         path: logPath,
         verbose: true,
-      })!;
+      });
+      assert.isDefined(handler);
       handler(rawEvent('{"type":"assistant"}'));
       expect(readFileSync(logPath, "utf8")).toBe(
         'I\'ll commit the result myself.\n{"type":"assistant"}\n',
@@ -167,7 +176,8 @@ describe("buildAgentStreamHandler (verbose file mode)", () => {
         type: "file",
         path: logPath,
         verbose: true,
-      })!;
+      });
+      assert.isDefined(handler);
       handler(rawEvent('{"type":"system"}'));
       handler(rawEvent('{"type":"assistant"}'));
       expect(readFileSync(logPath, "utf8")).toBe(
@@ -235,8 +245,8 @@ describe("RunResult", () => {
       branch: "main",
     };
     expect(result.iterations).toHaveLength(2);
-    expect(result.iterations[0]!.sessionId).toBe("abc-123");
-    expect(result.iterations[1]!.sessionId).toBe("def-456");
+    expect(result.iterations[0]?.sessionId).toBe("abc-123");
+    expect(result.iterations[1]?.sessionId).toBe("def-456");
   });
 
   it("has undefined sessionId for non-Claude agent iterations", () => {
@@ -247,7 +257,9 @@ describe("RunResult", () => {
       commits: [],
       branch: "main",
     };
-    expect(result.iterations[0]!.sessionId).toBeUndefined();
+    const [iteration] = result.iterations;
+    assert.isDefined(iteration);
+    expect(iteration.sessionId).toBeUndefined();
   });
 
   it("carries sessionFilePath when session capture is enabled", () => {
@@ -264,7 +276,7 @@ describe("RunResult", () => {
       commits: [],
       branch: "main",
     };
-    expect(result.iterations[0]!.sessionFilePath).toContain("abc-123.jsonl");
+    expect(result.iterations[0]?.sessionFilePath).toContain("abc-123.jsonl");
   });
 
   it("has undefined sessionFilePath when capture is disabled", () => {
@@ -275,7 +287,9 @@ describe("RunResult", () => {
       commits: [],
       branch: "main",
     };
-    expect(result.iterations[0]!.sessionFilePath).toBeUndefined();
+    const [iteration] = result.iterations;
+    assert.isDefined(iteration);
+    expect(iteration.sessionFilePath).toBeUndefined();
   });
 
   it("allows fork as an optional sibling of resume on the type", () => {
@@ -1500,8 +1514,9 @@ describe("merge-to-head temp branch name", () => {
       });
 
       const match = agentPrompt?.match(/^SOURCE=(\S+) ACTUAL=(\S+)$/);
-      expect(match).not.toBeNull();
-      const [, sourceBranch, actualBranch] = match!;
+      assert.exists(match);
+      const [, sourceBranch, actualBranch] = match;
+      assert.isDefined(actualBranch);
       expect(actualBranch).toMatch(/^sandcastle\//);
       expect(sourceBranch).toBe(actualBranch);
       expect(result.logFilePath).toBe(
@@ -1509,7 +1524,7 @@ describe("merge-to-head temp branch name", () => {
           hostDir,
           ".sandcastle",
           "logs",
-          buildLogFilename(actualBranch!, "main"),
+          buildLogFilename(actualBranch, "main"),
         ),
       );
     } finally {
@@ -1582,8 +1597,10 @@ describe("resume/fork after a promptFile + promptArgs run", () => {
         logging: { type: "file", path: join(dir, "run.log") },
       });
 
-      const resumed = await first.resume!("repeat {{TOKEN}}");
-      const forked = await first.fork!("fork {{TOKEN}}");
+      assert.isDefined(first.resume);
+      assert.isDefined(first.fork);
+      const resumed = await first.resume("repeat {{TOKEN}}");
+      const forked = await first.fork("fork {{TOKEN}}");
 
       expect(resumed.iterations).toHaveLength(1);
       expect(forked.iterations).toHaveLength(1);
@@ -1672,8 +1689,10 @@ describe("resume/fork after a structured-output run", () => {
       const r = await first();
       expect(r.output).toBe("all good");
 
-      const resumed = await r.resume!("write the word DONE into done.txt");
-      const forked = await r.fork!("write the word DONE into done.txt");
+      assert.isDefined(r.resume);
+      assert.isDefined(r.fork);
+      const resumed = await r.resume("write the word DONE into done.txt");
+      const forked = await r.fork("write the word DONE into done.txt");
 
       expect(resumed.iterations).toHaveLength(1);
       expect(forked.iterations).toHaveLength(1);
@@ -1693,13 +1712,15 @@ describe("resume/fork after a structured-output run", () => {
     const { dir, first } = setup();
     try {
       const r = await first();
-      const resumed = (await r.resume!("Summarise again in <summary> tags", {
+      assert.isDefined(r.resume);
+      assert.isDefined(r.fork);
+      const resumed = (await r.resume("Summarise again in <summary> tags", {
         output: Output.string({ tag: "summary" }),
       })) as { output?: unknown };
       expect(resumed.output).toBe("all good");
 
       await expect(
-        r.fork!("no tag here", { output: Output.string({ tag: "summary" }) }),
+        r.fork("no tag here", { output: Output.string({ tag: "summary" }) }),
       ).rejects.toThrow(/output tag <summary> not found/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
