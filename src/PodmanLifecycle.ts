@@ -38,18 +38,10 @@ export const buildImage = (
   options?: { readonly containerfile?: string },
 ): Effect.Effect<void, PodmanError> =>
   Effect.gen(function* () {
-    if (options?.containerfile) {
-      yield* podmanExec([
-        "build",
-        "-t",
-        imageName,
-        "-f",
-        resolve(options.containerfile),
-        process.cwd(),
-      ]);
-    } else {
-      yield* podmanExec(["build", "-t", imageName, resolve(containerfileDir)]);
-    }
+    const buildContext = options?.containerfile
+      ? ["-f", resolve(options.containerfile), process.cwd()]
+      : [resolve(containerfileDir)];
+    yield* podmanExec(["build", "-t", imageName, ...buildContext]);
   });
 
 /**
