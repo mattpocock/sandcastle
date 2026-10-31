@@ -49,7 +49,7 @@ describe("shutdownRegistry", () => {
 
     process.emit("SIGINT");
 
-    expect(calls).toEqual(["a", "b"]);
+    expect(calls).toStrictEqual(["a", "b"]);
     expect(exit).toHaveBeenCalledTimes(1);
     expect(exit).toHaveBeenCalledWith(1);
 
@@ -64,7 +64,7 @@ describe("shutdownRegistry", () => {
 
     process.emit("SIGTERM");
 
-    expect(calls).toEqual(["x"]);
+    expect(calls).toStrictEqual(["x"]);
     u1();
   });
 
@@ -74,7 +74,7 @@ describe("shutdownRegistry", () => {
 
     process.emit("exit", 0);
 
-    expect(calls).toEqual(["e"]);
+    expect(calls).toStrictEqual(["e"]);
     u1();
   });
 
@@ -102,7 +102,7 @@ describe("shutdownRegistry", () => {
     gone();
     process.emit("SIGINT");
 
-    expect(calls).toEqual(["stay"]);
+    expect(calls).toStrictEqual(["stay"]);
     stay();
   });
 
@@ -116,7 +116,7 @@ describe("shutdownRegistry", () => {
 
     process.emit("SIGINT");
 
-    expect(calls).toEqual(["ran"]);
+    expect(calls).toStrictEqual(["ran"]);
     u1();
     u2();
   });
