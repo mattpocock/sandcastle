@@ -1,6 +1,6 @@
 import { exec } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readdir, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -233,6 +233,60 @@ describe("sandcastle CLI", () => {
     const entries = await readdir(join(hostDir, ".sandcastle"));
     expect(entries).toContain("Dockerfile");
     expect(entries).toContain("prompt.md");
+  });
+
+  describe("init --issue-tracker beads and the host's bd version", () => {
+    // Every beads sandbox opens the host's .beads/ with the image's bd 1.3.2.
+    // A different host bd breaks one side (an older one can't create issues
+    // once 1.3.2 has migrated the database), so init warns.
+    const initWithHostBd = async (versionLine: string) => {
+      const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+      await initRepo(hostDir);
+      await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+      const binDir = await mkdtemp(join(tmpdir(), "cli-fake-bd-"));
+      await writeFile(
+        join(binDir, "bd"),
+        `#!/bin/sh\necho "${versionLine}"\n`,
+        {
+          mode: 0o755,
+        },
+      );
+      const { stdout } = await execAsync(
+        `node ${cliPath} init --agent claude-code --template blank --sandbox docker --issue-tracker beads --build-image false`,
+        {
+          cwd: hostDir,
+          env: { ...process.env, PATH: `${binDir}:${process.env.PATH ?? ""}` },
+        },
+      );
+      const dockerfile = await readFile(
+        join(hostDir, ".sandcastle", "Dockerfile"),
+        "utf8",
+      );
+      return { stdout, dockerfile };
+    };
+
+    it.skipIf(process.platform === "win32")(
+      "warns when the host bd is older than the image's",
+      async () => {
+        const { stdout, dockerfile } = await initWithHostBd(
+          "bd version 1.0.0 (72170267: HEAD@72170267e00a)",
+        );
+        expect(dockerfile).toContain("ARG BEADS_VERSION=1.3.2");
+        expect(stdout).toContain("bd 1.0.0");
+        expect(stdout).toContain("can no longer create issues");
+      },
+    );
+
+    it.skipIf(process.platform === "win32")(
+      "says nothing when the host bd matches the image's",
+      async () => {
+        const { stdout } = await initWithHostBd(
+          "bd version 1.3.2 (0123abcd: HEAD@0123abcd)",
+        );
+        expect(stdout).toContain("Init complete");
+        expect(stdout).not.toContain("Your host runs bd");
+      },
+    );
   });
 
   it("init without --agent fails fast with a clear non-interactive error message", async () => {

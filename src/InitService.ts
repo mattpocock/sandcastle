@@ -578,6 +578,47 @@ RUN ARCH=$(dpkg --print-architecture) \\
 
 RUN corepack enable`;
 
+/** `bd version` prints `bd version 1.3.2 (<commit>)`; returns `1.3.2`. */
+export const parseBdVersion = (output: string): string | undefined =>
+  /\bbd version v?(?<version>\d+\.\d+\.\d+)\b/u.exec(output)?.groups?.version;
+
+const compareVersions = (a: string, b: string): number => {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (diff !== 0) {
+      return diff;
+    }
+  }
+  return 0;
+};
+
+/**
+ * What init warns a beads user about the host's bd, or undefined when it
+ * matches the image's. Every beads sandbox opens the host's .beads/ with the
+ * image's pinned bd. A newer bd migrates the database, after which an older
+ * host bd can't create issues (`fk_events_issue`, or "Your bd binary is
+ * stale"). init doesn't pin the image to the host's bd instead: the scaffold's
+ * BEADS_DIR mount is verified on 1.3.2 only, and bd 1.2.2 with it silently
+ * reads an empty database.
+ */
+export const beadsVersionWarning = (
+  hostVersion?: string,
+): string | undefined => {
+  if (hostVersion === BEADS_VERSION) {
+    return undefined;
+  }
+  const shared = `the image installs bd ${BEADS_VERSION}, and every sandbox opens your .beads/ with it`;
+  if (hostVersion === undefined) {
+    return `bd isn't on your PATH, and ${shared}. Use bd ${BEADS_VERSION} on the host too, or an older host bd can no longer create issues once a sandbox has opened the database.`;
+  }
+  if (compareVersions(hostVersion, BEADS_VERSION) < 0) {
+    return `Your host runs bd ${hostVersion}, but ${shared}. bd ${BEADS_VERSION} migrates the database, after which host bd ${hostVersion} can no longer create issues in it. Upgrade the host's bd to ${BEADS_VERSION} before you run.`;
+  }
+  return `Your host runs bd ${hostVersion}, but ${shared}, and an older bd can't safely write a database a newer one has migrated. Set ARG BEADS_VERSION in the Dockerfile to ${hostVersion} and rebuild the image, or use bd ${BEADS_VERSION} on the host.`;
+};
+
 // Sentinels baked into the scaffold for the `custom` issue tracker. The
 // project ships deliberately broken-until-configured; the setup agent finds
 // and replaces these markers in place (see SETUP_ISSUE_TRACKER.md). Defined as

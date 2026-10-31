@@ -2,7 +2,7 @@ import { Command, Options } from "@effect/cli";
 import { FileSystem } from "@effect/platform";
 import { Effect, Option } from "effect";
 import * as clack from "@clack/prompts";
-import { execSync } from "node:child_process";
+import { execFile, execSync } from "node:child_process";
 import { join } from "node:path";
 import { styleText } from "node:util";
 
@@ -27,6 +27,8 @@ import {
   hostHasDependency,
   getTemplateDependencies,
   buildImageShellCommand,
+  parseBdVersion,
+  beadsVersionWarning,
 } from "./InitService.js";
 import { defaultImageName } from "./sandboxes/docker.js";
 import { ConfigDirError, InitError } from "./errors.js";
@@ -192,6 +194,19 @@ const choiceToTriBool = (
   opt: Option.Option<"true" | "false">,
 ): Option.Option<boolean> =>
   opt._tag === "Some" ? Option.some(opt.value === "true") : Option.none();
+
+/** The host's `bd version`, or undefined when bd isn't on the PATH. */
+const detectHostBdVersion = (cwd: string): Effect.Effect<string | undefined> =>
+  Effect.async((resume) => {
+    execFile(
+      "bd",
+      ["version"],
+      { cwd, encoding: "utf8", timeout: 15_000 },
+      (_error, stdout, stderr) => {
+        resume(Effect.succeed(parseBdVersion(`${stdout}\n${stderr}`)));
+      },
+    );
+  });
 
 const initCommand = Command.make(
   "init",
@@ -460,6 +475,15 @@ const initCommand = Command.make(
           ),
         ),
       );
+
+      // Beads sandboxes open the host's .beads/ with the image's bd, so a
+      // different host bd breaks one side or the other (see beadsVersionWarning).
+      if (selectedIssueTracker.name === "beads") {
+        const warning = beadsVersionWarning(yield* detectHostBdVersion(cwd));
+        if (warning !== undefined) {
+          yield* d.status(warning, "warn");
+        }
+      }
 
       // Detect the host package manager so the zod offer below and the next
       // steps below both use the right install command.
