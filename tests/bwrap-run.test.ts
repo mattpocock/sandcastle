@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -11,13 +12,17 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { BranchStrategy } from "@ai-hero/sandcastle";
-import { claudeCode, run } from "@ai-hero/sandcastle";
+import { claudeCode, opencode, run } from "@ai-hero/sandcastle";
 import { bwrap } from "@ai-hero/sandcastle/sandboxes/bwrap";
 import {
   NATIVE_PROVIDERS,
   assertUsable,
   skipsHere,
 } from "./helpers/nativeProviders.js";
+import {
+  FAKE_OPENCODE,
+  FAKE_OPENCODE_SESSION_ID,
+} from "./helpers/fakeOpencode.js";
 
 // run() with bwrap() and the real claudeCode() agent factory, against a
 // harmless fake `claude`: a shell script on a read-only mount, found through
@@ -37,7 +42,8 @@ const IDENTITY = { name: "Bwrap E2E", email: "bwrap-e2e@example.com" };
 /**
  * The fake `claude`. The prompt picks its behaviour: `HANG` prints the init
  * line and then goes silent; `SLOW` spaces its lines out; anything else is
- * quick. It commits the prompt and its global git email, then reports done.
+ * quick. `SUBAGENT` also writes a subagent transcript where Claude Code puts
+ * them. It commits the prompt and its global git email, then reports done.
  */
 const FAKE_CLAUDE = `#!/bin/sh
 prompt=$(cat)
@@ -50,6 +56,12 @@ pause() { case "$prompt" in *SLOW*) sleep 0.6 ;; esac; }
 project="$HOME/.claude/projects/$(pwd | sed 's/[^A-Za-z0-9]/-/g')"
 mkdir -p "$project"
 line '{"type":"summary","summary":"fake-session-marker"}' > "$project/${SESSION_ID}.jsonl"
+case "$prompt" in
+  *SUBAGENT*)
+    mkdir -p "$project/${SESSION_ID}/subagents"
+    line '{"type":"user","isSidechain":true,"summary":"fake-subagent-marker"}' > "$project/${SESSION_ID}/subagents/agent-a1.jsonl"
+    ;;
+esac
 printf '%s\\n' "$prompt" > agent.txt
 git config --global user.email > identity.txt
 git add agent.txt identity.txt
@@ -84,6 +96,8 @@ describe.skipIf(skipsHere(BWRAP))(
       mkdirSync(fakeBin);
       writeFileSync(path.join(fakeBin, "claude"), FAKE_CLAUDE);
       chmodSync(path.join(fakeBin, "claude"), 0o755);
+      writeFileSync(path.join(fakeBin, "opencode"), FAKE_OPENCODE);
+      chmodSync(path.join(fakeBin, "opencode"), 0o755);
       originalPath = process.env["PATH"];
       process.env["PATH"] = `${fakeBin}:${originalPath ?? ""}`;
 
@@ -168,6 +182,56 @@ describe.skipIf(skipsHere(BWRAP))(
       expect(sessionFile).toBeTypeOf("string");
       expect(readFileSync(String(sessionFile), "utf8")).toContain(
         "fake-session-marker",
+      );
+    }, 30_000);
+
+    it("copies the agent's subagent transcripts out of the private home", async () => {
+      await runFake("Spawn a SUBAGENT.");
+
+      const projects = path.join(scratch, "projects");
+      const transcripts = readdirSync(projects, { recursive: true })
+        .map(String)
+        .filter((file) => path.basename(file) === "agent-a1.jsonl");
+      expect(transcripts).toHaveLength(1);
+      expect(transcripts[0]).toMatch(
+        new RegExp(
+          `${SESSION_ID}[\\\\/]subagents[\\\\/]agent-a1\\.jsonl$`,
+          "u",
+        ),
+      );
+      expect(
+        readFileSync(path.join(projects, String(transcripts[0])), "utf8"),
+      ).toContain("fake-subagent-marker");
+    }, 30_000);
+
+    it("captures an opencode session exported inside the sandbox", async () => {
+      const result = await run({
+        agent: opencode("anthropic/claude-opus-4-8", {
+          sessionStorage: {
+            hostSessionsDir: path.join(scratch, "opencode-sessions"),
+          },
+        }),
+        sandbox: bwrap({
+          mounts: [{ hostPath: fakeBin, sandboxPath: fakeBin, readonly: true }],
+        }),
+        cwd: repo,
+        prompt: "Export my session.",
+        branchStrategy: { type: "head" },
+        logging: { type: "file", path: path.join(scratch, "run.log") },
+      });
+
+      expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
+      expect(result.iterations[0]?.sessionId).toBe(FAKE_OPENCODE_SESSION_ID);
+      const sessionFile = result.iterations[0]?.sessionFilePath;
+      expect(sessionFile).toBe(
+        path.join(
+          scratch,
+          "opencode-sessions",
+          `${FAKE_OPENCODE_SESSION_ID}.json`,
+        ),
+      );
+      expect(readFileSync(String(sessionFile), "utf8")).toContain(
+        "fake-opencode-marker",
       );
     }, 30_000);
 

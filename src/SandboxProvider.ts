@@ -25,6 +25,17 @@ export interface BindMountSandboxHandle {
   /** Absolute path to the worktree inside the sandbox. */
   readonly worktreePath: string;
   /**
+   * Absolute path to the agent's home directory, as commands running inside
+   * the sandbox see it. Sandcastle runs commands there to find and place agent
+   * session files. Omit when it is `/home/agent`, as in the Docker image.
+   */
+  readonly sandboxHomedir?: string;
+  /**
+   * Absolute path to a writable temp directory, as commands running inside
+   * the sandbox see it. Omit when it is `/tmp`.
+   */
+  readonly sandboxTmpdir?: string;
+  /**
    * Execute a command in the sandbox.
    *
    * Implementations MUST support line-by-line streaming via `onLine`. This is
