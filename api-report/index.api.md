@@ -441,12 +441,19 @@ export interface NoSandboxProvider {
 }
 
 // @public (undocumented)
-export const opencode: (model: string, options?: OpenCodeOptions) => AgentProvider;
+export const opencode: (model: string, options?: OpenCodeOptions) => AgentProvider & {
+    readonly sessionStorage: AgentSessionStorage;
+};
 
 // @public
 export interface OpenCodeOptions {
     readonly agent?: string;
+    readonly captureSessions?: boolean;
     readonly env?: Record<string, string>;
+    readonly sessionStorage?: {
+        readonly hostSessionsDir?: string;
+        readonly sandboxExportDir?: string;
+    };
     readonly variant?: string;
 }
 
