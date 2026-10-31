@@ -1,4 +1,4 @@
-import { Deferred, Duration, Effect, Schedule } from "effect";
+import { Deferred, Duration, Effect, Runtime, Schedule } from "effect";
 import { Display } from "./Display.js";
 import {
   CommitCollectionTimeoutError,
@@ -347,8 +347,10 @@ export const withSandboxLifecycle = <A>(
             }),
           );
         } else {
+          // The listener fires outside any fiber; fork onto the surrounding runtime.
+          const runFork = Runtime.runFork(yield* Effect.runtime());
           const onAbort = () => {
-            Effect.runPromise(
+            runFork(
               Deferred.fail(
                 abortDeferred,
                 new ExecError({
@@ -356,7 +358,7 @@ export const withSandboxLifecycle = <A>(
                   message: `Aborted: ${signal.reason}`,
                 }),
               ),
-            ).catch(() => {});
+            );
           };
           signal.addEventListener("abort", onAbort, { once: true });
           abortCleanup = () => {
