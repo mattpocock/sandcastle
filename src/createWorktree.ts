@@ -231,18 +231,18 @@ export const createWorktree = async (
   const isMergeToHead = options.branchStrategy.type === "merge-to-head";
 
   const { hostRepoDir, worktreeInfo } = await Effect.gen(function* () {
-    const hostRepoDir = yield* resolveCwd(options.cwd);
-    yield* WorktreeManager.pruneStale(hostRepoDir).pipe(
+    const repoDir = yield* resolveCwd(options.cwd);
+    yield* WorktreeManager.pruneStale(repoDir).pipe(
       Effect.catchAll(() => Effect.void),
     );
-    const info = yield* WorktreeManager.create(hostRepoDir, {
+    const info = yield* WorktreeManager.create(repoDir, {
       branch,
       baseBranch,
     });
     if (options.copyToWorktree && options.copyToWorktree.length > 0) {
       yield* copyToWorktree(
         options.copyToWorktree,
-        hostRepoDir,
+        repoDir,
         info.path,
         options.timeouts?.copyToWorktreeMs,
       );
@@ -251,7 +251,7 @@ export const createWorktree = async (
     if (options.hooks?.host?.onWorktreeReady?.length) {
       yield* runHostHooks(options.hooks.host.onWorktreeReady, info.path);
     }
-    return { hostRepoDir, worktreeInfo: info };
+    return { hostRepoDir: repoDir, worktreeInfo: info };
   }).pipe(Effect.provide(NodeContext.layer), Effect.runPromise);
 
   let closed = false;
