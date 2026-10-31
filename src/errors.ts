@@ -69,6 +69,19 @@ export class NativeInteractiveNotSupportedError extends Data.TaggedError(
 }> {}
 
 /**
+ * A native sandbox provider's OS mechanism isn't usable on this host (wrong
+ * OS, tool not installed, or blocked by the kernel). Thrown when the provider
+ * is constructed, so it never runs unsandboxed.
+ */
+export class NativeSandboxUnavailableError extends Data.TaggedError(
+  "NativeSandboxUnavailableError",
+)<{
+  readonly message: string;
+  /** A shell command that fixes the host, when there is one. */
+  readonly fixCommand?: string;
+}> {}
+
+/**
  * A host-side git command failed, or was refused because the repository's
  * `.git` did not lead where it should.
  */

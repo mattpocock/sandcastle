@@ -431,6 +431,20 @@ export interface NativeInteractiveNotSupportedError extends Error {
 export const NativeInteractiveNotSupportedError: NativeInteractiveNotSupportedErrorConstructor;
 
 // @public
+export interface NativeSandboxUnavailableError extends Error {
+    readonly fixCommand?: string;
+    // (undocumented)
+    readonly message: string;
+    // (undocumented)
+    readonly _tag: "NativeSandboxUnavailableError";
+}
+
+// Warning: (ae-forgotten-export) The symbol "NativeSandboxUnavailableErrorConstructor" needs to be exported by the entry point index.d.ts
+//
+// @public
+export const NativeSandboxUnavailableError: NativeSandboxUnavailableErrorConstructor;
+
+// @public
 export type NoSandboxBranchStrategy = HeadBranchStrategy | MergeToHeadBranchStrategy | NamedBranchStrategy;
 
 // @public

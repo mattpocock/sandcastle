@@ -14,6 +14,9 @@ import type { BindMountCreateOptions } from "./SandboxProvider.js";
 import { BoundedTail } from "./boundedTail.js";
 import { BwrapError, CopyError } from "./errors.js";
 
+/** The construction check, from its own module (it runs a process, synchronously). */
+export { assertBwrapUsable } from "./bwrapPreflight.js";
+
 /** The private home's path inside the sandbox. */
 export const SANDBOX_HOME = "/home/agent";
 const SANDBOX_TMP = "/tmp";
