@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import {
   claudeSubagentsDirInSandbox,
   claudeSubagentsDirOnHost,
@@ -19,6 +19,13 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
 import type { BindMountSandboxHandle } from "./SandboxProvider.js";
+
+/** Parses one line of a JSONL transcript, failing the test if the line is missing. */
+const parseLine = (lines: readonly string[], index: number): unknown => {
+  const line = lines[index];
+  assert.isDefined(line, `expected a line at index ${index}`);
+  return JSON.parse(line);
+};
 
 // ---------------------------------------------------------------------------
 // encodeProjectPath
@@ -93,15 +100,15 @@ describe("transferClaudeSession", () => {
     );
     const lines = written.split("\n");
 
-    expect(JSON.parse(lines[0]!)).toEqual({
+    expect(parseLine(lines, 0)).toStrictEqual({
       type: "system",
       cwd: "/home/user/repos/project",
     });
-    expect(JSON.parse(lines[1]!)).toEqual({
+    expect(parseLine(lines, 1)).toStrictEqual({
       type: "message",
       content: "hello",
     });
-    expect(JSON.parse(lines[2]!)).toEqual({
+    expect(parseLine(lines, 2)).toStrictEqual({
       type: "tool_call",
       cwd: "/home/user/repos/project",
       name: "Read",
@@ -132,8 +139,8 @@ describe("transferClaudeSession", () => {
 
     const out = transferClaudeSession(jsonl, "/sandbox/worktree", "/host/repo");
     const lines = out.split("\n");
-    expect(JSON.parse(lines[0]!).cwd).toBe("/host/repo");
-    expect(JSON.parse(lines[1]!).cwd).toBe("/other/path");
+    expect(parseLine(lines, 0)).toMatchObject({ cwd: "/host/repo" });
+    expect(parseLine(lines, 1)).toMatchObject({ cwd: "/other/path" });
   });
 
   it("preserves a malformed line verbatim instead of aborting the rewrite", () => {
@@ -149,9 +156,9 @@ describe("transferClaudeSession", () => {
 
     const out = transferClaudeSession(jsonl, "/sandbox/worktree", "/host/repo");
     const lines = out.split("\n");
-    expect(JSON.parse(lines[0]!).cwd).toBe("/host/repo");
+    expect(parseLine(lines, 0)).toMatchObject({ cwd: "/host/repo" });
     expect(lines[1]).toBe(torn);
-    expect(JSON.parse(lines[2]!).cwd).toBe("/host/repo");
+    expect(parseLine(lines, 2)).toMatchObject({ cwd: "/host/repo" });
   });
 });
 
@@ -171,8 +178,10 @@ describe("transferCodexSession", () => {
 
     const out = transferCodexSession(jsonl, "/sandbox/repo", "/host/repo");
     const lines = out.split("\n");
-    expect(JSON.parse(lines[0]!).payload.cwd).toBe("/host/repo");
-    expect(JSON.parse(lines[1]!).cwd).toBe("/host/repo");
+    expect(parseLine(lines, 0)).toMatchObject({
+      payload: { cwd: "/host/repo" },
+    });
+    expect(parseLine(lines, 1)).toMatchObject({ cwd: "/host/repo" });
   });
 
   it("handles empty JSONL", () => {
@@ -350,7 +359,7 @@ describe("transferPiSession", () => {
     const out = transferPiSession(jsonl, "/sandbox/repo", "/host/repo");
     const lines = out.split("\n");
 
-    expect(JSON.parse(lines[0]!).cwd).toBe("/host/repo");
+    expect(parseLine(lines, 0)).toMatchObject({ cwd: "/host/repo" });
     // Non-header lines round-trip verbatim — no field renaming, no
     // whitespace shuffling.
     expect(lines[1]).toBe(
@@ -374,8 +383,8 @@ describe("transferPiSession", () => {
     const out = transferPiSession(jsonl, "/sandbox/repo", "/host/repo");
     const lines = out.split("\n");
 
-    expect(JSON.parse(lines[0]!).cwd).toBe("/host/repo");
-    expect(JSON.parse(lines[1]!).cwd).toBe("/sandbox/repo");
+    expect(parseLine(lines, 0)).toMatchObject({ cwd: "/host/repo" });
+    expect(parseLine(lines, 1)).toMatchObject({ cwd: "/sandbox/repo" });
   });
 
   it("leaves the header untouched when its cwd does not match fromCwd", () => {
@@ -539,7 +548,7 @@ describe("listClaudeSubagentSessionsInSandbox", () => {
         dir,
       );
 
-      expect(result.sort()).toEqual([f1, f2].sort());
+      expect(result.sort()).toStrictEqual([f1, f2].sort());
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -554,7 +563,7 @@ describe("listClaudeSubagentSessionsInSandbox", () => {
         fsHandle(),
         dir,
       );
-      expect(result).toEqual([]);
+      expect(result).toStrictEqual([]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -572,7 +581,7 @@ describe("listClaudeSubagentSessionsInSandbox", () => {
         fsHandle(),
         dir,
       );
-      expect(result).toEqual([]);
+      expect(result).toStrictEqual([]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
