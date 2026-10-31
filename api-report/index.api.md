@@ -665,6 +665,20 @@ export class StructuredOutputError extends Error {
 }
 
 // @public
+export interface SyncOutPathError extends Error {
+    // (undocumented)
+    readonly message: string;
+    readonly path: string;
+    // (undocumented)
+    readonly _tag: "SyncOutPathError";
+}
+
+// Warning: (ae-forgotten-export) The symbol "SyncOutPathErrorConstructor" needs to be exported by the entry point index.d.ts
+//
+// @public
+export const SyncOutPathError: SyncOutPathErrorConstructor;
+
+// @public
 export interface Timeouts {
     readonly commitCollectionMs?: number;
     readonly copyToWorktreeMs?: number;

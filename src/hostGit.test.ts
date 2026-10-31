@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { hostGit } from "./hostGit.js";
 
@@ -196,6 +196,72 @@ describe("hostGit", () => {
         run(["status", "--porcelain"], ctx.worktree, ctx),
       ).rejects.toThrow(/Refusing to run git on the host/u);
       expect(ctx.fired()).toStrictEqual(new Set());
+    });
+  });
+
+  describe("programs and transports", () => {
+    const withPath = (ctx: Ctx, ...dirs: string[]) => ({
+      ...ctx.env,
+      PATH: [...dirs, process.env["PATH"] ?? ""].join(delimiter),
+    });
+
+    it("never runs a git planted on a relative PATH entry", async () => {
+      const ctx = setup();
+      mkdirSync(join(ctx.repo, "bin"));
+      writeScript(join(ctx.repo, "bin", "git"), `${ctx.touch("git")}; exit 1`);
+
+      await expect(
+        run(["rev-parse", "HEAD"], ctx.repo, { env: withPath(ctx, "bin") }),
+      ).resolves.toMatch(/^[0-9a-f]{40}\n$/u);
+      expect(ctx.fired()).toStrictEqual(new Set());
+    });
+
+    it("never runs an ssh planted on a PATH entry inside the repo", async () => {
+      const ctx = setup();
+      const bin = join(ctx.repo, "node_modules", ".bin");
+      mkdirSync(bin, { recursive: true });
+      writeScript(join(bin, "ssh"), `${ctx.touch("ssh")}; exit 1`);
+      ctx.sh("git remote add origin ssh://git@127.0.0.1:1/x.git");
+
+      await run(["fetch", "origin", "main"], ctx.repo, {
+        env: withPath(ctx, bin),
+      }).catch(() => "fetch failed");
+      expect(ctx.fired()).toStrictEqual(new Set());
+    });
+
+    it("refuses a remote URL that names a remote helper", async () => {
+      const ctx = setup();
+      // A helper the host could find, outside the repo.
+      const bin = join(ctx.root, "bin");
+      mkdirSync(bin);
+      writeScript(
+        join(bin, "git-remote-evil"),
+        `${ctx.touch("helper")}; exit 1`,
+      );
+      ctx.sh("git remote add origin evil::payload");
+
+      await expect(
+        run(["fetch", "origin", "main"], ctx.repo, { env: withPath(ctx, bin) }),
+      ).rejects.toThrow(/not allowed/u);
+      expect(ctx.fired()).toStrictEqual(new Set());
+    });
+
+    it("still fetches from a local remote, and allows https and ssh", async () => {
+      const ctx = setup();
+      const remote = join(ctx.root, "remote.git");
+      ctx.sh(`git clone -q --bare "${ctx.repo}" "${remote}"`, ctx.root);
+      ctx.sh(`git remote add origin "${remote}"`);
+
+      await expect(
+        run(["fetch", "origin", "main"], ctx.repo, ctx),
+      ).resolves.toBeDefined();
+      const messages = await Promise.all(
+        ["https://127.0.0.1:1/x.git", "ssh://git@127.0.0.1:1/x.git"].map(
+          async (url) =>
+            run(["ls-remote", url], ctx.repo, ctx).then(() => "", String),
+        ),
+      );
+      expect(messages.join("\n")).not.toMatch(/not allowed/u);
     });
   });
 });
