@@ -196,7 +196,7 @@ export const parseGitdirPath = (
 ): { parentGitDir: string; worktreeName: string } => {
   const normalized = gitdirPath.replaceAll("\\", "/").replace(/\/+$/, "");
   const segments = normalized.split("/");
-  const worktreeName = segments.pop()!; // <name>
+  const worktreeName = segments.pop() ?? ""; // <name>
   segments.pop(); // "worktrees"
   const parentGitDir = segments.join("/");
   return { worktreeName, parentGitDir };
@@ -278,12 +278,11 @@ export const patchGitMountsForWindows = (
     if (content === null) {
       return gitMounts;
     }
-    const match = /^gitdir:\s*(.+)$/.exec(content);
-    if (!match) {
+    const gitdirPath = /^gitdir:\s*(.+)$/.exec(content)?.[1];
+    if (gitdirPath === undefined) {
       return gitMounts;
     }
 
-    const gitdirPath = match[1]!;
     const { parentGitDir, worktreeName } = parseGitdirPath(gitdirPath);
 
     // Create a temp file with the corrected gitdir content

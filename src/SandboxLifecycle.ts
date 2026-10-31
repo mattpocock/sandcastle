@@ -441,7 +441,8 @@ export const withSandboxLifecycle = <A>(
     // The count resolves the base from the same sandbox-owned ref `syncOut`
     // uses, so on run 2+ we don't anchor to the host's `am`-rewritten HEAD
     // (which the sandbox has never seen) and silently degrade to 0.
-    if (options.applyToHost) {
+    const { applyToHost } = options;
+    if (applyToHost) {
       const commitCount = yield* countCommitsToSync(
         sandbox,
         sandboxRepoDir,
@@ -452,7 +453,7 @@ export const withSandboxLifecycle = <A>(
         commitCount > 0
           ? `Syncing ${commitCount} commit${commitCount === 1 ? "" : "s"} to host`
           : "No commits to sync out",
-        () => options.applyToHost!(),
+        () => applyToHost(),
       );
     }
 
