@@ -8,10 +8,9 @@ import {
   SyncInTimeoutError,
   WorktreeError,
   withTimeout,
-  type DockerError,
 } from "./errors.js";
+import type { DockerError } from "./errors.js";
 import type {
-  SandboxProvider,
   BindMountSandboxProvider,
   BindMountSandboxHandle,
   IsolatedSandboxProvider,
@@ -19,14 +18,11 @@ import type {
   NoSandboxProvider,
   NoSandboxHandle,
 } from "./SandboxProvider.js";
-import {
-  type SandboxService,
-  type MountEntry,
-  makeSandboxFromHandle,
-  SANDBOX_REPO_DIR,
-} from "./SandboxFactory.js";
+import { makeSandboxFromHandle, SANDBOX_REPO_DIR } from "./SandboxFactory.js";
+import type { SandboxService, MountEntry } from "./SandboxFactory.js";
 import { syncIn } from "./syncIn.js";
 import { normalizeMounts } from "./mountUtils.js";
+import { protectGitControlFiles } from "./protectGitMounts.js";
 
 export interface StartSandboxBindMountOptions {
   provider: BindMountSandboxProvider;
@@ -163,37 +159,36 @@ const startBindMountSandbox = (
 ): Effect.Effect<
   StartSandboxResult,
   DockerError | WorktreeError | ContainerStartTimeoutError
-> =>
-  createClosingIfAbandoned(
-    () => {
-      const rawMounts = [
-        {
-          hostPath: options.worktreeOrRepoPath,
-          sandboxPath: options.repoDir,
-        },
-        ...options.gitMounts,
-      ];
-      const mounts = normalizeMounts(
-        rawMounts,
-        options.worktreeOrRepoPath,
-        SANDBOX_REPO_DIR,
-      );
-      const worktreePath =
-        process.platform === "win32"
-          ? options.worktreeOrRepoPath.replace(/\\/g, "/")
-          : options.worktreeOrRepoPath;
-      return options.provider.create({
-        worktreePath,
-        hostRepoPath: options.hostRepoDir,
-        mounts,
-        env: options.env,
-      });
-    },
-    (e) =>
-      new WorktreeError({
-        message: `Provider '${options.provider.name}' create failed: ${e instanceof Error ? e.message : String(e)}`,
-      }),
+> => {
+  const { worktreeOrRepoPath, provider } = options;
+  const rawMounts = [
+    { hostPath: worktreeOrRepoPath, sandboxPath: options.repoDir },
+    ...options.gitMounts,
+  ];
+  // The sandbox may write the repo's objects and refs, but never the git
+  // files that decide what git on the host runs.
+  return protectGitControlFiles(
+    normalizeMounts(rawMounts, worktreeOrRepoPath, SANDBOX_REPO_DIR),
+    worktreeOrRepoPath,
   ).pipe(
+    Effect.flatMap((mounts) =>
+      createClosingIfAbandoned(
+        () =>
+          provider.create({
+            worktreePath:
+              process.platform === "win32"
+                ? worktreeOrRepoPath.replaceAll("\\", "/")
+                : worktreeOrRepoPath,
+            hostRepoPath: options.hostRepoDir,
+            mounts,
+            env: options.env,
+          }),
+        (e) =>
+          new WorktreeError({
+            message: `Provider '${provider.name}' create failed: ${e instanceof Error ? e.message : String(e)}`,
+          }),
+      ),
+    ),
     Effect.map((handle) => ({
       handle,
       sandbox: makeSandboxFromHandle(handle),
@@ -208,6 +203,7 @@ const startBindMountSandbox = (
         }),
     ),
   );
+};
 
 const startIsolatedSandbox = (
   options: StartSandboxIsolatedOptions,
@@ -256,7 +252,7 @@ const startIsolatedSandbox = (
 
       if (options.copyPaths && options.copyPaths.length > 0) {
         const pathsToCopy = options.copyPaths;
-        const copySourceDir = options.copySourceDir;
+        const { copySourceDir } = options;
         yield* Effect.gen(function* () {
           for (const relativePath of pathsToCopy) {
             const hostPath = join(copySourceDir, relativePath);

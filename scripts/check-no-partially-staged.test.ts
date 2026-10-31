@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const script = fileURLToPath(
-  new URL("./check-no-partially-staged.mjs", import.meta.url),
+  new URL("check-no-partially-staged.mjs", import.meta.url),
 );
 
 let repo: string;

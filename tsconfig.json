@@ -84,7 +84,7 @@
           "multipleEffectProvide": "error",
           "nestedEffectGenYield": "error",
           "newPromise": "error",
-          "nodeBuiltinImport": "error",
+          "nodeBuiltinImport": "off", // a Node CLI imports node:path/fs; @effect/platform everywhere is not the plan
           "nonObjectEffectServiceType": "error",
           "outdatedEffectCodegen": "error",
           "overriddenSchemaConstructor": "error",

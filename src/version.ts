@@ -4,8 +4,16 @@ declare const __SANDCASTLE_VERSION__: string | undefined;
 
 const fallbackVersion = (): string => {
   const require = createRequire(import.meta.url);
-  const pkg = require("../package.json") as { version: string };
-  return pkg.version;
+  const pkg: unknown = require("../package.json");
+  if (
+    typeof pkg === "object" &&
+    pkg !== null &&
+    "version" in pkg &&
+    typeof pkg.version === "string"
+  ) {
+    return pkg.version;
+  }
+  throw new Error("Could not read the version from package.json.");
 };
 
 /**
@@ -14,6 +22,6 @@ const fallbackVersion = (): string => {
  * is undefined, so we fall back to reading `package.json` at runtime.
  */
 export const VERSION: string =
-  typeof __SANDCASTLE_VERSION__ !== "undefined"
-    ? __SANDCASTLE_VERSION__
-    : fallbackVersion();
+  typeof __SANDCASTLE_VERSION__ === "undefined"
+    ? fallbackVersion()
+    : __SANDCASTLE_VERSION__;

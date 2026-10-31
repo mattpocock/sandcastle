@@ -38,10 +38,9 @@ export interface AgentStreamEmitterService {
   readonly emit: (event: AgentStreamEvent) => Effect.Effect<void>;
 }
 
-export class AgentStreamEmitter extends Context.Tag("AgentStreamEmitter")<
-  AgentStreamEmitter,
-  AgentStreamEmitterService
->() {}
+export class AgentStreamEmitter extends Context.Tag(
+  "@ai-hero/sandcastle/AgentStreamEmitter",
+)<AgentStreamEmitter, AgentStreamEmitterService>() {}
 
 /**
  * Build a layer for the AgentStreamEmitter service.
