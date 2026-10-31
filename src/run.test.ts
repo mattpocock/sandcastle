@@ -29,7 +29,7 @@ import {
   sanitizeBranchForFilename,
 } from "./run.js";
 import type { RunOptions, RunResult } from "./run.js";
-import { claudeCode, copilot, cursor, opencode } from "./AgentProvider.js";
+import { claudeCode, copilot, cursor } from "./AgentProvider.js";
 import type { AgentProvider } from "./AgentProvider.js";
 import { ForkNotSupportedError } from "./errors.js";
 import { Output, StructuredOutputError } from "./Output.js";
@@ -1117,10 +1117,10 @@ describe("output.maxRetries entry-time validation", () => {
     );
   });
 
-  it("throws when maxRetries > 0 and the agent provider lacks session resumption (opencode)", async () => {
+  it("throws when maxRetries > 0 and the agent provider lacks session resumption (no sessionStorage)", async () => {
     await expect(
       run({
-        agent: opencode("opencode-m"),
+        agent: noResumeAgent,
         sandbox: testSandbox,
         prompt: "emit your answer inside <result> tags",
         branchStrategy: { type: "head" },

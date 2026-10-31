@@ -17,6 +17,8 @@ import {
   listClaudeSubagentSessionsInSandbox,
   locateSandboxSessionFile,
   makeSessionFileStorage,
+  opencodeHostDatabase,
+  opencodeHostSessionsDir,
   pathExists,
   piSessionDirPath,
   requireHostSessionPath,
@@ -1279,19 +1281,56 @@ export interface OpenCodeOptions {
   readonly agent?: string;
   /** Environment variables injected by this agent provider. */
   readonly env?: Record<string, string>;
+  /** When false, session capture is disabled. Default: true. */
+  readonly captureSessions?: boolean;
+  /** Override where session exports live, for tests or non-standard installs. */
+  readonly sessionStorage?: {
+    readonly hostSessionsDir?: string;
+    readonly sandboxExportDir?: string;
+  };
 }
+
+/**
+ * OpenCode's sessions live in its SQLite database, so a session moves as the
+ * JSON of `opencode export <id>`, its documented interchange format: exported
+ * in the sandbox after a run, and `opencode import`ed from the sandbox repo
+ * before a resume (ADR 0022). The import keeps the session id and re-homes the
+ * session to the importing project, so no rewrite is needed.
+ */
+const makeOpenCodeSessionStorage = (
+  options?: OpenCodeOptions,
+): AgentSessionStorage => {
+  const hostDir =
+    options?.sessionStorage?.hostSessionsDir ?? opencodeHostSessionsDir();
+  const exportDir = options?.sessionStorage?.sandboxExportDir ?? "/tmp";
+  const hostPath = (id: string): string => join(hostDir, `${id}.json`);
+  return makeSessionFileStorage({
+    hostRoot: hostDir,
+    hostPath: (_cwd, id) => hostPath(id),
+    // A no-sandbox run resumes from OpenCode's own database, which can't be
+    // queried by id from here; OpenCode reports an unknown id itself.
+    hostPathsById: (id) => [hostPath(id), opencodeHostDatabase()],
+    sandboxPath: (_cwd, id) => posix.join(exportDir, `${id}.json`),
+    sandboxExport: (id, path) =>
+      `opencode export ${shellEscape(id)} > ${shellEscape(path)}`,
+    sandboxImport: (_id, path) => `opencode import ${shellEscape(path)}`,
+  });
+};
 
 export const opencode = (
   model: string,
   options?: OpenCodeOptions,
-): AgentProvider => ({
+): AgentProvider & { readonly sessionStorage: AgentSessionStorage } => ({
   name: "opencode",
   env: options?.env ?? {},
-  captureSessions: false,
+  captureSessions: options?.captureSessions ?? true,
+  sessionStorage: makeOpenCodeSessionStorage(options),
 
   buildPrintCommand({
     prompt,
     dangerouslySkipPermissions,
+    resumeSession,
+    forkSession,
   }: AgentCommandOptions): PrintCommand {
     const variantFlag = options?.variant
       ? ` --variant ${shellEscape(options.variant)}`
@@ -1302,8 +1341,14 @@ export const opencode = (
     const permissionsFlag = dangerouslySkipPermissions
       ? " --dangerously-skip-permissions"
       : "";
+    // `--fork` copies the session to a new id before continuing, leaving the
+    // parent untouched; it needs `--session`.
+    const sessionFlags =
+      resumeSession === undefined
+        ? ""
+        : ` --session ${shellEscape(resumeSession)}${forkSession === true ? " --fork" : ""}`;
     return {
-      command: `opencode run --format json --model ${shellEscape(model)}${variantFlag}${agentFlag}${permissionsFlag} ${shellEscape(prompt)}`,
+      command: `opencode run --format json --model ${shellEscape(model)}${variantFlag}${agentFlag}${permissionsFlag}${sessionFlags} ${shellEscape(prompt)}`,
     };
   },
 

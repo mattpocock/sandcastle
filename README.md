@@ -718,7 +718,7 @@ console.log(result.output.score); // typed as number
 
 When extraction or validation fails, `run()` throws a `StructuredOutputError`. Alongside `tag`, `rawMatched`, `cause`, `commits`, `branch`, and `preservedWorktreePath`, the error carries the `sessionId` (and `sessionFilePath`, when the session was captured) of the run that produced the bad output.
 
-Pass `maxRetries` to have Sandcastle handle the retry loop for you. Each retry resumes the same agent session and feeds back a token-efficient description of the error, so the agent can re-emit a corrected tag without redoing the work. Retries require an agent provider that supports session resumption (`claudeCode`, `codex`, `pi`, `copilot`, `cursor`) — calling `run()` with `maxRetries > 0` against a non-resumable provider (`opencode`) throws immediately.
+Pass `maxRetries` to have Sandcastle handle the retry loop for you. Each retry resumes the same agent session and feeds back a token-efficient description of the error, so the agent can re-emit a corrected tag without redoing the work. Retries require an agent provider that supports session resumption (`claudeCode`, `codex`, `pi`, `copilot`, `cursor`, `opencode`) — every built-in agent provider resumes. Calling `run()` with `maxRetries > 0` against a custom provider without `sessionStorage` throws immediately.
 
 ```ts
 const result = await run({
@@ -901,15 +901,15 @@ Sources: claudeCode, pi, opencode and copilot read it from the agent's stream, s
 
 ### Session capture
 
-After each resumable provider iteration, Sandcastle automatically captures the agent's session file from the sandbox to the host. Claude Code sessions are stored under `~/.claude/projects/<encoded-path>/<session-id>.jsonl`; Codex sessions are stored under `~/.codex/sessions/YYYY/MM/DD/rollout-*-<session-id>.jsonl`; Pi sessions are stored under `~/.pi/agent/sessions/--<encoded-cwd>--/<timestamp>_<session-id>.jsonl`; Copilot sessions are stored under `~/.copilot/session-state/<session-id>/events.jsonl`; Cursor chats are stored under `~/.cursor/chats/<md5-of-cwd>/<chat-id>/store.db` (an SQLite file, copied byte for byte). Any provider-specific `cwd` fields are rewritten to match the host repo root, so the provider's native resume command works.
+After each resumable provider iteration, Sandcastle automatically captures the agent's session file from the sandbox to the host. Claude Code sessions are stored under `~/.claude/projects/<encoded-path>/<session-id>.jsonl`; Codex sessions are stored under `~/.codex/sessions/YYYY/MM/DD/rollout-*-<session-id>.jsonl`; Pi sessions are stored under `~/.pi/agent/sessions/--<encoded-cwd>--/<timestamp>_<session-id>.jsonl`; Copilot sessions are stored under `~/.copilot/session-state/<session-id>/events.jsonl`; Cursor chats are stored under `~/.cursor/chats/<md5-of-cwd>/<chat-id>/store.db` (an SQLite file, copied byte for byte). OpenCode keeps sessions in its SQLite database, so Sandcastle runs `opencode export <id>` in the sandbox and stores the JSON under `~/.local/share/opencode/sandcastle-sessions/<session-id>.json` ([ADR 0022](docs/adr/0022-opencode-resume-via-export-import.md)). Any provider-specific `cwd` fields are rewritten to match the host repo root, so the provider's native resume command works.
 
 For Claude Code, any `Agent`-tool or `Workflow`-tool subagent transcripts written under `<session-id>/subagents/agent-*.jsonl` are captured alongside the main session. Subagent capture is best-effort: a failure on an individual transcript logs a warning and lets siblings and the main session through. Main-session capture failure still fails the run (see below).
 
-Session capture is enabled by default for `claudeCode()`, `codex()`, `pi()`, `copilot()`, and `cursor()` and can be opted out via `captureSessions: false`. Providers without `sessionStorage` do not attempt capture. Capture failure fails the run.
+Session capture is enabled by default for `claudeCode()`, `codex()`, `pi()`, `copilot()`, `cursor()`, and `opencode()` and can be opted out via `captureSessions: false`. Providers without `sessionStorage` do not attempt capture. Capture failure fails the run.
 
 ### Session resume
 
-Pass `resumeSession` to `run()` to continue a prior Claude Code, Codex, Pi, Copilot, or Cursor conversation inside a new sandbox:
+Pass `resumeSession` to `run()` to continue a prior Claude Code, Codex, Pi, Copilot, Cursor, or OpenCode conversation inside a new sandbox:
 
 ```typescript
 const result = await run({
@@ -934,16 +934,16 @@ const second = await first.resume?.("Now implement the plan");
 
 `resume` is present only on results from resumable providers — hence the optional-chaining call. Which providers resume and fork:
 
-| Agent provider | Resume                   | Fork                                  |
-| -------------- | ------------------------ | ------------------------------------- |
-| `claudeCode`   | `claude --resume <id>`   | `claude --resume <id> --fork-session` |
-| `codex`        | `codex exec resume <id>` | `codex exec fork <id>`                |
-| `pi`           | `pi --session <id>`      | `pi --fork <id>`                      |
-| `copilot`      | `copilot --resume=<id>`  | No: throws `ForkNotSupportedError`    |
-| `cursor`       | `agent --resume=<id>`    | No: throws `ForkNotSupportedError`    |
-| `opencode`     | No                       | No                                    |
+| Agent provider | Resume                        | Fork                                  |
+| -------------- | ----------------------------- | ------------------------------------- |
+| `claudeCode`   | `claude --resume <id>`        | `claude --resume <id> --fork-session` |
+| `codex`        | `codex exec resume <id>`      | `codex exec fork <id>`                |
+| `pi`           | `pi --session <id>`           | `pi --fork <id>`                      |
+| `opencode`     | `opencode run --session <id>` | `opencode run --session <id> --fork`  |
+| `copilot`      | `copilot --resume=<id>`       | No: throws `ForkNotSupportedError`    |
+| `cursor`       | `agent --resume=<id>`         | No: throws `ForkNotSupportedError`    |
 
-Before the sandbox starts, Sandcastle validates that the session file exists on the host and transfers it into the sandbox with `cwd` fields rewritten to match the sandbox-side path. Claude Code receives `--resume <id>`; Codex receives `codex exec resume <id>` with the prompt piped over stdin; Pi receives `--session <id>`; Copilot and Cursor receive `--resume=<id>`.
+Before the sandbox starts, Sandcastle validates that the session file exists on the host and transfers it into the sandbox with `cwd` fields rewritten to match the sandbox-side path. Claude Code receives `--resume <id>`; Codex receives `codex exec resume <id>` with the prompt piped over stdin; Pi receives `--session <id>`; Copilot and Cursor receive `--resume=<id>`. OpenCode's session is first loaded with `opencode import`, then OpenCode receives `--session <id>`.
 
 Constraints:
 
@@ -955,7 +955,7 @@ Constraints:
 
 ### Session fork
 
-`RunResult.fork(prompt, options?)` is the sibling of `.resume()`: it continues from the last captured session but leaves the parent session JSONL untouched and writes the child under a new session id. The mechanism is the agent's native fork flag — `claude --resume <id> --fork-session` for Claude Code, `codex exec fork <id>` for Codex.
+`RunResult.fork(prompt, options?)` is the sibling of `.resume()`: it continues from the last captured session but leaves the parent session JSONL untouched and writes the child under a new session id. The mechanism is the agent's native fork flag — `claude --resume <id> --fork-session` for Claude Code, `codex exec fork <id>` for Codex, `pi --fork <id>` for Pi, `opencode run --session <id> --fork` for OpenCode.
 
 Fork enables fan-out workflows where a single parent run is the starting point for several independent children:
 
