@@ -54,7 +54,7 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
     const handle: NoSandboxHandle = {
       worktreePath,
 
-      exec: (
+      exec: async (
         command: string,
         opts?: {
           onLine?: (line: string) => void;
@@ -135,7 +135,7 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
         });
       },
 
-      interactiveExec: (
+      interactiveExec: async (
         args: string[],
         opts: InteractiveExecOptions,
       ): Promise<{ exitCode: number }> =>

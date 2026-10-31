@@ -127,7 +127,7 @@ describe("startSandbox", () => {
 
     afterEach(async () => {
       await Promise.all(
-        tempDirs.map((d) => rm(d, { recursive: true, force: true })),
+        tempDirs.map(async (d) => rm(d, { recursive: true, force: true })),
       );
       tempDirs.length = 0;
     });
@@ -201,7 +201,7 @@ describe("startSandbox", () => {
           const handle = await realProvider.create(options);
           return {
             ...handle,
-            copyIn: (hostPath: string, sandboxPath: string) => {
+            copyIn: async (hostPath: string, sandboxPath: string) => {
               // Allow syncIn's copyIn calls (bundle files) to succeed,
               // but hang on everything else
               if (sandboxPath.includes("repo.bundle")) {
@@ -229,7 +229,9 @@ describe("startSandbox", () => {
         );
         // Yield to allow real async operations (create, syncIn) to complete
         yield* Effect.yieldNow();
-        yield* Effect.promise(() => new Promise((r) => setTimeout(r, 2000)));
+        yield* Effect.promise(
+          async () => new Promise((r) => setTimeout(r, 2000)),
+        );
         yield* Effect.yieldNow();
         // Now advance past the copyPaths timeout
         yield* TestClock.adjust(Duration.millis(COPY_PATHS_TIMEOUT_MS + 1));

@@ -39,7 +39,7 @@ export const createTempSandbox = async (
   const worktreePath = join(sandboxRoot, "workspace");
   await mkdir(worktreePath, { recursive: true });
 
-  const exec = (
+  const exec = async (
     command: string,
     options?: {
       onLine?: (line: string) => void;
@@ -108,7 +108,7 @@ export const createTempSandbox = async (
   return {
     worktreePath,
     exec,
-    close: () => rm(sandboxRoot, { recursive: true, force: true }),
+    close: async () => rm(sandboxRoot, { recursive: true, force: true }),
   };
 };
 

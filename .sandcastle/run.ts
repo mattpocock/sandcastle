@@ -41,7 +41,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // Phase 2: Execute + Review — implement then review each branch, max 4 in parallel
   let running = 0;
   const queue: (() => void)[] = [];
-  const acquire = () =>
+  const acquire = async () =>
     running < MAX_PARALLEL
       ? (running++, Promise.resolve())
       : new Promise<void>((resolve) => queue.push(resolve));

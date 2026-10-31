@@ -247,7 +247,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
       const handle: BindMountSandboxHandle = {
         worktreePath,
 
-        exec: (
+        exec: async (
           command: string,
           opts?: {
             onLine?: (line: string) => void;
@@ -328,7 +328,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
           });
         },
 
-        interactiveExec: (
+        interactiveExec: async (
           args: string[],
           opts: InteractiveExecOptions,
         ): Promise<{ exitCode: number }> =>
@@ -360,7 +360,10 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
               resolve({ exitCode: code ?? 0 });
             });
           }),
-        copyFileIn: (hostPath: string, sandboxPath: string): Promise<void> =>
+        copyFileIn: async (
+          hostPath: string,
+          sandboxPath: string,
+        ): Promise<void> =>
           new Promise((resolve, reject) => {
             execFile(
               "docker",
@@ -375,7 +378,10 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
             );
           }),
 
-        copyFileOut: (sandboxPath: string, hostPath: string): Promise<void> =>
+        copyFileOut: async (
+          sandboxPath: string,
+          hostPath: string,
+        ): Promise<void> =>
           new Promise((resolve, reject) => {
             execFile(
               "docker",
@@ -404,7 +410,10 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
 // Re-export for backwards compatibility
 export { defaultImageName };
 
-const checkImageUid = (imageName: string, expectedUid: number): Promise<void> =>
+const checkImageUid = async (
+  imageName: string,
+  expectedUid: number,
+): Promise<void> =>
   new Promise<void>((resolve, reject) => {
     execFile(
       "docker",

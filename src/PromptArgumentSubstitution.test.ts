@@ -19,7 +19,7 @@ describe("PromptArgumentSubstitution", () => {
     return { layer, displayRef };
   };
 
-  const run = (
+  const run = async (
     prompt: string,
     args: Record<string, string | number | boolean>,
     layer: Layer.Layer<import("./Display.js").Display>,
@@ -28,7 +28,7 @@ describe("PromptArgumentSubstitution", () => {
       substitutePromptArgs(prompt, args).pipe(Effect.provide(layer)),
     );
 
-  const runFail = (
+  const runFail = async (
     prompt: string,
     args: Record<string, string | number | boolean>,
     layer: Layer.Layer<import("./Display.js").Display>,

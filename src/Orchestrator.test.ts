@@ -64,7 +64,7 @@ const withFakeTimers = async <T>(fn: () => Promise<T>): Promise<T> => {
 
 /** Advance the fake clock by `ms`, firing every timer due on the way. */
 const advance = (ms: number) =>
-  Effect.promise(() => vi.advanceTimersByTimeAsync(ms));
+  Effect.promise(async () => vi.advanceTimersByTimeAsync(ms));
 
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });
@@ -195,7 +195,9 @@ const makeMockAgentLayer = (
           const { onLine } = options;
           return Effect.gen(function* () {
             const cwd = options?.cwd ?? sandboxDir;
-            const output = yield* Effect.promise(() => mockAgentBehavior(cwd));
+            const output = yield* Effect.promise(async () =>
+              mockAgentBehavior(cwd),
+            );
             const streamOutput = toStreamJson(output);
             for (const line of streamOutput.split("\n")) {
               onLine(line);
@@ -205,7 +207,9 @@ const makeMockAgentLayer = (
         }
         return Effect.gen(function* () {
           const cwd = options?.cwd ?? sandboxDir;
-          const output = yield* Effect.promise(() => mockAgentBehavior(cwd));
+          const output = yield* Effect.promise(async () =>
+            mockAgentBehavior(cwd),
+          );
           return { stdout: output, stderr: "", exitCode: 0 };
         });
       }
@@ -2552,7 +2556,7 @@ describe("Orchestrator Display integration", () => {
       },
     );
 
-    const exitResult = await withFakeTimers(() =>
+    const exitResult = await withFakeTimers(async () =>
       Effect.runPromise(
         orchestrate({
           provider: testProvider,
@@ -2610,7 +2614,7 @@ describe("Orchestrator Display integration", () => {
       },
     );
 
-    const exitResult = await withFakeTimers(() =>
+    const exitResult = await withFakeTimers(async () =>
       Effect.runPromise(
         orchestrate({
           provider: testProvider,
@@ -2668,7 +2672,7 @@ describe("Orchestrator Display integration", () => {
       noopAgentStreamEmitterLayer,
     );
 
-    const exitResult = await withFakeTimers(() =>
+    const exitResult = await withFakeTimers(async () =>
       Effect.runPromise(
         orchestrate({
           provider: testProvider,
@@ -2753,7 +2757,7 @@ describe("Orchestrator Display integration", () => {
       noopAgentStreamEmitterLayer,
     );
 
-    const exitResult = await withFakeTimers(() =>
+    const exitResult = await withFakeTimers(async () =>
       Effect.runPromise(
         orchestrate({
           provider: testProvider,
@@ -2833,7 +2837,9 @@ const makeMockPiAgentLayer = (
           const { onLine } = options;
           return Effect.gen(function* () {
             const cwd = options?.cwd ?? sandboxDir;
-            const output = yield* Effect.promise(() => mockAgentBehavior(cwd));
+            const output = yield* Effect.promise(async () =>
+              mockAgentBehavior(cwd),
+            );
             const streamOutput = toPiStreamJson(output);
             for (const line of streamOutput.split("\n")) {
               onLine(line);
@@ -2843,7 +2849,9 @@ const makeMockPiAgentLayer = (
         }
         return Effect.gen(function* () {
           const cwd = options?.cwd ?? sandboxDir;
-          const output = yield* Effect.promise(() => mockAgentBehavior(cwd));
+          const output = yield* Effect.promise(async () =>
+            mockAgentBehavior(cwd),
+          );
           return { stdout: output, stderr: "", exitCode: 0 };
         });
       }
@@ -3149,7 +3157,9 @@ const makeMockCodexAgentLayer = (
           const { onLine } = options;
           return Effect.gen(function* () {
             const cwd = options?.cwd ?? sandboxDir;
-            const output = yield* Effect.promise(() => mockAgentBehavior(cwd));
+            const output = yield* Effect.promise(async () =>
+              mockAgentBehavior(cwd),
+            );
             const streamOutput = toCodexStreamJson(output, usage);
             for (const line of streamOutput.split("\n")) {
               onLine(line);
@@ -3159,7 +3169,9 @@ const makeMockCodexAgentLayer = (
         }
         return Effect.gen(function* () {
           const cwd = options?.cwd ?? sandboxDir;
-          const output = yield* Effect.promise(() => mockAgentBehavior(cwd));
+          const output = yield* Effect.promise(async () =>
+            mockAgentBehavior(cwd),
+          );
           return { stdout: output, stderr: "", exitCode: 0 };
         });
       }
@@ -3328,7 +3340,7 @@ describe("Session capture integration", () => {
                   const { onLine } = options;
                   return Effect.gen(function* () {
                     const cwd = options?.cwd ?? sandboxBaseDir;
-                    const output = yield* Effect.promise(() =>
+                    const output = yield* Effect.promise(async () =>
                       mockAgentBehavior(cwd),
                     );
                     const streamOutput = toStreamJson(output, sessionId);
@@ -3656,10 +3668,10 @@ describe("Session capture integration", () => {
                     const cwd = options?.cwd ?? sandboxBaseDir;
                     const sbEncoded = encodeProjectPath(cwd);
                     const sessionsDir = join(sandboxProjectsDir, sbEncoded);
-                    yield* Effect.promise(() =>
+                    yield* Effect.promise(async () =>
                       mkdir(sessionsDir, { recursive: true }),
                     );
-                    yield* Effect.promise(() =>
+                    yield* Effect.promise(async () =>
                       writeFile(
                         join(sessionsDir, `${childSessionId}.jsonl`),
                         [
@@ -4229,7 +4241,7 @@ describe("Orchestrator completion timeout (hanging process)", () => {
       };
     });
 
-    const result = await withFakeTimers(() =>
+    const result = await withFakeTimers(async () =>
       Effect.runPromise(
         orchestrate({
           provider: testProvider,

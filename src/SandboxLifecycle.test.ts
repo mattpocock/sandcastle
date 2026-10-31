@@ -556,7 +556,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
               { cwd: ctx.sandboxRepoDir },
             );
             // An uncommitted edit on the host to the same file
-            yield* Effect.promise(() =>
+            yield* Effect.promise(async () =>
               writeFile(join(hostDir, "file.txt"), "uncommitted host edit"),
             );
           }),
@@ -1532,7 +1532,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
         },
         sandbox,
         () =>
-          Effect.promise(() =>
+          Effect.promise(async () =>
             execAsync(`git config include.path "${gate.path}"`, {
               cwd: hostDir,
             }),

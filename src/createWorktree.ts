@@ -366,7 +366,7 @@ export const createWorktree = async (
         | NoSandboxHandle;
 
       if (resolvedSandbox.tag === "none") {
-        handle = yield* Effect.promise(() =>
+        handle = yield* Effect.promise(async () =>
           resolvedSandbox.create({
             worktreePath: worktreeInfo.path,
             env: effectiveEnv,
@@ -453,7 +453,7 @@ export const createWorktree = async (
               });
 
               const result = yield* raceAbortSignal(
-                Effect.promise(() =>
+                Effect.promise(async () =>
                   interactiveExecFn(interactiveArgs, {
                     stdin: process.stdin,
                     stdout: process.stdout,
@@ -487,7 +487,9 @@ export const createWorktree = async (
         } satisfies InteractiveResult;
       }).pipe(
         // Always close sandbox handle
-        Effect.ensuring(Effect.promise(() => handle.close().catch(() => {}))),
+        Effect.ensuring(
+          Effect.promise(async () => handle.close().catch(() => {})),
+        ),
       );
     });
 
@@ -731,7 +733,9 @@ export const createWorktree = async (
       }).pipe(
         Effect.provide(runLayer),
         // Always close sandbox handle
-        Effect.ensuring(Effect.promise(() => handle.close().catch(() => {}))),
+        Effect.ensuring(
+          Effect.promise(async () => handle.close().catch(() => {})),
+        ),
       );
 
       return {

@@ -11,10 +11,10 @@ import {
   getTemplateDependencies,
 } from "./InitService.js";
 
-const makeDir = () => mkdtemp(join(tmpdir(), "init-service-"));
+const makeDir = async () => mkdtemp(join(tmpdir(), "init-service-"));
 
 describe("detectPackageManager", () => {
-  const detect = (dir: string) =>
+  const detect = async (dir: string) =>
     Effect.runPromise(
       detectPackageManager(dir).pipe(Effect.provide(NodeFileSystem.layer)),
     );
@@ -70,7 +70,7 @@ describe("addDependencyCommand", () => {
 });
 
 describe("hostHasDependency", () => {
-  const has = (dir: string, pkg: string) =>
+  const has = async (dir: string, pkg: string) =>
     Effect.runPromise(
       hostHasDependency(dir, pkg).pipe(Effect.provide(NodeFileSystem.layer)),
     );

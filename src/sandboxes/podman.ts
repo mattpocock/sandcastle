@@ -307,7 +307,7 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
       const handle: BindMountSandboxHandle = {
         worktreePath,
 
-        exec: (
+        exec: async (
           command: string,
           opts?: {
             onLine?: (line: string) => void;
@@ -388,7 +388,7 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
           });
         },
 
-        interactiveExec: (
+        interactiveExec: async (
           args: string[],
           opts: InteractiveExecOptions,
         ): Promise<{ exitCode: number }> =>
@@ -420,7 +420,10 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
               resolve({ exitCode: code ?? 0 });
             });
           }),
-        copyFileIn: (hostPath: string, sandboxPath: string): Promise<void> =>
+        copyFileIn: async (
+          hostPath: string,
+          sandboxPath: string,
+        ): Promise<void> =>
           new Promise((resolve, reject) => {
             execFile(
               "podman",
@@ -435,7 +438,10 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
             );
           }),
 
-        copyFileOut: (sandboxPath: string, hostPath: string): Promise<void> =>
+        copyFileOut: async (
+          sandboxPath: string,
+          hostPath: string,
+        ): Promise<void> =>
           new Promise((resolve, reject) => {
             execFile(
               "podman",
@@ -476,7 +482,7 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
 // Re-export for backwards compatibility
 export { defaultImageName };
 
-const checkImageExists = (imageName: string): Promise<void> =>
+const checkImageExists = async (imageName: string): Promise<void> =>
   new Promise<void>((resolve, reject) => {
     execFile("podman", ["image", "inspect", imageName], (error) => {
       if (error) {
@@ -496,7 +502,7 @@ const podmanMachineError = () =>
     "Podman Machine is not running. Run 'podman machine init && podman machine start' first.",
   );
 
-const checkPodmanMachine = (): Promise<void> =>
+const checkPodmanMachine = async (): Promise<void> =>
   new Promise<void>((resolve, reject) => {
     execFile(
       "podman",

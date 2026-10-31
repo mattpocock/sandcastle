@@ -27,7 +27,7 @@ const commitFile = async (
 
 const cliPath = join(import.meta.dirname, "..", "dist", "main.js");
 
-const runCli = (args: string, cwd: string) =>
+const runCli = async (args: string, cwd: string) =>
   execAsync(`node ${cliPath} ${args}`, { cwd });
 
 describe("sandcastle CLI", () => {

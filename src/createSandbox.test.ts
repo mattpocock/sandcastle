@@ -182,7 +182,9 @@ const makeMockAgentLayer = (
         const { onLine } = options;
         return Effect.gen(function* () {
           const cwd = options?.cwd ?? sandboxDir;
-          const output = yield* Effect.promise(() => mockAgentBehavior(cwd));
+          const output = yield* Effect.promise(async () =>
+            mockAgentBehavior(cwd),
+          );
           const streamOutput = agent.toStream(output);
           for (const line of streamOutput.split("\n")) {
             onLine(line);
@@ -193,7 +195,9 @@ const makeMockAgentLayer = (
       if (agent) {
         return Effect.gen(function* () {
           const cwd = options?.cwd ?? sandboxDir;
-          const output = yield* Effect.promise(() => mockAgentBehavior(cwd));
+          const output = yield* Effect.promise(async () =>
+            mockAgentBehavior(cwd),
+          );
           return { stdout: output, stderr: "", exitCode: 0 };
         });
       }

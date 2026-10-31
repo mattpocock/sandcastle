@@ -16,11 +16,13 @@ describe("resolveGitMounts", () => {
   };
 
   afterEach(async () => {
-    await Promise.all(dirs.map((d) => rm(d, { recursive: true, force: true })));
+    await Promise.all(
+      dirs.map(async (d) => rm(d, { recursive: true, force: true })),
+    );
     dirs.length = 0;
   });
 
-  const run = (gitPath: string) =>
+  const run = async (gitPath: string) =>
     Effect.runPromise(
       resolveGitMounts(gitPath).pipe(Effect.provide(NodeFileSystem.layer)),
     );

@@ -59,7 +59,7 @@ describe("WorktreeDockerSandboxFactory — baseBranch (real git)", () => {
 
   afterEach(async () => {
     await Promise.all(
-      tempDirs.map((d) => rm(d, { recursive: true, force: true })),
+      tempDirs.map(async (d) => rm(d, { recursive: true, force: true })),
     );
     tempDirs.length = 0;
   });

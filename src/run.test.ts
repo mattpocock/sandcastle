@@ -1650,7 +1650,7 @@ describe("resume/fork after a structured-output run", () => {
       }),
     });
 
-    const first = () =>
+    const first = async () =>
       run({
         agent: claudeCode("claude-opus-4-8", {
           captureSessions: false,
