@@ -1,5 +1,5 @@
-import { mkdir, readFile, rm, writeFile, access } from "node:fs/promises";
-import { dirname, join, posix } from "node:path";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { dirname, join, posix, relative } from "node:path";
 import { tmpdir } from "node:os";
 import {
   claudeHostSessionPath,
@@ -9,12 +9,15 @@ import {
   findClaudeSessionOnHost,
   findCodexSessionOnHost,
   findPiSessionOnHost,
+  homeDir,
   listClaudeSubagentSessionsInSandbox,
-  locateCodexHostSession,
-  locateCodexSandboxSession,
-  locatePiHostSession,
-  locatePiSandboxSession,
+  locateSandboxSessionFile,
+  makeSessionFileStorage,
+  opencodeHostDatabase,
+  opencodeHostSessionsDir,
+  pathExists,
   piSessionDirPath,
+  requireHostSessionPath,
   transferClaudeSession,
   transferCodexSession,
   transferPiSession,
@@ -22,15 +25,6 @@ import {
 import type { HostSessionLookup } from "./SessionStore.js";
 import type { BindMountSandboxHandle } from "./SandboxProvider.js";
 import type { ContextWindow } from "./ContextWindow.js";
-
-const fileExists = async (path: string): Promise<boolean> => {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
-};
 
 export type ParsedStreamEvent =
   | { type: "text"; text: string }
@@ -467,10 +461,10 @@ const makeClaudeSessionStorage = (
     hostSessionFilePath: (cwd, id) =>
       claudeHostSessionPath(cwd, id, hostProjectsDir),
     existsOnHost: (cwd, id) =>
-      fileExists(claudeHostSessionPath(cwd, id, hostProjectsDir)),
+      pathExists(claudeHostSessionPath(cwd, id, hostProjectsDir)),
     readHostSession: async (cwd, id) => {
       const path = claudeHostSessionPath(cwd, id, hostProjectsDir);
-      if (!(await fileExists(path))) return undefined;
+      if (!(await pathExists(path))) return undefined;
       return readFile(path, "utf8");
     },
     captureToHost: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
@@ -544,6 +538,11 @@ const makeClaudeSessionStorage = (
   };
 };
 
+/**
+ * Codex sessions live at YYYY/MM/DD/rollout-*-<id>.jsonl — the path is not
+ * derivable from (cwd, id) alone, so we cache the path written by
+ * captureToHost for hostSessionFilePath to surface on the IterationResult.
+ */
 const makeCodexSessionStorage = (
   options?: CodexOptions,
 ): AgentSessionStorage => {
@@ -551,10 +550,6 @@ const makeCodexSessionStorage = (
   const sandboxSessionsDir =
     options?.sessionStorage?.sandboxSessionsDir ??
     posix.join("/home/agent", ".codex", "sessions");
-
-  // Codex sessions live at YYYY/MM/DD/rollout-*-<id>.jsonl — the path is not
-  // derivable from (cwd, id) alone, so we cache the path written by
-  // captureToHost for hostSessionFilePath to surface on the IterationResult.
   const capturedPaths = new Map<string, string>();
 
   return {
@@ -569,25 +564,28 @@ const makeCodexSessionStorage = (
       return readFile(found.path, "utf8");
     },
     captureToHost: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
-      const located = await locateCodexSandboxSession(
-        sessionId,
+      const located = await locateSandboxSessionFile(
         handle,
         sandboxSessionsDir,
+        `rollout-*-${sessionId}.jsonl`,
       );
       const jsonl = await readSandboxFile(handle, located.path, "codex-cap");
       const rewritten = transferCodexSession(jsonl, sandboxCwd, hostCwd);
-      const root =
-        hostSessionsDir ?? join(process.env.HOME ?? "~", ".codex", "sessions");
+      const root = hostSessionsDir ?? join(homeDir(), ".codex", "sessions");
       const target = join(root, located.relativePath);
       await mkdir(dirname(target), { recursive: true });
       await writeFile(target, rewritten);
       capturedPaths.set(sessionId, target);
     },
     resumeIntoSandbox: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
-      const located = await locateCodexHostSession(sessionId, hostSessionsDir);
-      const jsonl = await readFile(located.path, "utf8");
+      const found = await findCodexSessionOnHost(sessionId, hostSessionsDir);
+      const path = requireHostSessionPath(found, sessionId);
+      const jsonl = await readFile(path, "utf8");
       const rewritten = transferCodexSession(jsonl, hostCwd, sandboxCwd);
-      const target = posix.join(sandboxSessionsDir, located.relativePath);
+      const target = posix.join(
+        sandboxSessionsDir,
+        ...relative(found.searchedRoot, path).split(/[\\/]/u),
+      );
       await writeSandboxFile(handle, target, rewritten, "codex-res");
     },
     findByIdOnHost: (id) => findCodexSessionOnHost(id, hostSessionsDir),
@@ -598,6 +596,12 @@ const makeCodexSessionStorage = (
 // Pi agent provider
 // ---------------------------------------------------------------------------
 
+/**
+ * Pi resolves `--session <id>` against the *current project's* encoded
+ * directory first; a transferred file in any other directory hits the "fork
+ * session?" prompt, which hangs in print/json mode. So capture lands the file
+ * in `--<enc-host-cwd>--/<filename>`, not the sandbox's encoded dir.
+ */
 const makePiSessionStorage = (options?: PiOptions): AgentSessionStorage => {
   const hostSessionsDir = options?.sessionStorage?.hostSessionsDir;
   const sandboxSessionsDir =
@@ -616,28 +620,24 @@ const makePiSessionStorage = (options?: PiOptions): AgentSessionStorage => {
       return readFile(found.path, "utf8");
     },
     captureToHost: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
-      const located = await locatePiSandboxSession(
-        sessionId,
+      const located = await locateSandboxSessionFile(
         handle,
         sandboxSessionsDir,
+        `*_${sessionId}.jsonl`,
       );
       const jsonl = await readSandboxFile(handle, located.path, "pi-cap");
       const rewritten = transferPiSession(jsonl, sandboxCwd, hostCwd);
-      // Pi resolves `--session <id>` against the *current project's* encoded
-      // directory first; a transferred file in any other directory hits the
-      // "fork session?" prompt, which hangs in print/json mode. So we land
-      // the file in `--<enc-host-cwd>--/<filename>`, not the sandbox's
-      // encoded dir.
       const filename = posix.basename(located.path);
       const target = join(piSessionDirPath(hostCwd, hostSessionsDir), filename);
       await mkdir(dirname(target), { recursive: true });
       await writeFile(target, rewritten);
     },
     resumeIntoSandbox: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
-      const located = await locatePiHostSession(sessionId, hostSessionsDir);
-      const jsonl = await readFile(located.path, "utf8");
+      const found = await findPiSessionOnHost(sessionId, hostSessionsDir);
+      const path = requireHostSessionPath(found, sessionId);
+      const jsonl = await readFile(path, "utf8");
       const rewritten = transferPiSession(jsonl, hostCwd, sandboxCwd);
-      const filename = located.relativePath.split(/[\\/]/).pop()!;
+      const filename = posix.basename(path.replaceAll("\\", "/"));
       const target = posix.join(
         sandboxSessionsDir,
         encodePiSessionDir(sandboxCwd),
@@ -1162,19 +1162,56 @@ export interface OpenCodeOptions {
   readonly agent?: string;
   /** Environment variables injected by this agent provider. */
   readonly env?: Record<string, string>;
+  /** When false, session capture is disabled. Default: true. */
+  readonly captureSessions?: boolean;
+  /** Override where session exports live, for tests or non-standard installs. */
+  readonly sessionStorage?: {
+    readonly hostSessionsDir?: string;
+    readonly sandboxExportDir?: string;
+  };
 }
+
+/**
+ * OpenCode's sessions live in its SQLite database, so a session moves as the
+ * JSON of `opencode export <id>`, its documented interchange format: exported
+ * in the sandbox after a run, and `opencode import`ed from the sandbox repo
+ * before a resume (ADR 0022). The import keeps the session id and re-homes the
+ * session to the importing project, so no rewrite is needed.
+ */
+const makeOpenCodeSessionStorage = (
+  options?: OpenCodeOptions,
+): AgentSessionStorage => {
+  const hostDir =
+    options?.sessionStorage?.hostSessionsDir ?? opencodeHostSessionsDir();
+  const exportDir = options?.sessionStorage?.sandboxExportDir ?? "/tmp";
+  const hostPath = (id: string): string => join(hostDir, `${id}.json`);
+  return makeSessionFileStorage({
+    hostRoot: hostDir,
+    hostPath: (_cwd, id) => hostPath(id),
+    // A no-sandbox run resumes from OpenCode's own database, which can't be
+    // queried by id from here; OpenCode reports an unknown id itself.
+    hostPathsById: (id) => [hostPath(id), opencodeHostDatabase()],
+    sandboxPath: (_cwd, id) => posix.join(exportDir, `${id}.json`),
+    sandboxExport: (id, path) =>
+      `opencode export ${shellEscape(id)} > ${shellEscape(path)}`,
+    sandboxImport: (_id, path) => `opencode import ${shellEscape(path)}`,
+  });
+};
 
 export const opencode = (
   model: string,
   options?: OpenCodeOptions,
-): AgentProvider => ({
+): AgentProvider & { readonly sessionStorage: AgentSessionStorage } => ({
   name: "opencode",
   env: options?.env ?? {},
-  captureSessions: false,
+  captureSessions: options?.captureSessions ?? true,
+  sessionStorage: makeOpenCodeSessionStorage(options),
 
   buildPrintCommand({
     prompt,
     dangerouslySkipPermissions,
+    resumeSession,
+    forkSession,
   }: AgentCommandOptions): PrintCommand {
     const variantFlag = options?.variant
       ? ` --variant ${shellEscape(options.variant)}`
@@ -1185,8 +1222,14 @@ export const opencode = (
     const permissionsFlag = dangerouslySkipPermissions
       ? " --dangerously-skip-permissions"
       : "";
+    // `--fork` copies the session to a new id before continuing, leaving the
+    // parent untouched; it needs `--session`.
+    const sessionFlags =
+      resumeSession === undefined
+        ? ""
+        : ` --session ${shellEscape(resumeSession)}${forkSession === true ? " --fork" : ""}`;
     return {
-      command: `opencode run --format json --model ${shellEscape(model)}${variantFlag}${agentFlag}${permissionsFlag} ${shellEscape(prompt)}`,
+      command: `opencode run --format json --model ${shellEscape(model)}${variantFlag}${agentFlag}${permissionsFlag}${sessionFlags} ${shellEscape(prompt)}`,
     };
   },
 

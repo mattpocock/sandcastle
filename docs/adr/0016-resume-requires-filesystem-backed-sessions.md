@@ -1,5 +1,7 @@
 # Resume support requires filesystem-backed session storage
 
+> OpenCode is resumable since [ADR 0022](./0022-opencode-resume-via-export-import.md), through its CLI's own `export` / `import`. The rule below still holds for other database-backed agents.
+
 ## Context
 
 Per [ADR 0012](./0012-agent-provider-owned-session-storage.md), each **agent provider** owns its **agent session** storage — the location, key encoding, and content rewriting on host↔sandbox transfer. That ADR left the door open to non-file backends, suggesting a SQLite-backed provider could "serialise the relevant row(s) to a string the same store can round-trip back."

@@ -29,7 +29,7 @@ import {
   sanitizeBranchForFilename,
 } from "./run.js";
 import type { RunOptions, RunResult } from "./run.js";
-import { claudeCode, cursor, opencode } from "./AgentProvider.js";
+import { claudeCode, cursor } from "./AgentProvider.js";
 import type { AgentProvider } from "./AgentProvider.js";
 import { Output, StructuredOutputError } from "./Output.js";
 import { claudeHostSessionPath } from "./SessionStore.js";
@@ -41,6 +41,15 @@ import { createBindMountSandboxProvider } from "./SandboxProvider.js";
 import { testStubProvider } from "./sandboxes/test-shared.js";
 
 const testSandbox = testStubProvider({ name: "test" }).provider;
+
+/** An agent provider with no session storage, so it cannot resume. */
+const noResumeAgent: AgentProvider = {
+  name: "no-resume-agent",
+  env: {},
+  captureSessions: false,
+  buildPrintCommand: () => ({ command: "true" }),
+  parseStreamLine: () => [],
+};
 
 describe("printFileDisplayStartup", () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
@@ -1107,10 +1116,10 @@ describe("output.maxRetries entry-time validation", () => {
     );
   });
 
-  it("throws when maxRetries > 0 and the agent provider lacks session resumption (opencode)", async () => {
+  it("throws when maxRetries > 0 and the agent provider lacks session resumption (no sessionStorage)", async () => {
     await expect(
       run({
-        agent: opencode("opencode-m"),
+        agent: noResumeAgent,
         sandbox: testSandbox,
         prompt: "emit your answer inside <result> tags",
         branchStrategy: { type: "head" },

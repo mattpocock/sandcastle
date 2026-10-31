@@ -1667,15 +1667,31 @@ describe("resumeSession on non-Claude providers", () => {
     expect(command).toContain("codex exec resume 'abc-123'");
   });
 
-  it("opencode ignores resumeSession in buildPrintCommand", () => {
-    const provider = opencode("opencode/big-pickle");
-    const { command } = provider.buildPrintCommand({
-      prompt: "test",
-      dangerouslySkipPermissions: true,
-      resumeSession: "abc-123",
+  it("opencode resumes a session with --session <id>", () => {
+    const { command } = opencode("opencode/big-pickle").buildPrintCommand({
+      ...opts("test"),
+      resumeSession: "ses_abc123",
     });
-    expect(command).not.toContain("--resume");
-    expect(command).not.toContain("abc-123");
+    expect(command).toContain("--session 'ses_abc123'");
+    expect(command).not.toContain("--fork");
+  });
+
+  it("opencode forks a session with --session <id> --fork", () => {
+    const { command } = opencode("opencode/big-pickle").buildPrintCommand({
+      ...opts("test"),
+      resumeSession: "ses_abc123",
+      forkSession: true,
+    });
+    expect(command).toContain("--session 'ses_abc123' --fork");
+  });
+
+  it("opencode omits --session and --fork on a fresh run", () => {
+    const { command } = opencode("opencode/big-pickle").buildPrintCommand({
+      ...opts("test"),
+      forkSession: true,
+    });
+    expect(command).not.toContain("--session");
+    expect(command).not.toContain("--fork");
   });
 
   it("cursor ignores resumeSession in buildPrintCommand", () => {
@@ -2168,8 +2184,14 @@ describe("captureSessions flag", () => {
     ).toBe(false);
   });
 
-  it("opencode has captureSessions false", () => {
-    expect(opencode("opencode-model").captureSessions).toBe(false);
+  it("opencode defaults captureSessions to true", () => {
+    expect(opencode("opencode-model").captureSessions).toBe(true);
+  });
+
+  it("opencode allows opting out of captureSessions", () => {
+    expect(
+      opencode("opencode-model", { captureSessions: false }).captureSessions,
+    ).toBe(false);
   });
 
   it("cursor has captureSessions false", () => {
@@ -2661,6 +2683,152 @@ describe("sessionStorage", () => {
     } finally {
       await rm(hostDir, { recursive: true, force: true });
       await rm(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * A bind-mount handle over local directories that stands in for the
+   * opencode CLI: `opencode export <id>` writes `exported` to the redirect
+   * target, and `opencode import <file>` records the file's content. Every
+   * other command runs for real.
+   */
+  const opencodeHandle = (
+    exported: string,
+  ): {
+    handle: BindMountSandboxHandle;
+    commands: { command: string; cwd?: string }[];
+    imported: string[];
+  } => {
+    const commands: { command: string; cwd?: string }[] = [];
+    const imported: string[] = [];
+    const base = fsBindMountHandle();
+    const handle: BindMountSandboxHandle = {
+      ...base,
+      exec: async (command, options) => {
+        commands.push({ command, cwd: options?.cwd });
+        const exportTo = /^opencode export \S+ > '(?<path>[^']+)'$/u.exec(
+          command,
+        )?.groups?.["path"];
+        if (exportTo !== undefined) {
+          await writeFile(exportTo, exported);
+          return { stdout: "", stderr: "", exitCode: 0 };
+        }
+        const importFrom = /^opencode import '(?<path>[^']+)'$/u.exec(command)
+          ?.groups?.["path"];
+        if (importFrom !== undefined) {
+          imported.push(await readFile(importFrom, "utf8"));
+          return { stdout: "", stderr: "", exitCode: 0 };
+        }
+        return base.exec(command, options);
+      },
+    };
+    return { handle, commands, imported };
+  };
+
+  it("opencode captureToHost exports the session in the sandbox and keeps the JSON on the host", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-opencode-host-"));
+    const sandboxDir = await mkdtemp(
+      join(tmpdir(), "sandcastle-opencode-sbx-"),
+    );
+    try {
+      const id = "ses_e6e178a49ffeZPPT9189e5aA1p";
+      const exported = JSON.stringify({ info: { id }, messages: [] });
+      const { handle, commands } = opencodeHandle(exported);
+      const { sessionStorage } = opencode("opencode/big-pickle", {
+        sessionStorage: {
+          hostSessionsDir: hostDir,
+          sandboxExportDir: sandboxDir,
+        },
+      });
+
+      await sessionStorage.captureToHost({
+        hostCwd: "/host/repo",
+        sandboxCwd: "/sandbox/repo",
+        sessionId: id,
+        handle,
+      });
+
+      const hostPath = join(hostDir, `${id}.json`);
+      expect(sessionStorage.hostSessionFilePath("/host/repo", id)).toBe(
+        hostPath,
+      );
+      await expect(readFile(hostPath, "utf8")).resolves.toBe(exported);
+      expect(commands).toContainEqual({
+        command: `opencode export '${id}' > '${join(sandboxDir, `${id}.json`)}'`,
+        cwd: "/sandbox/repo",
+      });
+      await expect(sessionStorage.existsOnHost("/host/repo", id)).resolves.toBe(
+        true,
+      );
+      await expect(
+        sessionStorage.readHostSession("/host/repo", id),
+      ).resolves.toBe(exported);
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it("opencode resumeIntoSandbox copies the JSON in and imports it from the sandbox repo", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-opencode-host-"));
+    const sandboxDir = await mkdtemp(
+      join(tmpdir(), "sandcastle-opencode-sbx-"),
+    );
+    try {
+      const id = "ses_e6e171324ffeeykW5t5sMlLRV4";
+      const exported = JSON.stringify({ info: { id }, messages: [] });
+      await writeFile(join(hostDir, `${id}.json`), exported);
+      const { handle, commands, imported } = opencodeHandle("");
+      const { sessionStorage } = opencode("opencode/big-pickle", {
+        sessionStorage: {
+          hostSessionsDir: hostDir,
+          sandboxExportDir: sandboxDir,
+        },
+      });
+
+      await sessionStorage.resumeIntoSandbox({
+        hostCwd: "/host/repo",
+        sandboxCwd: "/sandbox/repo",
+        sessionId: id,
+        handle,
+      });
+
+      expect(imported).toStrictEqual([exported]);
+      expect(commands).toContainEqual({
+        command: `opencode import '${join(sandboxDir, `${id}.json`)}'`,
+        cwd: "/sandbox/repo",
+      });
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it("opencode captureToHost fails with the CLI's error when the export fails", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-opencode-host-"));
+    try {
+      const failing: BindMountSandboxHandle = {
+        ...fsBindMountHandle(),
+        exec: async () => ({
+          stdout: "",
+          stderr: "Error: Session not found: ses_missing",
+          exitCode: 1,
+        }),
+      };
+      const { sessionStorage } = opencode("opencode/big-pickle", {
+        sessionStorage: { hostSessionsDir: hostDir },
+      });
+
+      await expect(
+        sessionStorage.captureToHost({
+          hostCwd: "/host/repo",
+          sandboxCwd: "/sandbox/repo",
+          sessionId: "ses_missing",
+          handle: failing,
+        }),
+      ).rejects.toThrow(/Session not found: ses_missing/u);
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
     }
   });
 });

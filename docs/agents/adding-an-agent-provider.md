@@ -41,7 +41,7 @@ Resume support is a hard requirement for new **agent providers** ([ADR 0012](../
 
 - **Resume-by-session-ID flag.** A flag that takes a previously emitted session ID and continues that session (e.g. `claude --resume <id>`, `codex exec resume <id>`, `pi --session <id>`, `opencode run --session <id>`).
 - **Session-ID round-trip stability.** The session ID emitted in the stream during a fresh run is the same string the resume flag accepts back. If the CLI mints a new ID per invocation but only persists the file/row, resume cannot work — verify the round-trip empirically before starting implementation.
-- **Filesystem-backed session storage.** The agent writes its conversation record to files addressable by session ID (for example JSONL rollout files) so Sandcastle can transfer them between **host** and **sandbox**. Agents whose session state only exists in a local database are not resumable; see [ADR 0016](../adr/0016-resume-requires-filesystem-backed-sessions.md).
+- **Filesystem-backed session storage.** The agent writes its conversation record to files addressable by session ID (for example JSONL rollout files) so Sandcastle can transfer them between **host** and **sandbox**. Agents whose session state only exists in a local database are not resumable ([ADR 0016](../adr/0016-resume-requires-filesystem-backed-sessions.md)), unless the CLI itself can export one session to a file and import it back, as OpenCode's can ([ADR 0022](../adr/0022-opencode-resume-via-export-import.md)).
 
 If any of these is missing, the agent likely cannot be supported until its CLI changes.
 
