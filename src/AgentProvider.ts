@@ -350,6 +350,12 @@ export interface AgentSessionStorage {
    * directory that was searched (for not-found errors).
    */
   findByIdOnHost(sessionId: string): Promise<HostSessionLookup>;
+  /**
+   * `false` when the agent's CLI can resume a session but has no native fork:
+   * `.fork()` then throws `ForkNotSupportedError` before any sandbox starts.
+   * Omitted means the agent forks.
+   */
+  readonly canFork?: boolean;
 }
 
 export interface AgentProvider {

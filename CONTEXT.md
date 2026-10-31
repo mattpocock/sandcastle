@@ -195,7 +195,7 @@ Continuing an **agent session** by appending new turns to the same session recor
 _Avoid_: "continue", "follow-up"
 
 **Session fork**:
-Branching an **agent session** into a new record with a new session ID, leaving the parent record byte-for-byte unchanged. Uses the **agent**'s native fork flag (`claude --fork-session`, `codex exec fork`). Exposed as `RunResult.fork()`. Isolates the session only -- not the **source branch** or **sandbox**.
+Branching an **agent session** into a new record with a new session ID, leaving the parent record byte-for-byte unchanged. Uses the **agent**'s native fork flag (`claude --fork-session`, `codex exec fork`). Exposed as `RunResult.fork()`. Isolates the session only -- not the **source branch** or **sandbox**. An **agent provider** whose CLI resumes but has no fork flag declares `canFork: false`, and `.fork()` throws `ForkNotSupportedError` for it (ADR 0021).
 _Avoid_: "branch" (overloaded with git branches), "copy session"
 
 ### Display

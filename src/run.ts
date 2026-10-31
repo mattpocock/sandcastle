@@ -11,7 +11,10 @@ import path, { join } from "node:path";
 import { styleText } from "node:util";
 import { Effect, Layer } from "effect";
 import { resolveCwd } from "./resolveCwd.js";
-import { assertResumeSessionExists } from "./resumePrecheck.js";
+import {
+  assertForkSupported,
+  assertResumeSessionExists,
+} from "./resumePrecheck.js";
 import type { AgentProvider } from "./AgentProvider.js";
 import { ClackDisplay, Display, FileDisplay } from "./Display.js";
 import type { Severity } from "./Display.js";
@@ -561,6 +564,9 @@ export async function run(
       "forkSession requires resumeSession. " +
         "Use RunResult.fork(prompt) to fork the last captured session.",
     );
+  }
+  if (options.forkSession === true) {
+    assertForkSupported(provider);
   }
 
   // Validate: output requires maxIterations === 1
