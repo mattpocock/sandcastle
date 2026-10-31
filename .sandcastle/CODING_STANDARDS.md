@@ -97,12 +97,12 @@ Instead, create a config layer using Effect for that function, then instantiate 
 `npm run lint` runs oxlint (every category but `restriction` and `nursery` as errors, type-aware, `.oxlintrc.json`) and every Effect language service diagnostic (the `tsconfig.json` plugin). The compiler itself is not ratcheted: `npm run typecheck` passes clean. Run `npm run build` first: the scripts in `.sandcastle/` and `.factory/` import `@ai-hero/sandcastle`, whose types come from `dist`, and without them type-aware rules report false `no-unsafe-*` violations. Code that broke a rule when the linter landed is counted, per file and rule, in `scripts/lint-baseline.json`. `scripts/lint-ratchet.ts` holds the code to that baseline, and the baseline only ever shrinks:
 
 - A new violation fails — a count going up, or a file or rule the baseline lacks. Fix it. Never raise the baseline.
-- A fixed violation also fails until the baseline is lowered to match. Run `npm run lint:shrink`, which lowers counts and drops entries at zero but never raises one, and commit the baseline with the fix.
+- A fixed violation passes. Lowering the baseline in the same PR is optional: after every push to `main`, the `lint-shrink` workflow runs `npm run lint:shrink` (which lowers counts and drops entries at zero but never raises one) and opens or updates a "chore(lint): shrink baseline" PR. Leave `scripts/lint-baseline.json` alone in fix PRs so they don't conflict with each other.
 - A baseline that grew against `origin/main` fails.
 
 No disable comments (`eslint-disable`, `oxlint-disable`, `@ts-ignore`, `@ts-expect-error`, `@effect-diagnostics`) outside the reviewed allowlist in `scripts/lint-ratchet-config.ts`; each one counts as `ratchet/disable-comment`. The same file names the Effect entry points (the only modules that may call `Effect.runPromise` and friends) and the test-only Effect exemptions. `.oxlintrc.json` may not grow a per-file override.
 
-To pay down debt, pick a rule or a file from `npm run lint:report`, fix every violation of it, run `npm run lint:shrink`, and land the fix and the lower baseline together. Fix behaviour-neutrally: one rule or one file per PR, no autofix sweeps across the repo.
+To pay down debt, pick a rule or a file from `npm run lint:report` and fix every violation of it. Fix behaviour-neutrally, one rule or one file per PR; `oxlint --fix` sweeps of one rule across the repo are fine.
 
 ---
 

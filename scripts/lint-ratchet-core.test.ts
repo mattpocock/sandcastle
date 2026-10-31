@@ -36,9 +36,13 @@ describe("lint ratchet", () => {
     expect(grown).toStrictEqual(["a.ts: y 0 -> 1", "b.ts: x 0 -> 1"]);
   });
 
-  it("fails on a count that fell without the baseline being lowered", () => {
-    const { stale } = compare({ "a.ts": { x: 1 } }, { "a.ts": { x: 2, y: 1 } });
-    expect(stale).toStrictEqual(["a.ts: x 2 -> 1", "a.ts: y 1 -> 0"]);
+  it("passes on a count that fell, and lists it as below the baseline", () => {
+    expect(
+      compare({ "a.ts": { x: 1 } }, { "a.ts": { x: 2, y: 1 } }),
+    ).toStrictEqual({
+      grown: [],
+      stale: ["a.ts: x 2 -> 1", "a.ts: y 1 -> 0"],
+    });
   });
 
   it("shrinks the baseline but never raises it or adds to it", () => {
