@@ -3,7 +3,7 @@ import { Effect } from "effect";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { resolveEnv } from "./EnvResolver.js";
 
 const makeDir = async () => mkdtemp(join(tmpdir(), "env-resolver-"));
@@ -21,7 +21,7 @@ describe("resolveEnv", () => {
     );
 
     const env = await runResolveEnv(dir);
-    expect(env).toEqual({
+    expect(env).toStrictEqual({
       ANTHROPIC_API_KEY: "sc-key",
       GH_TOKEN: "sc-gh",
     });
@@ -37,7 +37,7 @@ describe("resolveEnv", () => {
     const env = await runResolveEnv(dir);
     expect(env["ROOT_SECRET"]).toBeUndefined();
     expect(env["ANOTHER_ROOT_KEY"]).toBeUndefined();
-    expect(env).toEqual({});
+    expect(env).toStrictEqual({});
   });
 
   it("root .env is ignored even when .sandcastle/.env also exists", async () => {
@@ -61,17 +61,12 @@ describe("resolveEnv", () => {
     // .sandcastle/.env declares the key but with empty value
     await writeFile(join(dir, ".sandcastle", ".env"), "MY_TOKEN=\n");
 
-    const orig = process.env["MY_TOKEN"];
+    vi.stubEnv("MY_TOKEN", "from-process");
     try {
-      process.env["MY_TOKEN"] = "from-process";
       const env = await runResolveEnv(dir);
       expect(env["MY_TOKEN"]).toBe("from-process");
     } finally {
-      if (orig === undefined) {
-        delete process.env["MY_TOKEN"];
-      } else {
-        process.env["MY_TOKEN"] = orig;
-      }
+      vi.unstubAllEnvs();
     }
   });
 
@@ -92,24 +87,19 @@ describe("resolveEnv", () => {
     await mkdir(join(dir, ".sandcastle"));
     await writeFile(join(dir, ".sandcastle", ".env"), "MY_VAR=sc-val\n");
 
-    const orig = process.env["MY_VAR"];
+    vi.stubEnv("MY_VAR", "from-process");
     try {
-      process.env["MY_VAR"] = "from-process";
       const env = await runResolveEnv(dir);
       expect(env["MY_VAR"]).toBe("sc-val");
     } finally {
-      if (orig === undefined) {
-        delete process.env["MY_VAR"];
-      } else {
-        process.env["MY_VAR"] = orig;
-      }
+      vi.unstubAllEnvs();
     }
   });
 
   it("returns empty object when no .env files exist", async () => {
     const dir = await makeDir();
     const env = await runResolveEnv(dir);
-    expect(env).toEqual({});
+    expect(env).toStrictEqual({});
   });
 
   it("ignores comments and blank lines in .sandcastle/.env", async () => {
@@ -121,7 +111,7 @@ describe("resolveEnv", () => {
     );
 
     const env = await runResolveEnv(dir);
-    expect(env).toEqual({ KEY1: "val1", KEY2: "val2" });
+    expect(env).toStrictEqual({ KEY1: "val1", KEY2: "val2" });
   });
 
   it("does no validation — returns whatever keys are present in .sandcastle/.env", async () => {
@@ -134,7 +124,7 @@ describe("resolveEnv", () => {
     );
 
     const env = await runResolveEnv(dir);
-    expect(env).toEqual({
+    expect(env).toStrictEqual({
       NPM_TOKEN: "npm123",
       DATABASE_URL: "pg://localhost",
     });
@@ -185,7 +175,7 @@ describe("resolveEnv", () => {
     await writeFile(join(dir, ".sandcastle", ".env"), 'KEY=""\n');
 
     const env = await runResolveEnv(dir);
-    expect(env).toEqual({});
+    expect(env).toStrictEqual({});
   });
 
   it("process.env fallback works for keys in .sandcastle/.env too", async () => {
@@ -193,17 +183,12 @@ describe("resolveEnv", () => {
     await mkdir(join(dir, ".sandcastle"));
     await writeFile(join(dir, ".sandcastle", ".env"), "FALLBACK_KEY=\n");
 
-    const orig = process.env["FALLBACK_KEY"];
+    vi.stubEnv("FALLBACK_KEY", "from-env");
     try {
-      process.env["FALLBACK_KEY"] = "from-env";
       const env = await runResolveEnv(dir);
       expect(env["FALLBACK_KEY"]).toBe("from-env");
     } finally {
-      if (orig === undefined) {
-        delete process.env["FALLBACK_KEY"];
-      } else {
-        process.env["FALLBACK_KEY"] = orig;
-      }
+      vi.unstubAllEnvs();
     }
   });
 
