@@ -481,6 +481,46 @@ describe("forkSession validation", () => {
   });
 });
 
+describe("timeout option validation", () => {
+  it("rejects idleTimeoutSeconds: 0 before starting anything", async () => {
+    await expect(
+      run({
+        agent: claudeCode("claude-opus-4-8"),
+        sandbox: testSandbox,
+        prompt: "test",
+        branchStrategy: { type: "head" },
+        idleTimeoutSeconds: 0,
+      }),
+    ).rejects.toThrow(
+      "idleTimeoutSeconds must be a positive number of seconds. Received: 0",
+    );
+  });
+
+  it("rejects a negative completionTimeoutSeconds", async () => {
+    await expect(
+      run({
+        agent: claudeCode("claude-opus-4-8"),
+        sandbox: testSandbox,
+        prompt: "test",
+        branchStrategy: { type: "head" },
+        completionTimeoutSeconds: -1,
+      }),
+    ).rejects.toThrow("completionTimeoutSeconds must be a positive number");
+  });
+
+  it("rejects timeouts.gitSetupMs: NaN", async () => {
+    await expect(
+      run({
+        agent: claudeCode("claude-opus-4-8"),
+        sandbox: testSandbox,
+        prompt: "test",
+        branchStrategy: { type: "head" },
+        timeouts: { gitSetupMs: Number.NaN },
+      }),
+    ).rejects.toThrow("timeouts.gitSetupMs must be a positive number");
+  });
+});
+
 describe("copyToWorktree with head branch strategy", () => {
   it("throws a runtime error when copyToWorktree is provided with head strategy", async () => {
     await expect(

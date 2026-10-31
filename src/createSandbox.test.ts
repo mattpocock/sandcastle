@@ -480,6 +480,59 @@ describe("createSandbox", () => {
     }
   });
 
+  it("rejects invalid timeouts before creating the worktree", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-timeouts-validate-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    try {
+      await expect(
+        createSandbox({
+          branch: "timeouts-validate",
+          sandbox: testSandbox,
+          cwd: hostDir,
+          timeouts: { copyToWorktreeMs: 0 },
+        }),
+      ).rejects.toThrow("timeouts.copyToWorktreeMs must be a positive number");
+      expect(existsSync(join(hostDir, ".sandcastle", "worktrees"))).toBe(false);
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("sandbox.run() rejects idleTimeoutSeconds: 0", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-idle-validate-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    let agentRan = false;
+    const sandbox = await createSandbox({
+      branch: "idle-validate",
+      sandbox: testSandbox,
+      cwd: hostDir,
+      _test: {
+        buildSandbox: (sandboxDir) =>
+          makeMockAgentLayer(sandboxDir, async () => {
+            agentRan = true;
+            return "ok";
+          }),
+      },
+    });
+    try {
+      await expect(
+        sandbox.run({
+          agent: testProvider,
+          prompt: "do something",
+          idleTimeoutSeconds: 0,
+        }),
+      ).rejects.toThrow(
+        "idleTimeoutSeconds must be a positive number of seconds. Received: 0",
+      );
+      expect(agentRan).toBe(false);
+    } finally {
+      await sandbox.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
   it("sandbox.run() rejects resumeSession with maxIterations > 1", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-resume-validate-"));
     await initRepo(hostDir);

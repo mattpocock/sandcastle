@@ -28,7 +28,7 @@ export const resolvePrompt = (
   if (prompt !== undefined && promptFile !== undefined) {
     return Effect.fail(
       new PromptError({
-        message: "Cannot provide both --prompt and --prompt-file",
+        message: "Cannot provide both prompt and promptFile",
       }),
     );
   }

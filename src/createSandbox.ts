@@ -59,6 +59,7 @@ import { resolveCwd } from "./resolveCwd.js";
 import { patchGitMountsForWindows } from "./mountUtils.js";
 import { assertResumeSessionExists } from "./resumePrecheck.js";
 import { registerShutdown } from "./shutdownRegistry.js";
+import { validateTimeoutOptions } from "./validateTimeouts.js";
 
 export interface CreateSandboxOptions {
   /** Explicit branch for the worktree (required). */
@@ -379,6 +380,8 @@ const buildSandboxHandle = (
       // The container was started before this agent was chosen, so the
       // agent's env is applied to its own process instead (see withAgentEnv).
       const provider = withAgentEnv(runOptions.agent, ctx.sandboxProviderEnv);
+
+      validateTimeoutOptions(runOptions);
 
       // Validate: resumeSession + maxIterations > 1 is not allowed.
       if (runOptions.resumeSession && maxIterations > 1) {
@@ -781,6 +784,7 @@ export const createSandboxFromWorktree = async (
 ): Promise<Sandbox> => {
   const { branch, worktreePath, hostRepoDir } = options;
   const isTestMode = !!options._test?.buildSandbox;
+  validateTimeoutOptions(options);
 
   // 1. Copy files if requested (bind-mount only)
   if (
@@ -951,6 +955,7 @@ export const createSandbox = async (
   const { branch } = options;
   const isTestMode = !!options._test?.buildSandbox;
   const isIsolated = options.sandbox.tag === "isolated";
+  validateTimeoutOptions(options);
 
   // Resolve cwd, create the worktree, and set up the sandbox in a single Effect.
   // Once the worktree exists, any later failure (e.g. a missing image surfacing

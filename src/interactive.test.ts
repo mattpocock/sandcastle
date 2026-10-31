@@ -368,6 +368,23 @@ describe("interactive()", () => {
     expect(receivedArgs).toContain("prompt from file");
   });
 
+  it("rejects invalid timeouts before launching the agent", async () => {
+    let launched = false;
+    const provider = makeTestProvider(async () => {
+      launched = true;
+      return { exitCode: 0 };
+    });
+
+    await expect(
+      interactive({
+        agent: claudeCode("claude-opus-4-8"),
+        sandbox: provider,
+        timeouts: { mergeToHostMs: 0 },
+      }),
+    ).rejects.toThrow("timeouts.mergeToHostMs must be a positive number");
+    expect(launched).toBe(false);
+  });
+
   it("throws when both prompt and promptFile are provided", async () => {
     const promptPath = join(hostDir, "test-prompt.md");
     writeFileSync(promptPath, "prompt from file");
@@ -381,7 +398,7 @@ describe("interactive()", () => {
         prompt: "inline prompt",
         promptFile: promptPath,
       }),
-    ).rejects.toThrow("Cannot provide both");
+    ).rejects.toThrow("Cannot provide both prompt and promptFile");
   });
 
   it("substitutes {{KEY}} placeholders in prompts", async () => {

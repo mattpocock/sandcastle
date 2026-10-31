@@ -57,6 +57,7 @@ import {
 import { noSandbox } from "./sandboxes/no-sandbox.js";
 import { raceAbortSignal } from "./raceAbortSignal.js";
 import type { Timeouts } from "./run.js";
+import { validateTimeoutOptions } from "./validateTimeouts.js";
 
 /** Branch strategies valid for createWorktree — head is excluded. */
 export type WorktreeBranchStrategy =
@@ -215,6 +216,8 @@ export interface Worktree {
 export const createWorktree = async (
   options: CreateWorktreeOptions,
 ): Promise<Worktree> => {
+  validateTimeoutOptions(options);
+
   const branch =
     options.branchStrategy.type === "branch"
       ? options.branchStrategy.branch
@@ -513,6 +516,8 @@ export const createWorktree = async (
     const { prompt, promptFile, hooks, agent: provider } = opts;
     const sandboxProvider = opts.sandbox;
     const maxIterations = opts.maxIterations ?? 1;
+
+    validateTimeoutOptions(opts);
 
     if (opts.resumeSession && maxIterations > 1) {
       throw new Error(

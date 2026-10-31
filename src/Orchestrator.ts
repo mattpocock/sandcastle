@@ -116,7 +116,7 @@ const invokeAgent = (
             yield* Deferred.fail(
               timeoutSignal,
               new AgentIdleTimeoutError({
-                message: `Agent idle for ${idleTimeoutMs / 1000} seconds — no output received. Consider increasing the idle timeout with --idle-timeout.`,
+                message: `Agent idle for ${idleTimeoutMs / 1000} seconds — no output received. Increase the idleTimeoutSeconds option to allow longer silences.`,
                 timeoutMs: idleTimeoutMs,
               }),
             );

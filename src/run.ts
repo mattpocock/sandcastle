@@ -48,6 +48,7 @@ import type {
 } from "./Output.js";
 import { StructuredOutputError } from "./Output.js";
 import { extractStructuredOutput } from "./extractStructuredOutput.js";
+import { validateTimeoutOptions } from "./validateTimeouts.js";
 
 /**
  * Build the token-efficient feedback prompt sent to the agent when retrying
@@ -512,6 +513,9 @@ export async function run(
       ? { type: "merge-to-head" }
       : { type: "head" });
   const effectiveBranchType = branchStrategy.type;
+
+  // Validate: timeouts must be positive (0 would fire before the agent's first output)
+  validateTimeoutOptions(options);
 
   // Validate: head strategy is not supported with isolated providers
   if (effectiveBranchType === "head" && options.sandbox.tag === "isolated") {
