@@ -321,12 +321,10 @@ describe("WorktreeDockerSandboxFactory", () => {
             yield* Effect.promise(() =>
               writeFile(join(worktreePathOf(info), "dirty.txt"), "dirty"),
             );
-            return yield* Effect.fail(
-              new AgentIdleTimeoutError({
-                message: "timed out",
-                timeoutMs: 30_000,
-              }),
-            );
+            return yield* new AgentIdleTimeoutError({
+              message: "timed out",
+              timeoutMs: 30_000,
+            });
           }),
         );
       }).pipe(Effect.provide(makeLayer())),
@@ -351,9 +349,7 @@ describe("WorktreeDockerSandboxFactory", () => {
             yield* Effect.promise(() =>
               writeFile(join(worktreePathOf(info), "dirty.txt"), "dirty"),
             );
-            return yield* Effect.fail(
-              new AgentError({ message: "agent failed" }),
-            );
+            return yield* new AgentError({ message: "agent failed" });
           }),
         );
       }).pipe(Effect.provide(makeLayer())),

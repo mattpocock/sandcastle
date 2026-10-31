@@ -145,13 +145,11 @@ export const syncIn = (
           cwd: worktreePath,
         })).stdout.trim();
 
-        if (hostHead !== sandboxHead) {
-          yield* Effect.fail(
-            new SyncError({
+        return yield* hostHead === sandboxHead
+          ? Effect.void
+          : new SyncError({
               message: `HEAD mismatch after sync-in: host=${hostHead} sandbox=${sandboxHead}`,
-            }),
-          );
-        }
+            });
       }),
       // Clean up host-side bundle temp dir (runs regardless of success/failure)
       Effect.promise(() => rm(bundleDir, { recursive: true, force: true })),
