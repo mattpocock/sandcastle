@@ -52,7 +52,8 @@
     "test-vercel": "npm run build && tsx --env-file=.sandcastle/.env .sandcastle/test-vercel.ts",
     "test-interactive": "npm run build && tsx --env-file=.sandcastle/.env .sandcastle/test-interactive.ts",
     "verify": "tsx .sandcastle/verify/verify.ts",
-    "verify:world": "npm run build >/dev/null && tsx .sandcastle/verify/verify.ts world"
+    "verify:world": "npm run build >/dev/null && tsx .sandcastle/verify/verify.ts world",
+    "coverage:gate": "tsx scripts/coverage-gate.ts"
   },
   "keywords": [
     "cli",
@@ -78,6 +79,7 @@
     "@effect/printer-ansi": "^0.48.0",
     "@types/node": "^25.5.0",
     "@typescript/native": "npm:typescript@7.0.2",
+    "@vitest/coverage-v8": "^3.2.4",
     "dependency-cruiser": "^18.7.0",
     "effect": "^3.20.0",
     "husky": "^9.1.7",
