@@ -20,14 +20,12 @@ const NO_CONFIG_LOCK_FLAGS = [
   "push.autoSetupRemote=false",
 ];
 
+const pad = (n: number) => String(n).padStart(2, "0");
+
 /** Format a timestamp as YYYYMMDD-HHMMSS */
-const formatTimestamp = (date: Date): string => {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return (
-    `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-` +
-    `${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
-  );
-};
+const formatTimestamp = (date: Date): string =>
+  `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-` +
+  `${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
 
 /**
  * Short random hex suffix appended to generated temp branch names. Three

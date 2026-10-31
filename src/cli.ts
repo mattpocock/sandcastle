@@ -159,6 +159,13 @@ const choiceToTriBool = (
 ): Option.Option<boolean> =>
   opt._tag === "Some" ? Option.some(opt.value === "true") : Option.none();
 
+const failIfNonInteractive = (flag: string) =>
+  Effect.fail(
+    new InitError({
+      message: `${flag} is required in non-interactive mode (no TTY detected).`,
+    }),
+  );
+
 const initCommand = Command.make(
   "init",
   {
@@ -251,12 +258,6 @@ const initCommand = Command.make(
       );
 
       const isInteractive = process.stdin.isTTY === true;
-      const failIfNonInteractive = (flag: string) =>
-        Effect.fail(
-          new InitError({
-            message: `${flag} is required in non-interactive mode (no TTY detected).`,
-          }),
-        );
 
       // Tri-state confirm: CLI flag wins; otherwise prompt interactively (or
       // fail fast in non-interactive mode naming the missing flag). Cancelling
