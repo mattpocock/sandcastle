@@ -1,5 +1,12 @@
 import { NodeContext, NodeFileSystem } from "@effect/platform-node";
-import { appendFileSync, mkdirSync } from "node:fs";
+import {
+  appendFileSync,
+  closeSync,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readSync,
+} from "node:fs";
 import path, { join } from "node:path";
 import { styleText } from "node:util";
 import { Effect, Layer } from "effect";
@@ -292,6 +299,29 @@ export const buildAgentStreamHandler = (
   };
 };
 
+/**
+ * Whether the file's last byte is something other than a newline. The log file
+ * has two writers: FileDisplay streams agent prose as chunks with no trailing
+ * newline, and the verbose sink appends raw lines. Reading the file's actual
+ * tail lets the sink start each raw line on a fresh line without sharing state
+ * with FileDisplay. A missing or empty file counts as "not mid-line".
+ */
+const fileEndsMidLine = (filePath: string): boolean => {
+  let fd: number | undefined;
+  try {
+    fd = openSync(filePath, "r");
+    const { size } = fstatSync(fd);
+    if (size === 0) return false;
+    const lastByte = Buffer.alloc(1);
+    readSync(fd, lastByte, 0, 1, size - 1);
+    return lastByte[0] !== 0x0a;
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+};
+
 const buildVerboseRawLineSink = (
   logging: LoggingOption,
 ): ((line: string) => void) => {
@@ -307,7 +337,8 @@ const buildVerboseRawLineSink = (
     }
     return (line) => {
       try {
-        appendFileSync(logPath, line + "\n");
+        const prefix = fileEndsMidLine(logPath) ? "\n" : "";
+        appendFileSync(logPath, prefix + line + "\n");
       } catch {
         // Swallow — verbose-mode I/O errors must not kill the run.
       }

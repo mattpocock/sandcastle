@@ -10,6 +10,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import {
+  buildAgentStreamHandler,
   buildCompletionMessage,
   buildContextWindowLines,
   buildLogFilename,
@@ -137,6 +138,51 @@ describe("printFileDisplayStartup", () => {
     expect(allOutput).toContain(
       "tail -f /some/other/repo/.sandcastle/logs/main.log",
     );
+  });
+});
+
+describe("buildAgentStreamHandler (verbose file mode)", () => {
+  const rawEvent = (line: string) =>
+    ({ type: "raw", line, iteration: 1, timestamp: new Date() }) as const;
+
+  it("starts a raw line on a fresh line when the log ends mid-line", () => {
+    const dir = mkdtempSync(join(tmpdir(), "verbose-sink-"));
+    try {
+      const logPath = join(dir, "run.log");
+      // FileDisplay streams agent prose as raw chunks with no trailing newline.
+      writeFileSync(logPath, "I'll commit the result myself.");
+      const handler = buildAgentStreamHandler({
+        type: "file",
+        path: logPath,
+        verbose: true,
+      })!;
+      handler(rawEvent('{"type":"assistant"}'));
+      expect(readFileSync(logPath, "utf-8")).toBe(
+        'I\'ll commit the result myself.\n{"type":"assistant"}\n',
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("adds no blank line when the log already ends with a newline", () => {
+    const dir = mkdtempSync(join(tmpdir(), "verbose-sink-"));
+    try {
+      const logPath = join(dir, "run.log");
+      writeFileSync(logPath, "Agent started\n");
+      const handler = buildAgentStreamHandler({
+        type: "file",
+        path: logPath,
+        verbose: true,
+      })!;
+      handler(rawEvent('{"type":"system"}'));
+      handler(rawEvent('{"type":"assistant"}'));
+      expect(readFileSync(logPath, "utf-8")).toBe(
+        'Agent started\n{"type":"system"}\n{"type":"assistant"}\n',
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
