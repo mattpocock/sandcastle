@@ -2353,6 +2353,17 @@ describe("InitService scaffold", () => {
       expect(result.mainFilename).toBe("main.mts");
     });
 
+    it.each(["{ not json", "null", "[]"])(
+      "scaffolds main.mts when package.json is %s",
+      async (content) => {
+        const dir = await makeDir();
+        await writeFile(join(dir, "package.json"), content);
+        const result = await runScaffold(dir);
+
+        expect(result.mainFilename).toBe("main.mts");
+      },
+    );
+
     it("scaffolds main.ts when package.json has type: module", async () => {
       const dir = await makeDir();
       await writeFile(

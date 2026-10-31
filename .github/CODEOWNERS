@@ -1,0 +1,3 @@
+# The public API report (scripts/api-report.ts). Any change to Sandcastle's
+# public surface changes it, so it needs Matt's review.
+/api-report/ @mattpocock

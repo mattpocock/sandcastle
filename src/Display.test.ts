@@ -264,7 +264,7 @@ describe("FileDisplay", () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const d = yield* Display;
-        yield* d.spinner("Building image", Effect.succeed(undefined));
+        yield* d.spinner("Building image", Effect.void);
       }).pipe(Effect.provide(layer)),
     );
 

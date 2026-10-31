@@ -19,7 +19,13 @@ describe("PromptArgumentSubstitution", () => {
     return { layer, displayRef };
   };
 
-  const run = async (
+  /** The messages of the warn-level status entries a run displayed. */
+  const warningsIn = (entries: readonly DisplayEntry[]): string[] =>
+    entries.flatMap((e) =>
+      e._tag === "status" && e.severity === "warn" ? [e.message] : [],
+    );
+
+  const run = (
     prompt: string,
     args: Record<string, string | number | boolean>,
     layer: Layer.Layer<import("./Display.js").Display>,
@@ -116,11 +122,9 @@ describe("PromptArgumentSubstitution", () => {
     const { layer, displayRef } = setup();
     await run("Hello world", { UNUSED: "value" }, layer);
     const entries = await Effect.runPromise(Ref.get(displayRef));
-    const warnings = entries.filter(
-      (e) => e._tag === "status" && e.severity === "warn",
-    );
+    const warnings = warningsIn(entries);
     expect(warnings).toHaveLength(1);
-    expect((warnings[0] as { message: string }).message).toContain("UNUSED");
+    expect(warnings[0]).toContain("UNUSED");
   });
 
   it("passes through a prompt with no placeholders and no args", async () => {
@@ -177,9 +181,7 @@ describe("PromptArgumentSubstitution", () => {
     const { layer, displayRef } = setup();
     await run("{{ NAME }}", { NAME: "world" }, layer);
     const entries = await Effect.runPromise(Ref.get(displayRef));
-    const warnings = entries.filter(
-      (e) => e._tag === "status" && e.severity === "warn",
-    );
+    const warnings = warningsIn(entries);
     expect(warnings).toHaveLength(0);
   });
 
@@ -201,9 +203,7 @@ describe("PromptArgumentSubstitution", () => {
     const { layer, displayRef } = setup();
     await run("No placeholders", { FOO: "1", BAR: "2" }, layer);
     const entries = await Effect.runPromise(Ref.get(displayRef));
-    const warnings = entries.filter(
-      (e) => e._tag === "status" && e.severity === "warn",
-    );
+    const warnings = warningsIn(entries);
     expect(warnings).toHaveLength(2);
   });
 
@@ -217,12 +217,10 @@ describe("PromptArgumentSubstitution", () => {
       ).pipe(Effect.provide(layer)),
     );
     const entries = await Effect.runPromise(Ref.get(displayRef));
-    const warnings = entries.filter(
-      (e) => e._tag === "status" && e.severity === "warn",
-    );
+    const warnings = warningsIn(entries);
     // Only USER_ARG should warn — SOURCE_BRANCH and TARGET_BRANCH are silent
     expect(warnings).toHaveLength(1);
-    expect((warnings[0] as { message: string }).message).toContain("USER_ARG");
+    expect(warnings[0]).toContain("USER_ARG");
   });
 
   it("still substitutes silent keys when they appear in the prompt", async () => {

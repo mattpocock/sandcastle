@@ -44,4 +44,17 @@ describe("PromptResolver", () => {
     expect(error).toBeInstanceOf(PromptError);
     expect(error.message).toContain("prompt");
   });
+
+  it("fails with a PromptError naming the file when promptFile can't be read", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "prompt-resolver-"));
+    const promptPath = join(dir, "missing.md");
+
+    const error = await run(
+      resolvePrompt({ promptFile: promptPath }).pipe(Effect.flip),
+    );
+    expect(error).toBeInstanceOf(PromptError);
+    expect(error.message).toContain(
+      `Failed to read prompt from ${promptPath}: `,
+    );
+  });
 });
