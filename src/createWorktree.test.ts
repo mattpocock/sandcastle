@@ -22,6 +22,7 @@ import type {
 import { claudeCode, codex } from "./AgentProvider.js";
 import {
   createBindMountSandboxProvider,
+  createIsolatedSandboxProvider,
   type BindMountSandboxHandle,
   type InteractiveExecOptions,
   type ExecResult,
@@ -29,6 +30,7 @@ import {
 } from "./SandboxProvider.js";
 import { encodeProjectPath } from "./SessionStore.js";
 import { makeLocalSandbox } from "./testSandbox.js";
+import { testIsolated } from "./sandboxes/test-isolated.js";
 
 const execAsync = promisify(exec);
 
@@ -1481,5 +1483,125 @@ describe("worktree.createSandbox()", () => {
       // @ts-expect-error - branch should not be accepted
       branch: "should-not-work",
     };
+  });
+});
+
+describe("isolated provider: createWorktree({ copyToWorktree })", () => {
+  /** Reads `secret.txt` from where the agent runs inside the sandbox. */
+  const readSecret = async (cwd: string) =>
+    existsSync(join(cwd, "secret.txt"))
+      ? (await readFile(join(cwd, "secret.txt"), "utf-8")).trim()
+      : "MISSING";
+
+  /**
+   * An isolated provider whose agent records what `secret.txt` holds inside
+   * the sandbox. Everything else passes through to testIsolated().
+   */
+  const makeIsolatedProvider = (seen: { secret?: string }) => {
+    const base = testIsolated();
+    return createIsolatedSandboxProvider({
+      name: "test-isolated-copy",
+      create: async (opts) => {
+        const handle = await base.create(opts);
+        return {
+          ...handle,
+          exec: async (command, execOptions) => {
+            if (!command.startsWith("claude ")) {
+              return handle.exec(command, execOptions);
+            }
+            seen.secret = await readSecret(
+              execOptions?.cwd ?? handle.worktreePath,
+            );
+            const streamOutput = toStreamJson("done");
+            for (const line of streamOutput.split("\n")) {
+              execOptions?.onLine?.(line);
+            }
+            return { stdout: streamOutput, stderr: "", exitCode: 0 };
+          },
+          interactiveExec: async (_args, interactiveOptions) => {
+            seen.secret = await readSecret(
+              interactiveOptions.cwd ?? handle.worktreePath,
+            );
+            return { exitCode: 0 };
+          },
+        };
+      },
+    });
+  };
+
+  /** A host repo with a gitignored `secret.txt`, so no git bundle carries it. */
+  const makeHostRepo = async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-isolated-copy-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, ".gitignore", "secret.txt\n", "ignore secret");
+    await writeFile(join(hostDir, "secret.txt"), "host secret");
+    return hostDir;
+  };
+
+  it("wt.run() sees the copied file inside the sandbox", async () => {
+    const hostDir = await makeHostRepo();
+    const seen: { secret?: string } = {};
+    const ws = await createWorktree({
+      branchStrategy: { type: "branch", branch: "isolated-copy-run" },
+      cwd: hostDir,
+      copyToWorktree: ["secret.txt"],
+    });
+
+    try {
+      await ws.run({
+        agent: claudeCode("claude-opus-4-8"),
+        sandbox: makeIsolatedProvider(seen),
+        prompt: "read the secret",
+        maxIterations: 1,
+      });
+      expect(seen.secret).toBe("host secret");
+    } finally {
+      await ws.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("wt.interactive() sees the copied file inside the sandbox", async () => {
+    const hostDir = await makeHostRepo();
+    const seen: { secret?: string } = {};
+    const ws = await createWorktree({
+      branchStrategy: { type: "branch", branch: "isolated-copy-interactive" },
+      cwd: hostDir,
+      copyToWorktree: ["secret.txt"],
+    });
+
+    try {
+      await ws.interactive({
+        agent: claudeCode("claude-opus-4-8"),
+        sandbox: makeIsolatedProvider(seen),
+        prompt: "read the secret",
+      });
+      expect(seen.secret).toBe("host secret");
+    } finally {
+      await ws.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("wt.createSandbox() sees the copied file inside the sandbox", async () => {
+    const hostDir = await makeHostRepo();
+    const ws = await createWorktree({
+      branchStrategy: { type: "branch", branch: "isolated-copy-sandbox" },
+      cwd: hostDir,
+      copyToWorktree: ["secret.txt"],
+    });
+
+    try {
+      const sandbox = await ws.createSandbox({ sandbox: testIsolated() });
+      try {
+        const result = await sandbox.exec("cat secret.txt || echo MISSING");
+        expect(result.stdout.trim()).toBe("host secret");
+      } finally {
+        await sandbox.close();
+      }
+    } finally {
+      await ws.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
   });
 });

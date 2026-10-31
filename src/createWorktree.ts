@@ -376,6 +376,8 @@ export const createWorktree = async (
             provider: resolvedSandbox,
             hostRepoDir: worktreeInfo.path,
             env: effectiveEnv,
+            copyPaths: options.copyToWorktree,
+            copySourceDir: hostRepoDir,
           }),
         );
         handle = startResult.handle;
@@ -580,6 +582,8 @@ export const createWorktree = async (
           provider: sandboxProvider,
           hostRepoDir: worktreeInfo.path,
           env: effectiveEnv,
+          copyPaths: options.copyToWorktree,
+          copySourceDir: hostRepoDir,
         });
         handle = startResult.handle;
         sandboxRepoDir = startResult.worktreePath;
@@ -761,7 +765,12 @@ export const createWorktree = async (
       hostRepoDir,
       sandbox: opts.sandbox,
       hooks: opts.hooks,
-      copyToWorktree: opts.copyToWorktree,
+      // Isolated sandboxes sync in via git bundle, so the worktree's own
+      // copyToWorktree files (often gitignored) must be copied in as well.
+      copyToWorktree:
+        opts.sandbox.tag === "isolated"
+          ? [...(options.copyToWorktree ?? []), ...(opts.copyToWorktree ?? [])]
+          : opts.copyToWorktree,
       timeouts: opts.timeouts,
       branchStrategy: options.branchStrategy,
       _test: opts._test,
