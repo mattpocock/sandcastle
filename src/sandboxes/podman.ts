@@ -328,20 +328,20 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
           args.push(containerName, "sh", "-c", command);
 
           return new Promise((resolve, reject) => {
-            const proc = spawn("podman", args, {
-              stdio: [
-                opts?.stdin === undefined ? "ignore" : "pipe",
-                "pipe",
-                "pipe",
-              ],
-            });
+            const stdin = opts?.stdin;
+            // Two literal `stdio` tuples, so the types know stdout and stderr
+            // are always piped.
+            const proc =
+              stdin === undefined
+                ? spawn("podman", args, { stdio: ["ignore", "pipe", "pipe"] })
+                : spawn("podman", args, { stdio: ["pipe", "pipe", "pipe"] });
 
-            if (opts?.stdin !== undefined) {
-              proc.stdin!.write(opts.stdin);
-              proc.stdin!.end();
+            if (stdin !== undefined) {
+              proc.stdin?.write(stdin);
+              proc.stdin?.end();
             }
 
-            proc.on("error", (error) => {
+            proc.on("error", (error: Error) => {
               reject(new Error(`podman exec failed: ${error.message}`));
             });
 
@@ -349,15 +349,15 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
               const { onLine } = opts;
               const stdoutTail = new BoundedTail(maxOutputTailChars, "\n");
               const stderrTail = new BoundedTail(maxOutputTailChars, "");
-              const rl = createInterface({ input: proc.stdout! });
+              const rl = createInterface({ input: proc.stdout });
               rl.on("line", (line) => {
                 stdoutTail.push(line);
                 onLine(line);
               });
-              proc.stderr!.on("data", (chunk: Buffer) => {
+              proc.stderr.on("data", (chunk: Buffer) => {
                 stderrTail.push(chunk.toString());
               });
-              proc.on("close", (code) => {
+              proc.on("close", (code: number | null) => {
                 resolve({
                   stdout: stdoutTail.toString(),
                   stderr: stderrTail.toString(),
@@ -367,13 +367,13 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
             } else {
               const stdoutChunks: string[] = [];
               const stderrChunks: string[] = [];
-              proc.stdout!.on("data", (chunk: Buffer) => {
+              proc.stdout.on("data", (chunk: Buffer) => {
                 stdoutChunks.push(chunk.toString());
               });
-              proc.stderr!.on("data", (chunk: Buffer) => {
+              proc.stderr.on("data", (chunk: Buffer) => {
                 stderrChunks.push(chunk.toString());
               });
-              proc.on("close", (code) => {
+              proc.on("close", (code: number | null) => {
                 resolve({
                   stdout: stdoutChunks.join(""),
                   stderr: stderrChunks.join(""),
@@ -509,10 +509,11 @@ const checkPodmanMachine = async (): Promise<void> =>
           return;
         }
         try {
-          const machines = JSON.parse(stdout) as {
-            Running?: boolean;
-          }[];
-          if (machines.some((m) => m.Running)) {
+          const machines: unknown = JSON.parse(stdout);
+          if (
+            Array.isArray(machines) &&
+            machines.some((m) => isRunningMachine(m))
+          ) {
             resolve();
           } else {
             reject(podmanMachineError());
@@ -523,3 +524,10 @@ const checkPodmanMachine = async (): Promise<void> =>
       },
     );
   });
+
+/** One entry of `podman machine list --format json` that reports it is running. */
+const isRunningMachine = (machine: unknown): boolean =>
+  typeof machine === "object" &&
+  machine !== null &&
+  "Running" in machine &&
+  machine.Running === true;

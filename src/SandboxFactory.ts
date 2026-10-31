@@ -312,13 +312,13 @@ const attachPreservedPath = <E>(
         message: e.message,
         timeoutMs: e.timeoutMs,
         preservedWorktreePath: path,
-      }) as unknown as E | SandboxError;
+      });
     }
     if (e instanceof AgentError) {
       return new AgentError({
         message: e.message,
         preservedWorktreePath: path,
-      }) as unknown as E | SandboxError;
+      });
     }
   }
   return e;
@@ -350,12 +350,11 @@ export const resolveGitMounts = (
     }
     // Worktree: .git is a file with "gitdir: <path>"
     const content = (yield* fs.readFileString(gitPath)).trim();
-    const match = /^gitdir:\s*(.+)$/.exec(content);
-    if (!match) {
+    const gitdirPath = /^gitdir:\s*(.+)$/.exec(content)?.[1];
+    if (gitdirPath === undefined) {
       // Unrecognized format — fall back to mounting the file as-is
       return [{ hostPath: gitPath, sandboxPath: gitPath }];
     }
-    const gitdirPath = match[1]!;
     // gitdirPath is like /path/to/repo/.git/worktrees/<name>
     // Mount both the .git file and the parent .git directory
     const parentGitDir = resolve(gitdirPath, "..", "..");

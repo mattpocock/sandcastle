@@ -11,7 +11,8 @@
  * permissions themselves.
  */
 
-import { spawn, type StdioOptions } from "node:child_process";
+import { spawn } from "node:child_process";
+import type { StdioOptions } from "node:child_process";
 import { createInterface } from "node:readline";
 import type {
   NoSandboxProvider,
@@ -80,23 +81,31 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
               };
 
         return new Promise((resolve, reject) => {
-          const proc = spawn(plan.file, plan.args, {
+          const spawnOptions = {
             cwd,
             env: plan.env,
-            stdio: [
-              opts?.stdin === undefined ? "ignore" : "pipe",
-              "pipe",
-              "pipe",
-            ],
             windowsVerbatimArguments: plan.windowsVerbatimArguments,
-          });
+          };
+          const stdin = opts?.stdin;
+          // Two literal `stdio` tuples, so the types know stdout and stderr
+          // are always piped.
+          const proc =
+            stdin === undefined
+              ? spawn(plan.file, plan.args, {
+                  ...spawnOptions,
+                  stdio: ["ignore", "pipe", "pipe"],
+                })
+              : spawn(plan.file, plan.args, {
+                  ...spawnOptions,
+                  stdio: ["pipe", "pipe", "pipe"],
+                });
 
-          if (opts?.stdin !== undefined) {
-            proc.stdin!.write(opts.stdin);
-            proc.stdin!.end();
+          if (stdin !== undefined) {
+            proc.stdin?.write(stdin);
+            proc.stdin?.end();
           }
 
-          proc.on("error", (error) => {
+          proc.on("error", (error: Error) => {
             reject(new Error(`exec failed: ${error.message}`));
           });
 
@@ -104,15 +113,15 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
             const { onLine } = opts;
             const stdoutTail = new BoundedTail(maxOutputTailChars, "\n");
             const stderrTail = new BoundedTail(maxOutputTailChars, "");
-            const rl = createInterface({ input: proc.stdout! });
+            const rl = createInterface({ input: proc.stdout });
             rl.on("line", (line) => {
               stdoutTail.push(line);
               onLine(line);
             });
-            proc.stderr!.on("data", (chunk: Buffer) => {
+            proc.stderr.on("data", (chunk: Buffer) => {
               stderrTail.push(chunk.toString());
             });
-            proc.on("close", (code) => {
+            proc.on("close", (code: number | null) => {
               resolve({
                 stdout: stdoutTail.toString(),
                 stderr: stderrTail.toString(),
@@ -122,13 +131,13 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
           } else {
             const stdoutChunks: string[] = [];
             const stderrChunks: string[] = [];
-            proc.stdout!.on("data", (chunk: Buffer) => {
+            proc.stdout.on("data", (chunk: Buffer) => {
               stdoutChunks.push(chunk.toString());
             });
-            proc.stderr!.on("data", (chunk: Buffer) => {
+            proc.stderr.on("data", (chunk: Buffer) => {
               stderrChunks.push(chunk.toString());
             });
-            proc.on("close", (code) => {
+            proc.on("close", (code: number | null) => {
               resolve({
                 stdout: stdoutChunks.join(""),
                 stderr: stderrChunks.join(""),
@@ -154,6 +163,10 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
             : undefined;
         return new Promise((resolve, reject) => {
           const [cmd, ...rest] = args;
+          if (cmd === undefined) {
+            reject(new Error("interactiveExec needs a command to run"));
+            return;
+          }
           const proc = plan
             ? spawn(plan.file, plan.args, {
                 cwd,
@@ -161,7 +174,7 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
                 stdio,
                 windowsVerbatimArguments: plan.windowsVerbatimArguments,
               })
-            : spawn(cmd!, rest, {
+            : spawn(cmd, rest, {
                 cwd,
                 env: processEnv,
                 stdio,
