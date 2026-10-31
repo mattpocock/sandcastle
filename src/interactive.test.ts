@@ -29,6 +29,10 @@ const buildInteractiveArgs = (provider: AgentProvider, prompt: string) => {
   return provider.buildInteractiveArgs(interactiveOpts(prompt));
 };
 
+/** The entries of a directory, or none if it does not exist. */
+const entriesOf = (dir: string): string[] =>
+  existsSync(dir) ? readdirSync(dir) : [];
+
 describe("buildInteractiveArgs with prompts", () => {
   it("claudeCode includes prompt as positional argument", () => {
     const provider = claudeCode("claude-opus-4-8");
@@ -646,7 +650,7 @@ describe("interactive()", () => {
       },
     });
 
-    expect(executionOrder).toEqual(["interactive-after-hook"]);
+    expect(executionOrder).toStrictEqual(["interactive-after-hook"]);
   });
 
   it("removes the worktree when sandbox start fails (no orphan)", async () => {
@@ -664,12 +668,11 @@ describe("interactive()", () => {
         prompt: "test",
         branchStrategy: { type: "merge-to-head" },
       }),
-    ).rejects.toThrow();
+    ).rejects.toThrow("Image 'sandcastle:test' not found locally");
 
     // The worktree must not be left orphaned on disk.
     const worktreesDir = join(hostDir, ".sandcastle", "worktrees");
-    const leftover = existsSync(worktreesDir) ? readdirSync(worktreesDir) : [];
-    expect(leftover).toHaveLength(0);
+    expect(entriesOf(worktreesDir)).toHaveLength(0);
   });
 
   // --- copyToWorktree tests ---
@@ -718,18 +721,15 @@ describe("interactive()", () => {
       throw new Error("interactiveExec should not be called");
     });
 
-    try {
-      await interactive({
+    await expect(
+      interactive({
         agent: claudeCode("claude-opus-4-8"),
         sandbox: provider,
         prompt: "test",
         branchStrategy: { type: "head" },
         signal: ac.signal,
-      });
-      expect.unreachable("should have thrown");
-    } catch (err) {
-      expect(err).toBe(reason);
-    }
+      }),
+    ).rejects.toBe(reason);
   });
 
   it("aborts an active interactive session when signal fires", async () => {

@@ -14,12 +14,12 @@ const podmanExec = (args: string[]): Effect.Effect<string, PodmanError> =>
           resume(
             Effect.fail(
               new PodmanError({
-                message: `podman ${args[0]} failed: ${stderr?.toString() || error.message}`,
+                message: `podman ${args[0]} failed: ${stderr || error.message}`,
               }),
             ),
           );
         } else {
-          resume(Effect.succeed(stdout.toString()));
+          resume(Effect.succeed(stdout));
         }
       },
     );
@@ -38,18 +38,10 @@ export const buildImage = (
   options?: { readonly containerfile?: string },
 ): Effect.Effect<void, PodmanError> =>
   Effect.gen(function* () {
-    if (options?.containerfile) {
-      yield* podmanExec([
-        "build",
-        "-t",
-        imageName,
-        "-f",
-        resolve(options.containerfile),
-        process.cwd(),
-      ]);
-    } else {
-      yield* podmanExec(["build", "-t", imageName, resolve(containerfileDir)]);
-    }
+    const buildContext = options?.containerfile
+      ? ["-f", resolve(options.containerfile), process.cwd()]
+      : [resolve(containerfileDir)];
+    yield* podmanExec(["build", "-t", imageName, ...buildContext]);
   });
 
 /**

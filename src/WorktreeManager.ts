@@ -1,9 +1,9 @@
 import { Effect, Option } from "effect";
 import { FileSystem } from "@effect/platform";
-import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { join, normalize } from "node:path";
 import { WorktreeError, WorktreeTimeoutError, withTimeout } from "./errors.js";
+import { hostGit } from "./hostGit.js";
 
 const WORKTREE_TIMEOUT_MS = 30_000;
 
@@ -20,14 +20,12 @@ const NO_CONFIG_LOCK_FLAGS = [
   "push.autoSetupRemote=false",
 ];
 
+const pad = (n: number) => String(n).padStart(2, "0");
+
 /** Format a timestamp as YYYYMMDD-HHMMSS */
-const formatTimestamp = (date: Date): string => {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return (
-    `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-` +
-    `${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
-  );
-};
+const formatTimestamp = (date: Date): string =>
+  `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-` +
+  `${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
 
 /**
  * Short random hex suffix appended to generated temp branch names. Three
@@ -45,30 +43,9 @@ const execGit = (
   args: string[],
   cwd: string,
 ): Effect.Effect<string, WorktreeError> =>
-  Effect.async((resume) => {
-    // Force the C locale so git emits English, machine-stable messages. Several
-    // callers match git's stderr (e.g. "invalid reference") to decide control
-    // flow; under a localized locale gettext translates those strings and the
-    // matches silently fail, breaking worktree creation (issue #595).
-    execFile(
-      "git",
-      args,
-      { cwd, env: { ...process.env, LC_ALL: "C" } },
-      (error, stdout, stderr) => {
-        if (error) {
-          resume(
-            Effect.fail(
-              new WorktreeError({
-                message: stderr?.trim() || error.message,
-              }),
-            ),
-          );
-        } else {
-          resume(Effect.succeed(stdout));
-        }
-      },
-    );
-  });
+  hostGit(args, cwd).pipe(
+    Effect.mapError((e) => new WorktreeError({ message: e.message })),
+  );
 
 /**
  * Generates a temporary branch name.
@@ -347,15 +324,13 @@ export const create = (
           return { path: normalize(collision.path), branch };
         }
         // Branch is checked out in the main working tree or external worktree
-        yield* Effect.fail(
-          new WorktreeError({
-            message:
-              `Branch '${branch}' is already checked out in worktree at '${collision.path}'. ` +
-              `Sandcastle's branch and merge-to-head strategies run the agent in a git worktree under .sandcastle/worktrees/, ` +
-              `and git refuses to check out the same branch in two worktrees at once (HEAD would become ambiguous). ` +
-              `Pick a different branch, or switch the main working tree to a different branch before re-running.`,
-          }),
-        );
+        return yield* new WorktreeError({
+          message:
+            `Branch '${branch}' is already checked out in worktree at '${collision.path}'. ` +
+            `Sandcastle's branch and merge-to-head strategies run the agent in a git worktree under .sandcastle/worktrees/, ` +
+            `and git refuses to check out the same branch in two worktrees at once (HEAD would become ambiguous). ` +
+            `Pick a different branch, or switch the main working tree to a different branch before re-running.`,
+        });
       }
       yield* execGit(
         [...NO_CONFIG_LOCK_FLAGS, "worktree", "add", worktreePath, branch],

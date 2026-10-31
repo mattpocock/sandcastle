@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import {
   claudeCode,
   codex,
@@ -10,8 +10,38 @@ import {
   opencode,
   pi,
 } from "./AgentProvider.js";
-import type { AgentCommandOptions } from "./AgentProvider.js";
+import type { AgentCommandOptions, AgentProvider } from "./AgentProvider.js";
 import type { BindMountSandboxHandle } from "./SandboxProvider.js";
+
+/** Builds interactive args, failing the test if the provider has no interactive mode. */
+const buildInteractiveArgs = (
+  provider: AgentProvider,
+  options: AgentCommandOptions,
+): string[] => {
+  assert(
+    provider.buildInteractiveArgs !== undefined,
+    `${provider.name} has no interactive mode`,
+  );
+  return provider.buildInteractiveArgs(options);
+};
+
+/** Parses session usage, failing the test if the provider cannot. */
+const parseSessionUsage = (provider: AgentProvider, content: string) => {
+  assert(
+    provider.parseSessionUsage !== undefined,
+    `${provider.name} has no parseSessionUsage`,
+  );
+  return provider.parseSessionUsage(content);
+};
+
+/** The provider's session storage, failing the test if it has none. */
+const sessionStorageOf = (provider: AgentProvider) => {
+  assert.isDefined(
+    provider.sessionStorage,
+    `${provider.name} has no session storage`,
+  );
+  return provider.sessionStorage;
+};
 
 /** Shorthand: build options with dangerouslySkipPermissions: true (mirrors existing sandbox callers). */
 const opts = (prompt: string): AgentCommandOptions => ({
@@ -261,7 +291,7 @@ describe("claudeCode factory", () => {
 
   it("buildInteractiveArgs includes --dangerously-skip-permissions when true", () => {
     const provider = claudeCode("claude-opus-4-8");
-    const args = provider.buildInteractiveArgs!({
+    const args = buildInteractiveArgs(provider, {
       prompt: "test",
       dangerouslySkipPermissions: true,
     });
@@ -270,7 +300,7 @@ describe("claudeCode factory", () => {
 
   it("buildInteractiveArgs omits --dangerously-skip-permissions when false", () => {
     const provider = claudeCode("claude-opus-4-8");
-    const args = provider.buildInteractiveArgs!({
+    const args = buildInteractiveArgs(provider, {
       prompt: "test",
       dangerouslySkipPermissions: false,
     });
@@ -305,7 +335,7 @@ describe("claudeCode factory", () => {
 
   it("buildInteractiveArgs emits --permission-mode when permissionMode is set", () => {
     const provider = claudeCode("claude-opus-4-8", { permissionMode: "plan" });
-    const args = provider.buildInteractiveArgs!({
+    const args = buildInteractiveArgs(provider, {
       prompt: "test",
       dangerouslySkipPermissions: false,
     });
@@ -315,7 +345,7 @@ describe("claudeCode factory", () => {
 
   it("buildInteractiveArgs omits --dangerously-skip-permissions when permissionMode is set", () => {
     const provider = claudeCode("claude-opus-4-8", { permissionMode: "auto" });
-    const args = provider.buildInteractiveArgs!({
+    const args = buildInteractiveArgs(provider, {
       prompt: "test",
       dangerouslySkipPermissions: true,
     });
@@ -1090,7 +1120,7 @@ describe("cursor factory", () => {
 
   it("buildInteractiveArgs includes binary, model and prompt", () => {
     const provider = cursor("claude-sonnet-4-6");
-    const args = provider.buildInteractiveArgs!({
+    const args = buildInteractiveArgs(provider, {
       prompt: "test prompt",
       dangerouslySkipPermissions: true,
     });
@@ -1105,7 +1135,7 @@ describe("cursor factory", () => {
 
   it("buildInteractiveArgs omits prompt when empty", () => {
     const provider = cursor("claude-sonnet-4-6");
-    const args = provider.buildInteractiveArgs!({
+    const args = buildInteractiveArgs(provider, {
       prompt: "",
       dangerouslySkipPermissions: true,
     });
@@ -1359,8 +1389,8 @@ describe("opencode factory", () => {
 
   it("buildInteractiveArgs includes --agent when specified", () => {
     const provider = opencode("opencode/big-pickle", { agent: "build" });
-    const args = provider.buildInteractiveArgs!(opts("do something"));
-    expect(args).toStrictEqual([
+    const args = buildInteractiveArgs(provider, opts("do something"));
+    expect(args).toEqual([
       "opencode",
       "--model",
       "opencode/big-pickle",
@@ -1373,7 +1403,7 @@ describe("opencode factory", () => {
 
   it("buildInteractiveArgs omits --agent when not specified", () => {
     const provider = opencode("opencode/big-pickle");
-    const args = provider.buildInteractiveArgs!(opts("do something"));
+    const args = buildInteractiveArgs(provider, opts("do something"));
     expect(args).not.toContain("--agent");
   });
 
@@ -1741,7 +1771,7 @@ describe("copilot factory", () => {
 
   it("buildInteractiveArgs includes copilot binary, --model, and prompt", () => {
     const provider = copilot("claude-sonnet-4.5");
-    const args = provider.buildInteractiveArgs!(opts("hello"));
+    const args = buildInteractiveArgs(provider, opts("hello"));
     expect(args[0]).toBe("copilot");
     expect(args).toContain("--model");
     expect(args).toContain("claude-sonnet-4.5");
@@ -1752,7 +1782,7 @@ describe("copilot factory", () => {
     // `-p`/`--prompt` runs programmatically and exits; interactive sessions
     // must use `-i`/`--interactive` to launch the TUI without exiting.
     const provider = copilot("claude-sonnet-4.5");
-    const args = provider.buildInteractiveArgs!(opts("hello"));
+    const args = buildInteractiveArgs(provider, opts("hello"));
     expect(args).toContain("-i");
     expect(args).not.toContain("-p");
     // The prompt immediately follows the -i flag.
@@ -2029,7 +2059,7 @@ describe("parseSessionUsage (Claude Code)", () => {
       }),
     ].join("\n");
 
-    expect(provider.parseSessionUsage!(content)).toStrictEqual({
+    expect(parseSessionUsage(provider, content)).toEqual({
       inputTokens: 3,
       cacheCreationInputTokens: 9294,
       cacheReadInputTokens: 8526,
@@ -2038,7 +2068,7 @@ describe("parseSessionUsage (Claude Code)", () => {
   });
 
   it("returns undefined for empty content", () => {
-    expect(provider.parseSessionUsage!("")).toBeUndefined();
+    expect(parseSessionUsage(provider, "")).toBeUndefined();
   });
 
   it("returns undefined for content with no assistant messages", () => {
@@ -2046,7 +2076,7 @@ describe("parseSessionUsage (Claude Code)", () => {
       JSON.stringify({ type: "system", subtype: "init", session_id: "abc" }),
       JSON.stringify({ type: "result", result: "done" }),
     ].join("\n");
-    expect(provider.parseSessionUsage!(content)).toBeUndefined();
+    expect(parseSessionUsage(provider, content)).toBeUndefined();
   });
 
   it("returns undefined when assistant message has no usage block", () => {
@@ -2057,12 +2087,12 @@ describe("parseSessionUsage (Claude Code)", () => {
         content: [{ type: "text", text: "hi" }],
       },
     });
-    expect(provider.parseSessionUsage!(content)).toBeUndefined();
+    expect(parseSessionUsage(provider, content)).toBeUndefined();
   });
 
   it("returns undefined for malformed JSON lines", () => {
     const content = "not json\n{bad json\n";
-    expect(provider.parseSessionUsage!(content)).toBeUndefined();
+    expect(parseSessionUsage(provider, content)).toBeUndefined();
   });
 
   it("skips malformed lines and finds valid assistant message", () => {
@@ -2082,7 +2112,7 @@ describe("parseSessionUsage (Claude Code)", () => {
       }),
     ].join("\n");
 
-    expect(provider.parseSessionUsage!(content)).toStrictEqual({
+    expect(parseSessionUsage(provider, content)).toEqual({
       inputTokens: 10,
       cacheCreationInputTokens: 20,
       cacheReadInputTokens: 30,
@@ -2185,7 +2215,7 @@ describe("sessionStorage", () => {
         sessionStorage: { hostProjectsDir: dir },
       });
       // Path is purely a function of (cwd, id) — available before any capture.
-      const path = provider.sessionStorage.hostSessionFilePath(
+      const path = sessionStorageOf(provider).hostSessionFilePath(
         "/some/cwd",
         "abc-123",
       );
@@ -2230,7 +2260,7 @@ describe("sessionStorage", () => {
         },
       });
 
-      await provider.sessionStorage.captureToHost({
+      await sessionStorageOf(provider).captureToHost({
         hostCwd,
         sandboxCwd,
         sessionId: id,
@@ -2242,9 +2272,12 @@ describe("sessionStorage", () => {
       const expectedHostPath = join(hostDir, "--host-repo--", filename);
       const content = await readFile(expectedHostPath, "utf8");
       const lines = content.split("\n");
-      const header = JSON.parse(lines[0]!);
-      expect(header.type).toBe("session");
-      expect(header.cwd).toBe(hostCwd);
+      const [header] = lines;
+      assert.isDefined(header);
+      expect(JSON.parse(header)).toMatchObject({
+        type: "session",
+        cwd: hostCwd,
+      });
       // Non-header lines are preserved verbatim.
       expect(lines[1]).toBe(
         JSON.stringify({
@@ -2256,7 +2289,7 @@ describe("sessionStorage", () => {
 
       // existsOnHost finds the captured session by globbing the dir.
       await expect(
-        provider.sessionStorage.existsOnHost(hostCwd, id),
+        sessionStorageOf(provider).existsOnHost(hostCwd, id),
       ).resolves.toBe(true);
     } finally {
       await rm(hostDir, { recursive: true, force: true });
@@ -2293,7 +2326,7 @@ describe("sessionStorage", () => {
         },
       });
 
-      await provider.sessionStorage.resumeIntoSandbox({
+      await sessionStorageOf(provider).resumeIntoSandbox({
         hostCwd,
         sandboxCwd,
         sessionId: id,
@@ -2306,9 +2339,10 @@ describe("sessionStorage", () => {
         filename,
       );
       const content = await readFile(expectedSandboxPath, "utf8");
-      const header = JSON.parse(content);
-      expect(header.type).toBe("session");
-      expect(header.cwd).toBe(sandboxCwd);
+      expect(JSON.parse(content)).toMatchObject({
+        type: "session",
+        cwd: sandboxCwd,
+      });
     } finally {
       await rm(hostDir, { recursive: true, force: true });
       await rm(sandboxDir, { recursive: true, force: true });
@@ -2319,7 +2353,7 @@ describe("sessionStorage", () => {
     const provider = pi("claude-sonnet-4-6", {
       sessionStorage: { hostSessionsDir: "/tmp/sessions" },
     });
-    const path = provider.sessionStorage.hostSessionFilePath(
+    const path = sessionStorageOf(provider).hostSessionFilePath(
       "/some/cwd",
       "abc-123",
     );
@@ -2333,7 +2367,7 @@ describe("sessionStorage", () => {
         sessionStorage: { hostSessionsDir: hostDir },
       });
       await expect(
-        provider.sessionStorage.existsOnHost("/some/cwd", "missing-id"),
+        sessionStorageOf(provider).existsOnHost("/some/cwd", "missing-id"),
       ).resolves.toBe(false);
     } finally {
       await rm(hostDir, { recursive: true, force: true });
@@ -2371,10 +2405,10 @@ describe("sessionStorage", () => {
 
       // Before capture, the path is unknown.
       expect(
-        provider.sessionStorage.hostSessionFilePath("/host/repo", id),
+        sessionStorageOf(provider).hostSessionFilePath("/host/repo", id),
       ).toBeUndefined();
 
-      await provider.sessionStorage.captureToHost({
+      await sessionStorageOf(provider).captureToHost({
         hostCwd: "/host/repo",
         sandboxCwd: "/sandbox/repo",
         sessionId: id,
@@ -2382,13 +2416,16 @@ describe("sessionStorage", () => {
       });
 
       // After capture, the path resolves to the rewritten rollout under hostDir.
-      const captured = provider.sessionStorage.hostSessionFilePath(
+      const captured = sessionStorageOf(provider).hostSessionFilePath(
         "/host/repo",
         id,
       );
       expect(captured).toBe(join(hostDir, relativePath));
-      const content = await readFile(captured!, "utf8");
-      expect(JSON.parse(content).payload.cwd).toBe("/host/repo");
+      assert.isDefined(captured);
+      const content = await readFile(captured, "utf8");
+      expect(JSON.parse(content)).toMatchObject({
+        payload: { cwd: "/host/repo" },
+      });
     } finally {
       await rm(hostDir, { recursive: true, force: true });
       await rm(sandboxDir, { recursive: true, force: true });
@@ -2421,7 +2458,7 @@ describe("sessionStorage", () => {
         },
       });
 
-      await provider.sessionStorage.captureToHost({
+      await sessionStorageOf(provider).captureToHost({
         hostCwd,
         sandboxCwd,
         sessionId: id,
@@ -2430,7 +2467,7 @@ describe("sessionStorage", () => {
 
       const expectedHostPath = join(hostDir, "-host-repo", `${id}.jsonl`);
       const main = await readFile(expectedHostPath, "utf8");
-      expect(JSON.parse(main).cwd).toBe(hostCwd);
+      expect(JSON.parse(main)).toMatchObject({ cwd: hostCwd });
     } finally {
       await rm(hostDir, { recursive: true, force: true });
       await rm(sandboxDir, { recursive: true, force: true });
@@ -2483,7 +2520,7 @@ describe("sessionStorage", () => {
         },
       });
 
-      await provider.sessionStorage.captureToHost({
+      await sessionStorageOf(provider).captureToHost({
         hostCwd,
         sandboxCwd,
         sessionId: id,
@@ -2495,7 +2532,7 @@ describe("sessionStorage", () => {
         join(hostDir, "-host-repo", `${id}.jsonl`),
         "utf8",
       );
-      expect(JSON.parse(mainContent).cwd).toBe(hostCwd);
+      expect(JSON.parse(mainContent)).toMatchObject({ cwd: hostCwd });
 
       // Both subagent transcripts captured with cwd rewritten on every line.
       const hostSubagentsDir = join(hostDir, "-host-repo", id, "subagents");
@@ -2504,20 +2541,20 @@ describe("sessionStorage", () => {
         "utf8",
       );
       for (const line of alpha.split("\n")) {
-        expect(JSON.parse(line).cwd).toBe(hostCwd);
+        expect(JSON.parse(line)).toMatchObject({ cwd: hostCwd });
       }
       const beta = await readFile(
         join(hostSubagentsDir, "agent-beta.jsonl"),
         "utf8",
       );
       for (const line of beta.split("\n")) {
-        expect(JSON.parse(line).cwd).toBe(hostCwd);
+        expect(JSON.parse(line)).toMatchObject({ cwd: hostCwd });
       }
 
       // The non-matching sibling must not have been copied.
       await expect(
         readFile(join(hostSubagentsDir, "notes.txt"), "utf8"),
-      ).rejects.toThrow();
+      ).rejects.toThrow("ENOENT");
     } finally {
       await rm(hostDir, { recursive: true, force: true });
       await rm(sandboxDir, { recursive: true, force: true });
@@ -2587,7 +2624,7 @@ describe("sessionStorage", () => {
             sandboxProjectsDir: sandboxDir,
           },
         });
-        await provider.sessionStorage.captureToHost({
+        await sessionStorageOf(provider).captureToHost({
           hostCwd,
           sandboxCwd,
           sessionId: id,
@@ -2602,7 +2639,7 @@ describe("sessionStorage", () => {
         join(hostDir, "-host-repo", `${id}.jsonl`),
         "utf8",
       );
-      expect(JSON.parse(mainContent).cwd).toBe(hostCwd);
+      expect(JSON.parse(mainContent)).toMatchObject({ cwd: hostCwd });
 
       // Good sibling captured.
       const hostSubagentsDir = join(hostDir, "-host-repo", id, "subagents");
@@ -2610,12 +2647,12 @@ describe("sessionStorage", () => {
         join(hostSubagentsDir, "agent-good.jsonl"),
         "utf8",
       );
-      expect(JSON.parse(good).cwd).toBe(hostCwd);
+      expect(JSON.parse(good)).toMatchObject({ cwd: hostCwd });
 
       // Bad subagent NOT copied.
       await expect(
         readFile(join(hostSubagentsDir, "agent-bad.jsonl"), "utf8"),
-      ).rejects.toThrow();
+      ).rejects.toThrow("ENOENT");
 
       // Exactly one warning emitted, naming the bad path — successful
       // siblings and the main session must not produce warnings of their own.
