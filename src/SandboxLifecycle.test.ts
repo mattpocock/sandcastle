@@ -1206,10 +1206,10 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       ).pipe(Effect.provide(testDisplayLayer)),
     );
 
-    setTimeout(() => {
-      ac.abort("cancelled");
-    }, 50);
-    await expect(promise).rejects.toThrow();
+    setTimeout(() => ac.abort("cancelled"), 50);
+    await expect(promise).rejects.toThrow(
+      "Command aborted: sleep 60 (cancelled)",
+    );
   });
 
   it("sandbox.onSandboxReady hook is killed when signal fires", async () => {
@@ -1234,10 +1234,8 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       ).pipe(Effect.provide(testDisplayLayer)),
     );
 
-    setTimeout(() => {
-      ac.abort("cancelled");
-    }, 50);
-    await expect(promise).rejects.toThrow();
+    setTimeout(() => ac.abort("cancelled"), 50);
+    await expect(promise).rejects.toThrow("Aborted: cancelled");
   });
 
   it("hooks receive never-aborted signal when no signal is provided", async () => {
@@ -1717,7 +1715,9 @@ describe("runHostHooks", () => {
       ac.abort("cancelled");
     }, 50);
 
-    await expect(promise).rejects.toThrow();
+    await expect(promise).rejects.toThrow(
+      "Command aborted: sleep 60 (cancelled)",
+    );
   });
 
   it("works normally when signal is not provided", async () => {
@@ -1766,7 +1766,7 @@ describe("runHostHooks", () => {
       Effect.runPromise(
         runHostHooks([{ command: ORPHAN_HOOK }], dir, ac.signal),
       ),
-    ).rejects.toThrow();
+    ).rejects.toThrow("Command aborted");
 
     await waitForProcessGone(await readPid(dir));
   });

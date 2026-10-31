@@ -303,7 +303,7 @@ describe("WorktreeDockerSandboxFactory", () => {
           );
         }).pipe(Effect.provide(makeLayer())),
       ),
-    ).rejects.toThrow();
+    ).rejects.toThrow("boom");
 
     expect(observedWorktreePath).toBeDefined();
     assert.isDefined(observedWorktreePath);
@@ -493,7 +493,7 @@ describe("WorktreeDockerSandboxFactory", () => {
           });
         }).pipe(Effect.provide(makeLayer())),
       ),
-    ).rejects.toThrow();
+    ).rejects.toThrow("agent failed");
 
     expect(observedWorktreePath).toBeDefined();
     assert.isDefined(observedWorktreePath);
@@ -510,7 +510,7 @@ describe("WorktreeDockerSandboxFactory", () => {
           );
         }).pipe(Effect.provide(makeLayer())),
       ),
-    ).rejects.toThrow();
+    ).rejects.toThrow("agent failed");
 
     await expect(sandcastleBranches(hostRepoDir)).resolves.toEqual([]);
   });
@@ -538,7 +538,7 @@ describe("WorktreeDockerSandboxFactory", () => {
             );
           }).pipe(Effect.provide(makeLayer())),
         ),
-      ).rejects.toThrow();
+      ).rejects.toThrow("agent failed");
 
       const branches = await sandcastleBranches(hostRepoDir);
       expect(branches).toHaveLength(1);
@@ -567,7 +567,7 @@ describe("WorktreeDockerSandboxFactory", () => {
           ),
         ),
       ),
-    ).rejects.toThrow();
+    ).rejects.toThrow("agent failed");
 
     const { stdout } = await execAsync('git branch --list "feature/keep-me"', {
       cwd: hostRepoDir,
@@ -604,7 +604,7 @@ describe("WorktreeDockerSandboxFactory", () => {
           yield* factory.withSandbox(() => Effect.void);
         }).pipe(Effect.provide(layer)),
       ),
-    ).rejects.toThrow();
+    ).rejects.toThrow("Image 'sandcastle:test' not found locally");
 
     // No worktree should remain on disk
     const worktree = await findCreatedWorktree(hostRepoDir);
@@ -623,7 +623,7 @@ describe("WorktreeDockerSandboxFactory", () => {
           );
         }).pipe(Effect.provide(makeLayer())),
       ),
-    ).rejects.toThrow();
+    ).rejects.toThrow("agent failed");
 
     const output = stderrSpy.mock.calls.map((c) => c[0]).join(" ");
     expect(output).toContain("no uncommitted changes");
@@ -1026,7 +1026,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
           );
         }).pipe(Effect.provide(makeIsolatedLayer(hostDir))),
       ),
-    ).rejects.toThrow();
+    ).rejects.toThrow("boom");
 
     assert.isDefined(observedWorktreePath);
 
@@ -1066,7 +1066,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
           yield* factory.withSandbox(() => Effect.void);
         }).pipe(Effect.provide(layer)),
       ),
-    ).rejects.toThrow();
+    ).rejects.toThrow("isolated sandbox unavailable");
 
     // No worktree should remain
     const worktree = await findCreatedWorktree(hostDir);
@@ -1232,7 +1232,7 @@ describe("WorktreeDockerSandboxFactory — no-sandbox provider", () => {
           yield* factory.withSandbox(() => Effect.void);
         }).pipe(Effect.provide(layer)),
       ),
-    ).rejects.toThrow();
+    ).rejects.toThrow("no-sandbox create failed");
 
     const worktree = await findCreatedWorktree(hostDir);
     expect(worktree).toBeUndefined();
@@ -1308,7 +1308,7 @@ describe("WorktreeDockerSandboxFactory — interruption preserves the worktree",
             Effect.provide(makeLayer(hostDir, makeProvider(), ac.signal)),
           ),
         ),
-      ).rejects.toThrow();
+      ).rejects.toThrow("aborted");
 
       expect(observedWorktreePath).toBeDefined();
       assert.isDefined(observedWorktreePath);
@@ -1363,7 +1363,7 @@ describe("WorktreeDockerSandboxFactory — interruption preserves the worktree",
           Effect.provide(makeLayer(hostDir, bindMountProvider(), ac.signal)),
         ),
       ),
-    ).rejects.toThrow();
+    ).rejects.toThrow("boom");
 
     assert.isDefined(observedWorktreePath);
 

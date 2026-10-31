@@ -2554,7 +2554,7 @@ describe("sessionStorage", () => {
       // The non-matching sibling must not have been copied.
       await expect(
         readFile(join(hostSubagentsDir, "notes.txt"), "utf8"),
-      ).rejects.toThrow();
+      ).rejects.toThrow("ENOENT");
     } finally {
       await rm(hostDir, { recursive: true, force: true });
       await rm(sandboxDir, { recursive: true, force: true });
@@ -2652,7 +2652,7 @@ describe("sessionStorage", () => {
       // Bad subagent NOT copied.
       await expect(
         readFile(join(hostSubagentsDir, "agent-bad.jsonl"), "utf8"),
-      ).rejects.toThrow();
+      ).rejects.toThrow("ENOENT");
 
       // Exactly one warning emitted, naming the bad path — successful
       // siblings and the main session must not produce warnings of their own.
