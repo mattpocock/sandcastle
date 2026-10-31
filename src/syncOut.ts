@@ -24,7 +24,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import { Effect } from "effect";
+import { Clock, Effect } from "effect";
 import type { ExecResult, SandboxService } from "./SandboxFactory.js";
 import type { IsolatedSandboxHandle } from "./SandboxProvider.js";
 import { buildRecoveryMessage, type FailedStep } from "./RecoveryMessage.js";
@@ -136,31 +136,35 @@ const isEmptyPatch = (patchPath: string): Effect.Effect<boolean, SyncError> =>
 const createPatchDir = (
   hostRepoDir: string,
 ): Effect.Effect<string, SyncError> =>
-  Effect.tryPromise({
-    try: async () => {
-      const now = new Date();
-      const pad = (n: number) => String(n).padStart(2, "0");
-      const base = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  Clock.currentTimeMillis.pipe(
+    Effect.flatMap((nowMillis) =>
+      Effect.tryPromise({
+        try: async () => {
+          const now = new Date(nowMillis);
+          const pad = (n: number) => String(n).padStart(2, "0");
+          const base = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
 
-      const patchesRoot = join(hostRepoDir, ".sandcastle", "patches");
-      await mkdir(patchesRoot, { recursive: true });
+          const patchesRoot = join(hostRepoDir, ".sandcastle", "patches");
+          await mkdir(patchesRoot, { recursive: true });
 
-      let dirName = base;
-      let counter = 0;
-      while (existsSync(join(patchesRoot, dirName))) {
-        counter++;
-        dirName = `${base}-${counter}`;
-      }
+          let dirName = base;
+          let counter = 0;
+          while (existsSync(join(patchesRoot, dirName))) {
+            counter++;
+            dirName = `${base}-${counter}`;
+          }
 
-      const patchDir = join(patchesRoot, dirName);
-      await mkdir(patchDir, { recursive: true });
-      return patchDir;
-    },
-    catch: (e) =>
-      new SyncError({
-        message: `Failed to create patch directory: ${e instanceof Error ? e.message : String(e)}`,
+          const patchDir = join(patchesRoot, dirName);
+          await mkdir(patchDir, { recursive: true });
+          return patchDir;
+        },
+        catch: (e) =>
+          new SyncError({
+            message: `Failed to create patch directory: ${e instanceof Error ? e.message : String(e)}`,
+          }),
       }),
-  });
+    ),
+  );
 
 /**
  * Count commits that `syncOut` would emit on the next run. Uses the same base
