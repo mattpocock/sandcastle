@@ -366,6 +366,7 @@ export const orchestrate = (
     const streamEmitter = yield* AgentStreamEmitter;
     const { hostRepoDir, iterations, hooks, prompt, branch, provider } =
       options;
+    const { sessionStorage } = provider;
     let completionSignals: string[];
     if (options.completionSignal === undefined) {
       completionSignals = [DEFAULT_COMPLETION_SIGNAL];
@@ -422,12 +423,12 @@ export const orchestrate = (
                   if (
                     iterationResumeSession &&
                     bindMountHandle &&
-                    provider.sessionStorage
+                    sessionStorage
                   ) {
                     yield* display.status(label("Resuming session"), "info");
                     yield* Effect.tryPromise({
                       try: () =>
-                        provider.sessionStorage!.resumeIntoSandbox({
+                        sessionStorage.resumeIntoSandbox({
                           hostCwd: hostRepoDir,
                           sandboxCwd: ctx.sandboxRepoDir,
                           sessionId: iterationResumeSession,
@@ -551,14 +552,14 @@ export const orchestrate = (
                   let usage: IterationUsage | undefined = streamUsage;
                   if (
                     provider.captureSessions &&
-                    provider.sessionStorage &&
+                    sessionStorage &&
                     sessionId &&
                     bindMountHandle
                   ) {
                     yield* display.status(label("Capturing session"), "info");
                     yield* Effect.tryPromise({
                       try: () =>
-                        provider.sessionStorage!.captureToHost({
+                        sessionStorage.captureToHost({
                           hostCwd: hostRepoDir,
                           sandboxCwd: ctx.sandboxRepoDir,
                           sessionId,
@@ -570,11 +571,10 @@ export const orchestrate = (
                           sessionId,
                         }),
                     });
-                    sessionFilePath =
-                      provider.sessionStorage.hostSessionFilePath(
-                        hostRepoDir,
-                        sessionId,
-                      );
+                    sessionFilePath = sessionStorage.hostSessionFilePath(
+                      hostRepoDir,
+                      sessionId,
+                    );
 
                     // Parse token usage and the context window from the
                     // captured session JSONL
@@ -583,11 +583,8 @@ export const orchestrate = (
                       provider.parseSessionContextWindow
                     ) {
                       const content = yield* Effect.promise(() =>
-                        provider
-                          .sessionStorage!.readHostSession(
-                            hostRepoDir,
-                            sessionId,
-                          )
+                        sessionStorage
+                          .readHostSession(hostRepoDir, sessionId)
                           .catch(() => undefined as string | undefined),
                       );
                       if (content) {

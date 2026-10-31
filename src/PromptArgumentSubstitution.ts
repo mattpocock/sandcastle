@@ -24,6 +24,13 @@ export const BUILT_IN_PROMPT_ARG_KEYS = [
 const PLACEHOLDER_PATTERN = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
 
 /**
+ * The key of every `{{KEY}}` placeholder in `text`, in order, repeats
+ * included. The capture group is required, so the `?? ""` never applies.
+ */
+const placeholderKeys = (text: string): string[] =>
+  [...text.matchAll(PLACEHOLDER_PATTERN)].map((m) => m[1] ?? "");
+
+/**
  * Validates that the user has not provided any built-in prompt argument keys.
  * Fails with a PromptError if any built-in key is found in `args`.
  */
@@ -69,13 +76,11 @@ export const findMissingPromptArgKeys = (
   prompt: string,
   providedArgs: PromptArgs,
 ): string[] => {
-  const matches = [...prompt.matchAll(PLACEHOLDER_PATTERN)];
   const builtInSet = new Set<string>(BUILT_IN_PROMPT_ARG_KEYS);
   const seen = new Set<string>();
   const missing: string[] = [];
 
-  for (const m of matches) {
-    const key = m[1]!;
+  for (const key of placeholderKeys(prompt)) {
     if (seen.has(key)) {
       continue;
     }
@@ -131,9 +136,9 @@ export const substitutePromptArgs = (
         : value,
     ]),
   );
-  const matches = [...markedPrompt.matchAll(PLACEHOLDER_PATTERN)];
+  const keys = placeholderKeys(markedPrompt);
 
-  if (matches.length === 0 && Object.keys(sanitizedArgs).length === 0) {
+  if (keys.length === 0 && Object.keys(sanitizedArgs).length === 0) {
     return Effect.succeed(markedPrompt);
   }
 
@@ -141,7 +146,7 @@ export const substitutePromptArgs = (
     const display = yield* Display;
 
     // Collect all keys referenced in the prompt
-    const referencedKeys = new Set(matches.map((m) => m[1]!));
+    const referencedKeys = new Set(keys);
 
     // Check for missing keys (placeholder in prompt but no matching arg, or
     // a present-but-nullish value supplied by an untyped caller — e.g. an
@@ -176,8 +181,10 @@ export const substitutePromptArgs = (
     }
 
     // Replace all placeholders with their values
-    const result = markedPrompt.replaceAll(PLACEHOLDER_PATTERN, (_match, key) =>
-      sanitizedArgs[key as string]!.toString(),
+    // Every key was checked above to have a non-null value.
+    const result = markedPrompt.replaceAll(
+      PLACEHOLDER_PATTERN,
+      (_match, key: string) => String(sanitizedArgs[key]),
     );
 
     return result;

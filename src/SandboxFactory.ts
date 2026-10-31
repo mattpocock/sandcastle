@@ -27,7 +27,7 @@ import { runHostHooks } from "./SandboxLifecycle.js";
 import type { SandboxHooks } from "./SandboxLifecycle.js";
 import { startSandbox } from "./startSandbox.js";
 import { syncOut } from "./syncOut.js";
-import { patchGitMountsForWindows } from "./mountUtils.js";
+import { patchGitMountsForWindows, removeMountTempDirs } from "./mountUtils.js";
 import { registerShutdown } from "./shutdownRegistry.js";
 
 export interface ExecResult {
@@ -162,6 +162,27 @@ export class SandboxFactory extends Context.Tag("SandboxFactory")<
     ) => Effect.Effect<WithSandboxResult<A>, E | SandboxError, R>;
   }
 >() {}
+
+/**
+ * A SandboxFactory layer that hands every caller the same, already-started
+ * sandbox, instead of creating one per call. Used by the `run()` methods of
+ * `createSandbox` and `createWorktree` handles.
+ */
+export const reuseSandboxFactoryLayer = (
+  info: SandboxInfo,
+  sandbox: SandboxService,
+): Layer.Layer<SandboxFactory> =>
+  Layer.succeed(SandboxFactory, {
+    withSandbox: <A, E, R>(
+      makeEffect: (
+        info: SandboxInfo,
+        sandbox: SandboxService,
+      ) => Effect.Effect<A, E, R>,
+    ): Effect.Effect<WithSandboxResult<A>, E, R> =>
+      makeEffect(info, sandbox).pipe(
+        Effect.map((value) => ({ value, preservedWorktreePath: undefined })),
+      ),
+  });
 
 export class SandboxConfig extends Context.Tag("SandboxConfig")<
   SandboxConfig,
@@ -303,9 +324,14 @@ const attachPreservedPath = <E>(
   return e;
 };
 
+/** A git mount for a bind-mount sandbox. */
 export interface MountEntry {
   readonly hostPath: string;
   readonly sandboxPath: string;
+  /** Mount read-only. */
+  readonly readonly?: boolean;
+  /** A temp dir holding `hostPath`, removed when the sandbox closes. */
+  readonly tempDir?: string;
 }
 
 /**
@@ -665,6 +691,7 @@ export const WorktreeDockerSandboxFactory = {
                       catch: () => undefined,
                     }).pipe(Effect.orDie),
                 ).pipe(
+                  Effect.ensuring(removeMountTempDirs(gitMounts)),
                   Effect.map((value) => ({
                     value,
                     preservedWorktreePath: undefined,
@@ -755,7 +782,7 @@ export const WorktreeDockerSandboxFactory = {
                         try: () => handle.close(),
                         catch: () => undefined,
                       }).pipe(Effect.orDie),
-                  ),
+                  ).pipe(Effect.ensuring(removeMountTempDirs(gitMounts))),
                 ),
               ) as Effect.Effect<A, E | SandboxError, R>,
             // Release: remove or preserve the worktree based on dirty state.

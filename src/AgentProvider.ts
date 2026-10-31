@@ -103,20 +103,36 @@ const TOOL_ARG_FIELDS: Record<string, string> = {
   Agent: "description",
 };
 
+/** `value.message` when `value` is an object whose `message` is a string. */
+const messageField = (value: unknown): string | undefined =>
+  typeof value === "object" &&
+  value !== null &&
+  "message" in value &&
+  typeof value.message === "string"
+    ? value.message
+    : undefined;
+
 /**
  * Extract an error message from a parsed JSON error event.
  * Handles { error: "string" }, { error: { message: "string" } },
  * { error: { data: { message: "string" } } }, and { message: "string" }.
  */
-const extractErrorMessage = (obj: any): string | undefined => {
-  const err = obj.error;
-  if (typeof err === "string") return err;
-  if (typeof err === "object" && err !== null) {
-    if (typeof err.message === "string") return err.message;
-    if (typeof err.data?.message === "string") return err.data.message;
+const extractErrorMessage = (obj: unknown): string | undefined => {
+  if (typeof obj !== "object" || obj === null) {
+    return undefined;
   }
-  if (typeof obj.message === "string") return obj.message;
-  return undefined;
+  const err = "error" in obj ? obj.error : undefined;
+  if (typeof err === "string") {
+    return err;
+  }
+  if (typeof err === "object" && err !== null) {
+    const nested =
+      messageField(err) ?? ("data" in err ? messageField(err.data) : undefined);
+    if (nested !== undefined) {
+      return nested;
+    }
+  }
+  return messageField(obj);
 };
 
 /** A content block of a Claude `assistant` stream-json event. */
@@ -516,10 +532,10 @@ const makeClaudeSessionStorage = (
             ),
             tag: "claude-sub",
           });
-        } catch (err) {
+        } catch (error) {
           console.error(
             `sandcastle: failed to capture Claude subagent transcript ${sandboxSubagentPath}: ${
-              err instanceof Error ? err.message : String(err)
+              error instanceof Error ? error.message : String(error)
             }`,
           );
         }
