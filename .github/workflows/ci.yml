@@ -8,6 +8,9 @@ on:
   # secrets and a read-only token (see the agent workflows, moved off
   # pull_request_target in 8976368).
   pull_request:
+  # The merge queue on main: each queued PR is checked against the PRs ahead
+  # of it before it lands.
+  merge_group:
 
 permissions:
   contents: read
