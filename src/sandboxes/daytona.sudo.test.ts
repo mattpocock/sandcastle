@@ -86,6 +86,10 @@ describe("daytona() exec with sudo", () => {
 
     await handle.exec("a; b", { sudo: true, onLine: () => {} });
 
-    expect(sdk.commands.at(-1)).toContain(`sudo sh -c 'a; b'`);
+    // The session command is followed by pid-file housekeeping, so look for
+    // it among everything sent rather than at the end.
+    expect(sdk.commands).toContainEqual(
+      expect.stringContaining(`sudo sh -c 'a; b'`),
+    );
   });
 });
