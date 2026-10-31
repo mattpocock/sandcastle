@@ -92,6 +92,18 @@ type Example = {
 
 Instead, create a config layer using Effect for that function, then instantiate that differently in tests and in production. This helps keep the code cleaner. Don't make this layer optional - that adds more indirection to all layers of the code.
 
+## The lint ratchet
+
+`npm run lint` runs oxlint (every category but `restriction` and `nursery` as errors, type-aware, `.oxlintrc.json`), every Effect language service diagnostic (the `tsconfig.json` plugin), and `tsgo` once per strict compiler flag the code does not pass yet. Code that broke a rule when the linter landed is counted, per file and rule, in `scripts/lint-baseline.json`. `scripts/lint-ratchet.ts` holds the code to that baseline, and the baseline only ever shrinks:
+
+- A new violation fails — a count going up, or a file or rule the baseline lacks. Fix it. Never raise the baseline.
+- A fixed violation also fails until the baseline is lowered to match. Run `npm run lint:shrink`, which lowers counts and drops entries at zero but never raises one, and commit the baseline with the fix.
+- A baseline that grew against `origin/main` fails.
+
+No disable comments (`eslint-disable`, `oxlint-disable`, `@ts-ignore`, `@ts-expect-error`, `@effect-diagnostics`) outside the reviewed allowlist in `scripts/lint-ratchet-config.ts`; each one counts as `ratchet/disable-comment`. The same file names the Effect entry points (the only modules that may call `Effect.runPromise` and friends), the test-only Effect exemptions, and the compiler flags still ratcheted. When a flag's count reaches zero, move it into `tsconfig.json` and delete it from that list. `.oxlintrc.json` may not grow a per-file override.
+
+To pay down debt, pick a rule or a file from `npm run lint:report`, fix every violation of it, run `npm run lint:shrink`, and land the fix and the lower baseline together. Fix behaviour-neutrally: one rule or one file per PR, no autofix sweeps across the repo.
+
 ---
 
 ## Testing

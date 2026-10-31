@@ -1,0 +1,169 @@
+// The four sources of violations the lint ratchet counts. Each resolves to a
+// flat list of file × rule; scripts/lint-ratchet.ts tallies them.
+
+import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { promisify } from "node:util";
+import { z } from "zod";
+import type { Exemption } from "./lint-ratchet-config.ts";
+import {
+  ALLOWED_DIRECTIVES,
+  EFFECT_EXEMPTIONS,
+  RATCHETED_TS_FLAGS,
+} from "./lint-ratchet-config.ts";
+import type { Violation } from "./lint-ratchet-core.ts";
+
+export const ROOT = path.resolve(import.meta.dirname, "..");
+const BIN = path.join(ROOT, "node_modules", ".bin");
+const MAX_BUFFER = 256 * 1024 * 1024;
+
+/**
+ * Runs a command and resolves its stdout whatever its exit code: oxlint, tsgo
+ * and the Effect language service all exit non-zero when they find something.
+ * Rejects only when the command printed nothing to stdout.
+ */
+export const run: (bin: string, args: readonly string[]) => Promise<string> =
+  promisify(
+    (
+      bin: string,
+      args: readonly string[],
+      callback: (error: Error | null, stdout: string) => void,
+    ): void => {
+      execFile(
+        bin,
+        args,
+        { cwd: ROOT, maxBuffer: MAX_BUFFER },
+        (error, stdout, stderr) => {
+          if (error !== null && stdout === "") {
+            callback(new Error(`${bin} failed: ${stderr}`), "");
+            return;
+          }
+          callback(null, stdout);
+        },
+      );
+    },
+  );
+
+const globToRegExp = (glob: string): RegExp =>
+  new RegExp(
+    `^${glob
+      .replaceAll(/[.+^${}()|[\]\\]/gu, String.raw`\$&`)
+      .replaceAll("**/", "\u0000")
+      .replaceAll("*", "[^/]*")
+      .replaceAll("\u0000", "(?:.*/)?")}$`,
+    "u",
+  );
+
+const isExempt = (
+  exemptions: readonly Exemption[],
+  { file, rule }: Violation,
+): boolean =>
+  exemptions.some(
+    (e) =>
+      e.rules.includes(rule) &&
+      e.files.some((glob) => globToRegExp(glob).test(file)),
+  );
+
+const OxlintOutput = z.object({
+  diagnostics: z.array(
+    z.object({
+      // Absent on an unused disable directive.
+      code: z.string().default("oxlint(unused-disable-directive)"),
+      filename: z.string(),
+    }),
+  ),
+});
+
+/** oxlint, type-aware, configured by .oxlintrc.json. */
+export const collectOxlint = async (): Promise<Violation[]> => {
+  const out = await run(path.join(BIN, "oxlint"), ["--format", "json"]);
+  const { diagnostics } = OxlintOutput.parse(JSON.parse(out));
+  return diagnostics.map((d) => ({ file: d.filename, rule: d.code }));
+};
+
+const EffectOutput = z.object({
+  diagnostics: z.array(z.object({ file: z.string(), name: z.string() })),
+});
+
+/** Effect's language service, configured by the tsconfig.json plugin. */
+export const collectEffect = async (): Promise<Violation[]> => {
+  const out = await run(path.join(BIN, "effect-language-service"), [
+    "diagnostics",
+    "--project",
+    path.join(ROOT, "tsconfig.json"),
+    "--format",
+    "json",
+  ]);
+  const { diagnostics } = EffectOutput.parse(JSON.parse(out));
+  return diagnostics
+    .map((d) => ({ file: path.relative(ROOT, d.file), rule: d.name }))
+    .filter((v) => !isExempt(EFFECT_EXEMPTIONS, v))
+    .map((v) => ({ file: v.file, rule: `effect/${v.rule}` }));
+};
+
+const TSC_ERROR = /^(?<file>[^\s(][^(]*)\(\d+,\d+\): error TS\d+/gmu;
+
+const collectTscFlag = async (flag: string): Promise<Violation[]> => {
+  const out = await run(path.join(BIN, "tsgo"), [
+    "--noEmit",
+    "--pretty",
+    "false",
+    "-p",
+    "tsconfig.json",
+    `--${flag}`,
+  ]);
+  return [...out.matchAll(TSC_ERROR)].map((m) => ({
+    file: m.groups?.["file"] ?? "",
+    rule: `tsc/${flag}`,
+  }));
+};
+
+/** tsgo once per compiler flag tsconfig.json does not carry yet. */
+export const collectTsc = async (): Promise<Violation[]> => {
+  const perFlag = await Promise.all(
+    RATCHETED_TS_FLAGS.map(async (flag) => collectTscFlag(flag)),
+  );
+  return perFlag.flat();
+};
+
+const DIRECTIVES = [
+  "eslint-disable",
+  "eslint-enable",
+  "oxlint-disable",
+  "oxlint-enable",
+  "@ts-ignore",
+  "@ts-nocheck",
+  "@ts-expect-error",
+  "@effect-diagnostics",
+];
+const DIRECTIVE = new RegExp(
+  String.raw`(?:\/\/|\/\*)\s*(?<directive>${DIRECTIVES.join("|")})`,
+  "gu",
+);
+const SCANNED_EXTENSIONS = new Set([".ts", ".mts", ".cts", ".js", ".mjs"]);
+
+const directivesIn = async (file: string): Promise<Violation[]> => {
+  const source = await readFile(path.join(ROOT, file), "utf8");
+  return [...source.matchAll(DIRECTIVE)]
+    .map((m) => ({ file, rule: m.groups?.["directive"] ?? "" }))
+    .filter((v) => !isExempt(ALLOWED_DIRECTIVES, v))
+    .map(() => ({ file, rule: "ratchet/disable-comment" }));
+};
+
+/** Inline disable comments outside ALLOWED_DIRECTIVES. */
+export const collectDirectives = async (): Promise<Violation[]> => {
+  const listed = await run("git", [
+    "ls-files",
+    "--cached",
+    "--others",
+    "--exclude-standard",
+  ]);
+  const files = listed
+    .split("\n")
+    .filter((f) => SCANNED_EXTENSIONS.has(path.extname(f)));
+  const perFile = await Promise.all(
+    files.map(async (file) => directivesIn(file)),
+  );
+  return perFile.flat();
+};

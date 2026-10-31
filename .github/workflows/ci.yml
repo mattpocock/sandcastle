@@ -28,6 +28,7 @@ jobs:
           node-version: 22
       - run: npm ci
       - run: npm run typecheck
+      - run: npm run lint
       # Tests import from dist, so build before test.
       - run: npm run build
       - run: npm test
