@@ -172,6 +172,12 @@ export class SandboxConfig extends Context.Tag("SandboxConfig")<
     readonly copyToWorktree?: string[];
     /** When specified, the run name is included in the auto-generated branch and worktree names. */
     readonly name?: string;
+    /**
+     * merge-to-head only: the temp branch name the caller already generated and
+     * showed to the user (log filename, banner, `{{SOURCE_BRANCH}}`). The
+     * worktree is created on exactly this branch instead of a fresh one.
+     */
+    readonly tempBranch?: string;
     /** Sandbox provider — delegates sandbox lifecycle to the provider. */
     readonly sandboxProvider: SandboxProvider;
     /** Branch strategy — controls how the agent's changes relate to branches. */
@@ -308,6 +314,7 @@ export const WorktreeDockerSandboxFactory = {
         hostRepoDir,
         copyToWorktree: copyPaths,
         name,
+        tempBranch,
         sandboxProvider,
         branchStrategy,
         hooks,
@@ -339,7 +346,7 @@ export const WorktreeDockerSandboxFactory = {
           Effect.andThen(
             branch
               ? WorktreeManager.create(hostRepoDir, { branch, baseBranch })
-              : WorktreeManager.create(hostRepoDir, { name }),
+              : WorktreeManager.create(hostRepoDir, { name, tempBranch }),
           ),
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           // A SIGINT/SIGTERM exits the process before the release below runs,

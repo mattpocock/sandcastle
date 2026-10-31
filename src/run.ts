@@ -678,6 +678,10 @@ export async function run(
         hostRepoDir,
         copyToWorktree: options.copyToWorktree,
         name: options.name,
+        // Create the worktree on the temp branch already shown to the user,
+        // rather than letting WorktreeManager generate a second name.
+        tempBranch:
+          effectiveBranchType === "merge-to-head" ? resolvedBranch : undefined,
         sandboxProvider: options.sandbox,
         branchStrategy,
         hooks,

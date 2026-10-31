@@ -255,7 +255,10 @@ export const interactive = async (
           Effect.andThen(
             branch
               ? WorktreeManager.create(hostRepoDir, { branch })
-              : WorktreeManager.create(hostRepoDir, { name: options.name }),
+              : WorktreeManager.create(hostRepoDir, {
+                  name: options.name,
+                  tempBranch: resolvedBranch,
+                }),
           ),
         ),
       );
