@@ -1,7 +1,8 @@
 import { FileSystem } from "@effect/platform";
-import { Effect } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { InitError } from "./errors.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 
 const GITIGNORE = `.env
@@ -87,6 +88,36 @@ const LOCKFILES: readonly (readonly [string, PackageManager])[] = [
   ["package-lock.json", "npm"],
 ];
 
+const PackageJson = Schema.parseJson(
+  Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+);
+
+/**
+ * The host project's package.json, or None when it is missing, unreadable, or
+ * not a JSON object.
+ */
+const readHostPackageJson = (
+  repoDir: string,
+): Effect.Effect<
+  Option.Option<Record<string, unknown>>,
+  never,
+  FileSystem.FileSystem
+> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const pkgPath = join(repoDir, "package.json");
+    const exists = yield* fs
+      .exists(pkgPath)
+      .pipe(Effect.orElseSucceed(() => false));
+    if (!exists) {
+      return Option.none();
+    }
+    const content = yield* fs
+      .readFileString(pkgPath)
+      .pipe(Effect.orElseSucceed(() => ""));
+    return Schema.decodeUnknownOption(PackageJson)(content);
+  });
+
 /**
  * Detect the host project's package manager. An explicit corepack-style
  * `packageManager` field in package.json wins; otherwise the first matching
@@ -98,26 +129,14 @@ export const detectPackageManager = (
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
 
-    const pkgPath = join(repoDir, "package.json");
-    const pkgExists = yield* fs
-      .exists(pkgPath)
-      .pipe(Effect.orElseSucceed(() => false));
-    if (pkgExists) {
-      const content = yield* fs
-        .readFileString(pkgPath)
-        .pipe(Effect.orElseSucceed(() => ""));
-      try {
-        const pkg: unknown = JSON.parse(content);
-        const field = isRecord(pkg) ? pkg["packageManager"] : undefined;
-        if (typeof field === "string") {
-          const name = field.split("@")[0];
-          const match = PACKAGE_MANAGERS.find((pm) => pm === name);
-          if (match) {
-            return match;
-          }
-        }
-      } catch {
-        // Malformed package.json — fall through to lockfile detection.
+    // A missing or malformed package.json falls through to lockfile detection.
+    const pkg = yield* readHostPackageJson(repoDir);
+    const field = Option.getOrUndefined(pkg)?.["packageManager"];
+    if (typeof field === "string") {
+      const name = field.split("@")[0];
+      const match = PACKAGE_MANAGERS.find((pm) => pm === name);
+      if (match) {
+        return match;
       }
     }
 
@@ -173,35 +192,20 @@ export const hostHasDependency = (
   pkg: string,
 ): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
   Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const pkgPath = join(repoDir, "package.json");
-    const exists = yield* fs
-      .exists(pkgPath)
-      .pipe(Effect.orElseSucceed(() => false));
-    if (!exists) {
+    const parsed = yield* readHostPackageJson(repoDir);
+    if (Option.isNone(parsed)) {
       return false;
     }
-    const content = yield* fs
-      .readFileString(pkgPath)
-      .pipe(Effect.orElseSucceed(() => ""));
-    try {
-      const parsed: unknown = JSON.parse(content);
-      const depMaps = [
-        "dependencies",
-        "devDependencies",
-        "peerDependencies",
-        "optionalDependencies",
-      ];
-      return (
-        isRecord(parsed) &&
-        depMaps.some((key) => {
-          const deps = parsed[key];
-          return typeof deps === "object" && deps !== null && pkg in deps;
-        })
-      );
-    } catch {
-      return false;
-    }
+    const depMaps = [
+      "dependencies",
+      "devDependencies",
+      "peerDependencies",
+      "optionalDependencies",
+    ];
+    return depMaps.some((key) => {
+      const deps = parsed.value[key];
+      return typeof deps === "object" && deps !== null && pkg in deps;
+    });
   });
 
 // ---------------------------------------------------------------------------
@@ -773,14 +777,16 @@ const getTemplatesDir = (): string => {
   return join(dirname(thisFile), "templates");
 };
 
-const getTemplateDir = (templateName: string): Effect.Effect<string, Error> =>
+const getTemplateDir = (
+  templateName: string,
+): Effect.Effect<string, InitError> =>
   Effect.gen(function* () {
     const template = TEMPLATES.find((t) => t.name === templateName);
     if (!template) {
       const names = TEMPLATES.map((t) => t.name).join(", ");
-      yield* Effect.fail(
-        new Error(`Unknown template: "${templateName}". Available: ${names}`),
-      );
+      return yield* new InitError({
+        message: `Unknown template: "${templateName}". Available: ${names}`,
+      });
     }
     return join(getTemplatesDir(), templateName);
   });
@@ -800,12 +806,12 @@ const copyTemplateFiles = (
   templateDir: string,
   destDir: string,
   mainFilename: string,
-): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+): Effect.Effect<void, InitError, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const files = yield* fs
       .readDirectory(templateDir)
-      .pipe(Effect.mapError((e) => new Error(e.message)));
+      .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
     yield* Effect.all(
       files
         .filter(
@@ -818,7 +824,9 @@ const copyTemplateFiles = (
           const destName = f === "main.mts" ? mainFilename : f;
           return fs
             .copyFile(join(templateDir, f), join(destDir, destName))
-            .pipe(Effect.mapError((e) => new Error(e.message)));
+            .pipe(
+              Effect.mapError((e) => new InitError({ message: e.message })),
+            );
         }),
       { concurrency: "unbounded" },
     );
@@ -838,21 +846,21 @@ const rewriteMainTs = (
   sandboxProvider: SandboxProviderEntry,
   mainFilename: string,
   imageName: string | undefined,
-): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+): Effect.Effect<void, InitError, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const mainTsPath = join(configDir, mainFilename);
 
     const exists = yield* fs
       .exists(mainTsPath)
-      .pipe(Effect.mapError((e) => new Error(e.message)));
+      .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
     if (!exists) {
       return;
     }
 
     let content = yield* fs
       .readFileString(mainTsPath)
-      .pipe(Effect.mapError((e) => new Error(e.message)));
+      .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
 
     // Templates use main.mts as the canonical filename in comments.
     // When the target is main.ts, rewrite those references.
@@ -894,7 +902,7 @@ const rewriteMainTs = (
 
     yield* fs
       .writeFileString(mainTsPath, content)
-      .pipe(Effect.mapError((e) => new Error(e.message)));
+      .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
   });
 
 /**
@@ -909,7 +917,7 @@ const applyIssueTrackerSandboxOptions = (
   issueTracker: IssueTrackerEntry,
   sandboxProvider: SandboxProviderEntry,
   mainFilename: string,
-): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+): Effect.Effect<void, InitError, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     if (!issueTracker.sandboxOptions) {
       return;
@@ -919,14 +927,14 @@ const applyIssueTrackerSandboxOptions = (
 
     const exists = yield* fs
       .exists(mainTsPath)
-      .pipe(Effect.mapError((e) => new Error(e.message)));
+      .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
     if (!exists) {
       return;
     }
 
     const content = yield* fs
       .readFileString(mainTsPath)
-      .pipe(Effect.mapError((e) => new Error(e.message)));
+      .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
 
     const provider = sandboxProvider.name;
     const importRe = new RegExp(
@@ -934,11 +942,9 @@ const applyIssueTrackerSandboxOptions = (
       "m",
     );
     if (!importRe.test(content)) {
-      return yield* Effect.fail(
-        new Error(
-          `Cannot apply ${issueTracker.label} sandbox options: ${mainFilename} has no ${provider} import.`,
-        ),
-      );
+      return yield* new InitError({
+        message: `Cannot apply ${issueTracker.label} sandbox options: ${mainFilename} has no ${provider} import.`,
+      });
     }
 
     const updated = content
@@ -950,7 +956,7 @@ const applyIssueTrackerSandboxOptions = (
 
     yield* fs
       .writeFileString(mainTsPath, updated)
-      .pipe(Effect.mapError((e) => new Error(e.message)));
+      .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
   });
 
 /**
@@ -960,12 +966,12 @@ const applyIssueTrackerSandboxOptions = (
  */
 const rewritePromptFiles = (
   configDir: string,
-): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+): Effect.Effect<void, InitError, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const files = yield* fs
       .readDirectory(configDir)
-      .pipe(Effect.mapError((e) => new Error(e.message)));
+      .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
     const mdFiles = files.filter((f) => f.endsWith(".md"));
     yield* Effect.all(
       mdFiles.map((f) =>
@@ -973,12 +979,16 @@ const rewritePromptFiles = (
           const filePath = join(configDir, f);
           const content = yield* fs
             .readFileString(filePath)
-            .pipe(Effect.mapError((e) => new Error(e.message)));
+            .pipe(
+              Effect.mapError((e) => new InitError({ message: e.message })),
+            );
           const updated = content.replaceAll(" --label Sandcastle", "");
           if (updated !== content) {
             yield* fs
               .writeFileString(filePath, updated)
-              .pipe(Effect.mapError((e) => new Error(e.message)));
+              .pipe(
+                Effect.mapError((e) => new InitError({ message: e.message })),
+              );
           }
         }),
       ),
@@ -1017,12 +1027,12 @@ const isTextFile = (filename: string): boolean => {
 const substituteTemplateArgs = (
   configDir: string,
   issueTracker: IssueTrackerEntry,
-): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+): Effect.Effect<void, InitError, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const files = yield* fs
       .readDirectory(configDir)
-      .pipe(Effect.mapError((e) => new Error(e.message)));
+      .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
     const textFiles = files.filter((f) => isTextFile(f));
     yield* Effect.all(
       textFiles.map((f) =>
@@ -1030,7 +1040,9 @@ const substituteTemplateArgs = (
           const filePath = join(configDir, f);
           let content = yield* fs
             .readFileString(filePath)
-            .pipe(Effect.mapError((e) => new Error(e.message)));
+            .pipe(
+              Effect.mapError((e) => new InitError({ message: e.message })),
+            );
           const original = content;
           for (const [key, value] of Object.entries(
             issueTracker.templateArgs,
@@ -1043,7 +1055,9 @@ const substituteTemplateArgs = (
           if (content !== original) {
             yield* fs
               .writeFileString(filePath, content)
-              .pipe(Effect.mapError((e) => new Error(e.message)));
+              .pipe(
+                Effect.mapError((e) => new InitError({ message: e.message })),
+              );
           }
         }),
       ),
@@ -1157,29 +1171,16 @@ const detectMainFilename = (
   repoDir: string,
 ): Effect.Effect<string, never, FileSystem.FileSystem> =>
   Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const pkgPath = join(repoDir, "package.json");
-    const exists = yield* fs
-      .exists(pkgPath)
-      .pipe(Effect.orElseSucceed(() => false));
-    if (!exists) {
-      return "main.mts";
-    }
-    const content = yield* fs
-      .readFileString(pkgPath)
-      .pipe(Effect.orElseSucceed(() => ""));
-    try {
-      const pkg: unknown = JSON.parse(content);
-      return isRecord(pkg) && pkg["type"] === "module" ? "main.ts" : "main.mts";
-    } catch {
-      return "main.mts";
-    }
+    const pkg = yield* readHostPackageJson(repoDir);
+    return Option.getOrUndefined(pkg)?.["type"] === "module"
+      ? "main.ts"
+      : "main.mts";
   });
 
 export const scaffold = (
   repoDir: string,
   options: ScaffoldOptions,
-): Effect.Effect<ScaffoldResult, Error, FileSystem.FileSystem> =>
+): Effect.Effect<ScaffoldResult, InitError, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const {
       agent,
@@ -1195,20 +1196,19 @@ export const scaffold = (
 
     const exists = yield* fs
       .exists(configDir)
-      .pipe(Effect.mapError((e) => new Error(e.message)));
+      .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
     if (exists) {
-      yield* Effect.fail(
-        new Error(
+      return yield* new InitError({
+        message:
           ".sandcastle/ directory already exists. Remove it first if you want to re-initialize.",
-        ),
-      );
+      });
     }
 
     const mainFilename = yield* detectMainFilename(repoDir);
 
     yield* fs
       .makeDirectory(configDir, { recursive: false })
-      .pipe(Effect.mapError((e) => new Error(e.message)));
+      .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
 
     const templateDir = yield* getTemplateDir(templateName);
 
@@ -1226,13 +1226,13 @@ export const scaffold = (
             join(configDir, sandboxProvider.containerfileName),
             agent.dockerfileTemplate,
           )
-          .pipe(Effect.mapError((e) => new Error(e.message))),
+          .pipe(Effect.mapError((e) => new InitError({ message: e.message }))),
         fs
           .writeFileString(join(configDir, ".gitignore"), GITIGNORE)
-          .pipe(Effect.mapError((e) => new Error(e.message))),
+          .pipe(Effect.mapError((e) => new InitError({ message: e.message }))),
         fs
           .writeFileString(join(configDir, ".env.example"), envExampleContent)
-          .pipe(Effect.mapError((e) => new Error(e.message))),
+          .pipe(Effect.mapError((e) => new InitError({ message: e.message }))),
         copyTemplateFiles(templateDir, configDir, mainFilename),
       ],
       { concurrency: "unbounded" },
@@ -1276,12 +1276,8 @@ export const scaffold = (
             buildImageShellCommand(sandboxProvider, imageName),
           ),
         )
-        .pipe(Effect.mapError((e) => new Error(e.message)));
+        .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
     }
 
     return { mainFilename };
   });
-
-/** A parsed JSON value that is an object (or array), so its fields can be read. */
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null;
