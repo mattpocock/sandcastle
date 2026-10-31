@@ -258,7 +258,9 @@ export const createWorktree = async (
   let closed = false;
 
   const close = async (): Promise<CloseResult> => {
-    if (closed) return { preservedWorktreePath: undefined };
+    if (closed) {
+      return { preservedWorktreePath: undefined };
+    }
     closed = true;
 
     return Effect.gen(function* () {

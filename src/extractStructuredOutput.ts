@@ -125,11 +125,15 @@ const findLastTagContent = (text: string, tag: string): string | undefined => {
 
   while (true) {
     const openIdx = text.indexOf(openTag, searchFrom);
-    if (openIdx === -1) break;
+    if (openIdx === -1) {
+      break;
+    }
 
     const contentStart = openIdx + openTag.length;
     const closeIdx = text.indexOf(closeTag, contentStart);
-    if (closeIdx === -1) break;
+    if (closeIdx === -1) {
+      break;
+    }
 
     lastContent = text.slice(contentStart, closeIdx);
     searchFrom = closeIdx + closeTag.length;

@@ -105,8 +105,8 @@ const toStreamJson = (output: string, sessionId?: string): string => {
       type: "assistant",
       message: { content: [{ type: "text", text: output }] },
     }),
+    JSON.stringify({ type: "result", result: output }),
   );
-  lines.push(JSON.stringify({ type: "result", result: output }));
   return lines.join("\n");
 };
 
@@ -1080,7 +1080,9 @@ describe("Orchestrator tool call display integration", () => {
                 result: "<promise>COMPLETE</promise>",
               }),
             ];
-            for (const line of lines) onLine(line);
+            for (const line of lines) {
+              onLine(line);
+            }
             return Effect.succeed({
               stdout: lines.join("\n"),
               stderr: "",
@@ -1172,7 +1174,9 @@ describe("Orchestrator agent stream emitter", () => {
                 result: "<promise>COMPLETE</promise>",
               }),
             ];
-            for (const line of lines) onLine(line);
+            for (const line of lines) {
+              onLine(line);
+            }
             return Effect.succeed({
               stdout: lines.join("\n"),
               stderr: "",
@@ -1248,7 +1252,9 @@ describe("Orchestrator agent stream emitter", () => {
                 result: "<promise>COMPLETE</promise>",
               }),
             ];
-            for (const line of lines) onLine(line);
+            for (const line of lines) {
+              onLine(line);
+            }
             return Effect.succeed({
               stdout: lines.join("\n"),
               stderr: "",
@@ -1330,7 +1336,9 @@ describe("Orchestrator agent stream emitter", () => {
               recognisedLine,
               resultLine,
             ];
-            for (const line of lines) onLine(line);
+            for (const line of lines) {
+              onLine(line);
+            }
             return Effect.succeed({
               stdout: lines.join("\n"),
               stderr: "",
@@ -2795,8 +2803,6 @@ const toPiStreamJson = (output: string): string => {
       type: "message_update",
       assistantMessageEvent: { type: "text_delta", delta: output },
     }),
-  );
-  lines.push(
     JSON.stringify({
       type: "agent_end",
       messages: [
@@ -3850,7 +3856,9 @@ describe("Orchestrator signal (AbortSignal)", () => {
             if (command.startsWith("claude ") && options?.onLine) {
               lateOnLine = options.onLine;
               if (ending === "abort") {
-                setTimeout(() => ac.abort("verify-abort"), 20);
+                setTimeout(() => {
+                  ac.abort("verify-abort");
+                }, 20);
               }
               return Effect.never;
             }
@@ -4340,7 +4348,9 @@ describe("Orchestrator context window (last model call)", () => {
           const onLine = options.onLine;
           const call = perCall.shift() ?? { lines: [], exitCode: 0 };
           return Effect.sync(() => {
-            for (const line of call.lines) onLine(line);
+            for (const line of call.lines) {
+              onLine(line);
+            }
             return {
               stdout: call.lines.join("\n"),
               stderr: call.exitCode === 0 ? "" : "API Error: refused",

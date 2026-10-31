@@ -174,7 +174,9 @@ export const FileDisplay = {
 
         const appendRaw = (chunk: string): Effect.Effect<void> =>
           Effect.suspend(() => {
-            if (chunk.length === 0) return Effect.void;
+            if (chunk.length === 0) {
+              return Effect.void;
+            }
             midLine = !chunk.endsWith("\n");
             return fs
               .writeFileString(filePath, chunk, { flag: "a" })
@@ -260,7 +262,9 @@ export const ClackDisplay = {
 
       const printText = (text: string) => {
         const trimmed = text.replace(/^\n+|\n+$/g, "");
-        if (trimmed.trim().length > 0) clack.log.message(trimmed);
+        if (trimmed.trim().length > 0) {
+          clack.log.message(trimmed);
+        }
       };
 
       const flushText = () => {
@@ -272,7 +276,9 @@ export const ClackDisplay = {
       const writeText = (chunk: string) => {
         pendingText += chunk;
         const lastNewline = pendingText.lastIndexOf("\n");
-        if (lastNewline === -1) return;
+        if (lastNewline === -1) {
+          return;
+        }
         const complete = pendingText.slice(0, lastNewline);
         pendingText = pendingText.slice(lastNewline + 1);
         printText(complete);
@@ -288,10 +294,14 @@ export const ClackDisplay = {
 
       return {
         intro: (title) =>
-          sync(() => clack.intro(styleText("inverse", ` ${title} `))),
+          sync(() => {
+            clack.intro(styleText("inverse", ` ${title} `));
+          }),
 
         status: (message, severity) =>
-          sync(() => severityToClack[severity](terminalStyle.status(message))),
+          sync(() => {
+            severityToClack[severity](terminalStyle.status(message));
+          }),
 
         spinner: (message, effect) =>
           Effect.acquireUseRelease(
@@ -326,7 +336,10 @@ export const ClackDisplay = {
               flushText();
               return clack.taskLog({ title });
             }),
-            (log) => effect((msg) => log.message(msg)),
+            (log) =>
+              effect((msg) => {
+                log.message(msg);
+              }),
             (log, exit) =>
               Effect.sync(() => {
                 if (exit._tag === "Success") {
@@ -337,14 +350,20 @@ export const ClackDisplay = {
               }),
           ),
 
-        text: (message) => sync(() => clack.log.message(message)),
+        text: (message) =>
+          sync(() => {
+            clack.log.message(message);
+          }),
 
-        textChunk: (chunk) => Effect.sync(() => writeText(chunk)),
+        textChunk: (chunk) =>
+          Effect.sync(() => {
+            writeText(chunk);
+          }),
 
         toolCall: (name, formattedArgs) =>
-          sync(() =>
-            clack.log.step(terminalStyle.toolCall(`${name}(${formattedArgs})`)),
-          ),
+          sync(() => {
+            clack.log.step(terminalStyle.toolCall(`${name}(${formattedArgs})`));
+          }),
       };
     }),
   ),

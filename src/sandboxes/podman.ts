@@ -217,7 +217,7 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
         d,
       ]);
       const cpusArgs =
-        options?.cpus !== undefined ? ["--cpus", String(options.cpus)] : [];
+        options?.cpus === undefined ? [] : ["--cpus", String(options.cpus)];
 
       // Start container via podman run
       await new Promise<void>((resolve, reject) => {
@@ -320,15 +320,21 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
           // Elevate by running as root through the engine, not a `sudo`
           // prefix: the image needs no sudo binary, and the whole command
           // (`a && b`, not just `a`) runs as root.
-          if (opts?.sudo) args.push("--user", "0:0");
-          if (opts?.stdin !== undefined) args.push("-i");
-          if (opts?.cwd) args.push("-w", opts.cwd);
+          if (opts?.sudo) {
+            args.push("--user", "0:0");
+          }
+          if (opts?.stdin !== undefined) {
+            args.push("-i");
+          }
+          if (opts?.cwd) {
+            args.push("-w", opts.cwd);
+          }
           args.push(containerName, "sh", "-c", command);
 
           return new Promise((resolve, reject) => {
             const proc = spawn("podman", args, {
               stdio: [
-                opts?.stdin !== undefined ? "pipe" : "ignore",
+                opts?.stdin === undefined ? "ignore" : "pipe",
                 "pipe",
                 "pipe",
               ],
@@ -397,7 +403,9 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
             } else {
               podmanArgs.push("-i");
             }
-            if (opts.cwd) podmanArgs.push("-w", opts.cwd);
+            if (opts.cwd) {
+              podmanArgs.push("-w", opts.cwd);
+            }
             podmanArgs.push(containerName, ...args);
 
             const proc = spawn("podman", podmanArgs, {

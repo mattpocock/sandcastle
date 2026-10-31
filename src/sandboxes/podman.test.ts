@@ -1018,7 +1018,9 @@ describe("podman()", () => {
     expect(process.listenerCount("SIGTERM")).toBe(sigtermBefore + 1);
     expect(process.listenerCount("exit")).toBe(exitBefore + 1);
 
-    for (const h of handles) await h.close();
+    for (const h of handles) {
+      await h.close();
+    }
 
     expect(process.listenerCount("SIGINT")).toBe(sigintBefore);
     expect(process.listenerCount("SIGTERM")).toBe(sigtermBefore);

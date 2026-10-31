@@ -73,12 +73,14 @@ const shellProvider = (
               GIT_CONFIG_GLOBAL: gitConfig,
             },
             stdio: [
-              execOpts?.stdin !== undefined ? "pipe" : "ignore",
+              execOpts?.stdin === undefined ? "ignore" : "pipe",
               "pipe",
               "pipe",
             ],
           });
-          if (execOpts?.stdin !== undefined) proc.stdin!.end(execOpts.stdin);
+          if (execOpts?.stdin !== undefined) {
+            proc.stdin!.end(execOpts.stdin);
+          }
           let stdout = "";
           let stderr = "";
           createInterface({ input: proc.stdout! }).on("line", (line) => {
@@ -87,9 +89,9 @@ const shellProvider = (
           });
           proc.stderr!.on("data", (c: Buffer) => (stderr += c.toString()));
           proc.on("error", reject);
-          proc.on("close", (code) =>
-            resolve({ stdout, stderr, exitCode: code ?? 0 }),
-          );
+          proc.on("close", (code) => {
+            resolve({ stdout, stderr, exitCode: code ?? 0 });
+          });
         }),
       copyFileIn: async () => {},
       copyFileOut: async () => {},

@@ -67,8 +67,11 @@ describe("resolveEnv", () => {
       const env = await runResolveEnv(dir);
       expect(env["MY_TOKEN"]).toBe("from-process");
     } finally {
-      if (orig === undefined) delete process.env["MY_TOKEN"];
-      else process.env["MY_TOKEN"] = orig;
+      if (orig === undefined) {
+        delete process.env["MY_TOKEN"];
+      } else {
+        process.env["MY_TOKEN"] = orig;
+      }
     }
   });
 
@@ -95,8 +98,11 @@ describe("resolveEnv", () => {
       const env = await runResolveEnv(dir);
       expect(env["MY_VAR"]).toBe("sc-val");
     } finally {
-      if (orig === undefined) delete process.env["MY_VAR"];
-      else process.env["MY_VAR"] = orig;
+      if (orig === undefined) {
+        delete process.env["MY_VAR"];
+      } else {
+        process.env["MY_VAR"] = orig;
+      }
     }
   });
 
@@ -193,8 +199,11 @@ describe("resolveEnv", () => {
       const env = await runResolveEnv(dir);
       expect(env["FALLBACK_KEY"]).toBe("from-env");
     } finally {
-      if (orig === undefined) delete process.env["FALLBACK_KEY"];
-      else process.env["FALLBACK_KEY"] = orig;
+      if (orig === undefined) {
+        delete process.env["FALLBACK_KEY"];
+      } else {
+        process.env["FALLBACK_KEY"] = orig;
+      }
     }
   });
 

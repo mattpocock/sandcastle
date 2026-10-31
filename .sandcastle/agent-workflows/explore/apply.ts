@@ -53,9 +53,9 @@ const ghWith = (args: string[], options: { token?: string; input?: string }) =>
   });
 
 const outcome = (entry: Plan["issues"][number]): string =>
-  entry.duplicate_of !== null
-    ? `closed as duplicate of #${entry.duplicate_of}`
-    : `\`${EXPLORE_LABEL}\` → \`${VERDICT_LABEL[entry.tag]}\``;
+  entry.duplicate_of === null
+    ? `\`${EXPLORE_LABEL}\` → \`${VERDICT_LABEL[entry.tag]}\``
+    : `closed as duplicate of #${entry.duplicate_of}`;
 
 const describe = (effect: GitHubEffect): string => {
   switch (effect.kind) {

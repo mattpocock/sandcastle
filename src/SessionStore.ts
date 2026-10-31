@@ -117,9 +117,13 @@ export const listClaudeSubagentSessionsInSandbox = async (
   const result = await handle.exec(
     `find ${JSON.stringify(dir)} -type f -name ${JSON.stringify("agent-*.jsonl")} 2>/dev/null`,
   );
-  if (result.exitCode !== 0) return [];
+  if (result.exitCode !== 0) {
+    return [];
+  }
   const stdout = result.stdout.trim();
-  if (stdout === "") return [];
+  if (stdout === "") {
+    return [];
+  }
   return stdout.split("\n").filter((line) => line !== "");
 };
 
@@ -141,7 +145,9 @@ export const findClaudeSessionOnHost = async (
     return { path: undefined, searchedRoot: root };
   }
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
+    if (!entry.isDirectory()) {
+      continue;
+    }
     const candidate = join(root, entry.name, `${id}.jsonl`);
     if (await pathExists(candidate)) {
       return { path: candidate, searchedRoot: root };
@@ -155,11 +161,15 @@ const rewriteSessionCwd = (
   fromCwd: string,
   toCwd: string,
 ): string => {
-  if (content === "") return "";
+  if (content === "") {
+    return "";
+  }
   return content
     .split("\n")
     .map((line) => {
-      if (line === "") return line;
+      if (line === "") {
+        return line;
+      }
       // A torn final line (writer killed mid-flush) must not abort the whole
       // transfer — preserve it verbatim so the rest of the session survives.
       try {
@@ -219,7 +229,9 @@ const findCodexSessionPath = async (
       }
       if (entry.isDirectory()) {
         const found = await visit(child);
-        if (found) return found;
+        if (found) {
+          return found;
+        }
       }
     }
     return undefined;
@@ -254,7 +266,9 @@ export const locateCodexHostSession = async (
   const root =
     sessionsDir ?? join(process.env.HOME ?? "~", ".codex", "sessions");
   const path = await findCodexSessionPath(root, id);
-  if (!path) throw new Error(`session ${id} not found in ${root}`);
+  if (!path) {
+    throw new Error(`session ${id} not found in ${root}`);
+  }
   return { path, relativePath: relative(root, path) };
 };
 
@@ -321,7 +335,9 @@ const findPiSessionPath = async (
     return undefined;
   }
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
+    if (!entry.isDirectory()) {
+      continue;
+    }
     const dirAbs = join(rootDir, entry.name);
     let files;
     try {
@@ -367,7 +383,9 @@ export const locatePiHostSession = async (
   const root =
     sessionsDir ?? join(process.env.HOME ?? "~", ".pi", "agent", "sessions");
   const found = await findPiSessionPath(root, id);
-  if (!found) throw new Error(`session ${id} not found in ${root}`);
+  if (!found) {
+    throw new Error(`session ${id} not found in ${root}`);
+  }
   return found;
 };
 
@@ -400,11 +418,15 @@ export const transferPiSession = (
   fromCwd: string,
   toCwd: string,
 ): string => {
-  if (jsonl === "") return "";
+  if (jsonl === "") {
+    return "";
+  }
   return jsonl
     .split("\n")
     .map((line) => {
-      if (line === "") return line;
+      if (line === "") {
+        return line;
+      }
       try {
         const entry = JSON.parse(line) as Record<string, unknown>;
         if (

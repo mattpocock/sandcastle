@@ -31,13 +31,17 @@ export const classifyEnv = (
       });
       continue;
     }
-    if (ctx.declared.has(name)) continue;
+    if (ctx.declared.has(name)) {
+      continue;
+    }
     if (ctx.hostSecrets.has(name)) {
       leaks.push({ name, reason: "a host secret the world never declared" });
       continue;
     }
     for (const [hostName, hostValue] of ctx.hostSecrets) {
-      if (ctx.declared.has(hostName)) continue;
+      if (ctx.declared.has(hostName)) {
+        continue;
+      }
       if (value.includes(hostValue)) {
         leaks.push({
           name,

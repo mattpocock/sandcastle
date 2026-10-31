@@ -724,9 +724,13 @@ describe("interactive()", () => {
         // Simulate a long-running interactive session
         new Promise<{ exitCode: number }>((resolve) => {
           // Abort mid-session
-          setTimeout(() => ac.abort("mid-session abort"), 50);
+          setTimeout(() => {
+            ac.abort("mid-session abort");
+          }, 50);
           // This would normally run for a long time
-          setTimeout(() => resolve({ exitCode: 0 }), 10_000);
+          setTimeout(() => {
+            resolve({ exitCode: 0 });
+          }, 10_000);
         }),
     );
 

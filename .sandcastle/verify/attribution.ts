@@ -37,10 +37,14 @@ export const parseEngineTime = (raw: string): number | undefined => {
     /(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(\.\d+)?\s*(Z|[+-]\d{2}:?\d{2})?/.exec(
       raw.trim(),
     );
-  if (!m) return undefined;
+  if (!m) {
+    return undefined;
+  }
   const frac = m[3] ? m[3].slice(0, 4) : "";
   let zone = m[4] ?? "Z";
-  if (/^[+-]\d{4}$/.test(zone)) zone = `${zone.slice(0, 3)}:${zone.slice(3)}`;
+  if (/^[+-]\d{4}$/.test(zone)) {
+    zone = `${zone.slice(0, 3)}:${zone.slice(3)}`;
+  }
   const t = Date.parse(`${m[1]}T${m[2]}${frac}${zone}`);
   return Number.isNaN(t) ? undefined : t;
 };
@@ -60,35 +64,40 @@ export const attributeImage = (
   now: string,
 ): ImageAttribution => {
   const ids = runIdsIn(image.ref);
-  if (ids.includes(self.runId))
+  if (ids.includes(self.runId)) {
     return { kind: "own", detail: "this world's, cleanup removes it" };
-  if (ids.length > 0)
+  }
+  if (ids.length > 0) {
     return {
       kind: "other-world",
       detail: `named for world ${ids.join(", ")}, not this one`,
     };
-  if (!/^(localhost\/)?sandcastle:/.test(image.ref))
+  }
+  if (!/^(localhost\/)?sandcastle:/.test(image.ref)) {
     return {
       kind: "unrelated",
       detail: "new since the world began, not a Sandcastle image",
     };
+  }
   const nowT = Date.parse(now);
   const t = image.created ? parseEngineTime(image.created) : undefined;
-  if (t !== undefined && t < Date.parse(self.createdAt))
+  if (t !== undefined && t < Date.parse(self.createdAt)) {
     return {
       kind: "unrelated",
       detail: "built before this world (newly tagged since)",
     };
+  }
   // Unknown build time: assume it was built now, i.e. during the world.
   const at = t ?? nowT;
   const rivals = others
     .filter((w) => w.runId !== self.runId && liveAt(w, at, nowT))
     .map((w) => w.runId);
-  if (rivals.length > 0)
+  if (rivals.length > 0) {
     return {
       kind: "ambiguous",
       detail: `built outside any run-id name while world ${rivals.join(", ")} was also live, so not pinned on this one`,
     };
+  }
   return {
     kind: "leak",
     detail: "built during this world's life, outside its run-id name",

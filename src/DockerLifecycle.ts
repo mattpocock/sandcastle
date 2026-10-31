@@ -152,7 +152,7 @@ export const startContainer = (
       d,
     ]);
     const cpusFlags =
-      options?.cpus !== undefined ? ["--cpus", String(options.cpus)] : [];
+      options?.cpus === undefined ? [] : ["--cpus", String(options.cpus)];
 
     yield* dockerExec([
       "run",

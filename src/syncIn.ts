@@ -57,13 +57,13 @@ const execOk = (
       }),
   }).pipe(
     Effect.flatMap((result) =>
-      result.exitCode !== 0
-        ? Effect.fail(
+      result.exitCode === 0
+        ? Effect.succeed(result)
+        : Effect.fail(
             new SyncError({
               message: `Sandbox command failed (exit ${result.exitCode}): ${command}\n${result.stderr}`,
             }),
-          )
-        : Effect.succeed(result),
+          ),
     ),
   );
 

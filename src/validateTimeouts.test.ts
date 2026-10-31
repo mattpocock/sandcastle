@@ -3,8 +3,10 @@ import { validateTimeoutOptions } from "./validateTimeouts.js";
 
 describe("validateTimeoutOptions", () => {
   it("accepts unset options and positive values", () => {
-    expect(() => validateTimeoutOptions({})).not.toThrow();
-    expect(() =>
+    expect(() => {
+      validateTimeoutOptions({});
+    }).not.toThrow();
+    expect(() => {
       validateTimeoutOptions({
         idleTimeoutSeconds: 0.1,
         completionTimeoutSeconds: 5,
@@ -14,16 +16,16 @@ describe("validateTimeoutOptions", () => {
           commitCollectionMs: 30_000,
           mergeToHostMs: 30_000,
         },
-      }),
-    ).not.toThrow();
+      });
+    }).not.toThrow();
   });
 
   it.each([0, -1, Number.NaN])(
     "rejects idleTimeoutSeconds: %s, naming the option",
     (value) => {
-      expect(() =>
-        validateTimeoutOptions({ idleTimeoutSeconds: value }),
-      ).toThrow(
+      expect(() => {
+        validateTimeoutOptions({ idleTimeoutSeconds: value });
+      }).toThrow(
         `idleTimeoutSeconds must be a positive number of seconds. Received: ${value}`,
       );
     },
@@ -32,9 +34,9 @@ describe("validateTimeoutOptions", () => {
   it.each([0, -1, Number.NaN])(
     "rejects completionTimeoutSeconds: %s, naming the option",
     (value) => {
-      expect(() =>
-        validateTimeoutOptions({ completionTimeoutSeconds: value }),
-      ).toThrow(
+      expect(() => {
+        validateTimeoutOptions({ completionTimeoutSeconds: value });
+      }).toThrow(
         `completionTimeoutSeconds must be a positive number of seconds. Received: ${value}`,
       );
     },
@@ -47,19 +49,19 @@ describe("validateTimeoutOptions", () => {
     "mergeToHostMs",
   ] as const)("rejects timeouts.%s of 0, -1 or NaN", (key) => {
     for (const value of [0, -1, Number.NaN]) {
-      expect(() =>
-        validateTimeoutOptions({ timeouts: { [key]: value } }),
-      ).toThrow(
+      expect(() => {
+        validateTimeoutOptions({ timeouts: { [key]: value } });
+      }).toThrow(
         `timeouts.${key} must be a positive number of milliseconds. Received: ${value}`,
       );
     }
   });
 
   it("rejects a non-number from untyped callers", () => {
-    expect(() =>
+    expect(() => {
       validateTimeoutOptions({
         idleTimeoutSeconds: "30" as unknown as number,
-      }),
-    ).toThrow("idleTimeoutSeconds must be a positive number of seconds");
+      });
+    }).toThrow("idleTimeoutSeconds must be a positive number of seconds");
   });
 });

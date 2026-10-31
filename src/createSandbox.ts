@@ -692,7 +692,9 @@ const buildSandboxHandle = (
                     if (signal.aborted) return Promise.reject(signal.reason);
                     return new Promise<{ exitCode: number }>(
                       (resolve, reject) => {
-                        const onAbort = () => reject(signal.reason);
+                        const onAbort = () => {
+                          reject(signal.reason);
+                        };
                         signal.addEventListener("abort", onAbort, {
                           once: true,
                         });

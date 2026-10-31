@@ -52,8 +52,12 @@ export const defaultImageName = (repoDir: string): string => {
  */
 export const expandTilde = (p: string, homeDirPath?: string): string => {
   const home = homeDirPath ?? homedir();
-  if (p === "~") return home;
-  if (p.startsWith("~/") || p.startsWith("~\\")) return `${home}/${p.slice(2)}`;
+  if (p === "~") {
+    return home;
+  }
+  if (p.startsWith("~/") || p.startsWith("~\\")) {
+    return `${home}/${p.slice(2)}`;
+  }
   return p;
 };
 
@@ -105,9 +109,9 @@ export const resolveUserMounts = (
     if (!existsSync(resolvedHostPath)) {
       throw new Error(
         `Mount hostPath does not exist: ${m.hostPath}${
-          m.hostPath !== resolvedHostPath
-            ? ` (resolved to ${resolvedHostPath})`
-            : ""
+          m.hostPath === resolvedHostPath
+            ? ""
+            : ` (resolved to ${resolvedHostPath})`
         }`,
       );
     }
@@ -143,7 +147,9 @@ export const normalizeMounts = <
   sandboxRepoDir: string,
   platform: string = process.platform,
 ): M[] => {
-  if (platform !== "win32") return mounts;
+  if (platform !== "win32") {
+    return mounts;
+  }
 
   const normalizedWorktree = worktreeHostPath.replace(/\\/g, "/");
 
@@ -223,7 +229,9 @@ export const patchGitMountsForWindows = (
   platform: string = process.platform,
 ): Effect.Effect<{ hostPath: string; sandboxPath: string }[], WorktreeError> =>
   Effect.gen(function* () {
-    if (platform !== "win32") return gitMounts;
+    if (platform !== "win32") {
+      return gitMounts;
+    }
 
     const _readFile =
       readFile ??
@@ -245,12 +253,16 @@ export const patchGitMountsForWindows = (
       try: () => _statFile(gitEntryPath),
       catch: () => null,
     }).pipe(Effect.catchAll(() => Effect.succeed(null)));
-    if (gitEntryType === null) return gitMounts;
+    if (gitEntryType === null) {
+      return gitMounts;
+    }
     // .git is a directory (normal clone): no gitdir indirection to fix.
     // `normalizeMounts` already remaps the .git mount to `${sandboxRepoDir}/.git`
     // because the host .git sits under `worktreeHostPath`. Removing this short-
     // circuit would break head mode against a normal clone.
-    if (gitEntryType === "directory") return gitMounts;
+    if (gitEntryType === "directory") {
+      return gitMounts;
+    }
 
     // Read and parse the gitdir: line
     const content = yield* Effect.tryPromise({
@@ -260,9 +272,13 @@ export const patchGitMountsForWindows = (
       Effect.map((s) => s.trim()),
       Effect.catchAll(() => Effect.succeed(null)),
     );
-    if (content === null) return gitMounts;
+    if (content === null) {
+      return gitMounts;
+    }
     const match = content.match(/^gitdir:\s*(.+)$/);
-    if (!match) return gitMounts;
+    if (!match) {
+      return gitMounts;
+    }
 
     const gitdirPath = match[1]!;
     const { parentGitDir, worktreeName } = parseGitdirPath(gitdirPath);
@@ -372,12 +388,16 @@ export const processFileMountParents = (
       continue;
     }
 
-    if (!isFile) continue;
+    if (!isFile) {
+      continue;
+    }
 
     const parentDir = dirname(mount.sandboxPath);
 
     // Parent IS sandboxHomedir — it always exists in the image
-    if (parentDir === sandboxHomedir) continue;
+    if (parentDir === sandboxHomedir) {
+      continue;
+    }
 
     // Parent is outside sandboxHomedir — fail at config time
     if (!parentDir.startsWith(`${sandboxHomedir}/`)) {

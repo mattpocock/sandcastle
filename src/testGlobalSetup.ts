@@ -26,8 +26,11 @@ export default function setup(): () => void {
     const leaked = readdirSync(runTmpdir).filter((name) =>
       SANDCASTLE_TMP_ENTRY.test(name),
     );
-    if (originalTmpdir === undefined) delete process.env.TMPDIR;
-    else process.env.TMPDIR = originalTmpdir;
+    if (originalTmpdir === undefined) {
+      delete process.env.TMPDIR;
+    } else {
+      process.env.TMPDIR = originalTmpdir;
+    }
     rmSync(runTmpdir, { recursive: true, force: true });
     if (leaked.length > 0) {
       throw new Error(

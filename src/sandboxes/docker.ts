@@ -260,15 +260,21 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
           // Elevate by running as root through the engine, not a `sudo`
           // prefix: the image needs no sudo binary, and the whole command
           // (`a && b`, not just `a`) runs as root.
-          if (opts?.sudo) args.push("--user", "0:0");
-          if (opts?.stdin !== undefined) args.push("-i");
-          if (opts?.cwd) args.push("-w", opts.cwd);
+          if (opts?.sudo) {
+            args.push("--user", "0:0");
+          }
+          if (opts?.stdin !== undefined) {
+            args.push("-i");
+          }
+          if (opts?.cwd) {
+            args.push("-w", opts.cwd);
+          }
           args.push(containerName, "sh", "-c", command);
 
           return new Promise((resolve, reject) => {
             const proc = spawn("docker", args, {
               stdio: [
-                opts?.stdin !== undefined ? "pipe" : "ignore",
+                opts?.stdin === undefined ? "ignore" : "pipe",
                 "pipe",
                 "pipe",
               ],
@@ -337,7 +343,9 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
             } else {
               dockerArgs.push("-i");
             }
-            if (opts.cwd) dockerArgs.push("-w", opts.cwd);
+            if (opts.cwd) {
+              dockerArgs.push("-w", opts.cwd);
+            }
             dockerArgs.push(containerName, ...args);
 
             const proc = spawn("docker", dockerArgs, {
@@ -423,7 +431,9 @@ const checkImageUid = (imageName: string, expectedUid: number): Promise<void> =>
           resolve();
           return;
         }
-        if (imageUid !== expectedUid) {
+        if (imageUid === expectedUid) {
+          resolve();
+        } else {
           reject(
             new Error(
               `UID mismatch: image '${imageName}' was built with UID ${imageUid}, ` +
@@ -432,8 +442,6 @@ const checkImageUid = (imageName: string, expectedUid: number): Promise<void> =>
                 `or pass containerUid: ${imageUid} to docker() to match the image.`,
             ),
           );
-        } else {
-          resolve();
         }
       },
     );

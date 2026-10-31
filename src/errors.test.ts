@@ -107,7 +107,9 @@ describe("tagged errors", () => {
 
     // Both errors compose into a single chain
     const program = Effect.gen(function* () {
-      if (Math.random() > 2) yield* execFail;
+      if (Math.random() > 2) {
+        yield* execFail;
+      }
       yield* copyFail;
     });
 

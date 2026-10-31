@@ -13,7 +13,9 @@ describe("shutdownRegistry", () => {
     const spy = vi
       .spyOn(process, "exit")
       .mockImplementation((() => undefined) as never);
-    restoreExit = () => spy.mockRestore();
+    restoreExit = () => {
+      spy.mockRestore();
+    };
     return spy;
   };
 
@@ -30,7 +32,9 @@ describe("shutdownRegistry", () => {
     expect(process.listenerCount("SIGTERM")).toBe(sigtermBefore + 1);
     expect(process.listenerCount("exit")).toBe(exitBefore + 1);
 
-    unregisters.forEach((u) => u());
+    unregisters.forEach((u) => {
+      u();
+    });
 
     expect(process.listenerCount("SIGINT")).toBe(sigintBefore);
     expect(process.listenerCount("SIGTERM")).toBe(sigtermBefore);

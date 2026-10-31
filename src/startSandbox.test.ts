@@ -389,7 +389,9 @@ describe("startSandbox", () => {
       };
       return {
         released,
-        resolveCreate: () => resolveCreate(),
+        resolveCreate: () => {
+          resolveCreate();
+        },
         closeCalls: () => closeCalls,
         close,
       };

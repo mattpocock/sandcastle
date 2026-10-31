@@ -55,7 +55,9 @@ describe("makeTerminalCleanupHandler", () => {
       { write },
     );
 
-    expect(() => handler()).not.toThrow();
+    expect(() => {
+      handler();
+    }).not.toThrow();
     // cursor is still shown even after setRawMode failure
     expect(write).toHaveBeenCalledWith(SHOW_CURSOR);
   });

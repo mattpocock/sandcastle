@@ -53,8 +53,8 @@ const toStreamJson = (output: string): string => {
       type: "assistant",
       message: { content: [{ type: "text", text: output }] },
     }),
+    JSON.stringify({ type: "result", result: output }),
   );
-  lines.push(JSON.stringify({ type: "result", result: output }));
   return lines.join("\n");
 };
 
@@ -91,7 +91,9 @@ const makeRunProvider = () =>
           if (command.startsWith("claude ")) {
             const stream = toStreamJson("done");
             if (execOptions?.onLine) {
-              for (const line of stream.split("\n")) execOptions.onLine(line);
+              for (const line of stream.split("\n")) {
+                execOptions.onLine(line);
+              }
             }
             return { stdout: stream, stderr: "", exitCode: 0 };
           }

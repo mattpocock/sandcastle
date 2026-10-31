@@ -80,7 +80,7 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
             cwd,
             env: processEnv,
             stdio: [
-              opts?.stdin !== undefined ? "pipe" : "ignore",
+              opts?.stdin === undefined ? "ignore" : "pipe",
               "pipe",
               "pipe",
             ],

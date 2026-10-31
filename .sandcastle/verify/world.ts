@@ -129,7 +129,9 @@ export const remoteRefs = (remote: string): Record<string, string> => {
     },
   ).stdout.split("\n")) {
     const [ref, sha] = line.split(" ");
-    if (ref && sha) out[ref] = sha;
+    if (ref && sha) {
+      out[ref] = sha;
+    }
   }
   return out;
 };
@@ -157,7 +159,9 @@ export const createWorld = (): World => {
   const home = join(dir, "home");
   const logs = join(dir, "logs");
   const tmp = join(dir, "tmp");
-  for (const d of [project, home, logs, tmp]) mkdirSync(d, { recursive: true });
+  for (const d of [project, home, logs, tmp]) {
+    mkdirSync(d, { recursive: true });
+  }
 
   // The Sandcastle under test, packed as npm would publish it.
   const tgz = must(
@@ -227,11 +231,12 @@ export const createWorld = (): World => {
   return world;
 };
 
-export const saveWorld = (world: World): void =>
+export const saveWorld = (world: World): void => {
   writeFileSync(
     join(world.dir, "world.json"),
     `${JSON.stringify(world, null, 2)}\n`,
   );
+};
 
 /** The world `runId`, which this checkout must have created. */
 export const loadWorld = (runId: string | undefined): World => {
@@ -241,8 +246,9 @@ export const loadWorld = (runId: string | undefined): World => {
     );
   }
   const file = join(WORLDS_ROOT, runId, "world.json");
-  if (!existsSync(file))
+  if (!existsSync(file)) {
     throw new Error(`no world ${runId} under ${WORLDS_ROOT}`);
+  }
   const world = JSON.parse(readFileSync(file, "utf8")) as World;
   if (world.sandcastleRoot !== REPO_ROOT) {
     throw new Error(
@@ -316,7 +322,9 @@ const worldEnv = (world: World): NodeJS.ProcessEnv => {
 /** Keys the world's project declares in `.sandcastle/.env` (names only). */
 export const declaredKeys = (world: World): Set<string> => {
   const file = join(world.project, ".sandcastle", ".env");
-  if (!existsSync(file)) return new Set();
+  if (!existsSync(file)) {
+    return new Set();
+  }
   return new Set(
     readFileSync(file, "utf8")
       .split("\n")
@@ -335,7 +343,9 @@ export interface Observation {
 
 const inspect = (engine: Engine, name: string) => {
   const r = sh(engine, ["inspect", name, "--format", "{{json .}}"]);
-  if (r.code !== 0) return undefined;
+  if (r.code !== 0) {
+    return undefined;
+  }
   const j = JSON.parse(r.stdout) as {
     Config?: { Env?: string[]; Image?: string };
     Mounts?: { Source?: string }[];
@@ -353,8 +363,9 @@ const inspect = (engine: Engine, name: string) => {
 /** A container belongs to `world` when it mounts a path inside the world. */
 export const worldContainer = (world: World, engine: Engine, name: string) => {
   const info = inspect(engine, name);
-  if (!info || !info.mountsWorld.some((s) => s.startsWith(world.dir)))
+  if (!info || !info.mountsWorld.some((s) => s.startsWith(world.dir))) {
     return undefined;
+  }
   return info;
 };
 
@@ -392,9 +403,13 @@ export const runInWorld = async (
         .filter(Boolean);
       for (const name of names) {
         const key = `${engine}:${name}`;
-        if (seen.has(key)) continue;
+        if (seen.has(key)) {
+          continue;
+        }
         const info = worldContainer(world, engine, name);
-        if (!info) continue;
+        if (!info) {
+          continue;
+        }
         seen.add(key);
         const obs: Observation = {
           at: new Date().toISOString(),
@@ -452,7 +467,9 @@ export const runInWorld = async (
   pipe(child.stderr, process.stderr);
   const timer = setInterval(observe, 1000);
   const code = await new Promise<number>((resolve) => {
-    child.on("close", (c) => resolve(c ?? 1));
+    child.on("close", (c) => {
+      resolve(c ?? 1);
+    });
     child.on("error", (e) => {
       appendFileSync(log, `[verify] ${e.message}\n`);
       resolve(127);
@@ -467,7 +484,9 @@ export const runInWorld = async (
 /** Read every observation made in the world so far. */
 export const observations = (world: World): Observation[] => {
   const file = join(world.dir, "observed.jsonl");
-  if (!existsSync(file)) return [];
+  if (!existsSync(file)) {
+    return [];
+  }
   return readFileSync(file, "utf8")
     .split("\n")
     .filter(Boolean)

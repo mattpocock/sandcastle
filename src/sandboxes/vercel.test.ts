@@ -60,7 +60,9 @@ describe("vercel() auth from the environment", () => {
 
   beforeEach(() => {
     sandboxCreate.mockClear();
-    for (const key of AUTH_KEYS) vi.stubEnv(key, undefined);
+    for (const key of AUTH_KEYS) {
+      vi.stubEnv(key, undefined);
+    }
   });
 
   afterEach(() => {

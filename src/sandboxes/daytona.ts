@@ -93,9 +93,15 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
         (await import("@daytona/sdk")) as typeof import("@daytona/sdk");
 
       const config: DaytonaConfig = {};
-      if (options?.apiKey) config.apiKey = options.apiKey;
-      if (options?.apiUrl) config.apiUrl = options.apiUrl;
-      if (options?.target) config.target = options.target;
+      if (options?.apiKey) {
+        config.apiKey = options.apiKey;
+      }
+      if (options?.apiUrl) {
+        config.apiUrl = options.apiUrl;
+      }
+      if (options?.target) {
+        config.target = options.target;
+      }
 
       const client: DaytonaClient = new Daytona(config);
       // Pass the resolved env (env resolver + provider + agent) to the
@@ -213,12 +219,16 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
                     : await sandbox.process
                         .getSessionCommand(sessionId, cmdId)
                         .catch(() => undefined);
-                  if (!watching) return;
+                  if (!watching) {
+                    return;
+                  }
                   if (alive) {
                     watchTimer = setTimeout(check, SESSION_WATCH_INTERVAL_MS);
                     return;
                   }
-                  if (cmd?.exitCode != null) return resolve();
+                  if (cmd?.exitCode != null) {
+                    return resolve();
+                  }
                   reject(
                     new Error(
                       `Daytona session shell exited before the command finished, so its exit code is unknown: ${command}`,
