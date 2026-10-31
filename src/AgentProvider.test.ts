@@ -321,6 +321,86 @@ describe("claudeCode factory", () => {
     });
     expect(args).not.toContain("--dangerously-skip-permissions");
   });
+
+  // --- extraArgs option ---
+
+  it("buildPrintCommand appends extraArgs entries when specified", () => {
+    const provider = claudeCode("claude-opus-4-8", {
+      extraArgs: ["--strict-mcp-config", "--mcp-config", "/tmp/mcp.json"],
+    });
+    const { command } = provider.buildPrintCommand(opts("test"));
+    expect(command).toContain(
+      "'--strict-mcp-config' '--mcp-config' '/tmp/mcp.json'",
+    );
+  });
+
+  it("buildPrintCommand omits extraArgs when not specified", () => {
+    const provider = claudeCode("claude-opus-4-8");
+    const { command } = provider.buildPrintCommand(opts("test"));
+    expect(command).not.toContain("--strict-mcp-config");
+  });
+
+  it("buildPrintCommand omits extraArgs when empty array", () => {
+    const withEmpty = claudeCode("claude-opus-4-8", { extraArgs: [] });
+    const withoutOption = claudeCode("claude-opus-4-8");
+    expect(withEmpty.buildPrintCommand(opts("test")).command).toBe(
+      withoutOption.buildPrintCommand(opts("test")).command,
+    );
+  });
+
+  it("buildPrintCommand shell-escapes extraArgs entries containing spaces", () => {
+    const provider = claudeCode("claude-opus-4-8", {
+      extraArgs: ["--settings", "/tmp/has space/settings.json"],
+    });
+    const { command } = provider.buildPrintCommand(opts("test"));
+    expect(command).toContain("'--settings' '/tmp/has space/settings.json'");
+  });
+
+  it("buildPrintCommand places extraArgs after other flags and before the trailing -p -", () => {
+    const provider = claudeCode("claude-opus-4-8", {
+      effort: "high",
+      extraArgs: ["--strict-mcp-config"],
+    });
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+      resumeSession: "abc-123",
+      forkSession: true,
+    });
+    expect(command).toMatch(/--fork-session '--strict-mcp-config' -p -$/);
+  });
+
+  it("buildInteractiveArgs appends extraArgs entries when specified", () => {
+    const provider = claudeCode("claude-opus-4-8", {
+      extraArgs: ["--strict-mcp-config"],
+    });
+    const args = provider.buildInteractiveArgs!({
+      prompt: "test",
+      dangerouslySkipPermissions: false,
+    });
+    expect(args).toContain("--strict-mcp-config");
+  });
+
+  it("buildInteractiveArgs omits extraArgs when not specified", () => {
+    const provider = claudeCode("claude-opus-4-8");
+    const args = provider.buildInteractiveArgs!({
+      prompt: "test",
+      dangerouslySkipPermissions: false,
+    });
+    expect(args).not.toContain("--strict-mcp-config");
+  });
+
+  it("buildInteractiveArgs places extraArgs before the trailing prompt", () => {
+    const provider = claudeCode("claude-opus-4-8", {
+      extraArgs: ["--strict-mcp-config"],
+    });
+    const args = provider.buildInteractiveArgs!({
+      prompt: "do something",
+      dangerouslySkipPermissions: false,
+    });
+    expect(args.at(-2)).toBe("--strict-mcp-config");
+    expect(args.at(-1)).toBe("do something");
+  });
 });
 
 // ---------------------------------------------------------------------------
