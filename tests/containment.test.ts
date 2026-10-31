@@ -427,31 +427,28 @@ describe.each(NATIVE_PROVIDERS)("containment: $name", (provider) => {
       },
     );
 
+    // A known limit: Seatbelt has no PID namespace, so a host process is
+    // hidden only because each way to list one is blocked. Observed on the
+    // macOS job: the setuid `ps` can't run, `pgrep` can't reach sysmond, and
+    // the `kern.proc.all` sysctl is denied. A process asking the kernel by PID
+    // (proc_pidinfo) is limited to its own sandbox by `process-info*`.
     it.skipIf(provider.platform !== "darwin")(
-      "DIAGNOSTIC process listing and keychain (macOS)",
+      "can't list a host process with ps, pgrep or sysctl (macOS, known limit)",
       async () => {
         const host = startHostSleep();
         try {
           await using sandbox = await open();
-          const cmds = [
-            "ps -eo args=",
-            "ps -o pid=,args= -p " + String(host.pid),
-            "ps -o pid=,args= -p $$",
-            "ls -l /bin/ps",
-            "pgrep -f 'sleep 987'",
-            "kill -0 " + String(host.pid),
-            "sysctl kern.proc.all 2>&1 | head -c 200",
-            "security list-keychains",
-            "security default-keychain",
-            "security find-generic-password -s 'Claude Code-credentials'",
-            "security find-generic-password -s 'sandcastle-nonexistent'",
-          ];
-          for (const cmd of cmds) {
-            const r = await sandbox.exec(cmd);
-            console.log(
-              `DIAG [${cmd}] exit=${String(r.exitCode)}\nstdout:\n${r.stdout.slice(0, 3000)}\nstderr:\n${r.stderr.slice(0, 1000)}\nhost-sleep-visible=${String(r.stdout.includes(HOST_SLEEP))}`,
-            );
-          }
+
+          const result = await sandbox.exec(
+            `ps -eo args=; echo "ps=$?"; ` +
+              `pgrep -fl 'sleep 987'; echo "pgrep=$?"; ` +
+              `sysctl kern.proc.all >/dev/null 2>&1; echo "sysctl=$?"`,
+          );
+
+          expect(result.stdout).not.toContain(HOST_SLEEP);
+          expect(result.stdout).not.toContain("ps=0");
+          expect(result.stdout).not.toContain("pgrep=0");
+          expect(result.stdout).not.toContain("sysctl=0");
         } finally {
           host.stop();
         }
