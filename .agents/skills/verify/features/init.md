@@ -53,6 +53,6 @@ Every template except `blank` needs issues from its tracker. A github-issues run
 ## Issue trackers
 
 - **github-issues:** the prompts use `gh issue list --label Sandcastle …`, `gh issue view`, `gh issue close`. The Dockerfile installs `gh`, and `.env.example` gains `GH_TOKEN=`. `--create-label true` runs `gh label create "Sandcastle" … 2>/dev/null` against the real repo, with errors hidden (`src/cli.ts:399-417`). Never pass true from a world: it writes to whichever GitHub repo `gh` resolves.
-- **beads:** `bd ready --json`, `bd show`, `bd close`. The Dockerfile installs beads. No env lines.
+- **beads:** `bd ready --json`, `bd show`, `bd close`. The Dockerfile installs a pinned bd release (`ARG BEADS_VERSION`). No env lines. Every sandbox call in `main` gets `sandboxOptions`: a mount of the host's `.beads/` plus `BEADS_DIR`, so worktree sandboxes share the host database. Recipe for a world: run `bd init` and `bd create "<title>" -d "<body>"` on the host first, with a host `bd` of the same version as the image (download the release binary into the world if the host's differs). Proof: the host `bd list --all` shows the issue closed after the run.
 - **custom:** writes `.sandcastle/SETUP_ISSUE_TRACKER.md` and skips the build. Listing issues fails on purpose with `No issue tracker configured…`.
 - **`--create-label false`** strips ` --label Sandcastle` from every `.sandcastle/*.md` (`src/InitService.ts:822-848`). Proof: `grep -r -- "--label Sandcastle" .sandcastle` finds nothing.

@@ -64,6 +64,7 @@ interface IssueTrackerEntry {
     readonly ISSUE_TRACKER_TOOLS: string;
   };
   readonly envExample: string;
+  readonly sandboxOptions?: string;
 }
 ```
 
@@ -76,6 +77,7 @@ Field by field:
 - `templateArgs.CLOSE_TASK_COMMAND` — shell command that closes a task by ID. Use `<ID>` as the literal placeholder.
 - `templateArgs.ISSUE_TRACKER_TOOLS` — Dockerfile snippet that installs the CLI. Substituted into the agent provider's Dockerfile at the `{{ISSUE_TRACKER_TOOLS}}` placeholder, which sits before the `USER agent` line, so commands run as root.
 - `envExample` — lines appended to `.env.example`. Empty string if no auth is required.
+- `sandboxOptions` — optional. TypeScript source declaring `const sandboxOptions = { … }` (with a comment saying why), inserted after the provider import in the scaffolded main file; every bare `docker()`/`podman()` call becomes `docker(sandboxOptions)`. Use it only when the tracker keeps local state the sandbox must reach: worktree sandboxes get git-tracked files only. `beads` uses it to mount the host's `.beads/` and set `BEADS_DIR`, so every sandbox shares one database.
 
 ## Scaffold integration
 
