@@ -1,5 +1,5 @@
 import { Duration, Effect, Exit, TestClock, TestContext } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, assert, describe, expect, it } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { exec } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -9,10 +9,7 @@ import {
   createBindMountSandboxProvider,
   createIsolatedSandboxProvider,
 } from "./SandboxProvider.js";
-import type {
-  BindMountSandboxHandle,
-  IsolatedSandboxHandle,
-} from "./SandboxProvider.js";
+import type { BindMountCreateOptions } from "./SandboxProvider.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 import {
   startSandbox,
@@ -47,7 +44,7 @@ const commitFile = async (
 describe("startSandbox", () => {
   describe("bind-mount provider", () => {
     it("calls provider.create with mounts and env", async () => {
-      const createCalls: any[] = [];
+      const createCalls: BindMountCreateOptions[] = [];
       const provider = createBindMountSandboxProvider({
         name: "test",
         create: async (options) => {
@@ -75,15 +72,17 @@ describe("startSandbox", () => {
       );
 
       expect(createCalls).toHaveLength(1);
-      expect(createCalls[0].mounts).toContainEqual({
+      const [createCall] = createCalls;
+      assert.isDefined(createCall);
+      expect(createCall.mounts).toContainEqual({
         hostPath: "/worktree",
         sandboxPath: SANDBOX_REPO_DIR,
       });
-      expect(createCalls[0].mounts).toContainEqual({
+      expect(createCall.mounts).toContainEqual({
         hostPath: "/repo/.git",
         sandboxPath: "/repo/.git",
       });
-      expect(createCalls[0].env).toEqual({ FOO: "bar" });
+      expect(createCall.env).toStrictEqual({ FOO: "bar" });
       expect(result.worktreePath).toBe(SANDBOX_REPO_DIR);
       expect(result.handle).toBeDefined();
       expect(result.sandbox).toBeDefined();
@@ -241,15 +240,12 @@ describe("startSandbox", () => {
       const exit = await Effect.runPromise(program);
 
       expect(Exit.isFailure(exit)).toBe(true);
-      if (Exit.isFailure(exit) && exit.cause._tag === "Fail") {
-        const { error } = exit.cause;
-        expect(error).toBeInstanceOf(CopyToWorktreeTimeoutError);
-        const timeoutError = error as CopyToWorktreeTimeoutError;
-        expect(timeoutError.timeoutMs).toBe(COPY_PATHS_TIMEOUT_MS);
-        expect(timeoutError.paths).toEqual(["hang.txt"]);
-      } else {
-        throw new Error("Expected Fail cause");
-      }
+      assert(Exit.isFailure(exit), "Expected a failure");
+      assert(exit.cause._tag === "Fail", "Expected Fail cause");
+      const timeoutError = exit.cause.error;
+      assert.instanceOf(timeoutError, CopyToWorktreeTimeoutError);
+      expect(timeoutError.timeoutMs).toBe(COPY_PATHS_TIMEOUT_MS);
+      expect(timeoutError.paths).toStrictEqual(["hang.txt"]);
     }, 15_000);
 
     it("closes the handle when sync-in fails after create", async () => {
@@ -363,7 +359,7 @@ describe("startSandbox", () => {
       await commitFile(hostDir, "hello.txt", "hello", "initial");
 
       const provider = testIsolated();
-      const { handle } = await Effect.runPromise(
+      const started = Effect.runPromise(
         startSandbox({
           provider,
           hostRepoDir: hostDir,
@@ -373,6 +369,8 @@ describe("startSandbox", () => {
         }),
       );
 
+      await expect(started).resolves.toHaveProperty("handle");
+      const { handle } = await started;
       await handle.close();
     });
   });
