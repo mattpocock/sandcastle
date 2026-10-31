@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 
 vi.mock("node:child_process", async (importOriginal) => {
@@ -14,6 +14,17 @@ import { execFile } from "node:child_process";
 import { startContainer, buildImage, removeImage } from "./DockerLifecycle.js";
 
 const mockExecFile = vi.mocked(execFile);
+
+/** The argument list of the first recorded `docker <subcommand>` call, failing the test if there was none. */
+const dockerArgsFor = (subcommand: string): readonly string[] => {
+  const call = mockExecFile.mock.calls.find(
+    ([, args]) => Array.isArray(args) && args[0] === subcommand,
+  );
+  assert.isDefined(call, `expected a docker ${subcommand} call`);
+  const [, args] = call;
+  assert.exists(args);
+  return args;
+};
 
 afterEach(() => {
   mockExecFile.mockReset();
@@ -32,11 +43,7 @@ describe("buildImage", () => {
       }),
     );
 
-    const buildCall = mockExecFile.mock.calls.find(
-      ([, args]) => Array.isArray(args) && args[0] === "build",
-    );
-    expect(buildCall).toBeDefined();
-    const buildArgs = buildCall![1] as string[];
+    const buildArgs = dockerArgsFor("build");
     const uidIdx = buildArgs.indexOf("--build-arg");
     expect(uidIdx).toBeGreaterThan(-1);
     expect(buildArgs[uidIdx + 1]).toBe("AGENT_UID=1001");
@@ -53,10 +60,7 @@ describe("buildImage", () => {
 
     await Effect.runPromise(buildImage("my-image", "/tmp/dir"));
 
-    const buildCall = mockExecFile.mock.calls.find(
-      ([, args]) => Array.isArray(args) && args[0] === "build",
-    );
-    const buildArgs = buildCall![1] as string[];
+    const buildArgs = dockerArgsFor("build");
     expect(buildArgs).not.toContain("--build-arg");
   });
 });
@@ -72,11 +76,7 @@ describe("startContainer", () => {
       startContainer("ctr", "img", {}, { network: "my-network" }),
     );
 
-    const runCall = mockExecFile.mock.calls.find(
-      ([, args]) => Array.isArray(args) && args[0] === "run",
-    );
-    expect(runCall).toBeDefined();
-    const runArgs = runCall![1] as string[];
+    const runArgs = dockerArgsFor("run");
     const networkIdx = runArgs.indexOf("--network");
     expect(networkIdx).toBeGreaterThan(-1);
     expect(runArgs[networkIdx + 1]).toBe("my-network");
@@ -92,10 +92,7 @@ describe("startContainer", () => {
       startContainer("ctr", "img", {}, { network: ["net1", "net2"] }),
     );
 
-    const runCall = mockExecFile.mock.calls.find(
-      ([, args]) => Array.isArray(args) && args[0] === "run",
-    );
-    const runArgs = runCall![1] as string[];
+    const runArgs = dockerArgsFor("run");
     const firstIdx = runArgs.indexOf("--network");
     expect(firstIdx).toBeGreaterThan(-1);
     expect(runArgs[firstIdx + 1]).toBe("net1");
@@ -112,10 +109,7 @@ describe("startContainer", () => {
 
     await Effect.runPromise(startContainer("ctr", "img", {}));
 
-    const runCall = mockExecFile.mock.calls.find(
-      ([, args]) => Array.isArray(args) && args[0] === "run",
-    );
-    const runArgs = runCall![1] as string[];
+    const runArgs = dockerArgsFor("run");
     expect(runArgs).not.toContain("--network");
   });
 
@@ -129,11 +123,7 @@ describe("startContainer", () => {
       startContainer("ctr", "img", {}, { groups: ["docker"] }),
     );
 
-    const runCall = mockExecFile.mock.calls.find(
-      ([, args]) => Array.isArray(args) && args[0] === "run",
-    );
-    expect(runCall).toBeDefined();
-    const runArgs = runCall![1] as string[];
+    const runArgs = dockerArgsFor("run");
     const idx = runArgs.indexOf("--group-add");
     expect(idx).toBeGreaterThan(-1);
     expect(runArgs[idx + 1]).toBe("docker");
@@ -149,10 +139,7 @@ describe("startContainer", () => {
       startContainer("ctr", "img", {}, { groups: ["docker", 999] }),
     );
 
-    const runCall = mockExecFile.mock.calls.find(
-      ([, args]) => Array.isArray(args) && args[0] === "run",
-    );
-    const runArgs = runCall![1] as string[];
+    const runArgs = dockerArgsFor("run");
     const firstIdx = runArgs.indexOf("--group-add");
     expect(firstIdx).toBeGreaterThan(-1);
     expect(runArgs[firstIdx + 1]).toBe("docker");
@@ -169,10 +156,7 @@ describe("startContainer", () => {
 
     await Effect.runPromise(startContainer("ctr", "img", {}));
 
-    const runCall = mockExecFile.mock.calls.find(
-      ([, args]) => Array.isArray(args) && args[0] === "run",
-    );
-    const runArgs = runCall![1] as string[];
+    const runArgs = dockerArgsFor("run");
     expect(runArgs).not.toContain("--group-add");
   });
 
@@ -186,11 +170,7 @@ describe("startContainer", () => {
       startContainer("ctr", "img", {}, { devices: ["/dev/kvm"] }),
     );
 
-    const runCall = mockExecFile.mock.calls.find(
-      ([, args]) => Array.isArray(args) && args[0] === "run",
-    );
-    expect(runCall).toBeDefined();
-    const runArgs = runCall![1] as string[];
+    const runArgs = dockerArgsFor("run");
     const idx = runArgs.indexOf("--device");
     expect(idx).toBeGreaterThan(-1);
     expect(runArgs[idx + 1]).toBe("/dev/kvm");
@@ -213,10 +193,7 @@ describe("startContainer", () => {
       ),
     );
 
-    const runCall = mockExecFile.mock.calls.find(
-      ([, args]) => Array.isArray(args) && args[0] === "run",
-    );
-    const runArgs = runCall![1] as string[];
+    const runArgs = dockerArgsFor("run");
     const firstIdx = runArgs.indexOf("--device");
     expect(firstIdx).toBeGreaterThan(-1);
     expect(runArgs[firstIdx + 1]).toBe("/dev/kvm");
@@ -233,10 +210,7 @@ describe("startContainer", () => {
 
     await Effect.runPromise(startContainer("ctr", "img", {}));
 
-    const runCall = mockExecFile.mock.calls.find(
-      ([, args]) => Array.isArray(args) && args[0] === "run",
-    );
-    const runArgs = runCall![1] as string[];
+    const runArgs = dockerArgsFor("run");
     expect(runArgs).not.toContain("--device");
   });
 
@@ -248,11 +222,7 @@ describe("startContainer", () => {
 
     await Effect.runPromise(startContainer("ctr", "img", {}, { cpus: 2 }));
 
-    const runCall = mockExecFile.mock.calls.find(
-      ([, args]) => Array.isArray(args) && args[0] === "run",
-    );
-    expect(runCall).toBeDefined();
-    const runArgs = runCall![1] as string[];
+    const runArgs = dockerArgsFor("run");
     const idx = runArgs.indexOf("--cpus");
     expect(idx).toBeGreaterThan(-1);
     expect(runArgs[idx + 1]).toBe("2");
@@ -266,10 +236,7 @@ describe("startContainer", () => {
 
     await Effect.runPromise(startContainer("ctr", "img", {}, { cpus: 1.5 }));
 
-    const runCall = mockExecFile.mock.calls.find(
-      ([, args]) => Array.isArray(args) && args[0] === "run",
-    );
-    const runArgs = runCall![1] as string[];
+    const runArgs = dockerArgsFor("run");
     const idx = runArgs.indexOf("--cpus");
     expect(idx).toBeGreaterThan(-1);
     expect(runArgs[idx + 1]).toBe("1.5");
@@ -283,10 +250,7 @@ describe("startContainer", () => {
 
     await Effect.runPromise(startContainer("ctr", "img", {}));
 
-    const runCall = mockExecFile.mock.calls.find(
-      ([, args]) => Array.isArray(args) && args[0] === "run",
-    );
-    const runArgs = runCall![1] as string[];
+    const runArgs = dockerArgsFor("run");
     expect(runArgs).not.toContain("--cpus");
   });
 
@@ -309,10 +273,7 @@ describe("startContainer", () => {
       ),
     );
 
-    const runCall = mockExecFile.mock.calls.find(
-      ([, args]) => Array.isArray(args) && args[0] === "run",
-    );
-    const runArgs = runCall![1] as string[];
+    const runArgs = dockerArgsFor("run");
     expect(runArgs).toContain("-v");
     const vIdx = runArgs.indexOf("-v");
     expect(runArgs[vIdx + 1]).toBe("/host/path:/sandbox/path:z");
@@ -341,10 +302,7 @@ describe("startContainer", () => {
       ),
     );
 
-    const runCall = mockExecFile.mock.calls.find(
-      ([, args]) => Array.isArray(args) && args[0] === "run",
-    );
-    const runArgs = runCall![1] as string[];
+    const runArgs = dockerArgsFor("run");
     const vIdx = runArgs.indexOf("-v");
     expect(runArgs[vIdx + 1]).toBe("/host/path:/sandbox/path:ro,z");
   });
@@ -368,10 +326,7 @@ describe("startContainer", () => {
       ),
     );
 
-    const runCall = mockExecFile.mock.calls.find(
-      ([, args]) => Array.isArray(args) && args[0] === "run",
-    );
-    const runArgs = runCall![1] as string[];
+    const runArgs = dockerArgsFor("run");
     const vIdx = runArgs.indexOf("-v");
     expect(runArgs[vIdx + 1]).toBe("/host/path:/sandbox/path:z");
   });
@@ -396,10 +351,7 @@ describe("startContainer", () => {
       ),
     );
 
-    const runCall = mockExecFile.mock.calls.find(
-      ([, args]) => Array.isArray(args) && args[0] === "run",
-    );
-    const runArgs = runCall![1] as string[];
+    const runArgs = dockerArgsFor("run");
     const vIdx = runArgs.indexOf("-v");
     expect(runArgs[vIdx + 1]).toBe("/host/path:/sandbox/path:Z");
   });
@@ -424,10 +376,7 @@ describe("startContainer", () => {
       ),
     );
 
-    const runCall = mockExecFile.mock.calls.find(
-      ([, args]) => Array.isArray(args) && args[0] === "run",
-    );
-    const runArgs = runCall![1] as string[];
+    const runArgs = dockerArgsFor("run");
     const vIdx = runArgs.indexOf("-v");
     expect(runArgs[vIdx + 1]).toBe("/host/path:/sandbox/path");
   });
@@ -456,10 +405,7 @@ describe("startContainer", () => {
       ),
     );
 
-    const runCall = mockExecFile.mock.calls.find(
-      ([, args]) => Array.isArray(args) && args[0] === "run",
-    );
-    const runArgs = runCall![1] as string[];
+    const runArgs = dockerArgsFor("run");
     const vIdx = runArgs.indexOf("-v");
     expect(runArgs[vIdx + 1]).toBe("/host/path:/sandbox/path:ro");
   });
