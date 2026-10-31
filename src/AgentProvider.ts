@@ -647,14 +647,33 @@ const makeCodexSessionStorage = (
 // Pi agent provider
 // ---------------------------------------------------------------------------
 
+/**
+ * Where a captured pi session lands on the host. Pi resolves `--session <id>`
+ * against the *current project's* encoded directory first; a transferred file
+ * in any other directory hits the "fork session?" prompt, which hangs in
+ * print/json mode. So we land the file in `--<enc-host-cwd>--/<filename>`, not
+ * the sandbox's encoded dir.
+ */
+const piHostCaptureTarget = (
+  hostCwd: string,
+  sandboxPath: string,
+  hostSessionsDir: string | undefined,
+): string =>
+  join(piSessionDirPath(hostCwd, hostSessionsDir), posix.basename(sandboxPath));
+
+// Pi names its JSONL `<timestamp>_<id>.jsonl`, so the file is not derivable
+// from (cwd, id). captureToHost remembers what it wrote, so the iteration's
+// sessionFilePath is the JSONL itself. Before capture (the resume precheck's
+// not-found message) the best we can name is the directory.
 const makePiSessionStorage = (options?: PiOptions): AgentSessionStorage => {
   const hostSessionsDir = options?.sessionStorage?.hostSessionsDir;
   const sandboxSessionsDir =
     options?.sessionStorage?.sandboxSessionsDir ??
     posix.join("/home/agent", ".pi", "agent", "sessions");
-
+  const capturedPaths = new Map<string, string>();
   return {
-    hostSessionFilePath: (cwd, _id) => piSessionDirPath(cwd, hostSessionsDir),
+    hostSessionFilePath: (cwd, id) =>
+      capturedPaths.get(id) ?? piSessionDirPath(cwd, hostSessionsDir),
     existsOnHost: async (_cwd, id) => {
       const found = await findPiSessionOnHost(id, hostSessionsDir);
       return found.path !== undefined;
@@ -672,15 +691,14 @@ const makePiSessionStorage = (options?: PiOptions): AgentSessionStorage => {
       );
       const jsonl = await readSandboxFile(handle, located.path, "pi-cap");
       const rewritten = transferPiSession(jsonl, sandboxCwd, hostCwd);
-      // Pi resolves `--session <id>` against the *current project's* encoded
-      // directory first; a transferred file in any other directory hits the
-      // "fork session?" prompt, which hangs in print/json mode. So we land
-      // the file in `--<enc-host-cwd>--/<filename>`, not the sandbox's
-      // encoded dir.
-      const filename = posix.basename(located.path);
-      const target = join(piSessionDirPath(hostCwd, hostSessionsDir), filename);
+      const target = piHostCaptureTarget(
+        hostCwd,
+        located.path,
+        hostSessionsDir,
+      );
       await mkdir(dirname(target), { recursive: true });
       await writeFile(target, rewritten);
+      capturedPaths.set(sessionId, target);
     },
     resumeIntoSandbox: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
       const located = await locatePiHostSession(sessionId, hostSessionsDir);

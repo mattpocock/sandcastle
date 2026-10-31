@@ -2344,6 +2344,12 @@ describe("sessionStorage", () => {
       await expect(
         sessionStorageOf(provider).existsOnHost(hostCwd, id),
       ).resolves.toBe(true);
+
+      // hostSessionFilePath (surfaced as IterationResult.sessionFilePath) is
+      // the captured JSONL itself, not its directory.
+      expect(provider.sessionStorage.hostSessionFilePath(hostCwd, id)).toBe(
+        expectedHostPath,
+      );
     } finally {
       await rm(hostDir, { recursive: true, force: true });
       await rm(sandboxDir, { recursive: true, force: true });
@@ -2402,7 +2408,7 @@ describe("sessionStorage", () => {
     }
   });
 
-  it("pi hostSessionFilePath returns the host-cwd-encoded directory", () => {
+  it("pi hostSessionFilePath falls back to the host-cwd-encoded directory before capture", () => {
     const provider = pi("claude-sonnet-4-6", {
       sessionStorage: { hostSessionsDir: "/tmp/sessions" },
     });
