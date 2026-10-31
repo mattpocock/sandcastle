@@ -576,8 +576,14 @@ const parsePiStreamLine = (line: string): ParsedStreamEvent[] => {
       return [];
     }
     if (obj.type === "tool_execution_start") {
-      const toolName = obj.toolName;
-      if (typeof toolName !== "string") return [];
+      const rawName = obj.toolName;
+      if (typeof rawName !== "string") return [];
+      // Pi's built-in tools are lowercase (`bash`); match the shared allowlist
+      // case-insensitively and display its canonical name (`Bash`).
+      const toolName = Object.keys(TOOL_ARG_FIELDS).find(
+        (name) => name.toLowerCase() === rawName.toLowerCase(),
+      );
+      if (toolName === undefined) return [];
       const argField = TOOL_ARG_FIELDS[toolName];
       if (argField === undefined) return [];
       const args = obj.args as Record<string, unknown> | undefined;

@@ -453,6 +453,16 @@ describe("pi factory", () => {
     ]);
   });
 
+  it("parseStreamLine extracts pi's lowercase bash tool call as Bash", () => {
+    const provider = pi("claude-haiku-5-5");
+    // Real line from pi 0.80 --mode json (sandcastle-verify run 20261031-060336-31aa).
+    const line =
+      '{"type":"tool_execution_start","toolCallId":"toolu_01FFv8fPnapyEsUJu2xwkJyB","toolName":"bash","args":{"command":"cat seed/1.txt"}}';
+    expect(provider.parseStreamLine(line)).toEqual([
+      { type: "tool_call", name: "Bash", args: "cat seed/1.txt" },
+    ]);
+  });
+
   it("parseStreamLine skips non-allowlisted tools", () => {
     const provider = pi("claude-sonnet-4-6");
     const line = JSON.stringify({
