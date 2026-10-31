@@ -58,6 +58,7 @@ import { resolveCwd } from "./resolveCwd.js";
 import { patchGitMountsForWindows } from "./mountUtils.js";
 import { assertResumeSessionExists } from "./resumePrecheck.js";
 import { registerShutdown } from "./shutdownRegistry.js";
+import { raceAbortSignal } from "./raceAbortSignal.js";
 import { validateTimeoutOptions } from "./validateTimeouts.js";
 
 export interface CreateSandboxOptions {
@@ -312,7 +313,9 @@ const withAgentEnv = (
   sandboxProviderEnv: Record<string, string>,
 ): AgentProvider => {
   const entries = Object.entries(agent.env);
-  if (entries.length === 0) return agent;
+  if (entries.length === 0) {
+    return agent;
+  }
   mergeProviderEnv({
     resolvedEnv: {},
     agentProviderEnv: agent.env,
@@ -685,32 +688,10 @@ const buildSandboxHandle = (
                     cwd: sandboxRepoDir,
                   });
 
-                  // Race exec with abort signal if provided
-                  const { signal } = interactiveOptions;
-                  const result = yield* Effect.promise(() => {
-                    if (!signal) return execPromise;
-                    if (signal.aborted) return Promise.reject(signal.reason);
-                    return new Promise<{ exitCode: number }>(
-                      (resolve, reject) => {
-                        const onAbort = () => {
-                          reject(signal.reason);
-                        };
-                        signal.addEventListener("abort", onAbort, {
-                          once: true,
-                        });
-                        execPromise.then(
-                          (r) => {
-                            signal.removeEventListener("abort", onAbort);
-                            resolve(r);
-                          },
-                          (e) => {
-                            signal.removeEventListener("abort", onAbort);
-                            reject(e);
-                          },
-                        );
-                      },
-                    );
-                  });
+                  const result = yield* raceAbortSignal(
+                    Effect.promise(() => execPromise),
+                    interactiveOptions.signal,
+                  );
 
                   return result.exitCode;
                 }),
@@ -941,9 +922,13 @@ export const createSandboxFromWorktree = async (
       branchStrategy: options.branchStrategy,
     },
     async () => {
-      if (closed) return { preservedWorktreePath: undefined };
+      if (closed) {
+        return { preservedWorktreePath: undefined };
+      }
       closed = true;
-      if (providerHandle) await providerHandle.close();
+      if (providerHandle) {
+        await providerHandle.close();
+      }
       return { preservedWorktreePath: undefined };
     },
   );
@@ -1134,7 +1119,9 @@ export const createSandbox = async (
 
   // Build close function
   const doClose = async (): Promise<CloseResult> => {
-    if (closed) return { preservedWorktreePath: undefined };
+    if (closed) {
+      return { preservedWorktreePath: undefined };
+    }
     closed = true;
 
     return Effect.runPromise(
