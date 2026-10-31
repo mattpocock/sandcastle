@@ -131,7 +131,7 @@ const startBindMountSandbox = (
   DockerError | WorktreeError | ContainerStartTimeoutError
 > =>
   Effect.tryPromise({
-    try: () => {
+    try: (signal) => {
       const rawMounts = [
         {
           hostPath: options.worktreeOrRepoPath,
@@ -149,6 +149,7 @@ const startBindMountSandbox = (
           ? options.worktreeOrRepoPath.replace(/\\/g, "/")
           : options.worktreeOrRepoPath;
       return options.provider.create({
+        signal,
         worktreePath,
         hostRepoPath: options.hostRepoDir,
         mounts,
@@ -165,6 +166,9 @@ const startBindMountSandbox = (
       sandbox: makeSandboxFromHandle(handle),
       worktreePath: handle.worktreePath,
     })),
+    // Resource acquisition masks interruption, but the startup timeout must
+    // still be able to cancel the provider before it returns a handle.
+    Effect.interruptible,
     withTimeout(
       CONTAINER_START_TIMEOUT_MS,
       () =>
