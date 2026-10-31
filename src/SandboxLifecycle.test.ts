@@ -13,7 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import { SilentDisplay } from "./Display.js";
 import type { DisplayEntry } from "./Display.js";
 import type { SandboxService } from "./SandboxFactory.js";
@@ -254,20 +254,20 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     );
 
     // Find the hook exec calls (after git config calls)
-    const hookCalls = execCalls.filter(
-      (c) =>
-        c.command === "npm install" ||
-        c.command === "apt-get install -y ffmpeg",
-    );
+    const hookCommands = new Set(["npm install", "apt-get install -y ffmpeg"]);
+    const hookCalls = execCalls.filter((c) => hookCommands.has(c.command));
     expect(hookCalls).toHaveLength(2);
-    expect(hookCalls[0]).toEqual(
+    const [npmCall, aptCall] = hookCalls;
+    assert.isDefined(npmCall);
+    assert.isDefined(aptCall);
+    expect(npmCall).toStrictEqual(
       expect.objectContaining({ command: "npm install" }),
     );
-    expect(hookCalls[0]!.options?.sudo).toBeUndefined();
-    expect(hookCalls[1]).toEqual(
+    expect(npmCall.options?.sudo).toBeUndefined();
+    expect(aptCall).toStrictEqual(
       expect.objectContaining({ command: "apt-get install -y ffmpeg" }),
     );
-    expect(hookCalls[1]!.options?.sudo).toBe(true);
+    expect(aptCall.options?.sudo).toBe(true);
   });
 
   it("onSandboxReady hooks run in parallel", async () => {
@@ -314,7 +314,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     );
 
     // With parallel execution, both hooks should start before either ends
-    expect(events).toEqual([
+    expect(events).toStrictEqual([
       "start:slow-hook-a",
       "start:slow-hook-b",
       "end:slow-hook-a",
@@ -465,7 +465,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     const { stdout } = await execAsync('git branch --list "sandcastle/test"', {
       cwd: hostDir,
     });
-    expect(stdout.trim()).toBeTruthy();
+    expect(stdout.trim()).not.toBe("");
   });
 
   it("aborts a conflicting merge so the host is clean, and the suggested retry works", async () => {
@@ -526,8 +526,9 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       cwd: hostDir,
     }).then(
       () => "",
+      // join() renders a missing stdout or stderr as "".
       (e: { stdout?: string; stderr?: string }) =>
-        `${e.stdout ?? ""}${e.stderr ?? ""}`,
+        [e.stdout, e.stderr].join(""),
     );
     expect(retry).not.toMatch(/unmerged files/);
     expect(retry).toMatch(/CONFLICT/);
@@ -909,7 +910,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     );
 
     // applyToHost should be called after work but before the merge
-    expect(callOrder).toEqual(["work", "applyToHost"]);
+    expect(callOrder).toStrictEqual(["work", "applyToHost"]);
     // Commits should still be collected properly
     expect(result.commits).toHaveLength(1);
   });
@@ -982,10 +983,12 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       }).pipe(Effect.provide(displayLayer)),
     );
 
-    const syncLog = entries.find(
-      (e) => e._tag === "taskLog" && e.title === "No commits to sync out",
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        _tag: "taskLog",
+        title: "No commits to sync out",
+      }),
     );
-    expect(syncLog).toBeDefined();
   });
 
   it("logs 'Syncing N commits to host' when applyToHost is provided with commits", async () => {
@@ -1015,10 +1018,12 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       }).pipe(Effect.provide(displayLayer)),
     );
 
-    const syncLog = entries.find(
-      (e) => e._tag === "taskLog" && e.title === "Syncing 1 commit to host",
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        _tag: "taskLog",
+        title: "Syncing 1 commit to host",
+      }),
     );
-    expect(syncLog).toBeDefined();
   });
 
   it("does not log sync taskLog when applyToHost is not provided", async () => {
@@ -1080,10 +1085,9 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       }).pipe(Effect.provide(displayLayer)),
     );
 
-    const mergeLog = entries.find(
-      (e) => e._tag === "taskLog" && e.title === "Merging to main",
+    expect(entries).toContainEqual(
+      expect.objectContaining({ _tag: "taskLog", title: "Merging to main" }),
     );
-    expect(mergeLog).toBeDefined();
   });
 
   it("logs 'Collecting commits' taskLog after agent work", async () => {
@@ -1106,10 +1110,9 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       }).pipe(Effect.provide(displayLayer)),
     );
 
-    const commitLog = entries.find(
-      (e) => e._tag === "taskLog" && e.title === "Collecting commits",
+    expect(entries).toContainEqual(
+      expect.objectContaining({ _tag: "taskLog", title: "Collecting commits" }),
     );
-    expect(commitLog).toBeDefined();
   });
 
   it("host.onSandboxReady hooks run on the host with worktree cwd", async () => {
@@ -1672,7 +1675,7 @@ describe("runHostHooks", () => {
 
     const content = await readFile(join(dir, "order.txt"), "utf8");
     const lines = content.trim().split("\n");
-    expect(lines).toEqual(["first", "second"]);
+    expect(lines).toStrictEqual(["first", "second"]);
   });
 
   it("fails fast on non-zero exit", async () => {
