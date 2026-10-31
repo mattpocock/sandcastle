@@ -10,7 +10,7 @@
 
 import { access, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, join, posix } from "node:path";
-import type { BindMountSandboxHandle } from "./SandboxProvider.js";
+import type { BindMountSandboxHandle, ExecResult } from "./SandboxProvider.js";
 
 /** The host user's home directory, where every agent keeps its sessions. */
 export const homeDir = (): string => process.env.HOME ?? "~";
@@ -398,6 +398,23 @@ export const transferPiSession = (
 };
 
 // ---------------------------------------------------------------------------
+// OpenCode session paths
+// ---------------------------------------------------------------------------
+
+/**
+ * OpenCode keeps sessions in its SQLite database (`opencode.db`), so there is
+ * no per-session file to copy. Sandcastle moves the session as the JSON of
+ * `opencode export <id>` instead, and keeps it on the host here, where
+ * `opencode import <file>` also reads it.
+ */
+export const opencodeHostSessionsDir = (): string =>
+  join(homeDir(), ".local", "share", "opencode", "sandcastle-sessions");
+
+/** OpenCode's own database on the host, where a no-sandbox run keeps its sessions. */
+export const opencodeHostDatabase = (): string =>
+  join(homeDir(), ".local", "share", "opencode", "opencode.db");
+
+// ---------------------------------------------------------------------------
 // Session storage for agents that keep each session in one file
 // ---------------------------------------------------------------------------
 
@@ -421,6 +438,14 @@ export interface SessionFileLayout {
   ) => readonly string[];
   /** Sandbox path of the session file for a cwd (POSIX separators). */
   readonly sandboxPath: (cwd: string, id: string) => string;
+  /**
+   * For an agent whose sessions live in its own database: the sandbox command
+   * that writes session `id` to `sandboxPath` before capture, run in the
+   * sandbox repo.
+   */
+  readonly sandboxExport?: (id: string, sandboxPath: string) => string;
+  /** The sandbox command that loads `sandboxPath` back after resume, run in the sandbox repo. */
+  readonly sandboxImport?: (id: string, sandboxPath: string) => string;
   /** Rewrite the session's own record of its cwd when it moves. Omit to copy verbatim. */
   readonly rewrite?: (
     content: string,
@@ -436,14 +461,28 @@ interface SessionTransfer {
   readonly handle: BindMountSandboxHandle;
 }
 
+/** The error for a sandbox command that exited non-zero, with its stderr. */
+const sandboxCommandError = (command: string, result: ExecResult): Error =>
+  new Error(
+    `\`${command}\` exited with code ${result.exitCode}: ${result.stderr.trim()}`,
+  );
+
 /** Copy a session file out of the sandbox to the host, then rewrite it. */
 const captureSessionFile =
   (layout: SessionFileLayout) =>
   async (transfer: SessionTransfer): Promise<void> => {
     const { hostCwd, sandboxCwd, sessionId, handle } = transfer;
+    const source = layout.sandboxPath(sandboxCwd, sessionId);
+    if (layout.sandboxExport !== undefined) {
+      const command = layout.sandboxExport(sessionId, source);
+      const result = await handle.exec(command, { cwd: sandboxCwd });
+      if (result.exitCode !== 0) {
+        throw sandboxCommandError(command, result);
+      }
+    }
     const target = layout.hostPath(hostCwd, sessionId);
     await mkdir(dirname(target), { recursive: true });
-    await handle.copyFileOut(layout.sandboxPath(sandboxCwd, sessionId), target);
+    await handle.copyFileOut(source, target);
     if (layout.rewrite !== undefined) {
       const content = await readFile(target, "utf8");
       await writeFile(target, layout.rewrite(content, sandboxCwd, hostCwd));
@@ -461,6 +500,13 @@ const resumeSessionFile =
     if (layout.rewrite === undefined) {
       await handle.exec(`mkdir -p ${dir}`);
       await handle.copyFileIn(source, target);
+      if (layout.sandboxImport !== undefined) {
+        const command = layout.sandboxImport(sessionId, target);
+        const result = await handle.exec(command, { cwd: sandboxCwd });
+        if (result.exitCode !== 0) {
+          throw sandboxCommandError(command, result);
+        }
+      }
       return;
     }
     const content = await readFile(source, "utf8");
