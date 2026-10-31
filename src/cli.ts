@@ -35,6 +35,7 @@ import type {
   SandboxProviderEntry,
 } from "./InitService.js";
 import { ConfigDirError, InitError } from "./errors.js";
+import type { DockerError, PodmanError } from "./errors.js";
 import { VERSION } from "./version.js";
 
 // --- Shared options ---
@@ -566,19 +567,16 @@ const initCommand = Command.make(
 
         if (shouldBuild) {
           const containerfileDir = join(cwd, CONFIG_DIR);
-          if (selectedSandboxProvider.name === "podman") {
-            yield* d.spinner(
-              `Building ${providerLabel} image '${imageName}'...`,
-              podmanBuildImage(imageName, containerfileDir),
-            );
-          } else {
-            yield* d.spinner(
-              `Building ${providerLabel} image '${imageName}'...`,
-              buildImage(imageName, containerfileDir, {
-                buildArgs: defaultUidBuildArgs(),
-              }),
-            );
-          }
+          const build: Effect.Effect<void, DockerError | PodmanError> =
+            selectedSandboxProvider.name === "podman"
+              ? podmanBuildImage(imageName, containerfileDir)
+              : buildImage(imageName, containerfileDir, {
+                  buildArgs: defaultUidBuildArgs(),
+                });
+          yield* d.spinner(
+            `Building ${providerLabel} image '${imageName}'...`,
+            build,
+          );
           yield* d.status(
             "Init complete! Image built successfully.",
             "success",

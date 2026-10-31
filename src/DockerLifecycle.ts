@@ -46,25 +46,16 @@ export const buildImage = (
     const buildArgFlags = Object.entries(options?.buildArgs ?? {}).flatMap(
       ([k, v]) => ["--build-arg", `${k}=${v}`],
     );
-    if (options?.dockerfile) {
-      yield* dockerExec([
-        "build",
-        "-t",
-        imageName,
-        ...buildArgFlags,
-        "-f",
-        resolve(options.dockerfile),
-        process.cwd(),
-      ]);
-    } else {
-      yield* dockerExec([
-        "build",
-        "-t",
-        imageName,
-        ...buildArgFlags,
-        resolve(dockerfileDir),
-      ]);
-    }
+    const buildContext = options?.dockerfile
+      ? ["-f", resolve(options.dockerfile), process.cwd()]
+      : [resolve(dockerfileDir)];
+    yield* dockerExec([
+      "build",
+      "-t",
+      imageName,
+      ...buildArgFlags,
+      ...buildContext,
+    ]);
   });
 
 export interface VolumeMount {
