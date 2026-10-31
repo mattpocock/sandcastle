@@ -24,7 +24,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import { Effect } from "effect";
+import { Console, Effect } from "effect";
 import type { ExecResult, SandboxService } from "./SandboxFactory.js";
 import type { IsolatedSandboxHandle } from "./SandboxProvider.js";
 import { buildRecoveryMessage, type FailedStep } from "./RecoveryMessage.js";
@@ -428,7 +428,7 @@ export const syncOut = (
         hasDiff,
         hasUntracked,
       });
-      console.error(`\n${msg}`);
+      yield* Console.error(`\n${msg}`);
     } else {
       yield* Effect.tryPromise({
         try: async () => {

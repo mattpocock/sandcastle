@@ -1303,7 +1303,7 @@ describe("WorktreeDockerSandboxFactory — interruption preserves the worktree",
   it("still removes a clean worktree on a plain failure (no abort)", async () => {
     const hostDir = await makeHostRepo();
     const ac = new AbortController();
-    vi.spyOn(console, "error").mockImplementation(() => {});
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
 
     let observedWorktreePath: string | undefined;
     await expect(
@@ -1323,6 +1323,9 @@ describe("WorktreeDockerSandboxFactory — interruption preserves the worktree",
     ).rejects.toThrow();
 
     expect(existsSync(observedWorktreePath!)).toBe(false);
+    expect(errors).toHaveBeenCalledWith(
+      "\nWorktree removed (no uncommitted changes)",
+    );
   });
 
   for (const [label, makeProvider] of providers) {
