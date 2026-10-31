@@ -103,61 +103,113 @@ const TOOL_ARG_FIELDS: Record<string, string> = {
   Agent: "description",
 };
 
+/** `value.message` when `value` is an object whose `message` is a string. */
+const messageField = (value: unknown): string | undefined =>
+  typeof value === "object" &&
+  value !== null &&
+  "message" in value &&
+  typeof value.message === "string"
+    ? value.message
+    : undefined;
+
 /**
  * Extract an error message from a parsed JSON error event.
  * Handles { error: "string" }, { error: { message: "string" } },
  * { error: { data: { message: "string" } } }, and { message: "string" }.
  */
-const extractErrorMessage = (obj: any): string | undefined => {
-  const err = obj.error;
-  if (typeof err === "string") return err;
-  if (typeof err === "object" && err !== null) {
-    if (typeof err.message === "string") return err.message;
-    if (typeof err.data?.message === "string") return err.data.message;
+const extractErrorMessage = (obj: unknown): string | undefined => {
+  if (typeof obj !== "object" || obj === null) {
+    return undefined;
   }
-  if (typeof obj.message === "string") return obj.message;
-  return undefined;
+  const err = "error" in obj ? obj.error : undefined;
+  if (typeof err === "string") {
+    return err;
+  }
+  if (typeof err === "object" && err !== null) {
+    const nested =
+      messageField(err) ?? ("data" in err ? messageField(err.data) : undefined);
+    if (nested !== undefined) {
+      return nested;
+    }
+  }
+  return messageField(obj);
 };
+
+/** A content block of a Claude `assistant` stream-json event. */
+interface ClaudeContentBlock {
+  type: string;
+  text?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+}
+
+/** The tool_call event for an allowlisted tool_use block, if it is one. */
+const toolCallFromClaudeBlock = (
+  block: ClaudeContentBlock,
+): ParsedStreamEvent | undefined => {
+  if (
+    block.type !== "tool_use" ||
+    typeof block.name !== "string" ||
+    block.input === undefined
+  ) {
+    return undefined;
+  }
+  const argField = TOOL_ARG_FIELDS[block.name];
+  if (argField === undefined) {
+    return undefined; // not allowlisted
+  }
+  const argValue = block.input[argField];
+  if (typeof argValue !== "string") {
+    return undefined; // missing/wrong arg field
+  }
+  return { type: "tool_call", name: block.name, args: argValue };
+};
+
+/** Joins each run of consecutive text events into one text event. */
+const mergeAdjacentText = (
+  events: readonly ParsedStreamEvent[],
+): ParsedStreamEvent[] => {
+  const merged: ParsedStreamEvent[] = [];
+  for (const event of events) {
+    const last = merged.at(-1);
+    if (event.type === "text" && last?.type === "text") {
+      merged[merged.length - 1] = {
+        type: "text",
+        text: last.text + event.text,
+      };
+    } else {
+      merged.push(event);
+    }
+  }
+  return merged;
+};
+
+/**
+ * Turns a Claude assistant message's content blocks into events, in order:
+ * consecutive text blocks are joined into one text event, and allowlisted
+ * tool_use blocks become tool_call events. Other blocks are dropped.
+ */
+const parseClaudeAssistantContent = (
+  content: readonly ClaudeContentBlock[],
+): ParsedStreamEvent[] =>
+  mergeAdjacentText(
+    content.flatMap((block): ParsedStreamEvent[] => {
+      if (block.type === "text" && typeof block.text === "string") {
+        return [{ type: "text", text: block.text }];
+      }
+      const toolCall = toolCallFromClaudeBlock(block);
+      return toolCall === undefined ? [] : [toolCall];
+    }),
+  );
 
 const parseStreamJsonLine = (line: string): ParsedStreamEvent[] => {
   if (!line.startsWith("{")) return [];
   try {
     const obj = JSON.parse(line);
     if (obj.type === "assistant" && Array.isArray(obj.message?.content)) {
-      const events: ParsedStreamEvent[] = [];
-      const texts: string[] = [];
-      for (const block of obj.message.content as {
-        type: string;
-        text?: string;
-        name?: string;
-        input?: Record<string, unknown>;
-      }[]) {
-        if (block.type === "text" && typeof block.text === "string") {
-          texts.push(block.text);
-        } else if (
-          block.type === "tool_use" &&
-          typeof block.name === "string" &&
-          block.input !== undefined
-        ) {
-          const argField = TOOL_ARG_FIELDS[block.name];
-          if (argField === undefined) continue; // not allowlisted
-          const argValue = block.input[argField];
-          if (typeof argValue !== "string") continue; // missing/wrong arg field
-          if (texts.length > 0) {
-            events.push({ type: "text", text: texts.join("") });
-            texts.length = 0;
-          }
-          events.push({
-            type: "tool_call",
-            name: block.name,
-            args: argValue,
-          });
-        }
-      }
-      if (texts.length > 0) {
-        events.push({ type: "text", text: texts.join("") });
-      }
-      return events;
+      return parseClaudeAssistantContent(
+        obj.message.content as ClaudeContentBlock[],
+      );
     }
     if (obj.type === "result" && typeof obj.result === "string") {
       if (obj.is_error === true) {
@@ -185,14 +237,14 @@ const parseStreamJsonLine = (line: string): ParsedStreamEvent[] => {
  */
 const CURSOR_PRINT_PROMPT_MAX_BYTES = 120 * 1024;
 
-function assertCursorPrintPromptFitsArgv(prompt: string): void {
+const assertCursorPrintPromptFitsArgv = (prompt: string): void => {
   const n = Buffer.byteLength(prompt, "utf8");
   if (n > CURSOR_PRINT_PROMPT_MAX_BYTES) {
     throw new Error(
       `Cursor print-mode prompt is ${n} bytes (max ${CURSOR_PRINT_PROMPT_MAX_BYTES} bytes). The Cursor CLI accepts the prompt only as a command-line argument; shorten the prompt or split the work. Other Sandcastle providers use stdin for large prompts.`,
     );
   }
-}
+};
 
 /** Reads `<kind>ToolCall.args[field]` when it is a string. */
 const cursorToolCallArg = (
@@ -513,10 +565,10 @@ const makeClaudeSessionStorage = (
             ),
             tag: "claude-sub",
           });
-        } catch (err) {
+        } catch (error) {
           console.error(
             `sandcastle: failed to capture Claude subagent transcript ${sandboxSubagentPath}: ${
-              err instanceof Error ? err.message : String(err)
+              error instanceof Error ? error.message : String(error)
             }`,
           );
         }
@@ -646,6 +698,57 @@ const makePiSessionStorage = (options?: PiOptions): AgentSessionStorage => {
   };
 };
 
+/** A message in pi's `agent_end` event. */
+interface PiAgentEndMessage {
+  role: string;
+  content: { type: string; text?: string }[];
+  stopReason?: string;
+  errorMessage?: string;
+}
+
+/** The last assistant message, or null if there is none. */
+const lastAssistantMessage = (
+  messages: readonly (PiAgentEndMessage | null)[],
+): PiAgentEndMessage | null => {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg?.role === "assistant") {
+      return msg;
+    }
+  }
+  return null;
+};
+
+/**
+ * Reads pi's final answer from its `agent_end` messages: the last assistant
+ * message's text as a result, or an error if that message stopped on error.
+ */
+const parsePiAgentEnd = (
+  messages: readonly (PiAgentEndMessage | null)[],
+): ParsedStreamEvent[] => {
+  const msg = lastAssistantMessage(messages);
+  if (msg === null) {
+    return [];
+  }
+  // When the model call fails (e.g. an API 400), pi puts the error on
+  // the last assistant message and still exits 0.
+  if (msg.stopReason === "error") {
+    return [
+      {
+        type: "error",
+        message:
+          typeof msg.errorMessage === "string" && msg.errorMessage
+            ? msg.errorMessage
+            : 'pi stopped with stopReason "error"',
+      },
+    ];
+  }
+  const texts = msg.content.flatMap((block) =>
+    block.type === "text" && typeof block.text === "string" ? [block.text] : [],
+  );
+  return texts.length > 0 ? [{ type: "result", result: texts.join("") }] : [];
+};
+
 const parsePiStreamLine = (line: string): ParsedStreamEvent[] => {
   if (!line.startsWith("{")) return [];
   try {
@@ -697,41 +800,7 @@ const parsePiStreamLine = (line: string): ParsedStreamEvent[] => {
       return msg ? [{ type: "error", message: msg }] : [];
     }
     if (obj.type === "agent_end" && Array.isArray(obj.messages)) {
-      const messages = obj.messages as {
-        role: string;
-        content: { type: string; text?: string }[];
-        stopReason?: string;
-        errorMessage?: string;
-      }[];
-      for (let i = messages.length - 1; i >= 0; i--) {
-        const msg = messages[i];
-        if (msg?.role === "assistant") {
-          // When the model call fails (e.g. an API 400), pi puts the error on
-          // the last assistant message and still exits 0.
-          if (msg.stopReason === "error") {
-            return [
-              {
-                type: "error",
-                message:
-                  typeof msg.errorMessage === "string" && msg.errorMessage
-                    ? msg.errorMessage
-                    : 'pi stopped with stopReason "error"',
-              },
-            ];
-          }
-          const texts: string[] = [];
-          for (const block of msg.content) {
-            if (block.type === "text" && typeof block.text === "string") {
-              texts.push(block.text);
-            }
-          }
-          if (texts.length > 0) {
-            return [{ type: "result", result: texts.join("") }];
-          }
-          break;
-        }
-      }
-      return [];
+      return parsePiAgentEnd(obj.messages as (PiAgentEndMessage | null)[]);
     }
   } catch {
     // Not valid JSON — skip
@@ -783,9 +852,7 @@ export const pi = (
     // id (reported on the stream's `session` header line), leaving the parent
     // untouched. Pi rejects `--fork` combined with `--session`.
     const sessionFlag = resumeSession
-      ? forkSession
-        ? ` --fork ${shellEscape(resumeSession)}`
-        : ` --session ${shellEscape(resumeSession)}`
+      ? ` --${forkSession ? "fork" : "session"} ${shellEscape(resumeSession)}`
       : "";
     return {
       command: `pi -p --mode json --model ${shellEscape(model)}${thinkingFlag}${sessionFlag}`,
@@ -1198,14 +1265,14 @@ export const opencode = (
  */
 const COPILOT_PRINT_PROMPT_MAX_BYTES = 120 * 1024;
 
-function assertCopilotPrintPromptFitsArgv(prompt: string): void {
+const assertCopilotPrintPromptFitsArgv = (prompt: string): void => {
   const n = Buffer.byteLength(prompt, "utf8");
   if (n > COPILOT_PRINT_PROMPT_MAX_BYTES) {
     throw new Error(
       `Copilot print-mode prompt is ${n} bytes (max ${COPILOT_PRINT_PROMPT_MAX_BYTES} bytes). This provider passes the prompt as a command-line argument; shorten the prompt or split the work. Other Sandcastle providers use stdin for large prompts.`,
     );
   }
-}
+};
 
 /**
  * Parse one line of `copilot --output-format json` JSONL output.
@@ -1395,11 +1462,12 @@ export const claudeCode = (
     // permissionMode and --dangerously-skip-permissions are mutually exclusive
     // on Claude's CLI; an explicit mode on the provider takes precedence over
     // Sandcastle's default bypass.
+    const skipPermissionsFlag = dangerouslySkipPermissions
+      ? " --dangerously-skip-permissions"
+      : "";
     const permissionFlag = options?.permissionMode
       ? ` --permission-mode ${options.permissionMode}`
-      : dangerouslySkipPermissions
-        ? " --dangerously-skip-permissions"
-        : "";
+      : skipPermissionsFlag;
     const effortFlag = options?.effort ? ` --effort ${options.effort}` : "";
     const resumeFlag = resumeSession
       ? ` --resume ${shellEscape(resumeSession)}`

@@ -46,6 +46,7 @@ import type {
 import { StructuredOutputError } from "./Output.js";
 import { extractStructuredOutput } from "./extractStructuredOutput.js";
 import { validateTimeoutOptions } from "./validateTimeouts.js";
+import { buildContextWindowLines } from "./ContextWindow.js";
 
 /**
  * Build the token-efficient feedback prompt sent to the agent when retrying
@@ -54,20 +55,22 @@ import { validateTimeoutOptions } from "./validateTimeouts.js";
  *
  * @internal
  */
+const describeParserCause = (cause: unknown): string => {
+  if (cause === undefined) {
+    return "(no parser detail)";
+  }
+  if (typeof cause === "string") {
+    return cause;
+  }
+  return JSON.stringify(cause, null, 2);
+};
+
 export const buildStructuredOutputRetryFeedback = (
   error: StructuredOutputError,
   retriesRemaining: number,
 ): string => {
-  const raw =
-    error.rawMatched === undefined
-      ? "(no matching tag was emitted)"
-      : error.rawMatched;
-  const cause =
-    error.cause === undefined
-      ? "(no parser detail)"
-      : typeof error.cause === "string"
-        ? error.cause
-        : JSON.stringify(error.cause, null, 2);
+  const raw = error.rawMatched ?? "(no matching tag was emitted)";
+  const cause = describeParserCause(error.cause);
 
   return `Your previous response did not produce valid structured output.
 
@@ -187,9 +190,7 @@ export const buildCompletionMessage = (
   };
 };
 
-import { buildContextWindowLines } from "./ContextWindow.js";
-
-export { buildContextWindowLines };
+export { buildContextWindowLines } from "./ContextWindow.js";
 
 /**
  * Controls where Sandcastle writes iteration progress and agent output.
@@ -253,7 +254,9 @@ export const buildAgentStreamHandler = (
   const verboseSink = logging.verbose
     ? buildVerboseRawLineSink(logging)
     : undefined;
-  if (!userHandler && !verboseSink) return undefined;
+  if (!userHandler && !verboseSink) {
+    return undefined;
+  }
   return (event) => {
     if (userHandler) {
       try {
@@ -280,14 +283,18 @@ const fileEndsMidLine = (filePath: string): boolean => {
   try {
     fd = openSync(filePath, "r");
     const { size } = fstatSync(fd);
-    if (size === 0) return false;
+    if (size === 0) {
+      return false;
+    }
     const lastByte = Buffer.alloc(1);
     readSync(fd, lastByte, 0, 1, size - 1);
     return lastByte[0] !== 0x0a;
   } catch {
     return false;
   } finally {
-    if (fd !== undefined) closeSync(fd);
+    if (fd !== undefined) {
+      closeSync(fd);
+    }
   }
 };
 
@@ -817,7 +824,7 @@ export async function run(
     logFilePath:
       resolvedLogging.type === "file" ? resolvedLogging.path : undefined,
     resume: async (
-      prompt: string,
+      followUpPrompt: string,
       resumeOptions?: ResumeRunResultOptions,
     ): Promise<RunResult> => {
       const lastIteration = result.iterations.at(-1);
@@ -831,14 +838,14 @@ export async function run(
         // The follow-up prompt is new: structured output is opt-in per call.
         output: undefined,
         ...resumeOptions,
-        prompt,
+        prompt: followUpPrompt,
         promptFile: undefined,
         maxIterations: 1,
         resumeSession: lastIteration.sessionId,
       });
     },
     fork: async (
-      prompt: string,
+      followUpPrompt: string,
       forkOptions?: ResumeRunResultOptions,
     ): Promise<RunResult> => {
       const lastIteration = result.iterations.at(-1);
@@ -852,7 +859,7 @@ export async function run(
         // The follow-up prompt is new: structured output is opt-in per call.
         output: undefined,
         ...forkOptions,
-        prompt,
+        prompt: followUpPrompt,
         promptFile: undefined,
         maxIterations: 1,
         resumeSession: lastIteration.sessionId,

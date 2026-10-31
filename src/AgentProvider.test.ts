@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import {
   claudeCode,
   codex,
@@ -10,8 +10,38 @@ import {
   opencode,
   pi,
 } from "./AgentProvider.js";
-import type { AgentCommandOptions } from "./AgentProvider.js";
+import type { AgentCommandOptions, AgentProvider } from "./AgentProvider.js";
 import type { BindMountSandboxHandle } from "./SandboxProvider.js";
+
+/** Builds interactive args, failing the test if the provider has no interactive mode. */
+const buildInteractiveArgs = (
+  provider: AgentProvider,
+  options: AgentCommandOptions,
+): string[] => {
+  assert(
+    provider.buildInteractiveArgs !== undefined,
+    `${provider.name} has no interactive mode`,
+  );
+  return provider.buildInteractiveArgs(options);
+};
+
+/** Parses session usage, failing the test if the provider cannot. */
+const parseSessionUsage = (provider: AgentProvider, content: string) => {
+  assert(
+    provider.parseSessionUsage !== undefined,
+    `${provider.name} has no parseSessionUsage`,
+  );
+  return provider.parseSessionUsage(content);
+};
+
+/** The provider's session storage, failing the test if it has none. */
+const sessionStorageOf = (provider: AgentProvider) => {
+  assert.isDefined(
+    provider.sessionStorage,
+    `${provider.name} has no session storage`,
+  );
+  return provider.sessionStorage;
+};
 
 /** Shorthand: build options with dangerouslySkipPermissions: true (mirrors existing sandbox callers). */
 const opts = (prompt: string): AgentCommandOptions => ({
@@ -59,7 +89,7 @@ describe("claudeCode factory", () => {
       type: "assistant",
       message: { content: [{ type: "text", text: "Hello world" }] },
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "text", text: "Hello world" },
     ]);
   });
@@ -70,7 +100,7 @@ describe("claudeCode factory", () => {
       type: "result",
       result: "Final answer <promise>COMPLETE</promise>",
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       {
         type: "result",
         result: "Final answer <promise>COMPLETE</promise>",
@@ -80,8 +110,8 @@ describe("claudeCode factory", () => {
 
   it("parseStreamLine returns empty array for non-JSON lines", () => {
     const provider = claudeCode("claude-opus-4-8");
-    expect(provider.parseStreamLine("not json")).toEqual([]);
-    expect(provider.parseStreamLine("")).toEqual([]);
+    expect(provider.parseStreamLine("not json")).toStrictEqual([]);
+    expect(provider.parseStreamLine("")).toStrictEqual([]);
   });
 
   it("parseStreamLine extracts tool_use block (Bash → command arg)", () => {
@@ -94,7 +124,7 @@ describe("claudeCode factory", () => {
         ],
       },
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "tool_call", name: "Bash", args: "npm test" },
     ]);
   });
@@ -144,12 +174,12 @@ describe("claudeCode factory", () => {
     const provider = claudeCode("claude-opus-4-8", {
       env: { ANTHROPIC_API_KEY: "sk-test" },
     });
-    expect(provider.env).toEqual({ ANTHROPIC_API_KEY: "sk-test" });
+    expect(provider.env).toStrictEqual({ ANTHROPIC_API_KEY: "sk-test" });
   });
 
   it("defaults env to empty object when not provided", () => {
     const provider = claudeCode("claude-opus-4-8");
-    expect(provider.env).toEqual({});
+    expect(provider.env).toStrictEqual({});
   });
 
   // --- dangerouslySkipPermissions conditional tests ---
@@ -170,7 +200,7 @@ describe("claudeCode factory", () => {
       subtype: "init",
       session_id: "abc-123-def",
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "session_id", sessionId: "abc-123-def" },
     ]);
   });
@@ -182,7 +212,7 @@ describe("claudeCode factory", () => {
       subtype: "other",
       session_id: "abc-123-def",
     });
-    expect(provider.parseStreamLine(line)).toEqual([]);
+    expect(provider.parseStreamLine(line)).toStrictEqual([]);
   });
 
   it("parseStreamLine ignores system init without session_id", () => {
@@ -191,7 +221,7 @@ describe("claudeCode factory", () => {
       type: "system",
       subtype: "init",
     });
-    expect(provider.parseStreamLine(line)).toEqual([]);
+    expect(provider.parseStreamLine(line)).toStrictEqual([]);
   });
 
   it("buildPrintCommand includes --resume when resumeSession is set", () => {
@@ -261,7 +291,7 @@ describe("claudeCode factory", () => {
 
   it("buildInteractiveArgs includes --dangerously-skip-permissions when true", () => {
     const provider = claudeCode("claude-opus-4-8");
-    const args = provider.buildInteractiveArgs!({
+    const args = buildInteractiveArgs(provider, {
       prompt: "test",
       dangerouslySkipPermissions: true,
     });
@@ -270,7 +300,7 @@ describe("claudeCode factory", () => {
 
   it("buildInteractiveArgs omits --dangerously-skip-permissions when false", () => {
     const provider = claudeCode("claude-opus-4-8");
-    const args = provider.buildInteractiveArgs!({
+    const args = buildInteractiveArgs(provider, {
       prompt: "test",
       dangerouslySkipPermissions: false,
     });
@@ -305,7 +335,7 @@ describe("claudeCode factory", () => {
 
   it("buildInteractiveArgs emits --permission-mode when permissionMode is set", () => {
     const provider = claudeCode("claude-opus-4-8", { permissionMode: "plan" });
-    const args = provider.buildInteractiveArgs!({
+    const args = buildInteractiveArgs(provider, {
       prompt: "test",
       dangerouslySkipPermissions: false,
     });
@@ -315,7 +345,7 @@ describe("claudeCode factory", () => {
 
   it("buildInteractiveArgs omits --dangerously-skip-permissions when permissionMode is set", () => {
     const provider = claudeCode("claude-opus-4-8", { permissionMode: "auto" });
-    const args = provider.buildInteractiveArgs!({
+    const args = buildInteractiveArgs(provider, {
       prompt: "test",
       dangerouslySkipPermissions: true,
     });
@@ -436,7 +466,7 @@ describe("pi factory", () => {
       type: "message_update",
       assistantMessageEvent: { type: "text_delta", delta: "Hello world" },
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "text", text: "Hello world" },
     ]);
   });
@@ -448,7 +478,7 @@ describe("pi factory", () => {
       toolName: "Bash",
       args: { command: "npm test" },
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "tool_call", name: "Bash", args: "npm test" },
     ]);
   });
@@ -458,7 +488,7 @@ describe("pi factory", () => {
     // Real line from pi 0.80 --mode json (sandcastle-verify run 20261031-060336-31aa).
     const line =
       '{"type":"tool_execution_start","toolCallId":"toolu_01FFv8fPnapyEsUJu2xwkJyB","toolName":"bash","args":{"command":"cat seed/1.txt"}}';
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "tool_call", name: "Bash", args: "cat seed/1.txt" },
     ]);
   });
@@ -470,7 +500,7 @@ describe("pi factory", () => {
       toolName: "UnknownTool",
       args: { foo: "bar" },
     });
-    expect(provider.parseStreamLine(line)).toEqual([]);
+    expect(provider.parseStreamLine(line)).toStrictEqual([]);
   });
 
   it("parseStreamLine extracts result from agent_end event", () => {
@@ -490,7 +520,7 @@ describe("pi factory", () => {
         },
       ],
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       {
         type: "result",
         result: "Final answer <promise>COMPLETE</promise>",
@@ -507,7 +537,7 @@ describe("pi factory", () => {
       timestamp: "2026-05-29T08:00:00Z",
       cwd: "/sandbox/repo",
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       {
         type: "session_id",
         sessionId: "9ba1c695-2222-4444-8888-e7e847bf34dd",
@@ -522,30 +552,30 @@ describe("pi factory", () => {
       subtype: "init",
       session_id: "abc-123",
     });
-    expect(provider.parseStreamLine(line)).toEqual([]);
+    expect(provider.parseStreamLine(line)).toStrictEqual([]);
   });
 
   it("parseStreamLine returns empty array for non-JSON lines", () => {
     const provider = pi("claude-sonnet-4-6");
-    expect(provider.parseStreamLine("not json")).toEqual([]);
-    expect(provider.parseStreamLine("")).toEqual([]);
+    expect(provider.parseStreamLine("not json")).toStrictEqual([]);
+    expect(provider.parseStreamLine("")).toStrictEqual([]);
   });
 
   it("parseStreamLine returns empty array for unrecognized event types", () => {
     const provider = pi("claude-sonnet-4-6");
     const line = JSON.stringify({ type: "unknown_event", data: "foo" });
-    expect(provider.parseStreamLine(line)).toEqual([]);
+    expect(provider.parseStreamLine(line)).toStrictEqual([]);
   });
 
   it("parseStreamLine returns empty array for malformed JSON", () => {
     const provider = pi("claude-sonnet-4-6");
-    expect(provider.parseStreamLine("{bad json")).toEqual([]);
+    expect(provider.parseStreamLine("{bad json")).toStrictEqual([]);
   });
 
   it("parseStreamLine handles message_update with missing content", () => {
     const provider = pi("claude-sonnet-4-6");
     const line = JSON.stringify({ type: "message_update" });
-    expect(provider.parseStreamLine(line)).toEqual([]);
+    expect(provider.parseStreamLine(line)).toStrictEqual([]);
   });
 
   it("parseStreamLine handles tool_execution_start with missing fields", () => {
@@ -555,7 +585,7 @@ describe("pi factory", () => {
       toolName: "Bash",
       // no args field
     });
-    expect(provider.parseStreamLine(line)).toEqual([]);
+    expect(provider.parseStreamLine(line)).toStrictEqual([]);
   });
 
   it("bakes model into each provider instance independently", () => {
@@ -578,7 +608,7 @@ describe("pi factory", () => {
       type: "agent_error",
       error: "Authentication failed: invalid API key",
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "error", message: "Authentication failed: invalid API key" },
     ]);
   });
@@ -589,7 +619,7 @@ describe("pi factory", () => {
       type: "agent_error",
       error: { message: "Rate limit exceeded", code: "rate_limit" },
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "error", message: "Rate limit exceeded" },
     ]);
   });
@@ -600,7 +630,7 @@ describe("pi factory", () => {
       type: "error",
       message: "Internal server error",
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "error", message: "Internal server error" },
     ]);
   });
@@ -611,7 +641,7 @@ describe("pi factory", () => {
       type: "error",
       error: "Connection refused",
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "error", message: "Connection refused" },
     ]);
   });
@@ -622,7 +652,7 @@ describe("pi factory", () => {
       type: "agent_error",
       // no error field
     });
-    expect(provider.parseStreamLine(line)).toEqual([]);
+    expect(provider.parseStreamLine(line)).toStrictEqual([]);
   });
 
   it("parseStreamLine returns empty array for error event with no extractable message", () => {
@@ -631,17 +661,17 @@ describe("pi factory", () => {
       type: "error",
       // no message or error field
     });
-    expect(provider.parseStreamLine(line)).toEqual([]);
+    expect(provider.parseStreamLine(line)).toStrictEqual([]);
   });
 
   it("accepts an env option and exposes it on the provider", () => {
     const provider = pi("claude-sonnet-4-6", { env: { PI_KEY: "abc" } });
-    expect(provider.env).toEqual({ PI_KEY: "abc" });
+    expect(provider.env).toStrictEqual({ PI_KEY: "abc" });
   });
 
   it("defaults env to empty object when not provided", () => {
     const provider = pi("claude-sonnet-4-6");
-    expect(provider.env).toEqual({});
+    expect(provider.env).toStrictEqual({});
   });
 
   it("buildPrintCommand includes --thinking when specified", () => {
@@ -840,7 +870,7 @@ describe("codex factory", () => {
       type: "thread.started",
       thread_id: "9ba1c695-2222-4444-8888-e7e847bf34dd",
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       {
         type: "session_id",
         sessionId: "9ba1c695-2222-4444-8888-e7e847bf34dd",
@@ -854,7 +884,7 @@ describe("codex factory", () => {
       type: "item.completed",
       item: { type: "agent_message", text: "Hello world" },
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "text", text: "Hello world" },
       { type: "result", result: "Hello world" },
     ]);
@@ -866,7 +896,7 @@ describe("codex factory", () => {
       type: "item.started",
       item: { type: "command_execution", command: "npm test" },
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "tool_call", name: "Bash", args: "npm test" },
     ]);
   });
@@ -874,7 +904,7 @@ describe("codex factory", () => {
   it("parseStreamLine skips turn.completed events without usage", () => {
     const provider = codex("gpt-5.4-mini");
     const line = JSON.stringify({ type: "turn.completed" });
-    expect(provider.parseStreamLine(line)).toEqual([]);
+    expect(provider.parseStreamLine(line)).toStrictEqual([]);
   });
 
   it("parseStreamLine extracts usage from turn.completed", () => {
@@ -891,7 +921,7 @@ describe("codex factory", () => {
     // cached_input_tokens is a subset already included. Map cached tokens to
     // cache-read and the remainder to input so the context-window display does
     // not double-count them.
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       {
         type: "usage",
         usage: {
@@ -910,24 +940,24 @@ describe("codex factory", () => {
       type: "turn.completed",
       usage: { input_tokens: "lots", output_tokens: 51 },
     });
-    expect(provider.parseStreamLine(line)).toEqual([]);
+    expect(provider.parseStreamLine(line)).toStrictEqual([]);
   });
 
   it("parseStreamLine returns empty array for non-JSON lines", () => {
     const provider = codex("gpt-5.4-mini");
-    expect(provider.parseStreamLine("not json")).toEqual([]);
-    expect(provider.parseStreamLine("")).toEqual([]);
+    expect(provider.parseStreamLine("not json")).toStrictEqual([]);
+    expect(provider.parseStreamLine("")).toStrictEqual([]);
   });
 
   it("parseStreamLine returns empty array for unrecognized event types", () => {
     const provider = codex("gpt-5.4-mini");
     const line = JSON.stringify({ type: "unknown_event", data: "foo" });
-    expect(provider.parseStreamLine(line)).toEqual([]);
+    expect(provider.parseStreamLine(line)).toStrictEqual([]);
   });
 
   it("parseStreamLine returns empty array for malformed JSON", () => {
     const provider = codex("gpt-5.4-mini");
-    expect(provider.parseStreamLine("{bad json")).toEqual([]);
+    expect(provider.parseStreamLine("{bad json")).toStrictEqual([]);
   });
 
   it("parseStreamLine handles item.completed with missing text", () => {
@@ -936,7 +966,7 @@ describe("codex factory", () => {
       type: "item.completed",
       item: { type: "agent_message" },
     });
-    expect(provider.parseStreamLine(line)).toEqual([]);
+    expect(provider.parseStreamLine(line)).toStrictEqual([]);
   });
 
   it("parseStreamLine does not extract from item.content (array form), only item.text", () => {
@@ -948,7 +978,7 @@ describe("codex factory", () => {
         content: [{ type: "text", text: "from content array" }],
       },
     });
-    expect(provider.parseStreamLine(line)).toEqual([]);
+    expect(provider.parseStreamLine(line)).toStrictEqual([]);
   });
 
   it("parseStreamLine handles item.started with missing command", () => {
@@ -957,7 +987,7 @@ describe("codex factory", () => {
       type: "item.started",
       item: { type: "command_execution" },
     });
-    expect(provider.parseStreamLine(line)).toEqual([]);
+    expect(provider.parseStreamLine(line)).toStrictEqual([]);
   });
 
   it("parseStreamLine handles item.completed with non-agent_message type", () => {
@@ -966,7 +996,7 @@ describe("codex factory", () => {
       type: "item.completed",
       item: { type: "other_type", content: "foo" },
     });
-    expect(provider.parseStreamLine(line)).toEqual([]);
+    expect(provider.parseStreamLine(line)).toStrictEqual([]);
   });
 
   it("parseStreamLine handles item.started with non-command_execution type", () => {
@@ -975,7 +1005,7 @@ describe("codex factory", () => {
       type: "item.started",
       item: { type: "other_type", command: "foo" },
     });
-    expect(provider.parseStreamLine(line)).toEqual([]);
+    expect(provider.parseStreamLine(line)).toStrictEqual([]);
   });
 
   it("bakes model into each provider instance independently", () => {
@@ -1000,7 +1030,7 @@ describe("codex factory", () => {
       type: "error",
       error: { type: "server_error", message: "Internal server error" },
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "result", result: "Internal server error" },
     ]);
   });
@@ -1011,7 +1041,7 @@ describe("codex factory", () => {
       type: "error",
       error: "Authentication failed: invalid API key",
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "result", result: "Authentication failed: invalid API key" },
     ]);
   });
@@ -1022,7 +1052,7 @@ describe("codex factory", () => {
       type: "error",
       message: "Rate limit exceeded",
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "result", result: "Rate limit exceeded" },
     ]);
   });
@@ -1033,17 +1063,17 @@ describe("codex factory", () => {
       type: "error",
       code: "unknown",
     });
-    expect(provider.parseStreamLine(line)).toEqual([]);
+    expect(provider.parseStreamLine(line)).toStrictEqual([]);
   });
 
   it("accepts an env option and exposes it on the provider", () => {
     const provider = codex("gpt-5.4-mini", { env: { CODEX_API_KEY: "xyz" } });
-    expect(provider.env).toEqual({ CODEX_API_KEY: "xyz" });
+    expect(provider.env).toStrictEqual({ CODEX_API_KEY: "xyz" });
   });
 
   it("defaults env to empty object when not provided", () => {
     const provider = codex("gpt-5.4-mini");
-    expect(provider.env).toEqual({});
+    expect(provider.env).toStrictEqual({});
   });
 });
 
@@ -1090,11 +1120,11 @@ describe("cursor factory", () => {
 
   it("buildInteractiveArgs includes binary, model and prompt", () => {
     const provider = cursor("claude-sonnet-4-6");
-    const args = provider.buildInteractiveArgs!({
+    const args = buildInteractiveArgs(provider, {
       prompt: "test prompt",
       dangerouslySkipPermissions: true,
     });
-    expect(args).toEqual([
+    expect(args).toStrictEqual([
       "agent",
       "--model",
       "claude-sonnet-4-6",
@@ -1105,11 +1135,16 @@ describe("cursor factory", () => {
 
   it("buildInteractiveArgs omits prompt when empty", () => {
     const provider = cursor("claude-sonnet-4-6");
-    const args = provider.buildInteractiveArgs!({
+    const args = buildInteractiveArgs(provider, {
       prompt: "",
       dangerouslySkipPermissions: true,
     });
-    expect(args).toEqual(["agent", "--model", "claude-sonnet-4-6", "--force"]);
+    expect(args).toStrictEqual([
+      "agent",
+      "--model",
+      "claude-sonnet-4-6",
+      "--force",
+    ]);
   });
 
   // Orchestrator.invokeAgent always passes dangerouslySkipPermissions: true in print mode;
@@ -1129,7 +1164,7 @@ describe("cursor factory", () => {
       type: "assistant",
       message: { content: [{ type: "text", text: "Hello from Cursor" }] },
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "text", text: "Hello from Cursor" },
     ]);
   });
@@ -1144,7 +1179,7 @@ describe("cursor factory", () => {
         ],
       },
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "tool_call", name: "Bash", args: "npm test" },
     ]);
   });
@@ -1160,7 +1195,7 @@ describe("cursor factory", () => {
       },
       session_id: "c6b62c6f-7ead-4fd6-9922-e952131177ff",
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "tool_call", name: "Read", args: "README.md" },
     ]);
   });
@@ -1176,7 +1211,7 @@ describe("cursor factory", () => {
       },
       session_id: "c6b62c6f-7ead-4fd6-9922-e952131177ff",
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "tool_call", name: "Write", args: "src/index.ts" },
     ]);
   });
@@ -1247,7 +1282,7 @@ describe("cursor factory", () => {
         },
       },
     });
-    expect(provider.parseStreamLine(line)).toEqual([]);
+    expect(provider.parseStreamLine(line)).toStrictEqual([]);
   });
 
   it("parseStreamLine extracts result event", () => {
@@ -1256,7 +1291,7 @@ describe("cursor factory", () => {
       type: "result",
       result: "Done <promise>COMPLETE</promise>",
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "result", result: "Done <promise>COMPLETE</promise>" },
     ]);
   });
@@ -1265,12 +1300,12 @@ describe("cursor factory", () => {
     const provider = cursor("claude-sonnet-4-6", {
       env: { CURSOR_API_KEY: "cursor-key" },
     });
-    expect(provider.env).toEqual({ CURSOR_API_KEY: "cursor-key" });
+    expect(provider.env).toStrictEqual({ CURSOR_API_KEY: "cursor-key" });
   });
 
   it("defaults env to empty object when not provided", () => {
     const provider = cursor("claude-sonnet-4-6");
-    expect(provider.env).toEqual({});
+    expect(provider.env).toStrictEqual({});
   });
 });
 
@@ -1407,7 +1442,7 @@ describe("opencode factory", () => {
 
   it("buildInteractiveArgs includes --agent when specified", () => {
     const provider = opencode("opencode/big-pickle", { agent: "build" });
-    const args = provider.buildInteractiveArgs!(opts("do something"));
+    const args = buildInteractiveArgs(provider, opts("do something"));
     expect(args).toEqual([
       "opencode",
       "--model",
@@ -1421,7 +1456,7 @@ describe("opencode factory", () => {
 
   it("buildInteractiveArgs omits --agent when not specified", () => {
     const provider = opencode("opencode/big-pickle");
-    const args = provider.buildInteractiveArgs!(opts("do something"));
+    const args = buildInteractiveArgs(provider, opts("do something"));
     expect(args).not.toContain("--agent");
   });
 
@@ -1435,7 +1470,7 @@ describe("opencode factory", () => {
         sessionID: "ses_19cb8236effe4lu1aSmQyzbeP2",
       },
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "session_id", sessionId: "ses_19cb8236effe4lu1aSmQyzbeP2" },
     ]);
   });
@@ -1447,7 +1482,7 @@ describe("opencode factory", () => {
       sessionID: "ses_abc",
       part: { type: "text", text: "Hello world <promise>COMPLETE</promise>" },
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "text", text: "Hello world <promise>COMPLETE</promise>" },
       { type: "result", result: "Hello world <promise>COMPLETE</promise>" },
     ]);
@@ -1465,7 +1500,7 @@ describe("opencode factory", () => {
         state: { status: "completed", input: { command: "npm test" } },
       },
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "tool_call", name: "bash", args: "npm test" },
     ]);
   });
@@ -1481,7 +1516,7 @@ describe("opencode factory", () => {
         state: { status: "completed", input: { url: "https://example.com" } },
       },
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "tool_call", name: "webfetch", args: "https://example.com" },
     ]);
   });
@@ -1500,7 +1535,7 @@ describe("opencode factory", () => {
         },
       },
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "tool_call", name: "task", args: "Explore the repo" },
     ]);
   });
@@ -1516,7 +1551,7 @@ describe("opencode factory", () => {
         state: { status: "completed", input: { filePath: "/some/file" } },
       },
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "tool_call", name: "read", args: '{"filePath":"/some/file"}' },
     ]);
   });
@@ -1532,7 +1567,7 @@ describe("opencode factory", () => {
         state: { status: "completed", input: { pattern: "TODO" } },
       },
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "tool_call", name: "grep", args: '{"pattern":"TODO"}' },
     ]);
   });
@@ -1548,7 +1583,7 @@ describe("opencode factory", () => {
         state: { status: "completed", input: { foo: "bar" } },
       },
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "tool_call", name: "mystery", args: '{"foo":"bar"}' },
     ]);
   });
@@ -1564,7 +1599,7 @@ describe("opencode factory", () => {
         state: { status: "completed", input: { description: "no command" } },
       },
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "tool_call", name: "bash", args: '{"description":"no command"}' },
     ]);
   });
@@ -1579,7 +1614,7 @@ describe("opencode factory", () => {
         state: { status: "completed", input: { command: "npm test" } },
       },
     });
-    expect(provider.parseStreamLine(line)).toEqual([]);
+    expect(provider.parseStreamLine(line)).toStrictEqual([]);
   });
 
   it("parseStreamLine skips tool_use that has not completed", () => {
@@ -1593,7 +1628,7 @@ describe("opencode factory", () => {
         state: { status: "running", input: { command: "npm test" } },
       },
     });
-    expect(provider.parseStreamLine(line)).toEqual([]);
+    expect(provider.parseStreamLine(line)).toStrictEqual([]);
   });
 
   it("parseStreamLine extracts error message from an error event", () => {
@@ -1605,7 +1640,7 @@ describe("opencode factory", () => {
         data: { message: "Invalid API key" },
       },
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "error", message: "Invalid API key" },
     ]);
   });
@@ -1617,24 +1652,24 @@ describe("opencode factory", () => {
       sessionID: "ses_abc",
       part: { type: "step-finish", tokens: { total: 100 } },
     });
-    expect(provider.parseStreamLine(line)).toEqual([]);
+    expect(provider.parseStreamLine(line)).toStrictEqual([]);
   });
 
   it("parseStreamLine returns empty array for unrecognized event types", () => {
     const provider = opencode("opencode/big-pickle");
     const line = JSON.stringify({ type: "unknown_event", data: "foo" });
-    expect(provider.parseStreamLine(line)).toEqual([]);
+    expect(provider.parseStreamLine(line)).toStrictEqual([]);
   });
 
   it("parseStreamLine returns empty array for non-JSON lines", () => {
     const provider = opencode("opencode/big-pickle");
-    expect(provider.parseStreamLine("not json")).toEqual([]);
-    expect(provider.parseStreamLine("")).toEqual([]);
+    expect(provider.parseStreamLine("not json")).toStrictEqual([]);
+    expect(provider.parseStreamLine("")).toStrictEqual([]);
   });
 
   it("parseStreamLine returns empty array for malformed JSON", () => {
     const provider = opencode("opencode/big-pickle");
-    expect(provider.parseStreamLine("{bad json")).toEqual([]);
+    expect(provider.parseStreamLine("{bad json")).toStrictEqual([]);
   });
 
   it("bakes model into each provider instance independently", () => {
@@ -1655,12 +1690,12 @@ describe("opencode factory", () => {
     const provider = opencode("opencode/big-pickle", {
       env: { OPENCODE_API_KEY: "sk-test" },
     });
-    expect(provider.env).toEqual({ OPENCODE_API_KEY: "sk-test" });
+    expect(provider.env).toStrictEqual({ OPENCODE_API_KEY: "sk-test" });
   });
 
   it("defaults env to empty object when not provided", () => {
     const provider = opencode("opencode/big-pickle");
-    expect(provider.env).toEqual({});
+    expect(provider.env).toStrictEqual({});
   });
 });
 
@@ -1789,7 +1824,7 @@ describe("copilot factory", () => {
 
   it("buildInteractiveArgs includes copilot binary, --model, and prompt", () => {
     const provider = copilot("claude-sonnet-4.5");
-    const args = provider.buildInteractiveArgs!(opts("hello"));
+    const args = buildInteractiveArgs(provider, opts("hello"));
     expect(args[0]).toBe("copilot");
     expect(args).toContain("--model");
     expect(args).toContain("claude-sonnet-4.5");
@@ -1800,7 +1835,7 @@ describe("copilot factory", () => {
     // `-p`/`--prompt` runs programmatically and exits; interactive sessions
     // must use `-i`/`--interactive` to launch the TUI without exiting.
     const provider = copilot("claude-sonnet-4.5");
-    const args = provider.buildInteractiveArgs!(opts("hello"));
+    const args = buildInteractiveArgs(provider, opts("hello"));
     expect(args).toContain("-i");
     expect(args).not.toContain("-p");
     // The prompt immediately follows the -i flag.
@@ -1809,11 +1844,11 @@ describe("copilot factory", () => {
 
   it("parseStreamLine returns empty array for non-JSON and unrecognised input", () => {
     const provider = copilot("claude-sonnet-4.5");
-    expect(provider.parseStreamLine("some output text")).toEqual([]);
-    expect(provider.parseStreamLine("")).toEqual([]);
+    expect(provider.parseStreamLine("some output text")).toStrictEqual([]);
+    expect(provider.parseStreamLine("")).toStrictEqual([]);
     expect(
       provider.parseStreamLine(JSON.stringify({ type: "text", text: "hi" })),
-    ).toEqual([]);
+    ).toStrictEqual([]);
   });
 
   it("parseStreamLine extracts text from assistant.message_delta event", () => {
@@ -1822,7 +1857,7 @@ describe("copilot factory", () => {
       type: "assistant.message_delta",
       data: { messageId: "m1", deltaContent: "hello" },
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "text", text: "hello" },
     ]);
   });
@@ -1838,7 +1873,7 @@ describe("copilot factory", () => {
         turnId: "0",
       },
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "tool_call", name: "Bash", args: "ls /" },
     ]);
   });
@@ -1853,7 +1888,7 @@ describe("copilot factory", () => {
         arguments: { intent: "doing things" },
       },
     });
-    expect(provider.parseStreamLine(line)).toEqual([]);
+    expect(provider.parseStreamLine(line)).toStrictEqual([]);
   });
 
   it("parseStreamLine extracts result from assistant.message content", () => {
@@ -1868,7 +1903,7 @@ describe("copilot factory", () => {
         turnId: "0",
       },
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "result", result: "Final answer." },
     ]);
   });
@@ -1879,7 +1914,7 @@ describe("copilot factory", () => {
       type: "assistant.message",
       data: { messageId: "m1", content: "", toolRequests: [] },
     });
-    expect(provider.parseStreamLine(line)).toEqual([]);
+    expect(provider.parseStreamLine(line)).toStrictEqual([]);
   });
 
   it("parseStreamLine extracts session_id from terminal result event", () => {
@@ -1890,7 +1925,7 @@ describe("copilot factory", () => {
       exitCode: 0,
       usage: { premiumRequests: 1 },
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       {
         type: "session_id",
         sessionId: "08f6db99-c0af-4d97-a927-a526b205de12",
@@ -1915,13 +1950,13 @@ describe("copilot factory", () => {
     ]) {
       expect(
         provider.parseStreamLine(JSON.stringify({ type, data: {} })),
-      ).toEqual([]);
+      ).toStrictEqual([]);
     }
   });
 
   it("parseStreamLine returns empty array for malformed JSON", () => {
     const provider = copilot("claude-sonnet-4.5");
-    expect(provider.parseStreamLine("{bad json")).toEqual([]);
+    expect(provider.parseStreamLine("{bad json")).toStrictEqual([]);
   });
 
   it("parseStreamLine surfaces error events as error events (string error)", () => {
@@ -1930,7 +1965,7 @@ describe("copilot factory", () => {
       type: "error",
       error: "Connection refused",
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "error", message: "Connection refused" },
     ]);
   });
@@ -1941,7 +1976,7 @@ describe("copilot factory", () => {
       type: "agent_error",
       error: { message: "Rate limit exceeded", code: "rate_limit" },
     });
-    expect(provider.parseStreamLine(line)).toEqual([
+    expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "error", message: "Rate limit exceeded" },
     ]);
   });
@@ -2010,7 +2045,7 @@ describe("copilot factory", () => {
     ];
 
     const events = lines.flatMap((l) => provider.parseStreamLine(l));
-    expect(events).toEqual([
+    expect(events).toStrictEqual([
       { type: "text", text: "I'll run " },
       { type: "text", text: "ls /." },
       { type: "result", result: "I'll run ls /." },
@@ -2023,12 +2058,12 @@ describe("copilot factory", () => {
     const provider = copilot("claude-sonnet-4.5", {
       env: { GITHUB_TOKEN: "ghp_test" },
     });
-    expect(provider.env).toEqual({ GITHUB_TOKEN: "ghp_test" });
+    expect(provider.env).toStrictEqual({ GITHUB_TOKEN: "ghp_test" });
   });
 
   it("defaults env to empty object when not provided", () => {
     const provider = copilot("claude-sonnet-4.5");
-    expect(provider.env).toEqual({});
+    expect(provider.env).toStrictEqual({});
   });
 
   it("bakes model into each provider instance independently", () => {
@@ -2077,7 +2112,7 @@ describe("parseSessionUsage (Claude Code)", () => {
       }),
     ].join("\n");
 
-    expect(provider.parseSessionUsage!(content)).toEqual({
+    expect(parseSessionUsage(provider, content)).toEqual({
       inputTokens: 3,
       cacheCreationInputTokens: 9294,
       cacheReadInputTokens: 8526,
@@ -2086,7 +2121,7 @@ describe("parseSessionUsage (Claude Code)", () => {
   });
 
   it("returns undefined for empty content", () => {
-    expect(provider.parseSessionUsage!("")).toBeUndefined();
+    expect(parseSessionUsage(provider, "")).toBeUndefined();
   });
 
   it("returns undefined for content with no assistant messages", () => {
@@ -2094,7 +2129,7 @@ describe("parseSessionUsage (Claude Code)", () => {
       JSON.stringify({ type: "system", subtype: "init", session_id: "abc" }),
       JSON.stringify({ type: "result", result: "done" }),
     ].join("\n");
-    expect(provider.parseSessionUsage!(content)).toBeUndefined();
+    expect(parseSessionUsage(provider, content)).toBeUndefined();
   });
 
   it("returns undefined when assistant message has no usage block", () => {
@@ -2105,12 +2140,12 @@ describe("parseSessionUsage (Claude Code)", () => {
         content: [{ type: "text", text: "hi" }],
       },
     });
-    expect(provider.parseSessionUsage!(content)).toBeUndefined();
+    expect(parseSessionUsage(provider, content)).toBeUndefined();
   });
 
   it("returns undefined for malformed JSON lines", () => {
     const content = "not json\n{bad json\n";
-    expect(provider.parseSessionUsage!(content)).toBeUndefined();
+    expect(parseSessionUsage(provider, content)).toBeUndefined();
   });
 
   it("skips malformed lines and finds valid assistant message", () => {
@@ -2130,7 +2165,7 @@ describe("parseSessionUsage (Claude Code)", () => {
       }),
     ].join("\n");
 
-    expect(provider.parseSessionUsage!(content)).toEqual({
+    expect(parseSessionUsage(provider, content)).toEqual({
       inputTokens: 10,
       cacheCreationInputTokens: 20,
       cacheReadInputTokens: 30,
@@ -2233,7 +2268,7 @@ describe("sessionStorage", () => {
         sessionStorage: { hostProjectsDir: dir },
       });
       // Path is purely a function of (cwd, id) — available before any capture.
-      const path = provider.sessionStorage.hostSessionFilePath(
+      const path = sessionStorageOf(provider).hostSessionFilePath(
         "/some/cwd",
         "abc-123",
       );
@@ -2278,7 +2313,7 @@ describe("sessionStorage", () => {
         },
       });
 
-      await provider.sessionStorage.captureToHost({
+      await sessionStorageOf(provider).captureToHost({
         hostCwd,
         sandboxCwd,
         sessionId: id,
@@ -2290,9 +2325,12 @@ describe("sessionStorage", () => {
       const expectedHostPath = join(hostDir, "--host-repo--", filename);
       const content = await readFile(expectedHostPath, "utf8");
       const lines = content.split("\n");
-      const header = JSON.parse(lines[0]!);
-      expect(header.type).toBe("session");
-      expect(header.cwd).toBe(hostCwd);
+      const [header] = lines;
+      assert.isDefined(header);
+      expect(JSON.parse(header)).toMatchObject({
+        type: "session",
+        cwd: hostCwd,
+      });
       // Non-header lines are preserved verbatim.
       expect(lines[1]).toBe(
         JSON.stringify({
@@ -2304,7 +2342,7 @@ describe("sessionStorage", () => {
 
       // existsOnHost finds the captured session by globbing the dir.
       await expect(
-        provider.sessionStorage.existsOnHost(hostCwd, id),
+        sessionStorageOf(provider).existsOnHost(hostCwd, id),
       ).resolves.toBe(true);
     } finally {
       await rm(hostDir, { recursive: true, force: true });
@@ -2341,7 +2379,7 @@ describe("sessionStorage", () => {
         },
       });
 
-      await provider.sessionStorage.resumeIntoSandbox({
+      await sessionStorageOf(provider).resumeIntoSandbox({
         hostCwd,
         sandboxCwd,
         sessionId: id,
@@ -2354,9 +2392,10 @@ describe("sessionStorage", () => {
         filename,
       );
       const content = await readFile(expectedSandboxPath, "utf8");
-      const header = JSON.parse(content);
-      expect(header.type).toBe("session");
-      expect(header.cwd).toBe(sandboxCwd);
+      expect(JSON.parse(content)).toMatchObject({
+        type: "session",
+        cwd: sandboxCwd,
+      });
     } finally {
       await rm(hostDir, { recursive: true, force: true });
       await rm(sandboxDir, { recursive: true, force: true });
@@ -2367,7 +2406,7 @@ describe("sessionStorage", () => {
     const provider = pi("claude-sonnet-4-6", {
       sessionStorage: { hostSessionsDir: "/tmp/sessions" },
     });
-    const path = provider.sessionStorage.hostSessionFilePath(
+    const path = sessionStorageOf(provider).hostSessionFilePath(
       "/some/cwd",
       "abc-123",
     );
@@ -2381,7 +2420,7 @@ describe("sessionStorage", () => {
         sessionStorage: { hostSessionsDir: hostDir },
       });
       await expect(
-        provider.sessionStorage.existsOnHost("/some/cwd", "missing-id"),
+        sessionStorageOf(provider).existsOnHost("/some/cwd", "missing-id"),
       ).resolves.toBe(false);
     } finally {
       await rm(hostDir, { recursive: true, force: true });
@@ -2419,10 +2458,10 @@ describe("sessionStorage", () => {
 
       // Before capture, the path is unknown.
       expect(
-        provider.sessionStorage.hostSessionFilePath("/host/repo", id),
+        sessionStorageOf(provider).hostSessionFilePath("/host/repo", id),
       ).toBeUndefined();
 
-      await provider.sessionStorage.captureToHost({
+      await sessionStorageOf(provider).captureToHost({
         hostCwd: "/host/repo",
         sandboxCwd: "/sandbox/repo",
         sessionId: id,
@@ -2430,13 +2469,16 @@ describe("sessionStorage", () => {
       });
 
       // After capture, the path resolves to the rewritten rollout under hostDir.
-      const captured = provider.sessionStorage.hostSessionFilePath(
+      const captured = sessionStorageOf(provider).hostSessionFilePath(
         "/host/repo",
         id,
       );
       expect(captured).toBe(join(hostDir, relativePath));
-      const content = await readFile(captured!, "utf8");
-      expect(JSON.parse(content).payload.cwd).toBe("/host/repo");
+      assert.isDefined(captured);
+      const content = await readFile(captured, "utf8");
+      expect(JSON.parse(content)).toMatchObject({
+        payload: { cwd: "/host/repo" },
+      });
     } finally {
       await rm(hostDir, { recursive: true, force: true });
       await rm(sandboxDir, { recursive: true, force: true });
@@ -2469,7 +2511,7 @@ describe("sessionStorage", () => {
         },
       });
 
-      await provider.sessionStorage.captureToHost({
+      await sessionStorageOf(provider).captureToHost({
         hostCwd,
         sandboxCwd,
         sessionId: id,
@@ -2478,7 +2520,7 @@ describe("sessionStorage", () => {
 
       const expectedHostPath = join(hostDir, "-host-repo", `${id}.jsonl`);
       const main = await readFile(expectedHostPath, "utf8");
-      expect(JSON.parse(main).cwd).toBe(hostCwd);
+      expect(JSON.parse(main)).toMatchObject({ cwd: hostCwd });
     } finally {
       await rm(hostDir, { recursive: true, force: true });
       await rm(sandboxDir, { recursive: true, force: true });
@@ -2531,7 +2573,7 @@ describe("sessionStorage", () => {
         },
       });
 
-      await provider.sessionStorage.captureToHost({
+      await sessionStorageOf(provider).captureToHost({
         hostCwd,
         sandboxCwd,
         sessionId: id,
@@ -2543,7 +2585,7 @@ describe("sessionStorage", () => {
         join(hostDir, "-host-repo", `${id}.jsonl`),
         "utf8",
       );
-      expect(JSON.parse(mainContent).cwd).toBe(hostCwd);
+      expect(JSON.parse(mainContent)).toMatchObject({ cwd: hostCwd });
 
       // Both subagent transcripts captured with cwd rewritten on every line.
       const hostSubagentsDir = join(hostDir, "-host-repo", id, "subagents");
@@ -2552,20 +2594,20 @@ describe("sessionStorage", () => {
         "utf8",
       );
       for (const line of alpha.split("\n")) {
-        expect(JSON.parse(line).cwd).toBe(hostCwd);
+        expect(JSON.parse(line)).toMatchObject({ cwd: hostCwd });
       }
       const beta = await readFile(
         join(hostSubagentsDir, "agent-beta.jsonl"),
         "utf8",
       );
       for (const line of beta.split("\n")) {
-        expect(JSON.parse(line).cwd).toBe(hostCwd);
+        expect(JSON.parse(line)).toMatchObject({ cwd: hostCwd });
       }
 
       // The non-matching sibling must not have been copied.
       await expect(
         readFile(join(hostSubagentsDir, "notes.txt"), "utf8"),
-      ).rejects.toThrow();
+      ).rejects.toThrow("ENOENT");
     } finally {
       await rm(hostDir, { recursive: true, force: true });
       await rm(sandboxDir, { recursive: true, force: true });
@@ -2635,7 +2677,7 @@ describe("sessionStorage", () => {
             sandboxProjectsDir: sandboxDir,
           },
         });
-        await provider.sessionStorage.captureToHost({
+        await sessionStorageOf(provider).captureToHost({
           hostCwd,
           sandboxCwd,
           sessionId: id,
@@ -2650,7 +2692,7 @@ describe("sessionStorage", () => {
         join(hostDir, "-host-repo", `${id}.jsonl`),
         "utf8",
       );
-      expect(JSON.parse(mainContent).cwd).toBe(hostCwd);
+      expect(JSON.parse(mainContent)).toMatchObject({ cwd: hostCwd });
 
       // Good sibling captured.
       const hostSubagentsDir = join(hostDir, "-host-repo", id, "subagents");
@@ -2658,12 +2700,12 @@ describe("sessionStorage", () => {
         join(hostSubagentsDir, "agent-good.jsonl"),
         "utf8",
       );
-      expect(JSON.parse(good).cwd).toBe(hostCwd);
+      expect(JSON.parse(good)).toMatchObject({ cwd: hostCwd });
 
       // Bad subagent NOT copied.
       await expect(
         readFile(join(hostSubagentsDir, "agent-bad.jsonl"), "utf8"),
-      ).rejects.toThrow();
+      ).rejects.toThrow("ENOENT");
 
       // Exactly one warning emitted, naming the bad path — successful
       // siblings and the main session must not produce warnings of their own.
@@ -2692,7 +2734,9 @@ describe("errors the agent reports in its own stream", () => {
         },
       ],
     });
-    expect(pi("anthropic/claude-haiku-5-5").parseStreamLine(line)).toEqual([
+    expect(
+      pi("anthropic/claude-haiku-5-5").parseStreamLine(line),
+    ).toStrictEqual([
       {
         type: "error",
         message: String.raw`400 {"type":"error","error":{"type":"invalid_request_error","message":"\"thinking.type.enabled\" is not supported for this model."}}`,
@@ -2705,7 +2749,7 @@ describe("errors the agent reports in its own stream", () => {
       type: "agent_end",
       messages: [{ role: "assistant", content: [], stopReason: "error" }],
     });
-    expect(pi("m").parseStreamLine(line)).toEqual([
+    expect(pi("m").parseStreamLine(line)).toStrictEqual([
       { type: "error", message: 'pi stopped with stopReason "error"' },
     ]);
   });
@@ -2721,7 +2765,7 @@ describe("errors the agent reports in its own stream", () => {
         },
       ],
     });
-    expect(pi("m").parseStreamLine(line)).toEqual([
+    expect(pi("m").parseStreamLine(line)).toStrictEqual([
       { type: "result", result: "done" },
     ]);
   });
@@ -2733,7 +2777,7 @@ describe("errors the agent reports in its own stream", () => {
       is_error: true,
       result: "API Error: 400 invalid model",
     });
-    expect(claudeCode("m").parseStreamLine(line)).toEqual([
+    expect(claudeCode("m").parseStreamLine(line)).toStrictEqual([
       { type: "error", message: "API Error: 400 invalid model" },
     ]);
   });
@@ -2745,7 +2789,7 @@ describe("errors the agent reports in its own stream", () => {
       is_error: false,
       result: "done",
     });
-    expect(claudeCode("m").parseStreamLine(line)).toEqual([
+    expect(claudeCode("m").parseStreamLine(line)).toStrictEqual([
       { type: "result", result: "done" },
     ]);
   });
@@ -2757,7 +2801,7 @@ describe("errors the agent reports in its own stream", () => {
       is_error: true,
       result: "Model not available",
     });
-    expect(cursor("m").parseStreamLine(line)).toEqual([
+    expect(cursor("m").parseStreamLine(line)).toStrictEqual([
       { type: "error", message: "Model not available" },
     ]);
   });
@@ -2767,7 +2811,7 @@ describe("errors the agent reports in its own stream", () => {
       type: "turn.failed",
       error: { message: "unexpected status 400 Bad Request" },
     });
-    expect(codex("m").parseStreamLine(line)).toEqual([
+    expect(codex("m").parseStreamLine(line)).toStrictEqual([
       { type: "error", message: "unexpected status 400 Bad Request" },
     ]);
   });
@@ -2781,7 +2825,7 @@ describe("errors the agent reports in its own stream", () => {
         data: { message: "Model not found: anthropic/claude-nonexistent-9." },
       },
     });
-    expect(opencode("m").parseStreamLine(line)).toEqual([
+    expect(opencode("m").parseStreamLine(line)).toStrictEqual([
       {
         type: "error",
         message: "Model not found: anthropic/claude-nonexistent-9.",
@@ -2791,7 +2835,7 @@ describe("errors the agent reports in its own stream", () => {
 
   it("copilot: an error event emits an error event", () => {
     const line = JSON.stringify({ type: "error", error: "boom" });
-    expect(copilot("m").parseStreamLine(line)).toEqual([
+    expect(copilot("m").parseStreamLine(line)).toStrictEqual([
       { type: "error", message: "boom" },
     ]);
   });

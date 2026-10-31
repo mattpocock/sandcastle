@@ -1,5 +1,13 @@
 import { Effect, Ref } from "effect";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  assert,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { SilentDisplay } from "./Display.js";
 import type { DisplayEntry, Display } from "./Display.js";
 import {
@@ -174,45 +182,42 @@ describe("withFriendlyErrors", () => {
 
   it("routes DockerError through Display as error severity", async () => {
     const entries = await runWithDisplay(
-      withFriendlyErrors(
-        Effect.fail(new DockerError({ message: "daemon not running" })),
+      Effect.fail(new DockerError({ message: "daemon not running" })).pipe(
+        withFriendlyErrors,
       ),
     );
     const s = statusOf(entries);
-    expect(s).toBeDefined();
-    expect(s!.severity).toBe("error");
-    expect(s!.message).toContain("daemon not running");
+    assert.isDefined(s);
+    expect(s.severity).toBe("error");
+    expect(s.message).toContain("daemon not running");
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 
   it("routes ConfigDirError through Display with its message", async () => {
     const entries = await runWithDisplay(
-      withFriendlyErrors(
-        Effect.fail(
-          new ConfigDirError({
-            message: "No .sandcastle/ found. Run `sandcastle init` first.",
-          }),
-        ),
-      ),
+      Effect.fail(
+        new ConfigDirError({
+          message: "No .sandcastle/ found. Run `sandcastle init` first.",
+        }),
+      ).pipe(withFriendlyErrors),
     );
-    expect(statusOf(entries)!.message).toContain("No .sandcastle/");
+    expect(statusOf(entries)?.message).toContain("No .sandcastle/");
   });
 
   it("routes AgentIdleTimeoutError through Display with timeout seconds", async () => {
     const entries = await runWithDisplay(
-      withFriendlyErrors(
-        Effect.fail(
-          new AgentIdleTimeoutError({
-            message:
-              "Agent idle for 600 seconds — no output received. Increase the idleTimeoutSeconds option to allow longer silences.",
-            timeoutMs: 600_000,
-          }),
-        ),
-      ),
+      Effect.fail(
+        new AgentIdleTimeoutError({
+          message:
+            "Agent idle for 600 seconds — no output received. Increase the idleTimeoutSeconds option to allow longer silences.",
+          timeoutMs: 600_000,
+        }),
+      ).pipe(withFriendlyErrors),
     );
     const s = statusOf(entries);
-    expect(s!.message).toContain("600");
-    expect(s!.severity).toBe("error");
+    assert.isDefined(s);
+    expect(s.message).toContain("600");
+    expect(s.severity).toBe("error");
   });
 
   it("passes through successful effects unchanged", async () => {

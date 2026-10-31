@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { SHOW_CURSOR, makeTerminalCleanupHandler } from "./terminalCleanup.js";
 
+type SetRawMode = (raw: boolean) => void;
+type Write = (data: string) => boolean;
+
 describe("makeTerminalCleanupHandler", () => {
   it("calls setRawMode(false) and writes show-cursor when stdin is a TTY", () => {
-    const setRawMode = vi.fn();
-    const write = vi.fn(() => true);
+    const setRawMode = vi.fn<SetRawMode>();
+    const write = vi.fn<Write>(() => true);
 
     const handler = makeTerminalCleanupHandler(
       { isTTY: true, setRawMode },
@@ -12,14 +15,13 @@ describe("makeTerminalCleanupHandler", () => {
     );
     handler();
 
-    expect(setRawMode).toHaveBeenCalledTimes(1);
-    expect(setRawMode).toHaveBeenCalledWith(false);
+    expect(setRawMode).toHaveBeenCalledExactlyOnceWith(false);
     expect(write).toHaveBeenCalledWith(SHOW_CURSOR);
   });
 
   it("skips setRawMode when stdin is not a TTY", () => {
-    const setRawMode = vi.fn();
-    const write = vi.fn(() => true);
+    const setRawMode = vi.fn<SetRawMode>();
+    const write = vi.fn<Write>(() => true);
 
     const handler = makeTerminalCleanupHandler(
       { isTTY: false, setRawMode },
@@ -32,7 +34,7 @@ describe("makeTerminalCleanupHandler", () => {
   });
 
   it("skips setRawMode when stdin has no setRawMode (non-TTY pipe)", () => {
-    const write = vi.fn(() => true);
+    const write = vi.fn<Write>(() => true);
 
     const handler = makeTerminalCleanupHandler(
       { isTTY: true }, // isTTY true but no setRawMode
@@ -45,19 +47,17 @@ describe("makeTerminalCleanupHandler", () => {
   });
 
   it("does not throw when setRawMode throws", () => {
-    const setRawMode = vi.fn(() => {
+    const setRawMode = vi.fn<SetRawMode>(() => {
       throw new Error("setRawMode failed");
     });
-    const write = vi.fn(() => true);
+    const write = vi.fn<Write>(() => true);
 
     const handler = makeTerminalCleanupHandler(
       { isTTY: true, setRawMode },
       { write },
     );
 
-    expect(() => {
-      handler();
-    }).not.toThrow();
+    expect(handler).not.toThrow();
     // cursor is still shown even after setRawMode failure
     expect(write).toHaveBeenCalledWith(SHOW_CURSOR);
   });

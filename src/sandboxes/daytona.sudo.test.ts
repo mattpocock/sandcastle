@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 
 // A fake @daytona/sdk that records the commands sent to the sandbox.
 const sdk = vi.hoisted(() => ({ commands: [] as string[] }));
@@ -76,7 +76,9 @@ describe("daytona() exec with sudo", () => {
     });
 
     // sudo is invoked once, with the whole compound command as its argument.
-    expect(runWithFakeSudo(sdk.commands.at(-1)!)).toEqual([
+    const lastCommand = sdk.commands.at(-1);
+    assert.isDefined(lastCommand);
+    expect(runWithFakeSudo(lastCommand)).toStrictEqual([
       "sh -c echo a > /dev/null && echo b > /dev/null",
     ]);
   });

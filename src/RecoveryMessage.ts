@@ -34,14 +34,18 @@ export const buildRecoveryMessage = (input: RecoveryInput): string => {
   }
 
   const failedIndex = steps.findIndex((s) => s.key === failedStep);
-  const failedStepInfo = steps[failedIndex]!;
+  const failedStepInfo = steps[failedIndex];
+  if (failedStepInfo === undefined) {
+    throw new Error(
+      `Recovery step "${failedStep}" failed, but it had no changes to apply.`,
+    );
+  }
   const stepNumber = failedIndex + 1;
 
-  const lines: string[] = [];
-  lines.push(
+  const lines: string[] = [
     `Patch application failed at step ${stepNumber} (${failedStepInfo.label}).`,
     "",
-  );
+  ];
 
   // Add worktree setup preamble for --branch
   if (branch) {

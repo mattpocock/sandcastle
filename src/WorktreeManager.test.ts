@@ -13,9 +13,9 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import { promisify } from "node:util";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   create,
   generateTempBranchName,
@@ -162,6 +162,10 @@ describe("generateTempBranchName", () => {
 });
 
 describe("WorktreeManager.create", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("creates a worktree at .sandcastle/worktrees/<name>/", async () => {
     const repoDir = await setupRepo();
     const { path } = await run(create(repoDir));
@@ -226,10 +230,17 @@ describe("WorktreeManager.create", () => {
     await execAsync("git checkout main", { cwd: repoDir });
 
     const first = await run(create(repoDir, { branch: "my-branch" }));
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
     const second = await run(create(repoDir, { branch: "my-branch" }));
 
     expect(second.path).toBe(first.path);
     expect(second.branch).toBe("my-branch");
+    // No origin to refresh from: the reuse says so and carries on.
+    expect(log).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^Could not fetch from origin \(reusing worktree at .* as-is, branch 'my-branch'\)$/u,
+      ),
+    );
 
     await run(remove(first.path));
   });
@@ -245,10 +256,16 @@ describe("WorktreeManager.create", () => {
     // Make the worktree dirty
     await writeFile(join(first.path, "dirty.txt"), "uncommitted");
 
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const second = await run(create(repoDir, { branch: "my-branch" }));
 
     expect(second.path).toBe(first.path);
     expect(second.branch).toBe("my-branch");
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^Reusing worktree at .* \(branch 'my-branch'\) — worktree has uncommitted changes$/u,
+      ),
+    );
 
     await run(remove(first.path));
   });
@@ -377,7 +394,13 @@ describe("WorktreeManager.create", () => {
     // Someone else pushes a new commit to origin/my-branch
     await pushOrigin("my-branch", "new.txt", "new", "new origin commit");
 
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
     const second = await run(create(repoDir, { branch: "my-branch" }));
+    expect(log).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^Fast-forwarded worktree at .* \(branch 'my-branch'\) to origin\/my-branch$/u,
+      ),
+    );
 
     expect(second.path).toBe(first.path);
     expect(second.branch).toBe("my-branch");
@@ -412,7 +435,13 @@ describe("WorktreeManager.create", () => {
     // Also push a different new commit to origin → true divergence
     await pushOrigin("my-branch", "remote.txt", "remote", "remote-only commit");
 
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
     const second = await run(create(repoDir, { branch: "my-branch" }));
+    expect(log).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^Branch 'my-branch' has diverged from origin \(reusing worktree at .* as-is\)$/u,
+      ),
+    );
 
     expect(second.path).toBe(first.path);
 
@@ -550,7 +579,7 @@ describe("WorktreeManager.create", () => {
     // preconditions for the bug.
     await expect(
       execAsync("git symbolic-ref --quiet HEAD", { cwd: first.path }),
-    ).rejects.toThrow();
+    ).rejects.toThrow("Command failed: git symbolic-ref --quiet HEAD");
     const { stdout: status } = await execAsync("git status --porcelain", {
       cwd: first.path,
     });
@@ -572,9 +601,8 @@ describe("WorktreeManager.create", () => {
       "git rev-parse --git-path rebase-merge",
       { cwd: second.path },
     );
-    const resolvedRebaseDir = rebaseMergePath.trim().startsWith("/")
-      ? rebaseMergePath.trim()
-      : join(second.path, rebaseMergePath.trim());
+    // resolvePath() keeps an absolute git path and joins a relative one.
+    const resolvedRebaseDir = resolvePath(second.path, rebaseMergePath.trim());
     expect((await stat(resolvedRebaseDir)).isDirectory()).toBe(true);
 
     await execAsync("git rebase --abort", { cwd: first.path }).catch(() => {});
@@ -715,7 +743,7 @@ describe("WorktreeManager.remove", () => {
 
     await run(remove(path));
 
-    await expect(stat(path)).rejects.toThrow();
+    await expect(stat(path)).rejects.toThrow("ENOENT");
   });
 
   it("removes git worktree metadata", async () => {
@@ -769,16 +797,12 @@ describe("WorktreeManager.pruneStale", () => {
   it("does not remove active worktrees", async () => {
     const repoDir = await setupRepo();
     const { path } = await run(create(repoDir));
-    const name = path.split("/").pop()!;
-
     await run(pruneStale(repoDir));
 
     const s = await stat(path);
     expect(s.isDirectory()).toBe(true);
     // cleanup
     await run(remove(path));
-    // suppress unused var warning
-    void name;
   });
 
   it("does not remove active worktrees when .sandcastle is a symlink", async () => {
@@ -864,40 +888,31 @@ describe("WorktreeManager git locale", () => {
   // the real `git` binary with a shim that records the LC_ALL it received,
   // asserting the module invokes git in the C locale even when the parent
   // process is set to a different one.
-  it("invokes git with LC_ALL=C even when the process locale is non-English", async () => {
-    if (process.platform === "win32") {
-      return;
-    } // POSIX shell shim
-    const repoDir = await setupRepo();
-    const shimDir = await mkdtemp(join(tmpdir(), "wt-git-shim-"));
-    const logPath = join(shimDir, "lc_all.log");
-    const gitShim = join(shimDir, "git");
-    await writeFile(
-      gitShim,
-      `#!/bin/sh\nprintf '%s' "\${LC_ALL-}" > "${logPath}"\necho main\n`,
-    );
-    await chmod(gitShim, 0o755);
+  // POSIX shell shim, so not on Windows.
+  it.skipIf(process.platform === "win32")(
+    "invokes git with LC_ALL=C even when the process locale is non-English",
+    async () => {
+      const repoDir = await setupRepo();
+      const shimDir = await mkdtemp(join(tmpdir(), "wt-git-shim-"));
+      const logPath = join(shimDir, "lc_all.log");
+      const gitShim = join(shimDir, "git");
+      await writeFile(
+        gitShim,
+        `#!/bin/sh\nprintf '%s' "\${LC_ALL-}" > "${logPath}"\necho main\n`,
+      );
+      await chmod(gitShim, 0o755);
 
-    const originalPath = process.env.PATH;
-    const originalLcAll = process.env.LC_ALL;
-    process.env.PATH = `${shimDir}:${originalPath ?? ""}`;
-    process.env.LC_ALL = "en_US.UTF-8";
-    try {
-      const branch = await run(getCurrentBranch(repoDir));
-      expect(branch).toBe("main");
-    } finally {
-      if (originalPath === undefined) {
-        delete process.env.PATH;
-      } else {
-        process.env.PATH = originalPath;
+      // join() renders an unset PATH as "", as before.
+      vi.stubEnv("PATH", [shimDir, process.env.PATH].join(":"));
+      vi.stubEnv("LC_ALL", "en_US.UTF-8");
+      try {
+        const branch = await run(getCurrentBranch(repoDir));
+        expect(branch).toBe("main");
+      } finally {
+        vi.unstubAllEnvs();
       }
-      if (originalLcAll === undefined) {
-        delete process.env.LC_ALL;
-      } else {
-        process.env.LC_ALL = originalLcAll;
-      }
-    }
 
-    await expect(readFile(logPath, "utf8")).resolves.toBe("C");
-  });
+      await expect(readFile(logPath, "utf8")).resolves.toBe("C");
+    },
+  );
 });
