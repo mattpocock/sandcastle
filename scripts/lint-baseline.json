@@ -1354,7 +1354,6 @@
   },
   "src/SandboxFactory.test.ts": {
     "effect/unnecessaryFailYieldableError": 2,
-    "effect/unsafeEffectTypeAssertion": 3,
     "eslint(curly)": 9,
     "eslint(max-params)": 1,
     "eslint(prefer-destructuring)": 2,
@@ -1368,7 +1367,7 @@
     "typescript(no-unsafe-assignment)": 2,
     "typescript(no-unsafe-member-access)": 6,
     "typescript(no-unsafe-return)": 2,
-    "typescript(no-unsafe-type-assertion)": 7,
+    "typescript(no-unsafe-type-assertion)": 4,
     "typescript(promise-function-async)": 11,
     "typescript(require-await)": 3,
     "typescript(strict-void-return)": 1,
@@ -1534,7 +1533,6 @@
   "src/startSandbox.test.ts": {
     "effect/anyUnknownInErrorContext": 1,
     "effect/unnecessaryEffectGen": 3,
-    "effect/unsafeEffectTypeAssertion": 1,
     "eslint(max-params)": 1,
     "eslint(no-promise-executor-return)": 3,
     "eslint(no-unused-vars)": 2,
@@ -1545,14 +1543,13 @@
     "typescript(no-confusing-void-expression)": 1,
     "typescript(no-explicit-any)": 1,
     "typescript(no-unsafe-member-access)": 3,
-    "typescript(no-unsafe-type-assertion)": 1,
     "typescript(promise-function-async)": 3,
     "typescript(require-await)": 8,
     "typescript(strict-void-return)": 4,
     "vitest(expect-expect)": 1,
-    "vitest(no-conditional-expect)": 3,
+    "vitest(no-conditional-expect)": 2,
     "vitest(no-conditional-in-test)": 4,
-    "vitest(prefer-strict-equal)": 2
+    "vitest(prefer-strict-equal)": 1
   },
   "src/startSandbox.ts": {
     "effect/nodeBuiltinImport": 2,
@@ -1697,7 +1694,6 @@
     "unicorn(no-typeof-undefined)": 1
   },
   "src/WorktreeManager.test.ts": {
-    "effect/unsafeEffectTypeAssertion": 2,
     "eslint(curly)": 6,
     "eslint(max-params)": 2,
     "eslint(no-promise-executor-return)": 1,
@@ -1705,8 +1701,6 @@
     "eslint(require-unicode-regexp)": 13,
     "typescript(consistent-type-imports)": 1,
     "typescript(no-non-null-assertion)": 1,
-    "typescript(no-unnecessary-type-arguments)": 2,
-    "typescript(no-unsafe-type-assertion)": 2,
     "typescript(promise-function-async)": 2,
     "typescript(strict-void-return)": 2,
     "unicorn(no-await-expression-member)": 1,

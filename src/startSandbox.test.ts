@@ -240,9 +240,10 @@ describe("startSandbox", () => {
       if (Exit.isFailure(exit) && exit.cause._tag === "Fail") {
         const error = exit.cause.error;
         expect(error).toBeInstanceOf(CopyToWorktreeTimeoutError);
-        const timeoutError = error as CopyToWorktreeTimeoutError;
-        expect(timeoutError.timeoutMs).toBe(COPY_PATHS_TIMEOUT_MS);
-        expect(timeoutError.paths).toEqual(["hang.txt"]);
+        expect(error).toMatchObject({
+          timeoutMs: COPY_PATHS_TIMEOUT_MS,
+          paths: ["hang.txt"],
+        });
       } else {
         throw new Error("Expected Fail cause");
       }
