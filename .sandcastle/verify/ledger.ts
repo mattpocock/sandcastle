@@ -32,9 +32,8 @@ import {
   remoteRefs,
   worldContainer,
   worldTmp,
-  type Engine,
-  type World,
 } from "./world.ts";
+import type { Engine, World } from "./world.ts";
 
 interface Section {
   readonly title: string;

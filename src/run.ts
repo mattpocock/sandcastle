@@ -13,17 +13,10 @@ import { Effect, Layer } from "effect";
 import { resolveCwd } from "./resolveCwd.js";
 import { assertResumeSessionExists } from "./resumePrecheck.js";
 import type { AgentProvider } from "./AgentProvider.js";
-import {
-  ClackDisplay,
-  Display,
-  FileDisplay,
-  type Severity,
-} from "./Display.js";
-import {
-  orchestrate,
-  type IterationResult,
-  type OrchestrateResult,
-} from "./Orchestrator.js";
+import { ClackDisplay, Display, FileDisplay } from "./Display.js";
+import type { Severity } from "./Display.js";
+import { orchestrate } from "./Orchestrator.js";
+import type { IterationResult, OrchestrateResult } from "./Orchestrator.js";
 import { resolvePrompt } from "./PromptResolver.js";
 import {
   WorktreeDockerSandboxFactory,
@@ -33,20 +26,18 @@ import type { SandboxProvider, BranchStrategy } from "./SandboxProvider.js";
 import { resolveEnv } from "./EnvResolver.js";
 import { formatErrorMessage } from "./ErrorHandler.js";
 import type { SandboxError } from "./errors.js";
-import {
-  agentStreamEmitterLayer,
-  type AgentStreamEvent,
-} from "./AgentStreamEmitter.js";
+import { agentStreamEmitterLayer } from "./AgentStreamEmitter.js";
+import type { AgentStreamEvent } from "./AgentStreamEmitter.js";
 import type { SandboxHooks } from "./SandboxLifecycle.js";
 import { mergeProviderEnv } from "./mergeProviderEnv.js";
 import { generateTempBranchName, getCurrentBranch } from "./WorktreeManager.js";
 import {
-  type PromptArgs,
   substitutePromptArgs,
   validateNoArgsWithInlinePrompt,
   validateNoBuiltInArgOverride,
   BUILT_IN_PROMPT_ARG_KEYS,
 } from "./PromptArgumentSubstitution.js";
+import type { PromptArgs } from "./PromptArgumentSubstitution.js";
 import type {
   OutputDefinition,
   OutputObjectDefinition,
@@ -197,6 +188,7 @@ export const buildCompletionMessage = (
 };
 
 import { buildContextWindowLines } from "./ContextWindow.js";
+
 export { buildContextWindowLines };
 
 /**

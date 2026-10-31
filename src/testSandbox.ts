@@ -11,7 +11,7 @@ import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { BoundedTail, MAX_TAIL_CHARS } from "./boundedTail.js";
 import { CopyError, ExecError } from "./errors.js";
-import { type ExecResult, type SandboxService } from "./SandboxFactory.js";
+import type { ExecResult, SandboxService } from "./SandboxFactory.js";
 
 /**
  * Creates an isolated git global config env so that test sandbox

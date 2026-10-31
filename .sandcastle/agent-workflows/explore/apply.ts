@@ -8,9 +8,8 @@ import {
   planSchema,
   validate,
   VERDICT_LABEL,
-  type GitHubEffect,
-  type Plan,
 } from "./batch";
+import type { GitHubEffect, Plan } from "./batch";
 
 /**
  * Deterministic effects step for batch explore. Validates the agent's whole

@@ -2,7 +2,8 @@ import { Effect } from "effect";
 import { execFile } from "node:child_process";
 import { resolve } from "node:path";
 import { DockerError, ImageNotFoundError } from "./errors.js";
-import { formatVolumeMount, type SelinuxLabel } from "./mountUtils.js";
+import { formatVolumeMount } from "./mountUtils.js";
+import type { SelinuxLabel } from "./mountUtils.js";
 
 const dockerExec = (args: string[]): Effect.Effect<string, DockerError> =>
   Effect.async((resume) => {

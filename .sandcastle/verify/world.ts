@@ -16,7 +16,8 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { WorldSpan } from "./attribution.ts";
-import { classifyEnv, type EnvLeak } from "./envLeaks.ts";
+import { classifyEnv } from "./envLeaks.ts";
+import type { EnvLeak } from "./envLeaks.ts";
 import { redact, REPO_ROOT, secretsIn, sh } from "./lib.ts";
 
 export const WORLDS_ROOT = join(tmpdir(), "sandcastle-verify");
@@ -447,8 +448,8 @@ export const runInWorld = async (
       }
     });
   };
-  pipe(child.stdout!, process.stdout);
-  pipe(child.stderr!, process.stderr);
+  pipe(child.stdout, process.stdout);
+  pipe(child.stderr, process.stderr);
   const timer = setInterval(observe, 1000);
   const code = await new Promise<number>((resolve) => {
     child.on("close", (c) => resolve(c ?? 1));

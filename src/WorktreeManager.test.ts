@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { FileSystem } from "@effect/platform";
+import type { FileSystem } from "@effect/platform";
 import { NodeFileSystem } from "@effect/platform-node";
 import { exec } from "node:child_process";
 import {
@@ -98,10 +98,7 @@ const setupRepoWithOrigin = async () => {
 /** Run an Effect and return its success value, throwing on failure. */
 const run = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem>) =>
   Effect.runPromise(
-    effect.pipe(Effect.provide(NodeFileSystem.layer)) as Effect.Effect<
-      A,
-      never
-    >,
+    effect.pipe(Effect.provide(NodeFileSystem.layer)) as Effect.Effect<A>,
   );
 
 /** Run an Effect and return the error, throwing if it succeeds. */
@@ -109,7 +106,7 @@ const runFail = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem>) =>
   Effect.runPromise(
     Effect.flip(effect).pipe(
       Effect.provide(NodeFileSystem.layer),
-    ) as Effect.Effect<E, never>,
+    ) as Effect.Effect<E>,
   );
 
 describe("sanitizeName", () => {

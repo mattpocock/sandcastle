@@ -3,11 +3,12 @@ import { mkdtempSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { interactive, type InteractiveOptions } from "./interactive.js";
-import {
-  createBindMountSandboxProvider,
-  type BindMountSandboxHandle,
-  type InteractiveExecOptions,
+import { interactive } from "./interactive.js";
+import type { InteractiveOptions } from "./interactive.js";
+import { createBindMountSandboxProvider } from "./SandboxProvider.js";
+import type {
+  BindMountSandboxHandle,
+  InteractiveExecOptions,
 } from "./SandboxProvider.js";
 import { claudeCode, pi, codex, opencode } from "./AgentProvider.js";
 

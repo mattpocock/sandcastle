@@ -26,7 +26,7 @@ export const raceAbortSignal = <A, E, R>(
       return yield* Effect.die(signal.reason);
     }
 
-    const abortDeferred = yield* Deferred.make<never, never>();
+    const abortDeferred = yield* Deferred.make<never>();
     const onAbort = () => {
       Effect.runPromise(Deferred.die(abortDeferred, signal.reason)).catch(
         () => {},
@@ -34,10 +34,7 @@ export const raceAbortSignal = <A, E, R>(
     };
     signal.addEventListener("abort", onAbort, { once: true });
 
-    return yield* Effect.raceFirst(
-      effect,
-      Deferred.await(abortDeferred) as Effect.Effect<never, never, never>,
-    ).pipe(
+    return yield* Effect.raceFirst(effect, Deferred.await(abortDeferred)).pipe(
       Effect.ensuring(
         Effect.sync(() => signal.removeEventListener("abort", onAbort)),
       ),

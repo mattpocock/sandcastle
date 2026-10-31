@@ -1,6 +1,8 @@
-import { Effect, Layer, Ref } from "effect";
+import type { Layer } from "effect";
+import { Effect, Ref } from "effect";
 import { describe, expect, it } from "vitest";
-import { type DisplayEntry, SilentDisplay } from "./Display.js";
+import { SilentDisplay } from "./Display.js";
+import type { DisplayEntry } from "./Display.js";
 import {
   substitutePromptArgs,
   validateNoArgsWithInlinePrompt,

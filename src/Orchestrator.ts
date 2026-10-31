@@ -10,14 +10,13 @@ import {
 import type { SandboxError } from "./errors.js";
 import type { SandboxService } from "./SandboxFactory.js";
 import { SandboxFactory, SANDBOX_REPO_DIR } from "./SandboxFactory.js";
-import { withSandboxLifecycle, type SandboxHooks } from "./SandboxLifecycle.js";
+import { withSandboxLifecycle } from "./SandboxLifecycle.js";
+import type { SandboxHooks } from "./SandboxLifecycle.js";
 import type { AgentProvider, IterationUsage } from "./AgentProvider.js";
 import type { Timeouts } from "./run.js";
 import { TextDeltaBuffer } from "./TextDeltaBuffer.js";
-import {
-  buildContextWindowLines,
-  type ContextWindow,
-} from "./ContextWindow.js";
+import { buildContextWindowLines } from "./ContextWindow.js";
+import type { ContextWindow } from "./ContextWindow.js";
 
 export type { ParsedStreamEvent, IterationUsage } from "./AgentProvider.js";
 
@@ -62,10 +61,11 @@ const invokeAgent = (
     // fires (signal seen but process hasn't exited). Resolving lets the race
     // hand control back to the orchestrator with the buffered output, which
     // still contains the signal so the existing completionSignal check works.
-    const completionTimeoutDeferred = yield* Deferred.make<
-      { result: string; sessionId?: string; usage?: IterationUsage },
-      never
-    >();
+    const completionTimeoutDeferred = yield* Deferred.make<{
+      result: string;
+      sessionId?: string;
+      usage?: IterationUsage;
+    }>();
     let timeoutFiber: Fiber.RuntimeFiber<unknown, unknown> | null = null;
     let completionDetected = false;
 
@@ -134,7 +134,7 @@ const invokeAgent = (
 
     // Deferred that will be resolved (as a defect) when the AbortSignal fires.
     // Uses Effect.die so the abort reason propagates as-is to run().
-    const abortDeferred = yield* Deferred.make<never, never>();
+    const abortDeferred = yield* Deferred.make<never>();
     let abortCleanup: (() => void) | null = null;
     if (signal) {
       if (signal.aborted) {
@@ -255,10 +255,7 @@ const invokeAgent = (
     > = Effect.raceFirst(execEffect, Deferred.await(timeoutSignal));
     raced = Effect.raceFirst(raced, Deferred.await(completionTimeoutDeferred));
     if (signal) {
-      raced = Effect.raceFirst(
-        raced,
-        Deferred.await(abortDeferred) as Effect.Effect<never, never>,
-      );
+      raced = Effect.raceFirst(raced, Deferred.await(abortDeferred));
     }
 
     return yield* raced.pipe(

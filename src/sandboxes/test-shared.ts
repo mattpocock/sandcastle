@@ -11,11 +11,11 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import {
-  createBindMountSandboxProvider,
-  type BindMountSandboxHandle,
-  type BindMountSandboxProvider,
-  type ExecResult,
+import { createBindMountSandboxProvider } from "../SandboxProvider.js";
+import type {
+  BindMountSandboxHandle,
+  BindMountSandboxProvider,
+  ExecResult,
 } from "../SandboxProvider.js";
 import { BoundedTail, MAX_TAIL_CHARS } from "../boundedTail.js";
 
@@ -58,13 +58,13 @@ export const createTempSandbox = async (
         const stdoutTail = new BoundedTail(MAX_TAIL_CHARS, "\n");
         const stderrTail = new BoundedTail(MAX_TAIL_CHARS, "");
 
-        const rl = createInterface({ input: proc.stdout! });
+        const rl = createInterface({ input: proc.stdout });
         rl.on("line", (line) => {
           stdoutTail.push(line);
           onLine(line);
         });
 
-        proc.stderr!.on("data", (chunk: Buffer) => {
+        proc.stderr.on("data", (chunk: Buffer) => {
           stderrTail.push(chunk.toString());
         });
 

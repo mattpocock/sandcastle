@@ -27,9 +27,9 @@ export const formatErrorMessage = (error: SandboxError): string => {
     case "AgentError":
       return `Agent invocation failed: ${error.message}`;
     case "ConfigDirError":
-      return `${error.message}`;
+      return error.message;
     case "InitError":
-      return `${error.message}`;
+      return error.message;
     case "AgentIdleTimeoutError":
     case "WorktreeTimeoutError":
     case "ContainerStartTimeoutError":
@@ -52,7 +52,7 @@ const showErrorAndExit = (error: SandboxError) =>
   Effect.gen(function* () {
     const d = yield* Display;
     yield* d.status(formatErrorMessage(error), "error");
-    return yield* Effect.sync(() => process.exit(1) as never);
+    return yield* Effect.sync(() => process.exit(1));
   });
 
 /**
@@ -90,4 +90,4 @@ export const withFriendlyErrors = <A, E, R>(
     SessionCaptureError: showErrorAndExit,
     CwdError: showErrorAndExit,
     ImageNotFoundError: showErrorAndExit,
-  }) as Effect.Effect<A, Exclude<E, SandboxError>, R | Display>;
+  });

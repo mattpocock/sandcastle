@@ -12,11 +12,8 @@ import {
   SANDBOX_REPO_DIR,
 } from "./SandboxFactory.js";
 import { patchGitMountsForWindows } from "./mountUtils.js";
-import {
-  withSandboxLifecycle,
-  runHostHooks,
-  type SandboxHooks,
-} from "./SandboxLifecycle.js";
+import { withSandboxLifecycle, runHostHooks } from "./SandboxLifecycle.js";
+import type { SandboxHooks } from "./SandboxLifecycle.js";
 import type {
   AnySandboxProvider,
   SandboxProvider,
@@ -36,8 +33,9 @@ import {
   buildLogFilename,
   printFileDisplayStartup,
 } from "./run.js";
-import type { LoggingOption } from "./run.js";
-import { orchestrate, type IterationResult } from "./Orchestrator.js";
+import type { LoggingOption, Timeouts } from "./run.js";
+import { orchestrate } from "./Orchestrator.js";
+import type { IterationResult } from "./Orchestrator.js";
 import { agentStreamEmitterLayer } from "./AgentStreamEmitter.js";
 import { resolveEnv } from "./EnvResolver.js";
 import { mergeProviderEnv } from "./mergeProviderEnv.js";
@@ -48,15 +46,14 @@ import { copyToWorktree } from "./CopyToWorktree.js";
 import { resolveCwd } from "./resolveCwd.js";
 import { assertResumeSessionExists } from "./resumePrecheck.js";
 import {
-  type PromptArgs,
   substitutePromptArgs,
   validateNoArgsWithInlinePrompt,
   validateNoBuiltInArgOverride,
   BUILT_IN_PROMPT_ARG_KEYS,
 } from "./PromptArgumentSubstitution.js";
+import type { PromptArgs } from "./PromptArgumentSubstitution.js";
 import { noSandbox } from "./sandboxes/no-sandbox.js";
 import { raceAbortSignal } from "./raceAbortSignal.js";
-import type { Timeouts } from "./run.js";
 import { validateTimeoutOptions } from "./validateTimeouts.js";
 
 /** Branch strategies valid for createWorktree — head is excluded. */
@@ -270,7 +267,7 @@ export const createWorktree = async (
       ).pipe(Effect.catchAll(() => Effect.succeed(false)));
 
       if (isDirty) {
-        return { preservedWorktreePath: worktreeInfo.path } as CloseResult;
+        return { preservedWorktreePath: worktreeInfo.path };
       }
 
       yield* WorktreeManager.remove(worktreeInfo.path).pipe(
@@ -287,7 +284,7 @@ export const createWorktree = async (
         ).pipe(Effect.catchAll(() => Effect.void));
       }
 
-      return { preservedWorktreePath: undefined } as CloseResult;
+      return { preservedWorktreePath: undefined };
     }).pipe(Effect.runPromise);
   };
 

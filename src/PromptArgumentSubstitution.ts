@@ -88,7 +88,7 @@ const HTML_COMMENT_PATTERN = /<!--[\s\S]*?(?:-->|$)/g;
 
 const markShellBlocks = (prompt: string): string => {
   const commentRanges = [...prompt.matchAll(HTML_COMMENT_PATTERN)].map(
-    (m) => [m.index!, m.index! + m[0].length] as const,
+    (m) => [m.index, m.index + m[0].length] as const,
   );
   return prompt.replace(SHELL_BLOCK_PATTERN, (block, command, offset) =>
     commentRanges.some(([start, end]) => offset >= start && offset < end)
