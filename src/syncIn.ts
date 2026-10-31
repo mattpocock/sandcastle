@@ -12,31 +12,21 @@ import { join } from "node:path";
 import { Effect } from "effect";
 import type { IsolatedSandboxHandle } from "./SandboxProvider.js";
 import { SyncError } from "./errors.js";
+import { hostGit } from "./hostGit.js";
 
-/**
- * Execute a command on the host side, returning stdout.
- * Fails with SyncError on non-zero exit.
- */
-const execHost = (
-  command: string,
+/** Run host git, failing with SyncError on non-zero exit. */
+const execHostGit = (
+  args: readonly string[],
   cwd: string,
 ): Effect.Effect<string, SyncError> =>
-  Effect.tryPromise({
-    try: async () => {
-      const { exec } = await import("node:child_process");
-      const { promisify } = await import("node:util");
-      const execAsync = promisify(exec);
-      const { stdout } = await execAsync(command, {
-        cwd,
-        maxBuffer: 10 * 1024 * 1024,
-      });
-      return stdout;
-    },
-    catch: (e) =>
-      new SyncError({
-        message: `Host command failed: ${command}\n${e instanceof Error ? e.message : String(e)}`,
-      }),
-  });
+  hostGit(args, cwd).pipe(
+    Effect.mapError(
+      (e) =>
+        new SyncError({
+          message: `Host command failed: git ${args.join(" ")}\n${e.message}`,
+        }),
+    ),
+  );
 
 /**
  * Execute a command in the sandbox, failing with SyncError if it exits non-zero.
@@ -83,8 +73,8 @@ export const syncIn = (
 ): Effect.Effect<{ branch: string }, SyncError> =>
   Effect.gen(function* () {
     // Get current branch from host
-    const branch = (yield* execHost(
-      "git rev-parse --abbrev-ref HEAD",
+    const branch = (yield* execHostGit(
+      ["rev-parse", "--abbrev-ref", "HEAD"],
       hostRepoDir,
     )).trim();
 
@@ -100,8 +90,8 @@ export const syncIn = (
 
     yield* Effect.ensuring(
       Effect.gen(function* () {
-        yield* execHost(
-          `git bundle create "${bundleHostPath}" --all`,
+        yield* execHostGit(
+          ["bundle", "create", bundleHostPath, "--all"],
           hostRepoDir,
         );
 
@@ -147,8 +137,8 @@ export const syncIn = (
         });
 
         // Verify sync succeeded
-        const hostHead = (yield* execHost(
-          "git rev-parse HEAD",
+        const hostHead = (yield* execHostGit(
+          ["rev-parse", "HEAD"],
           hostRepoDir,
         )).trim();
         const sandboxHead = (yield* execOk(handle, "git rev-parse HEAD", {

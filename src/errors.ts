@@ -41,6 +41,17 @@ export class SyncError extends Data.TaggedError("SyncError")<{
   readonly message: string;
 }> {}
 
+/**
+ * A host-side git command failed, or was refused because the repository's
+ * `.git` did not lead where it should.
+ */
+export class HostGitError extends Data.TaggedError("HostGitError")<{
+  readonly message: string;
+  readonly args: readonly string[];
+  readonly stdout: string;
+  readonly stderr: string;
+}> {}
+
 /** Git worktree operation failed */
 export class WorktreeError extends Data.TaggedError("WorktreeError")<{
   readonly message: string;

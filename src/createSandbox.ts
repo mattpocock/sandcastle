@@ -39,7 +39,7 @@ import {
   SANDBOX_REPO_DIR,
   resolveGitMounts,
 } from "./SandboxFactory.js";
-import type { SandboxService } from "./SandboxFactory.js";
+import type { MountEntry, SandboxService } from "./SandboxFactory.js";
 import type {
   SandboxProvider,
   BindMountSandboxHandle,
@@ -54,7 +54,7 @@ import { syncOut } from "./syncOut.js";
 import * as WorktreeManager from "./WorktreeManager.js";
 import { copyToWorktree } from "./CopyToWorktree.js";
 import { resolveCwd } from "./resolveCwd.js";
-import { patchGitMountsForWindows } from "./mountUtils.js";
+import { patchGitMountsForWindows, removeMountTempDirs } from "./mountUtils.js";
 import { assertResumeSessionExists } from "./resumePrecheck.js";
 import { registerShutdown } from "./shutdownRegistry.js";
 import { raceAbortSignal } from "./raceAbortSignal.js";
@@ -796,6 +796,8 @@ export const createSandboxFromWorktree = async (
   let sandbox: SandboxService;
   let sandboxRepoDir: string;
   const isIsolated = options.sandbox.tag === "isolated";
+  // Temp dirs behind the git mounts, removed once the sandbox is closed.
+  const mountsToClean: MountEntry[] = [];
 
   if (isTestMode) {
     sandbox = options._test.buildSandbox!(worktreePath);
@@ -837,6 +839,9 @@ export const createSandboxFromWorktree = async (
         Effect.flatMap((gitMounts) =>
           patchGitMountsForWindows(gitMounts, worktreePath, SANDBOX_REPO_DIR),
         ),
+        Effect.tap((gitMounts) => {
+          mountsToClean.push(...gitMounts);
+        }),
         Effect.flatMap((gitMounts) =>
           startSandbox({
             provider,
@@ -847,6 +852,7 @@ export const createSandboxFromWorktree = async (
             repoDir: SANDBOX_REPO_DIR,
           }),
         ),
+        Effect.onError(() => removeMountTempDirs(mountsToClean)),
       );
     }
 
@@ -928,6 +934,7 @@ export const createSandboxFromWorktree = async (
       if (providerHandle) {
         await providerHandle.close();
       }
+      await Effect.runPromise(removeMountTempDirs(mountsToClean));
       return { preservedWorktreePath: undefined };
     },
   );
@@ -945,6 +952,8 @@ export const createSandbox = async (
   const isTestMode = !!options._test?.buildSandbox;
   const isIsolated = options.sandbox.tag === "isolated";
   validateTimeoutOptions(options);
+  // Temp dirs behind the git mounts, removed once the sandbox is closed.
+  const mountsToClean: MountEntry[] = [];
 
   // Resolve cwd, create the worktree, and set up the sandbox in a single Effect.
   // Once the worktree exists, any later failure (e.g. a missing image surfacing
@@ -1037,6 +1046,9 @@ export const createSandbox = async (
                     SANDBOX_REPO_DIR,
                   ),
                 ),
+                Effect.tap((gitMounts) => {
+                  mountsToClean.push(...gitMounts);
+                }),
                 Effect.flatMap((gitMounts) =>
                   startSandbox({
                     provider,
@@ -1082,9 +1094,10 @@ export const createSandbox = async (
               yield* Effect.all(allEffects, { concurrency: "unbounded" });
             }).pipe(
               Effect.onError(() =>
-                providerHandle
+                (providerHandle
                   ? Effect.promise(() => providerHandle.close().catch(() => {}))
-                  : Effect.void,
+                  : Effect.void
+                ).pipe(Effect.andThen(removeMountTempDirs(mountsToClean))),
               ),
             );
           }
@@ -1094,6 +1107,7 @@ export const createSandbox = async (
           Effect.onError(() =>
             WorktreeManager.remove(worktreePath).pipe(
               Effect.catchAll(() => Effect.void),
+              Effect.andThen(removeMountTempDirs(mountsToClean)),
             ),
           ),
         );
@@ -1132,6 +1146,7 @@ export const createSandbox = async (
         if (providerHandle) {
           yield* Effect.promise(() => providerHandle.close());
         }
+        yield* removeMountTempDirs(mountsToClean);
 
         // Preserve the worktree when it has uncommitted changes; otherwise remove it.
         const isDirty = yield* WorktreeManager.hasUncommittedChanges(
