@@ -96,6 +96,34 @@ const mountArgs = (
   ]);
 
 /**
+ * Each dir between a read-only overlay and the writable mount that holds it,
+ * bound onto itself, each chain shallowest first. A mount point can't be renamed or
+ * removed, so the overlay can't be moved aside by moving a parent (the git
+ * worktree admin dir that holds `commondir`, say).
+ */
+const anchorArgs = (
+  mounts: readonly { readonly hostPath: string; readonly readonly?: boolean }[],
+): string[] => {
+  const writable = mounts.filter((m) => m.readonly !== true);
+  const anchors = new Set<string>();
+  for (const overlay of mounts.filter((m) => m.readonly === true)) {
+    const roots = writable.filter((m) =>
+      isWithin(overlay.hostPath, m.hostPath),
+    );
+    const chain: string[] = [];
+    let dir = posix.dirname(overlay.hostPath);
+    while (roots.some((m) => dir !== m.hostPath && isWithin(dir, m.hostPath))) {
+      chain.unshift(dir);
+      dir = posix.dirname(dir);
+    }
+    for (const anchor of chain) {
+      anchors.add(anchor);
+    }
+  }
+  return [...anchors].flatMap((anchor) => ["--bind", anchor, anchor]);
+};
+
+/**
  * Checks `bwrap()`'s `mounts` option: each mount, after resolution, must sit
  * at its own host path. Throws at construction otherwise.
  */
@@ -183,6 +211,7 @@ export const sandboxArgs = (
       ...toolchainArgs(toolchain),
       ...mountArgs(options.mounts),
       ...mountArgs(userMounts),
+      ...anchorArgs(options.mounts),
       // The read-only core mounts (the #1261 overlays) again, so no user
       // mount can uncover them.
       ...mountArgs(options.mounts.filter((m) => m.readonly === true)),

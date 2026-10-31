@@ -297,6 +297,99 @@ describe.each(NATIVE_PROVIDERS)("containment: $name", (provider) => {
         expect(existsSync(path.join(dir, "hooks.aside"))).toBe(false);
         expect(existsSync(`${dir}.aside`)).toBe(false);
       });
+
+      it("stops replacing the git config by removing it or an ancestor", async () => {
+        const before = configBefore();
+        await using sandbox = await open();
+        const dir = commonDir();
+
+        await sandbox.exec(
+          `rm -f '${dir}/config'; rm -rf '${dir}'; mkdir -p '${dir}'; ` +
+            `printf '[core]\\n\\thooksPath = /tmp/evil\\n' > '${dir}/config'`,
+        );
+
+        expect(configBefore()).toBe(before);
+      });
+
+      it("stops replacing the git hooks by removing them", async () => {
+        await using sandbox = await open();
+        const dir = commonDir();
+
+        await sandbox.exec(
+          `rm -rf '${dir}/hooks'; mkdir -p '${dir}/hooks'; ` +
+            `printf '#!/bin/sh\\necho pwned\\n' > '${hookFile()}'`,
+        );
+
+        expect(existsSync(hookFile())).toBe(false);
+      });
+
+      it("stops replacing the git info dir by renaming or removing it or a parent", async () => {
+        const exclude = path.join(commonDir(), "info", "exclude");
+        const before = readFileSync(exclude, "utf8");
+        await using sandbox = await open();
+        const dir = commonDir();
+        const plant = `mkdir -p '${dir}/info'; echo evil > '${exclude}'`;
+
+        await sandbox.exec(
+          `echo evil >> '${exclude}'; ` +
+            `mv '${dir}/info' '${dir}/info.aside'; ${plant}; ` +
+            `rm -rf '${dir}/info'; ${plant}; ` +
+            `mv '${dir}' '${dir}.aside'; ${plant}`,
+        );
+
+        expect(readFileSync(exclude, "utf8")).toBe(before);
+        expect(existsSync(path.join(dir, "info.aside"))).toBe(false);
+        expect(existsSync(`${dir}.aside`)).toBe(false);
+      });
+
+      it("stops replacing the worktree's git pointer file by renaming or removing it or a parent", async () => {
+        await using sandbox = await open();
+        const worktree = sandbox.worktreePath;
+        const pointer = path.join(worktree, ".git");
+        const before = readFileSync(pointer, "utf8");
+        const plant = `echo 'gitdir: /tmp/evil' > '${pointer}'`;
+
+        await sandbox.exec(
+          `${plant}; ` +
+            `mv '${pointer}' '${pointer}.aside'; ${plant}; ` +
+            `rm -f '${pointer}'; ${plant}; ` +
+            `cd /; mv '${worktree}' '${worktree}.aside'; mkdir -p '${worktree}'; ${plant}`,
+        );
+
+        expect(readFileSync(pointer, "utf8")).toBe(before);
+        expect(existsSync(`${pointer}.aside`)).toBe(false);
+        expect(existsSync(`${worktree}.aside`)).toBe(false);
+      });
+
+      it("stops replacing the worktree's commondir by renaming or removing it or a parent", async () => {
+        await using sandbox = await open();
+        const pointer = readFileSync(
+          path.join(sandbox.worktreePath, ".git"),
+          "utf8",
+        );
+        const adminDir = path.resolve(
+          sandbox.worktreePath,
+          pointer.trim().replace(/^gitdir: /u, ""),
+        );
+        const worktrees = path.dirname(adminDir);
+        const commondir = path.join(adminDir, "commondir");
+        const before = readFileSync(commondir, "utf8");
+        const plant = `mkdir -p '${adminDir}'; echo /tmp/evil > '${commondir}'`;
+
+        await sandbox.exec(
+          `${plant}; ` +
+            `mv '${commondir}' '${commondir}.aside'; ${plant}; ` +
+            `rm -f '${commondir}'; ${plant}; ` +
+            `mv '${adminDir}' '${adminDir}.aside'; ${plant}; ` +
+            `mv '${worktrees}' '${worktrees}.aside'; ${plant}; ` +
+            `rm -rf '${adminDir}'; ${plant}`,
+        );
+
+        expect(readFileSync(commondir, "utf8")).toBe(before);
+        expect(existsSync(`${commondir}.aside`)).toBe(false);
+        expect(existsSync(`${adminDir}.aside`)).toBe(false);
+        expect(existsSync(`${worktrees}.aside`)).toBe(false);
+      });
     });
 
     it("can't signal a host process", async () => {
@@ -328,6 +421,34 @@ describe.each(NATIVE_PROVIDERS)("containment: $name", (provider) => {
           expect(result.exitCode).toBe(0);
           expect(result.stdout).toContain("ps -eo args=");
           expect(result.stdout).not.toContain(HOST_SLEEP);
+        } finally {
+          host.stop();
+        }
+      },
+    );
+
+    // A known limit: Seatbelt has no PID namespace, so a host process is
+    // hidden only because each way to list one is blocked. Observed on the
+    // macOS job: the setuid `ps` can't run, `pgrep` can't reach sysmond, and
+    // the `kern.proc.all` sysctl is denied. A process asking the kernel by PID
+    // (proc_pidinfo) is limited to its own sandbox by `process-info*`.
+    it.skipIf(provider.platform !== "darwin")(
+      "can't list a host process with ps, pgrep or sysctl (macOS, known limit)",
+      async () => {
+        const host = startHostSleep();
+        try {
+          await using sandbox = await open();
+
+          const result = await sandbox.exec(
+            `ps -eo args=; echo "ps=$?"; ` +
+              `pgrep -fl 'sleep 987'; echo "pgrep=$?"; ` +
+              `sysctl kern.proc.all >/dev/null 2>&1; echo "sysctl=$?"`,
+          );
+
+          expect(result.stdout).not.toContain(HOST_SLEEP);
+          expect(result.stdout).not.toContain("ps=0");
+          expect(result.stdout).not.toContain("pgrep=0");
+          expect(result.stdout).not.toContain("sysctl=0");
         } finally {
           host.stop();
         }
