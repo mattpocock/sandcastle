@@ -16,18 +16,23 @@ import type { ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import type { FileSystem } from "@effect/platform";
 import { NodeFileSystem } from "@effect/platform-node";
-import { Config, Effect } from "effect";
+import { Effect } from "effect";
 import {
   SANDBOX_HOME,
   assertBwrapUsable,
   collectOutput,
   copyCreatingParents,
+  bwrapMounts,
   makePrivateDirs,
   removePrivateDirs,
   sandboxArgs,
   toHostPath,
 } from "../bwrapSandbox.js";
-import type { PrivateDirs } from "../bwrapSandbox.js";
+import type {
+  IdentityMount,
+  MountConfig,
+  PrivateDirs,
+} from "../bwrapSandbox.js";
 import { createBindMountSandboxProvider } from "../SandboxProvider.js";
 import type {
   BindMountCreateOptions,
@@ -52,6 +57,13 @@ export interface BwrapOptions {
    * overflowing V8's max string length and crashing the run.
    */
   readonly maxOutputTailChars?: number;
+  /**
+   * Extra host paths to make visible in the sandbox (a cache, a sibling
+   * checkout, `.beads/`). Each appears at its own host path, so after
+   * resolution `sandboxPath` must equal `hostPath`; `bwrap()` throws
+   * otherwise. `readonly` defaults to `false`.
+   */
+  readonly mounts?: readonly MountConfig[];
 }
 
 type ExecOptions = Parameters<BindMountSandboxHandle["exec"]>[1];
@@ -85,21 +97,20 @@ const runOnHost = async <A, E>(
 /** Creates the sandbox's private dirs and the bwrap arguments every exec shares. */
 const prepare = async (
   options: BindMountCreateOptions,
+  userMounts: readonly IdentityMount[],
 ): Promise<{ dirs: PrivateDirs; baseArgs: string[] }> =>
   Effect.gen(function* () {
     const dirs = yield* makePrivateDirs;
-    const hostPathEnv = yield* Config.string("PATH").pipe(
-      Config.withDefault(""),
-    );
-    const baseArgs = yield* sandboxArgs(options, dirs, hostPathEnv);
+    const baseArgs = yield* sandboxArgs(options, dirs, userMounts);
     return { dirs, baseArgs };
   }).pipe(runOnHost);
 
 const createHandle = async (
   options: BindMountCreateOptions,
-  maxTailChars: number,
+  config: { maxTailChars: number; userMounts: readonly IdentityMount[] },
 ): Promise<BindMountSandboxHandle> => {
-  const { dirs, baseArgs } = await prepare(options);
+  const { maxTailChars, userMounts } = config;
+  const { dirs, baseArgs } = await prepare(options, userMounts);
   const live = new Set<ChildProcess>();
   const killAll = (): void => {
     for (const proc of live) {
@@ -147,7 +158,10 @@ const createHandle = async (
  * The agent runs the host's own toolchain, read-only, and can write only the
  * worktree, the git dirs Sandcastle mounts, a private `/tmp` and a private
  * home at `/home/agent`. Both private dirs are removed on close, and so is
- * every process the sandbox started. It has no root: `exec` with
+ * every process the sandbox started. The toolchain comes from the host
+ * `PATH`: each `PATH` dir (never the home dir or an ancestor of it) and the
+ * install root of each executable symlinked from one. Add other paths with
+ * `mounts`. It has no root: `exec` with
  * `sudo: true` rejects. All three branch strategies are supported.
  *
  * Checks once per process that Bubblewrap is usable, and throws
@@ -157,6 +171,9 @@ const createHandle = async (
  * running unsandboxed.
  */
 export const bwrap = (options?: BwrapOptions): BindMountSandboxProvider => {
+  // Reject a sandboxPath/hostPath mismatch before the preflight, so the
+  // config error surfaces on every OS.
+  const userMounts = bwrapMounts(options?.mounts ?? []);
   assertBwrapUsable();
   const maxTailChars = options?.maxOutputTailChars ?? MAX_TAIL_CHARS;
   return markNativeSandboxProvider(
@@ -165,7 +182,7 @@ export const bwrap = (options?: BwrapOptions): BindMountSandboxProvider => {
       env: options?.env ?? {},
       sandboxHomedir: SANDBOX_HOME,
       create: async (createOptions) =>
-        createHandle(createOptions, maxTailChars),
+        createHandle(createOptions, { maxTailChars, userMounts }),
     }),
   );
 };

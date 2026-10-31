@@ -13,6 +13,8 @@ export const bwrap: (options?: BwrapOptions) => BindMountSandboxProvider;
 export interface BwrapOptions {
     readonly env?: Record<string, string>;
     readonly maxOutputTailChars?: number;
+    // Warning: (ae-forgotten-export) The symbol "MountConfig" needs to be exported by the entry point bwrap.d.ts
+    readonly mounts?: readonly MountConfig[];
 }
 
 // (No @packageDocumentation comment for this package)
