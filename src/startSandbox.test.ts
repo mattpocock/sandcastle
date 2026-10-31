@@ -111,11 +111,7 @@ describe("startSandbox", () => {
         }),
       );
 
-      const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          return yield* sandbox.exec("echo hello");
-        }),
-      );
+      const result = await Effect.runPromise(sandbox.exec("echo hello"));
 
       expect(result.stdout).toBe("hello");
     });
@@ -147,11 +143,7 @@ describe("startSandbox", () => {
       );
 
       // Verify the repo was synced - hello.txt should exist
-      const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          return yield* sandbox.exec("cat hello.txt");
-        }),
-      );
+      const result = await Effect.runPromise(sandbox.exec("cat hello.txt"));
 
       expect(result.stdout.trim()).toBe("hello world");
       expect(worktreePath).toBeDefined();
@@ -176,11 +168,7 @@ describe("startSandbox", () => {
         }),
       );
 
-      const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          return yield* sandbox.exec("cat extra.txt");
-        }),
-      );
+      const result = await Effect.runPromise(sandbox.exec("cat extra.txt"));
 
       expect(result.stdout.trim()).toBe("extra content");
       await handle.close();
