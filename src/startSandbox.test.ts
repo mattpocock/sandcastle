@@ -1,5 +1,5 @@
 import { Duration, Effect, Exit, TestClock, TestContext } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, assert, describe, expect, it } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { exec } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -8,9 +8,8 @@ import { promisify } from "node:util";
 import {
   createBindMountSandboxProvider,
   createIsolatedSandboxProvider,
-  type BindMountSandboxHandle,
-  type IsolatedSandboxHandle,
 } from "./SandboxProvider.js";
+import type { BindMountCreateOptions } from "./SandboxProvider.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 import {
   startSandbox,
@@ -45,7 +44,7 @@ const commitFile = async (
 describe("startSandbox", () => {
   describe("bind-mount provider", () => {
     it("calls provider.create with mounts and env", async () => {
-      const createCalls: any[] = [];
+      const createCalls: BindMountCreateOptions[] = [];
       const provider = createBindMountSandboxProvider({
         name: "test",
         create: async (options) => {
@@ -73,15 +72,17 @@ describe("startSandbox", () => {
       );
 
       expect(createCalls).toHaveLength(1);
-      expect(createCalls[0].mounts).toContainEqual({
+      const [createCall] = createCalls;
+      assert.isDefined(createCall);
+      expect(createCall.mounts).toContainEqual({
         hostPath: "/worktree",
         sandboxPath: SANDBOX_REPO_DIR,
       });
-      expect(createCalls[0].mounts).toContainEqual({
+      expect(createCall.mounts).toContainEqual({
         hostPath: "/repo/.git",
         sandboxPath: "/repo/.git",
       });
-      expect(createCalls[0].env).toEqual({ FOO: "bar" });
+      expect(createCall.env).toStrictEqual({ FOO: "bar" });
       expect(result.worktreePath).toBe(SANDBOX_REPO_DIR);
       expect(result.handle).toBeDefined();
       expect(result.sandbox).toBeDefined();
@@ -110,11 +111,7 @@ describe("startSandbox", () => {
         }),
       );
 
-      const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          return yield* sandbox.exec("echo hello");
-        }),
-      );
+      const result = await Effect.runPromise(sandbox.exec("echo hello"));
 
       expect(result.stdout).toBe("hello");
     });
@@ -125,7 +122,7 @@ describe("startSandbox", () => {
 
     afterEach(async () => {
       await Promise.all(
-        tempDirs.map((d) => rm(d, { recursive: true, force: true })),
+        tempDirs.map(async (d) => rm(d, { recursive: true, force: true })),
       );
       tempDirs.length = 0;
     });
@@ -146,11 +143,7 @@ describe("startSandbox", () => {
       );
 
       // Verify the repo was synced - hello.txt should exist
-      const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          return yield* sandbox.exec("cat hello.txt");
-        }),
-      );
+      const result = await Effect.runPromise(sandbox.exec("cat hello.txt"));
 
       expect(result.stdout.trim()).toBe("hello world");
       expect(worktreePath).toBeDefined();
@@ -175,11 +168,7 @@ describe("startSandbox", () => {
         }),
       );
 
-      const result = await Effect.runPromise(
-        Effect.gen(function* () {
-          return yield* sandbox.exec("cat extra.txt");
-        }),
-      );
+      const result = await Effect.runPromise(sandbox.exec("cat extra.txt"));
 
       expect(result.stdout.trim()).toBe("extra content");
       await handle.close();
@@ -199,7 +188,7 @@ describe("startSandbox", () => {
           const handle = await realProvider.create(options);
           return {
             ...handle,
-            copyIn: (hostPath: string, sandboxPath: string) => {
+            copyIn: async (hostPath: string, sandboxPath: string) => {
               // Allow syncIn's copyIn calls (bundle files) to succeed,
               // but hang on everything else
               if (sandboxPath.includes("repo.bundle")) {
@@ -227,7 +216,9 @@ describe("startSandbox", () => {
         );
         // Yield to allow real async operations (create, syncIn) to complete
         yield* Effect.yieldNow();
-        yield* Effect.promise(() => new Promise((r) => setTimeout(r, 2000)));
+        yield* Effect.promise(
+          async () => new Promise((r) => setTimeout(r, 2000)),
+        );
         yield* Effect.yieldNow();
         // Now advance past the copyPaths timeout
         yield* TestClock.adjust(Duration.millis(COPY_PATHS_TIMEOUT_MS + 1));
@@ -237,15 +228,12 @@ describe("startSandbox", () => {
       const exit = await Effect.runPromise(program);
 
       expect(Exit.isFailure(exit)).toBe(true);
-      if (Exit.isFailure(exit) && exit.cause._tag === "Fail") {
-        const error = exit.cause.error;
-        expect(error).toBeInstanceOf(CopyToWorktreeTimeoutError);
-        const timeoutError = error as CopyToWorktreeTimeoutError;
-        expect(timeoutError.timeoutMs).toBe(COPY_PATHS_TIMEOUT_MS);
-        expect(timeoutError.paths).toEqual(["hang.txt"]);
-      } else {
-        throw new Error("Expected Fail cause");
-      }
+      assert(Exit.isFailure(exit), "Expected a failure");
+      assert(exit.cause._tag === "Fail", "Expected Fail cause");
+      const timeoutError = exit.cause.error;
+      assert.instanceOf(timeoutError, CopyToWorktreeTimeoutError);
+      expect(timeoutError.timeoutMs).toBe(COPY_PATHS_TIMEOUT_MS);
+      expect(timeoutError.paths).toStrictEqual(["hang.txt"]);
     }, 15_000);
 
     it("closes the handle when sync-in fails after create", async () => {
@@ -359,7 +347,7 @@ describe("startSandbox", () => {
       await commitFile(hostDir, "hello.txt", "hello", "initial");
 
       const provider = testIsolated();
-      const { handle } = await Effect.runPromise(
+      const started = Effect.runPromise(
         startSandbox({
           provider,
           hostRepoDir: hostDir,
@@ -369,6 +357,8 @@ describe("startSandbox", () => {
         }),
       );
 
+      await expect(started).resolves.toHaveProperty("handle");
+      const { handle } = await started;
       await handle.close();
     });
   });
@@ -381,13 +371,27 @@ describe("startSandbox", () => {
     const makeSlowCreate = () => {
       let resolveCreate!: () => void;
       const released = new Promise<void>((r) => (resolveCreate = r));
+      let markStarted = (): void => undefined;
+      const started = new Promise<void>((resolve) => {
+        markStarted = () => {
+          resolve();
+        };
+      });
       let closeCalls = 0;
       const close = async () => {
         closeCalls++;
       };
       return {
-        released,
-        resolveCreate: () => resolveCreate(),
+        /** Resolves once the provider's create() has been called. */
+        started,
+        /** What create() awaits: marks it started, then waits for release. */
+        wait: async () => {
+          markStarted();
+          await released;
+        },
+        resolveCreate: () => {
+          resolveCreate();
+        },
         closeCalls: () => closeCalls,
         close,
       };
@@ -400,7 +404,9 @@ describe("startSandbox", () => {
       const exit = await Effect.runPromise(
         Effect.gen(function* () {
           const fiber = yield* Effect.fork(start);
-          yield* Effect.yieldNow();
+          // Start-up work before create() (resolving mounts) is real I/O, so
+          // wait for create() to begin before moving the clock past the timeout.
+          yield* Effect.promise(async () => slow.started);
           yield* TestClock.adjust(
             Duration.millis(CONTAINER_START_TIMEOUT_MS + 1),
           );
@@ -427,7 +433,7 @@ describe("startSandbox", () => {
       const provider = createIsolatedSandboxProvider({
         name: "slow-isolated",
         create: async () => {
-          await slow.released;
+          await slow.wait();
           return {
             worktreePath: "/home/agent/workspace",
             exec: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
@@ -452,7 +458,7 @@ describe("startSandbox", () => {
       const provider = createBindMountSandboxProvider({
         name: "slow-bind-mount",
         create: async () => {
-          await slow.released;
+          await slow.wait();
           return {
             worktreePath: SANDBOX_REPO_DIR,
             exec: async () => ({ stdout: "", stderr: "", exitCode: 0 }),

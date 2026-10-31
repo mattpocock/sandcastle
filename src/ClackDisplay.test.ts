@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const calls: Array<[string, string]> = vi.hoisted(() => []);
+const calls: [string, string][] = vi.hoisted(() => []);
 
 vi.mock("@clack/prompts", () => {
   const record = (kind: string) => (msg: string) => {
@@ -23,9 +23,9 @@ vi.mock("@clack/prompts", () => {
 
 const { ClackDisplay, Display } = await import("./Display.js");
 
-const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
+const strip = (s: string) => s.replaceAll(/\u001B\[[0-9;]*m/g, "");
 
-const runWith = (
+const runWith = async (
   program: Effect.Effect<void, never, InstanceType<typeof Display>>,
 ) =>
   Effect.runPromise(
@@ -46,7 +46,7 @@ describe("ClackDisplay - textChunk", () => {
       }),
     );
 
-    expect(calls).toEqual([
+    expect(calls).toStrictEqual([
       [
         "message",
         "I'll run the five commands in parallel since they're independent.",
@@ -66,7 +66,7 @@ describe("ClackDisplay - textChunk", () => {
       }),
     );
 
-    expect(calls.map(([k, m]) => [k, strip(m)])).toEqual([
+    expect(calls.map(([k, m]) => [k, strip(m)])).toStrictEqual([
       ["message", "Let me read the file."],
       ["step", "Read(src/hello.ts)"],
       ["message", "Done."],
@@ -79,12 +79,12 @@ describe("ClackDisplay - textChunk", () => {
       Effect.gen(function* () {
         const d = yield* Display;
         yield* d.textChunk("First line.\nSecond li");
-        expect(calls).toEqual([["message", "First line."]]);
+        expect(calls).toStrictEqual([["message", "First line."]]);
         yield* d.textChunk("ne.\n");
       }),
     );
 
-    expect(calls).toEqual([
+    expect(calls).toStrictEqual([
       ["message", "First line."],
       ["message", "Second line."],
     ]);
@@ -99,7 +99,7 @@ describe("ClackDisplay - textChunk", () => {
       }),
     );
 
-    expect(calls).toEqual([
+    expect(calls).toStrictEqual([
       ["message", "Para one."],
       ["message", "Para two."],
     ]);
@@ -113,6 +113,6 @@ describe("ClackDisplay - textChunk", () => {
       }),
     );
 
-    expect(calls).toEqual([["message", "Trailing text with no newline"]]);
+    expect(calls).toStrictEqual([["message", "Trailing text with no newline"]]);
   });
 });

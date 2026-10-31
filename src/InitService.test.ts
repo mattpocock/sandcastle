@@ -23,7 +23,7 @@ import type {
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 import { SKELETON_PROMPT } from "./templates.js";
 
-const makeDir = () => mkdtemp(join(tmpdir(), "init-service-"));
+const makeDir = async () => mkdtemp(join(tmpdir(), "init-service-"));
 
 const claudeCodeAgent = getAgent("claude-code")!;
 const piAgent = getAgent("pi")!;
@@ -37,7 +37,10 @@ const defaultOptions: ScaffoldOptions = {
   model: "claude-opus-4-8",
 };
 
-const runScaffold = (repoDir: string, options?: Partial<ScaffoldOptions>) =>
+const runScaffold = async (
+  repoDir: string,
+  options?: Partial<ScaffoldOptions>,
+) =>
   Effect.runPromise(
     scaffold(repoDir, { ...defaultOptions, ...options }).pipe(
       Effect.provide(NodeFileSystem.layer),
@@ -55,7 +58,7 @@ describe("InitService scaffold", () => {
 
     const dockerfile = await readFile(
       join(dir, ".sandcastle", "Dockerfile"),
-      "utf-8",
+      "utf8",
     );
     // Template has {{ISSUE_TRACKER_TOOLS}} replaced — should contain GitHub CLI (default issue tracker)
     expect(dockerfile).toContain("FROM node:22-bookworm");
@@ -109,7 +112,7 @@ describe("InitService scaffold", () => {
 
       const envExample = await readFile(
         join(dir, ".sandcastle", ".env.example"),
-        "utf-8",
+        "utf8",
       );
       expect(envExample).toContain(expectedKey);
       expect(envExample).not.toContain(unexpectedKey);
@@ -130,7 +133,7 @@ describe("InitService scaffold", () => {
 
     const envExample = await readFile(
       join(dir, ".sandcastle", ".env.example"),
-      "utf-8",
+      "utf8",
     );
     expect(envExample).toContain("GH_TOKEN=");
     expect(envExample).toContain(
@@ -148,7 +151,7 @@ describe("InitService scaffold", () => {
 
     const envExample = await readFile(
       join(dir, ".sandcastle", ".env.example"),
-      "utf-8",
+      "utf8",
     );
     expect(envExample).not.toContain("GH_TOKEN=");
   });
@@ -179,7 +182,7 @@ describe("InitService scaffold", () => {
 
     const gitignore = await readFile(
       join(dir, ".sandcastle", ".gitignore"),
-      "utf-8",
+      "utf8",
     );
     expect(gitignore).toContain(".env");
     expect(gitignore).toContain("logs/");
@@ -193,7 +196,7 @@ describe("InitService scaffold", () => {
 
     const dockerfile = await readFile(
       join(dir, ".sandcastle", "Dockerfile"),
-      "utf-8",
+      "utf8",
     );
     expect(dockerfile).toContain(SANDBOX_REPO_DIR);
   });
@@ -213,7 +216,7 @@ describe("InitService scaffold", () => {
 
       const dockerfile = await readFile(
         join(dir, ".sandcastle", "Dockerfile"),
-        "utf-8",
+        "utf8",
       );
       expect(dockerfile).toContain("groupmod -o -g $AGENT_GID node");
       expect(dockerfile).toContain(
@@ -228,7 +231,7 @@ describe("InitService scaffold", () => {
 
     const dockerfile = await readFile(
       join(dir, ".sandcastle", "Dockerfile"),
-      "utf-8",
+      "utf8",
     );
     expect(dockerfile).not.toContain("corepack");
     expect(dockerfile).not.toContain("pnpm");
@@ -240,7 +243,7 @@ describe("InitService scaffold", () => {
 
     const prompt = await readFile(
       join(dir, ".sandcastle", "prompt.md"),
-      "utf-8",
+      "utf8",
     );
     expect(prompt).toContain("# ");
     expect(prompt).toContain("!`");
@@ -252,7 +255,7 @@ describe("InitService scaffold", () => {
     await runScaffold(dir, { templateName: "blank" });
 
     const configDir = join(dir, ".sandcastle");
-    const prompt = await readFile(join(configDir, "prompt.md"), "utf-8");
+    const prompt = await readFile(join(configDir, "prompt.md"), "utf8");
     expect(prompt).toContain("!`");
     expect(prompt).toContain("<promise>COMPLETE</promise>");
 
@@ -264,10 +267,7 @@ describe("InitService scaffold", () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "blank" });
 
-    const mainTs = await readFile(
-      join(dir, ".sandcastle", "main.mts"),
-      "utf-8",
-    );
+    const mainTs = await readFile(join(dir, ".sandcastle", "main.mts"), "utf8");
     expect(mainTs).toContain('"@ai-hero/sandcastle"');
   });
 
@@ -275,10 +275,7 @@ describe("InitService scaffold", () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "blank" });
 
-    const mainTs = await readFile(
-      join(dir, ".sandcastle", "main.mts"),
-      "utf-8",
-    );
+    const mainTs = await readFile(join(dir, ".sandcastle", "main.mts"), "utf8");
     expect(mainTs).toContain("run(");
   });
 
@@ -290,11 +287,11 @@ describe("InitService scaffold", () => {
 
     const prompt1 = await readFile(
       join(dir1, ".sandcastle", "prompt.md"),
-      "utf-8",
+      "utf8",
     );
     const prompt2 = await readFile(
       join(dir2, ".sandcastle", "prompt.md"),
-      "utf-8",
+      "utf8",
     );
     expect(prompt1).toBe(prompt2);
   });
@@ -305,10 +302,7 @@ describe("InitService scaffold", () => {
     const dir = await makeDir();
     await runScaffold(dir, { model: "claude-sonnet-4-6" });
 
-    const mainTs = await readFile(
-      join(dir, ".sandcastle", "main.mts"),
-      "utf-8",
-    );
+    const mainTs = await readFile(join(dir, ".sandcastle", "main.mts"), "utf8");
     expect(mainTs).toContain('claudeCode("claude-sonnet-4-6")');
     // Should not contain the template's original model
     expect(mainTs).not.toContain('claudeCode("claude-opus-4-8")');
@@ -318,10 +312,7 @@ describe("InitService scaffold", () => {
     const dir = await makeDir();
     await runScaffold(dir);
 
-    const mainTs = await readFile(
-      join(dir, ".sandcastle", "main.mts"),
-      "utf-8",
-    );
+    const mainTs = await readFile(join(dir, ".sandcastle", "main.mts"), "utf8");
     expect(mainTs).toContain('claudeCode("claude-opus-4-8")');
   });
 
@@ -342,10 +333,7 @@ describe("InitService scaffold", () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "simple-loop" });
 
-    const mainTs = await readFile(
-      join(dir, ".sandcastle", "main.mts"),
-      "utf-8",
-    );
+    const mainTs = await readFile(join(dir, ".sandcastle", "main.mts"), "utf8");
     expect(mainTs).toContain('"@ai-hero/sandcastle"');
   });
 
@@ -353,10 +341,7 @@ describe("InitService scaffold", () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "simple-loop" });
 
-    const mainTs = await readFile(
-      join(dir, ".sandcastle", "main.mts"),
-      "utf-8",
-    );
+    const mainTs = await readFile(join(dir, ".sandcastle", "main.mts"), "utf8");
     expect(mainTs).toContain("run(");
     expect(mainTs).toContain("maxIterations");
     expect(mainTs).toContain("3");
@@ -373,7 +358,7 @@ describe("InitService scaffold", () => {
 
     const prompt = await readFile(
       join(dir, ".sandcastle", "prompt.md"),
-      "utf-8",
+      "utf8",
     );
     expect(prompt).toContain("!`gh issue");
     expect(prompt).toContain("!`git log");
@@ -405,7 +390,7 @@ describe("InitService scaffold", () => {
 
       const mainTs = await readFile(
         join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
+        "utf8",
       );
       expect(mainTs).toContain('"@ai-hero/sandcastle"');
     });
@@ -416,7 +401,7 @@ describe("InitService scaffold", () => {
 
       const mainTs = await readFile(
         join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
+        "utf8",
       );
       expect(mainTs).toContain("createSandbox");
       expect(mainTs).toContain("sandbox.run");
@@ -431,7 +416,7 @@ describe("InitService scaffold", () => {
 
       const mainTs = await readFile(
         join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
+        "utf8",
       );
       expect(mainTs).not.toContain("merge-to-head");
     });
@@ -442,7 +427,7 @@ describe("InitService scaffold", () => {
 
       const mainTs = await readFile(
         join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
+        "utf8",
       );
       expect(mainTs).toContain("implement.commits.length");
     });
@@ -453,7 +438,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain("gh issue list");
       expect(prompt).toContain("gh issue close");
@@ -468,7 +453,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain(
         "already been filtered to issues ready for work",
@@ -483,7 +468,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "review-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain("{{BRANCH}}");
     });
@@ -501,7 +486,7 @@ describe("InitService scaffold", () => {
 
       const standards = await readFile(
         join(dir, ".sandcastle", "CODING_STANDARDS.md"),
-        "utf-8",
+        "utf8",
       );
       expect(standards).toContain("# Coding Standards");
       // Should have guiding comment, not opinionated defaults
@@ -514,7 +499,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "review-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain("@.sandcastle/CODING_STANDARDS.md");
     });
@@ -525,7 +510,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "review-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain("git diff {{TARGET_BRANCH}}...{{BRANCH}}");
       expect(prompt).toContain("git log {{TARGET_BRANCH}}..{{BRANCH}}");
@@ -542,7 +527,7 @@ describe("InitService scaffold", () => {
 
       const mainTs = await readFile(
         join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
+        "utf8",
       );
       const implementerSection = mainTs.slice(
         mainTs.indexOf('name: "implementer"'),
@@ -558,7 +543,7 @@ describe("InitService scaffold", () => {
 
       const mainTs = await readFile(
         join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
+        "utf8",
       );
       const noCommitIndex = mainTs.indexOf("!implement.commits.length");
       const section = mainTs.slice(noCommitIndex, noCommitIndex + 400);
@@ -769,12 +754,12 @@ describe("InitService scaffold", () => {
     });
 
     describe("reflects the detected package manager and what init already did", () => {
-      const managers: Array<{
+      const managers: {
         pm: PackageManager;
         run: string;
         add: string;
         install: string;
-      }> = [
+      }[] = [
         {
           pm: "npm",
           run: "npm run sandcastle",
@@ -811,7 +796,9 @@ describe("InitService scaffold", () => {
               zodInstalled ? ["zod"] : [],
             ).join("\n");
             expect(joined).toContain(`Run \`${run}\``);
-            if (pm !== "npm") expect(joined).not.toMatch(/\bnpm run/);
+            if (pm !== "npm") {
+              expect(joined).not.toMatch(/\bnpm run/);
+            }
             if (zodInstalled) {
               expect(joined).not.toContain("zod");
               expect(joined).not.toContain("schema validator");
@@ -827,7 +814,9 @@ describe("InitService scaffold", () => {
         it(`blank, ${pm}: run step uses ${run}`, () => {
           const joined = next("blank", "main.ts", pm).join("\n");
           expect(joined).toContain(`Run \`${run}\``);
-          if (pm !== "npm") expect(joined).not.toMatch(/\bnpm run/);
+          if (pm !== "npm") {
+            expect(joined).not.toMatch(/\bnpm run/);
+          }
         });
       }
 
@@ -881,7 +870,7 @@ describe("InitService scaffold", () => {
 
     const dockerfile = await readFile(
       join(dir, ".sandcastle", "Dockerfile"),
-      "utf-8",
+      "utf8",
     );
     expect(dockerfile).toContain("FROM node:22-bookworm");
     expect(dockerfile).toContain("@mariozechner/pi-coding-agent");
@@ -892,10 +881,7 @@ describe("InitService scaffold", () => {
     const dir = await makeDir();
     await runScaffold(dir, { agent: piAgent, model: "claude-sonnet-4-6" });
 
-    const mainTs = await readFile(
-      join(dir, ".sandcastle", "main.mts"),
-      "utf-8",
-    );
+    const mainTs = await readFile(join(dir, ".sandcastle", "main.mts"), "utf8");
     expect(mainTs).toContain('pi("claude-sonnet-4-6")');
     expect(mainTs).not.toContain("claudeCode");
   });
@@ -906,7 +892,7 @@ describe("InitService scaffold", () => {
 
     const dockerfile = await readFile(
       join(dir, ".sandcastle", "Dockerfile"),
-      "utf-8",
+      "utf8",
     );
     expect(dockerfile).toContain("FROM node:22-bookworm");
     expect(dockerfile).toContain("@openai/codex");
@@ -917,10 +903,7 @@ describe("InitService scaffold", () => {
     const dir = await makeDir();
     await runScaffold(dir, { agent: codexAgent, model: "gpt-5.4-mini" });
 
-    const mainTs = await readFile(
-      join(dir, ".sandcastle", "main.mts"),
-      "utf-8",
-    );
+    const mainTs = await readFile(join(dir, ".sandcastle", "main.mts"), "utf8");
     expect(mainTs).toContain('codex("gpt-5.4-mini")');
     expect(mainTs).not.toContain("claudeCode");
   });
@@ -931,7 +914,7 @@ describe("InitService scaffold", () => {
 
     const dockerfile = await readFile(
       join(dir, ".sandcastle", "Dockerfile"),
-      "utf-8",
+      "utf8",
     );
     expect(dockerfile).toContain("FROM node:22-bookworm");
     expect(dockerfile).toContain("cursor.com/install");
@@ -948,10 +931,7 @@ describe("InitService scaffold", () => {
     const dir = await makeDir();
     await runScaffold(dir, { agent: cursorAgent, model: "claude-sonnet-4-6" });
 
-    const mainTs = await readFile(
-      join(dir, ".sandcastle", "main.mts"),
-      "utf-8",
-    );
+    const mainTs = await readFile(join(dir, ".sandcastle", "main.mts"), "utf8");
     expect(mainTs).toContain('cursor("claude-sonnet-4-6")');
     expect(mainTs).not.toContain("claudeCode");
   });
@@ -964,7 +944,7 @@ describe("InitService scaffold", () => {
 
     const prompt = await readFile(
       join(dir, ".sandcastle", "prompt.md"),
-      "utf-8",
+      "utf8",
     );
     expect(prompt).toContain("--label Sandcastle");
   });
@@ -975,7 +955,7 @@ describe("InitService scaffold", () => {
 
     const prompt = await readFile(
       join(dir, ".sandcastle", "prompt.md"),
-      "utf-8",
+      "utf8",
     );
     expect(prompt).not.toContain("--label Sandcastle");
     // The gh issue list command should still be valid
@@ -993,7 +973,7 @@ describe("InitService scaffold", () => {
 
     const prompt = await readFile(
       join(dir, ".sandcastle", "plan-prompt.md"),
-      "utf-8",
+      "utf8",
     );
     expect(prompt).not.toContain("--label Sandcastle");
     expect(prompt).toContain("gh issue list");
@@ -1008,7 +988,7 @@ describe("InitService scaffold", () => {
 
     const prompt = await readFile(
       join(dir, ".sandcastle", "implement-prompt.md"),
-      "utf-8",
+      "utf8",
     );
     expect(prompt).not.toContain("--label Sandcastle");
     expect(prompt).toContain("gh issue list");
@@ -1020,7 +1000,7 @@ describe("InitService scaffold", () => {
     // whose runtime promptArgs do not include TASK_ID (simple-loop,
     // sequential-reviewer's implement, parallel-planner*'s merge),
     // causing PromptArgumentSubstitution to throw on every iteration.
-    const cases: Array<{ template: string; file: string }> = [
+    const cases: { template: string; file: string }[] = [
       { template: "simple-loop", file: "prompt.md" },
       { template: "sequential-reviewer", file: "implement-prompt.md" },
       { template: "parallel-planner", file: "merge-prompt.md" },
@@ -1029,7 +1009,7 @@ describe("InitService scaffold", () => {
     for (const { template, file } of cases) {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: template });
-      const prompt = await readFile(join(dir, ".sandcastle", file), "utf-8");
+      const prompt = await readFile(join(dir, ".sandcastle", file), "utf8");
       expect(prompt, `${template}/${file}`).not.toContain("{{TASK_ID}}");
     }
   });
@@ -1040,7 +1020,7 @@ describe("InitService scaffold", () => {
 
     const prompt = await readFile(
       join(dir, ".sandcastle", "prompt.md"),
-      "utf-8",
+      "utf8",
     );
     expect(prompt).toContain("--label Sandcastle");
   });
@@ -1080,7 +1060,7 @@ describe("InitService scaffold", () => {
 
       const mainTs = await readFile(
         join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
+        "utf8",
       );
       expect(mainTs).toContain("npm install");
       expect(mainTs).toContain("sandcastle");
@@ -1092,7 +1072,7 @@ describe("InitService scaffold", () => {
 
       const mainTs = await readFile(
         join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
+        "utf8",
       );
       expect(mainTs).toContain('"@ai-hero/sandcastle"');
     });
@@ -1103,7 +1083,7 @@ describe("InitService scaffold", () => {
 
       const mainTs = await readFile(
         join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
+        "utf8",
       );
       // All factory calls should use the specified model (default: claude-opus-4-8)
       expect(mainTs).toContain("claude-opus-4-8");
@@ -1115,7 +1095,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain("{{TASK_ID}}");
       expect(prompt).toContain("{{ISSUE_TITLE}}");
@@ -1128,7 +1108,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "merge-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain("{{BRANCHES}}");
       expect(prompt).toContain("{{ISSUES}}");
@@ -1140,7 +1120,7 @@ describe("InitService scaffold", () => {
 
       const mainTs = await readFile(
         join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
+        "utf8",
       );
       expect(mainTs).not.toContain("completedBranches.length === 1");
     });
@@ -1150,13 +1130,13 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner" });
 
       const configDir = join(dir, ".sandcastle");
-      const dockerfile = await readFile(join(configDir, "Dockerfile"), "utf-8");
+      const dockerfile = await readFile(join(configDir, "Dockerfile"), "utf8");
       expect(dockerfile).toContain("FROM node:22-bookworm");
       expect(dockerfile).not.toContain("{{ISSUE_TRACKER_TOOLS}}");
 
       const envExample = await readFile(
         join(configDir, ".env.example"),
-        "utf-8",
+        "utf8",
       );
       // Dynamic env: claude-code agent → CLAUDE_CODE_OAUTH_TOKEN, default issue tracker → GH_TOKEN
       expect(envExample).toContain("CLAUDE_CODE_OAUTH_TOKEN=");
@@ -1195,7 +1175,7 @@ describe("InitService scaffold", () => {
 
       const mainTs = await readFile(
         join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
+        "utf8",
       );
       expect(mainTs).toContain('"@ai-hero/sandcastle"');
     });
@@ -1206,7 +1186,7 @@ describe("InitService scaffold", () => {
 
       const mainTs = await readFile(
         join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
+        "utf8",
       );
       expect(mainTs).toContain("createSandbox");
       expect(mainTs).toContain("sandbox.run");
@@ -1219,7 +1199,7 @@ describe("InitService scaffold", () => {
 
       const mainTs = await readFile(
         join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
+        "utf8",
       );
       expect(mainTs).toContain("implement-prompt.md");
       expect(mainTs).toContain("review-prompt.md");
@@ -1232,7 +1212,7 @@ describe("InitService scaffold", () => {
 
       const mainTs = await readFile(
         join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
+        "utf8",
       );
       // Reviewer result must be captured, not discarded
       expect(mainTs).toContain("const review = await sandbox.run");
@@ -1247,7 +1227,7 @@ describe("InitService scaffold", () => {
 
       const mainTs = await readFile(
         join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
+        "utf8",
       );
       expect(mainTs).toContain("Promise.allSettled");
     });
@@ -1258,7 +1238,7 @@ describe("InitService scaffold", () => {
 
       const mainTs = await readFile(
         join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
+        "utf8",
       );
       // Check planner maxIterations: 1 (near "planner" name)
       const plannerSection = mainTs.slice(
@@ -1295,7 +1275,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain("{{TASK_ID}}");
       expect(prompt).toContain("{{ISSUE_TITLE}}");
@@ -1308,7 +1288,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "review-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain("{{BRANCH}}");
     });
@@ -1319,7 +1299,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "merge-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain("{{BRANCHES}}");
       expect(prompt).toContain("{{ISSUES}}");
@@ -1337,13 +1317,13 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
       const configDir = join(dir, ".sandcastle");
-      const dockerfile = await readFile(join(configDir, "Dockerfile"), "utf-8");
+      const dockerfile = await readFile(join(configDir, "Dockerfile"), "utf8");
       expect(dockerfile).toContain("FROM node:22-bookworm");
       expect(dockerfile).not.toContain("{{ISSUE_TRACKER_TOOLS}}");
 
       const envExample = await readFile(
         join(configDir, ".env.example"),
-        "utf-8",
+        "utf8",
       );
       // Dynamic env: claude-code agent → CLAUDE_CODE_OAUTH_TOKEN, default issue tracker → GH_TOKEN
       expect(envExample).toContain("CLAUDE_CODE_OAUTH_TOKEN=");
@@ -1356,7 +1336,7 @@ describe("InitService scaffold", () => {
 
       const mainTs = await readFile(
         join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
+        "utf8",
       );
       expect(mainTs).toContain("claude-opus-4-8");
     });
@@ -1367,7 +1347,7 @@ describe("InitService scaffold", () => {
 
       const standards = await readFile(
         join(dir, ".sandcastle", "CODING_STANDARDS.md"),
-        "utf-8",
+        "utf8",
       );
       expect(standards).toContain("# Coding Standards");
       expect(standards).toContain("Customize");
@@ -1379,7 +1359,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "review-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain("@.sandcastle/CODING_STANDARDS.md");
     });
@@ -1390,7 +1370,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "review-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain("git diff {{TARGET_BRANCH}}...{{BRANCH}}");
       expect(prompt).toContain("git log {{TARGET_BRANCH}}..{{BRANCH}}");
@@ -1535,7 +1515,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain("gh issue list");
       expect(prompt).toContain("labels");
@@ -1554,7 +1534,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain("bd ready --json");
       expect(prompt).toContain("bd close");
@@ -1573,7 +1553,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).not.toContain("--label Sandcastle");
     });
@@ -1588,7 +1568,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain("--label Sandcastle");
     });
@@ -1603,7 +1583,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).not.toContain("--label Sandcastle");
       expect(prompt).toContain("gh issue list");
@@ -1615,7 +1595,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "prompt.md"),
-        "utf-8",
+        "utf8",
       );
       // Should default to github-issues and replace placeholders
       expect(prompt).toContain("gh issue list");
@@ -1628,7 +1608,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).not.toContain("GitHub issue");
     });
@@ -1639,7 +1619,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain(
         "already been filtered to issues ready for work",
@@ -1661,7 +1641,7 @@ describe("InitService scaffold", () => {
 
       const setup = await readFile(
         join(dir, ".sandcastle", "SETUP_ISSUE_TRACKER.md"),
-        "utf-8",
+        "utf8",
       );
       // Goal + interview + the three commands the agent must produce.
       expect(setup).toContain("list");
@@ -1684,7 +1664,7 @@ describe("InitService scaffold", () => {
 
       const setup = await readFile(
         join(dir, ".sandcastle", "SETUP_ISSUE_TRACKER.md"),
-        "utf-8",
+        "utf8",
       );
       expect(setup).toContain("sandcastle podman build-image");
       expect(setup).not.toContain("sandcastle docker build-image");
@@ -1712,7 +1692,7 @@ describe("InitService scaffold", () => {
 
       const dockerfile = await readFile(
         join(dir, ".sandcastle", "Dockerfile"),
-        "utf-8",
+        "utf8",
       );
       expect(dockerfile).toContain("TODO");
       expect(dockerfile).toContain("SETUP_ISSUE_TRACKER.md");
@@ -1730,7 +1710,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain("exit 1");
       expect(prompt).toContain("SETUP_ISSUE_TRACKER.md");
@@ -1746,7 +1726,7 @@ describe("InitService scaffold", () => {
 
       const envExample = await readFile(
         join(dir, ".sandcastle", ".env.example"),
-        "utf-8",
+        "utf8",
       );
       expect(envExample).toContain("TODO");
       expect(envExample).toContain("SETUP_ISSUE_TRACKER.md");
@@ -1763,7 +1743,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain("gh issue list");
       expect(prompt).toContain("labels");
@@ -1782,7 +1762,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain("bd ready --json");
       expect(prompt).toContain("bd close");
@@ -1798,7 +1778,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).not.toContain("GitHub issue");
     });
@@ -1814,7 +1794,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain("gh issue list");
       expect(prompt).not.toContain("{{LIST_TASKS_COMMAND}}");
@@ -1829,7 +1809,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain("bd ready --json");
       expect(prompt).not.toContain("gh issue");
@@ -1847,7 +1827,7 @@ describe("InitService scaffold", () => {
 
       const planPrompt = await readFile(
         join(dir, ".sandcastle", "plan-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(planPrompt).toContain("gh issue list");
       expect(planPrompt).toContain("labels");
@@ -1864,7 +1844,7 @@ describe("InitService scaffold", () => {
 
       const planPrompt = await readFile(
         join(dir, ".sandcastle", "plan-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(planPrompt).toContain("bd ready --json");
       expect(planPrompt).not.toContain("gh issue");
@@ -1877,10 +1857,7 @@ describe("InitService scaffold", () => {
         templateName: "parallel-planner",
       });
 
-      const main = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
+      const main = await readFile(join(dir, ".sandcastle", "main.mts"), "utf8");
       expect(main).toContain("id: z.string()");
       expect(main).toContain("TASK_ID: issue.id");
       expect(main).not.toContain("number: number");
@@ -1894,10 +1871,7 @@ describe("InitService scaffold", () => {
         templateName: "parallel-planner",
       });
 
-      const main = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
+      const main = await readFile(join(dir, ".sandcastle", "main.mts"), "utf8");
       expect(main).toContain("Output.object");
       expect(main).toContain('tag: "plan"');
       expect(main).toContain("plan.output.issues");
@@ -1914,7 +1888,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain("{{TASK_ID}}");
       expect(prompt).not.toContain("{{ISSUE_NUMBER}}");
@@ -1929,7 +1903,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain("gh issue view");
       expect(prompt).not.toContain("{{VIEW_TASK_COMMAND}}");
@@ -1944,7 +1918,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain("bd show");
       expect(prompt).not.toContain("gh issue");
@@ -1960,7 +1934,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "merge-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain("gh issue close");
       expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
@@ -1975,7 +1949,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "merge-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain("bd close");
       expect(prompt).not.toContain("gh issue");
@@ -1988,7 +1962,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).not.toContain("close the issue when done");
       expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
@@ -2002,7 +1976,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).not.toContain("GitHub issue");
     });
@@ -2018,7 +1992,7 @@ describe("InitService scaffold", () => {
 
       const planPrompt = await readFile(
         join(dir, ".sandcastle", "plan-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(planPrompt).toContain("gh issue list");
       expect(planPrompt).toContain("labels");
@@ -2035,7 +2009,7 @@ describe("InitService scaffold", () => {
 
       const planPrompt = await readFile(
         join(dir, ".sandcastle", "plan-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(planPrompt).toContain("bd ready --json");
       expect(planPrompt).not.toContain("gh issue");
@@ -2048,10 +2022,7 @@ describe("InitService scaffold", () => {
         templateName: "parallel-planner-with-review",
       });
 
-      const main = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
+      const main = await readFile(join(dir, ".sandcastle", "main.mts"), "utf8");
       expect(main).toContain("id: z.string()");
       expect(main).toContain("TASK_ID: issue.id");
       expect(main).not.toContain("number: number");
@@ -2065,10 +2036,7 @@ describe("InitService scaffold", () => {
         templateName: "parallel-planner-with-review",
       });
 
-      const main = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
+      const main = await readFile(join(dir, ".sandcastle", "main.mts"), "utf8");
       expect(main).toContain("Output.object");
       expect(main).toContain('tag: "plan"');
       expect(main).toContain("plan.output.issues");
@@ -2085,7 +2053,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).not.toContain("close the issue when done");
       expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
@@ -2099,7 +2067,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain("{{TASK_ID}}");
       expect(prompt).not.toContain("{{ISSUE_NUMBER}}");
@@ -2114,7 +2082,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain("gh issue view");
       expect(prompt).not.toContain("{{VIEW_TASK_COMMAND}}");
@@ -2129,7 +2097,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain("bd show");
       expect(prompt).not.toContain("gh issue");
@@ -2145,7 +2113,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "merge-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain("gh issue close");
       expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
@@ -2160,7 +2128,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "merge-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).toContain("bd close");
       expect(prompt).not.toContain("gh issue");
@@ -2175,7 +2143,7 @@ describe("InitService scaffold", () => {
 
       const prompt = await readFile(
         join(dir, ".sandcastle", "implement-prompt.md"),
-        "utf-8",
+        "utf8",
       );
       expect(prompt).not.toContain("GitHub issue");
     });
@@ -2190,7 +2158,7 @@ describe("InitService scaffold", () => {
 
       const dockerfile = await readFile(
         join(dir, ".sandcastle", "Dockerfile"),
-        "utf-8",
+        "utf8",
       );
       expect(dockerfile).toContain("GitHub CLI");
       expect(dockerfile).toContain("gh");
@@ -2205,7 +2173,7 @@ describe("InitService scaffold", () => {
 
       const dockerfile = await readFile(
         join(dir, ".sandcastle", "Dockerfile"),
-        "utf-8",
+        "utf8",
       );
       expect(dockerfile).toContain("beads");
       expect(dockerfile).toContain("libicu72");
@@ -2226,7 +2194,7 @@ describe("InitService scaffold", () => {
 
       const containerfile = await readFile(
         join(dir, ".sandcastle", "Containerfile"),
-        "utf-8",
+        "utf8",
       );
       expect(containerfile).toContain("beads");
       expect(containerfile).toContain("libicu72");
@@ -2246,7 +2214,7 @@ describe("InitService scaffold", () => {
 
       const dockerfile = await readFile(
         join(dir, ".sandcastle", "Dockerfile"),
-        "utf-8",
+        "utf8",
       );
       expect(dockerfile).toContain("beads");
       expect(dockerfile).toContain("@mariozechner/pi-coding-agent");
@@ -2261,7 +2229,7 @@ describe("InitService scaffold", () => {
 
       const dockerfile = await readFile(
         join(dir, ".sandcastle", "Dockerfile"),
-        "utf-8",
+        "utf8",
       );
       expect(dockerfile).toMatch(/ARG BEADS_VERSION=\d+\.\d+\.\d+/);
       expect(dockerfile).toContain(
@@ -2294,7 +2262,7 @@ describe("InitService scaffold", () => {
 
           const main = await readFile(
             join(dir, ".sandcastle", "main.mts"),
-            "utf-8",
+            "utf8",
           );
           expect(main).not.toContain("docker()");
           const calls = main.match(/\bdocker\(([^)]*)\)/g) ?? [];
@@ -2318,7 +2286,7 @@ describe("InitService scaffold", () => {
 
         const main = await readFile(
           join(dir, ".sandcastle", "main.mts"),
-          "utf-8",
+          "utf8",
         );
         expect(main).not.toContain("podman()");
         expect(main).not.toMatch(/\bdocker\b/);
@@ -2335,7 +2303,7 @@ describe("InitService scaffold", () => {
 
         const main = await readFile(
           join(dir, ".sandcastle", "main.mts"),
-          "utf-8",
+          "utf8",
         );
         expect(main).toContain("docker()");
         expect(main).not.toContain("sandboxOptions");
@@ -2369,7 +2337,7 @@ describe("InitService scaffold", () => {
       expect(result.mainFilename).toBe("main.mts");
       const mainContent = await readFile(
         join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
+        "utf8",
       );
       expect(mainContent).toContain("@ai-hero/sandcastle");
     });
@@ -2384,6 +2352,17 @@ describe("InitService scaffold", () => {
 
       expect(result.mainFilename).toBe("main.mts");
     });
+
+    it.each(["{ not json", "null", "[]"])(
+      "scaffolds main.mts when package.json is %s",
+      async (content) => {
+        const dir = await makeDir();
+        await writeFile(join(dir, "package.json"), content);
+        const result = await runScaffold(dir);
+
+        expect(result.mainFilename).toBe("main.mts");
+      },
+    );
 
     it("scaffolds main.ts when package.json has type: module", async () => {
       const dir = await makeDir();
@@ -2414,7 +2393,7 @@ describe("InitService scaffold", () => {
 
       const mainContent = await readFile(
         join(dir, ".sandcastle", "main.ts"),
-        "utf-8",
+        "utf8",
       );
       expect(mainContent).toContain("@ai-hero/sandcastle");
       expect(mainContent).toContain('claudeCode("claude-opus-4-8")');
@@ -2430,7 +2409,7 @@ describe("InitService scaffold", () => {
 
       const mainContent = await readFile(
         join(dir, ".sandcastle", "main.ts"),
-        "utf-8",
+        "utf8",
       );
       expect(mainContent).toContain('pi("claude-sonnet-4-6")');
       expect(mainContent).not.toContain("claudeCode");
@@ -2446,7 +2425,7 @@ describe("InitService scaffold", () => {
 
       const mainContent = await readFile(
         join(dir, ".sandcastle", "main.ts"),
-        "utf-8",
+        "utf8",
       );
       expect(mainContent).not.toContain("main.mts");
       expect(mainContent).toContain("main.ts");
@@ -2475,7 +2454,7 @@ describe("InitService scaffold", () => {
 
       const dockerfile = await readFile(
         join(dir, ".sandcastle", "Dockerfile"),
-        "utf-8",
+        "utf8",
       );
       expect(dockerfile).toContain("FROM node:22-bookworm");
       expect(dockerfile).not.toContain("{{ISSUE_TRACKER_TOOLS}}");
@@ -2487,7 +2466,7 @@ describe("InitService scaffold", () => {
 
       const containerfile = await readFile(
         join(dir, ".sandcastle", "Containerfile"),
-        "utf-8",
+        "utf8",
       );
       expect(containerfile).toContain("FROM node:22-bookworm");
       expect(containerfile).not.toContain("{{ISSUE_TRACKER_TOOLS}}");
@@ -2519,7 +2498,7 @@ describe("InitService scaffold", () => {
 
       const mainTs = await readFile(
         join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
+        "utf8",
       );
       expect(mainTs).toContain(
         'import { podman } from "@ai-hero/sandcastle/sandboxes/podman"',
@@ -2537,7 +2516,7 @@ describe("InitService scaffold", () => {
 
       const mainTs = await readFile(
         join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
+        "utf8",
       );
       expect(mainTs).not.toContain("docker");
       // parallel-planner calls the factory three times
@@ -2550,7 +2529,7 @@ describe("InitService scaffold", () => {
 
       const mainTs = await readFile(
         join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
+        "utf8",
       );
       expect(mainTs).toContain(
         'import { run, claudeCode } from "@ai-hero/sandcastle"',
@@ -2629,14 +2608,14 @@ describe("init scaffold consistency (every agent x template x sandbox x tracker)
       // Containerfile: every placeholder resolved, the real mount path shown.
       const containerfile = await readFile(
         join(configDir, sandboxProvider.containerfileName),
-        "utf-8",
+        "utf8",
       );
       expect(containerfile).not.toContain("${SANDBOX_REPO_DIR}");
       expect(containerfile).not.toMatch(/\{\{[A-Z_]+\}\}/);
       expect(containerfile).toContain(SANDBOX_REPO_DIR);
 
       // Main file: the chosen agent, model, sandbox provider and image name.
-      const main = await readFile(join(configDir, mainFilename), "utf-8");
+      const main = await readFile(join(configDir, mainFilename), "utf8");
       expect(main).toContain(`${agent.factoryImport}("test-model")`);
       if (agent.factoryImport !== "claudeCode") {
         expect(main).not.toMatch(/\bclaudeCode\b/);
@@ -2656,7 +2635,7 @@ describe("init scaffold consistency (every agent x template x sandbox x tracker)
       // .env.example: the agent's auth key declared, nothing declared twice.
       const envExample = await readFile(
         join(configDir, ".env.example"),
-        "utf-8",
+        "utf8",
       );
       const keys = declaredKeys(envExample);
       expect(keys).toContain(AGENT_AUTH_KEY[agent.name]);
@@ -2666,7 +2645,7 @@ describe("init scaffold consistency (every agent x template x sandbox x tracker)
       if (issueTracker.name === "custom") {
         const setupDoc = await readFile(
           join(configDir, "SETUP_ISSUE_TRACKER.md"),
-          "utf-8",
+          "utf8",
         );
         expect(setupDoc).toContain(
           `sandcastle ${sandboxProvider.cliNamespace} build-image --image-name ${imageName}`,
@@ -2681,7 +2660,7 @@ describe("init scaffold consistency (every agent x template x sandbox x tracker)
       const { mainFilename } = await runScaffold(dir, { sandboxProvider });
       const main = await readFile(
         join(dir, ".sandcastle", mainFilename),
-        "utf-8",
+        "utf8",
       );
       expect(main).toContain(`sandbox: ${sandboxProvider.name}(),`);
     }

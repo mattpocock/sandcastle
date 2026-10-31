@@ -8,9 +8,8 @@ import {
   planSchema,
   validate,
   VERDICT_LABEL,
-  type GitHubEffect,
-  type Plan,
 } from "./batch";
+import type { GitHubEffect, Plan } from "./batch";
 
 /**
  * Deterministic effects step for batch explore. Validates the agent's whole
@@ -54,9 +53,9 @@ const ghWith = (args: string[], options: { token?: string; input?: string }) =>
   });
 
 const outcome = (entry: Plan["issues"][number]): string =>
-  entry.duplicate_of !== null
-    ? `closed as duplicate of #${entry.duplicate_of}`
-    : `\`${EXPLORE_LABEL}\` → \`${VERDICT_LABEL[entry.tag]}\``;
+  entry.duplicate_of === null
+    ? `\`${EXPLORE_LABEL}\` → \`${VERDICT_LABEL[entry.tag]}\``
+    : `closed as duplicate of #${entry.duplicate_of}`;
 
 const describe = (effect: GitHubEffect): string => {
   switch (effect.kind) {

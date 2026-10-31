@@ -16,11 +16,13 @@ describe("resolveGitMounts", () => {
   };
 
   afterEach(async () => {
-    await Promise.all(dirs.map((d) => rm(d, { recursive: true, force: true })));
+    await Promise.all(
+      dirs.map(async (d) => rm(d, { recursive: true, force: true })),
+    );
     dirs.length = 0;
   });
 
-  const run = (gitPath: string) =>
+  const run = async (gitPath: string) =>
     Effect.runPromise(
       resolveGitMounts(gitPath).pipe(Effect.provide(NodeFileSystem.layer)),
     );
@@ -32,7 +34,7 @@ describe("resolveGitMounts", () => {
 
     const mounts = await run(gitDir);
 
-    expect(mounts).toEqual([{ hostPath: gitDir, sandboxPath: gitDir }]);
+    expect(mounts).toStrictEqual([{ hostPath: gitDir, sandboxPath: gitDir }]);
   });
 
   it("returns both mounts when .git is a worktree file", async () => {
@@ -49,7 +51,7 @@ describe("resolveGitMounts", () => {
 
     const mounts = await run(gitFile);
 
-    expect(mounts).toEqual([
+    expect(mounts).toStrictEqual([
       { hostPath: gitFile, sandboxPath: gitFile },
       { hostPath: parentGitDir, sandboxPath: parentGitDir },
     ]);
@@ -62,6 +64,6 @@ describe("resolveGitMounts", () => {
 
     const mounts = await run(gitFile);
 
-    expect(mounts).toEqual([{ hostPath: gitFile, sandboxPath: gitFile }]);
+    expect(mounts).toStrictEqual([{ hostPath: gitFile, sandboxPath: gitFile }]);
   });
 });

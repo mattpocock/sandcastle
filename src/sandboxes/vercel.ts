@@ -11,11 +11,11 @@ import { readFile, unlink, writeFile, mkdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Writable } from "node:stream";
-import {
-  createIsolatedSandboxProvider,
-  type ExecResult,
-  type IsolatedSandboxHandle,
-  type IsolatedSandboxProvider,
+import { createIsolatedSandboxProvider } from "../SandboxProvider.js";
+import type {
+  ExecResult,
+  IsolatedSandboxHandle,
+  IsolatedSandboxProvider,
 } from "../SandboxProvider.js";
 import { BoundedTail, MAX_TAIL_CHARS } from "../boundedTail.js";
 
@@ -137,7 +137,7 @@ export interface VercelOptions {
 const resolveVercelAuth = (
   options: VercelOptions | undefined,
 ): { token?: string; teamId?: string; projectId?: string } => {
-  const env = process.env;
+  const { env } = process;
   const token = options?.token || env.VERCEL_TOKEN || undefined;
 
   if (!token) {
@@ -204,9 +204,7 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
 
       Object.assign(createParams, resolveVercelAuth(options));
 
-      const sandbox = await Sandbox.create(
-        createParams as Parameters<typeof Sandbox.create>[0],
-      );
+      const sandbox = await Sandbox.create(createParams);
 
       // Ensure worktree directory exists
       await sandbox.mkDir(VERCEL_REPO_PATH);
@@ -223,13 +221,13 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
           },
         ): Promise<ExecResult> => {
           if (opts?.onLine) {
-            const onLine = opts.onLine;
+            const { onLine } = opts;
             const stdoutTail = new BoundedTail(maxOutputTailChars, "\n");
             const stderrTail = new BoundedTail(maxOutputTailChars, "");
             let partial = "";
 
             const stdoutWritable = new Writable({
-              write(chunk, _encoding, callback) {
+              write(chunk: Buffer, _encoding, callback) {
                 const text = partial + chunk.toString();
                 const lines = text.split("\n");
                 partial = lines.pop() ?? "";
@@ -250,7 +248,7 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
             });
 
             const stderrWritable = new Writable({
-              write(chunk, _encoding, callback) {
+              write(chunk: Buffer, _encoding, callback) {
                 stderrTail.push(chunk.toString());
                 callback();
               },

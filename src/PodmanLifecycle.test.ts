@@ -1,15 +1,29 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
+import type * as ChildProcessModule from "node:child_process";
 
-vi.mock("node:child_process", () => ({
-  execFile: vi.fn(),
-  execFileSync: vi.fn(),
-}));
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof ChildProcessModule>();
+  return {
+    ...actual,
+    execFile: vi.fn<typeof actual.execFile>(),
+    execFileSync: vi.fn<typeof actual.execFileSync>(),
+  };
+});
 
-import { execFile } from "node:child_process";
+import { ChildProcess, execFile } from "node:child_process";
 import { buildImage, removeImage } from "./PodmanLifecycle.js";
 
 const mockExecFile = vi.mocked(execFile);
+
+/** Makes the mocked execFile call back with the given outcome. */
+const respondWith = (error: Error | null, stdout: string, stderr: string) => {
+  mockExecFile.mockImplementation((...args) => {
+    // The callback is execFile's fourth argument.
+    args[3]?.(error, stdout, stderr);
+    return new ChildProcess();
+  });
+};
 
 describe("PodmanLifecycle", () => {
   afterEach(() => {
@@ -17,10 +31,7 @@ describe("PodmanLifecycle", () => {
   });
   describe("buildImage", () => {
     it("calls podman build with image name and directory", async () => {
-      mockExecFile.mockImplementation((_cmd, args, _opts, cb: any) => {
-        cb(null, "", "");
-        return undefined as any;
-      });
+      respondWith(null, "", "");
 
       await Effect.runPromise(buildImage("my-image", "/path/to/dir"));
 
@@ -33,10 +44,7 @@ describe("PodmanLifecycle", () => {
     });
 
     it("uses -f flag when containerfile option is provided", async () => {
-      mockExecFile.mockImplementation((_cmd, args, _opts, cb: any) => {
-        cb(null, "", "");
-        return undefined as any;
-      });
+      respondWith(null, "", "");
 
       await Effect.runPromise(
         buildImage("my-image", "/path/to/dir", {
@@ -44,7 +52,10 @@ describe("PodmanLifecycle", () => {
         }),
       );
 
-      const args = mockExecFile.mock.calls[0]![1] as string[];
+      const [call] = mockExecFile.mock.calls;
+      assert.isDefined(call);
+      const [, args] = call;
+      assert.exists(args);
       expect(args).toContain("-f");
       expect(args).toContain("build");
       expect(args).toContain("-t");
@@ -52,11 +63,7 @@ describe("PodmanLifecycle", () => {
     });
 
     it("fails with PodmanError when podman build fails", async () => {
-      mockExecFile.mockImplementation((_cmd, _args, _opts, cb: any) => {
-        const err = new Error("build failed");
-        cb(err, "", "error: no such file");
-        return undefined as any;
-      });
+      respondWith(new Error("build failed"), "", "error: no such file");
 
       const result = await Effect.runPromiseExit(
         buildImage("my-image", "/path/to/dir"),
@@ -68,10 +75,7 @@ describe("PodmanLifecycle", () => {
 
   describe("removeImage", () => {
     it("calls podman rmi with image name", async () => {
-      mockExecFile.mockImplementation((_cmd, _args, _opts, cb: any) => {
-        cb(null, "", "");
-        return undefined as any;
-      });
+      respondWith(null, "", "");
 
       await Effect.runPromise(removeImage("my-image"));
 
@@ -84,11 +88,7 @@ describe("PodmanLifecycle", () => {
     });
 
     it("fails with PodmanError when podman rmi fails", async () => {
-      mockExecFile.mockImplementation((_cmd, _args, _opts, cb: any) => {
-        const err = new Error("rmi failed");
-        cb(err, "", "image not found");
-        return undefined as any;
-      });
+      respondWith(new Error("rmi failed"), "", "image not found");
 
       const result = await Effect.runPromiseExit(removeImage("my-image"));
 
@@ -96,14 +96,11 @@ describe("PodmanLifecycle", () => {
     });
 
     it("fails with ImageNotFoundError, not PodmanError, when the image does not exist", async () => {
-      mockExecFile.mockImplementation((_cmd, _args, _opts, cb: any) => {
-        cb(
-          new Error("Command failed"),
-          "",
-          "Error: sandcastle:nope: image not known\n",
-        );
-        return undefined as any;
-      });
+      respondWith(
+        new Error("Command failed"),
+        "",
+        "Error: sandcastle:nope: image not known\n",
+      );
 
       const error = await Effect.runPromise(
         Effect.flip(removeImage("sandcastle:nope")),

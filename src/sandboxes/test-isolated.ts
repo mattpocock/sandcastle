@@ -8,10 +8,10 @@
 
 import { copyFile, cp, mkdir, stat } from "node:fs/promises";
 import { dirname } from "node:path";
-import {
-  createIsolatedSandboxProvider,
-  type IsolatedSandboxHandle,
-  type IsolatedSandboxProvider,
+import { createIsolatedSandboxProvider } from "../SandboxProvider.js";
+import type {
+  IsolatedSandboxHandle,
+  IsolatedSandboxProvider,
 } from "../SandboxProvider.js";
 import { createTempSandbox } from "./test-shared.js";
 
