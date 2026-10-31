@@ -1,4 +1,4 @@
-import { Context, Effect, Exit, Layer } from "effect";
+import { Console, Context, Effect, Exit, Layer } from "effect";
 import { FileSystem } from "@effect/platform";
 import { join, resolve } from "node:path";
 import type { PlatformError } from "@effect/platform/Error";
@@ -213,17 +213,19 @@ const cleanupTempBranch = (
   tempBranch: string,
 ): Effect.Effect<void> =>
   WorktreeManager.deleteTempBranchIfUnused(hostRepoDir, tempBranch).pipe(
-    Effect.tap(({ unmergedCommits }) =>
-      Effect.sync(() => {
-        if (unmergedCommits === 0) return;
-        const s = unmergedCommits === 1 ? "" : "s";
-        console.error(
+    Effect.tap(({ unmergedCommits }) => {
+      if (unmergedCommits === 0) {
+        return Effect.void;
+      }
+      const s = unmergedCommits === 1 ? "" : "s";
+      return Effect.all([
+        Console.error(
           `\nTemporary branch '${tempBranch}' kept: it has ${unmergedCommits} commit${s} not on any other branch.`,
-        );
-        console.error(`  To merge: git merge ${tempBranch}`);
-        console.error(`  To discard: git branch -D ${tempBranch}`);
-      }),
-    ),
+        ),
+        Console.error(`  To merge: git merge ${tempBranch}`),
+        Console.error(`  To discard: git branch -D ${tempBranch}`),
+      ]);
+    }),
     Effect.asVoid,
     Effect.catchAll(() => Effect.void),
   );
@@ -262,10 +264,11 @@ const cleanupWorktree = (
         );
         return Effect.succeed(worktreePath as string | undefined);
       }
-      if (!Exit.isSuccess(exit)) {
-        console.error(`\nWorktree removed (no uncommitted changes)`);
-      }
-      return WorktreeManager.remove(worktreePath).pipe(
+      const announceRemoval = Exit.isSuccess(exit)
+        ? Effect.void
+        : Console.error(`\nWorktree removed (no uncommitted changes)`);
+      return announceRemoval.pipe(
+        Effect.andThen(WorktreeManager.remove(worktreePath)),
         Effect.andThen(
           temp ? cleanupTempBranch(temp.hostRepoDir, temp.branch) : Effect.void,
         ),
@@ -374,12 +377,10 @@ export const WorktreeDockerSandboxFactory = {
       const pruneAndCreate = () =>
         WorktreeManager.pruneStale(hostRepoDir).pipe(
           Effect.catchAll((e) =>
-            Effect.sync(() => {
-              console.error(
-                "[sandcastle] Warning: failed to prune stale worktrees:",
-                e.message,
-              );
-            }),
+            Console.error(
+              "[sandcastle] Warning: failed to prune stale worktrees:",
+              e.message,
+            ),
           ),
           Effect.andThen(
             branch

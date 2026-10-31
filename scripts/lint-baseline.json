@@ -1386,10 +1386,8 @@
     "effect/deterministicKeys": 2,
     "effect/effectMapVoid": 1,
     "effect/effectSucceedWithVoid": 2,
-    "effect/globalConsole": 4,
-    "effect/globalConsoleInEffect": 4,
+    "effect/globalConsole": 3,
     "effect/nodeBuiltinImport": 1,
-    "eslint(curly)": 1,
     "eslint(max-classes-per-file)": 1,
     "eslint(max-lines-per-function)": 3,
     "eslint(max-lines)": 1,
@@ -1598,7 +1596,6 @@
   },
   "src/syncOut.ts": {
     "effect/asyncFunction": 6,
-    "effect/globalConsoleInEffect": 1,
     "effect/globalDateInEffect": 1,
     "effect/nodeBuiltinImport": 3,
     "eslint(complexity)": 1,
@@ -1719,7 +1716,6 @@
     "vitest(require-to-throw-message)": 2
   },
   "src/WorktreeManager.ts": {
-    "effect/globalConsoleInEffect": 6,
     "effect/globalDate": 1,
     "effect/missingReturnYieldStar": 1,
     "effect/nodeBuiltinImport": 2,
