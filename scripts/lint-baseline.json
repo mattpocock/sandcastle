@@ -387,7 +387,6 @@
   "src/createSandbox.ts": {
     "effect/anyUnknownInErrorContext": 2,
     "effect/globalConsole": 3,
-    "effect/multipleEffectProvide": 1,
     "effect/newPromise": 1,
     "eslint(complexity)": 3,
     "eslint(curly)": 6,
@@ -468,7 +467,6 @@
     "vitest(prefer-to-have-length)": 3
   },
   "src/createWorktree.ts": {
-    "effect/multipleEffectProvide": 2,
     "eslint(arrow-body-style)": 1,
     "eslint(complexity)": 1,
     "eslint(curly)": 1,
@@ -725,7 +723,6 @@
   },
   "src/interactive.ts": {
     "effect/globalErrorInEffectFailure": 1,
-    "effect/multipleEffectProvide": 1,
     "eslint(complexity)": 2,
     "eslint(curly)": 1,
     "eslint(max-lines-per-function)": 4,

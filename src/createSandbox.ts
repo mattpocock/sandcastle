@@ -689,8 +689,9 @@ const buildSandboxHandle = (
                 }),
             );
           }).pipe(
-            Effect.provide(ClackDisplay.layer),
-            Effect.provide(NodeContext.layer),
+            Effect.provide(
+              Layer.mergeAll(ClackDisplay.layer, NodeContext.layer),
+            ),
           ),
         );
       } catch (error: unknown) {

@@ -501,9 +501,13 @@ export const createWorktree = async (
     try {
       return await Effect.runPromise(
         inner.pipe(
-          Effect.provide(ClackDisplay.layer),
-          Effect.provide(NodeContext.layer),
-          Effect.provide(NodeFileSystem.layer),
+          Effect.provide(
+            Layer.mergeAll(
+              ClackDisplay.layer,
+              NodeContext.layer,
+              NodeFileSystem.layer,
+            ),
+          ),
         ),
       );
     } catch (error: unknown) {
@@ -754,9 +758,13 @@ export const createWorktree = async (
     try {
       return await Effect.runPromise(
         inner.pipe(
-          Effect.provide(ClackDisplay.layer),
-          Effect.provide(NodeContext.layer),
-          Effect.provide(NodeFileSystem.layer),
+          Effect.provide(
+            Layer.mergeAll(
+              ClackDisplay.layer,
+              NodeContext.layer,
+              NodeFileSystem.layer,
+            ),
+          ),
         ),
       );
     } catch (error: unknown) {
