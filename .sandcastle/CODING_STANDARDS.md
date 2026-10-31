@@ -114,6 +114,8 @@ New tests go in `tests/` and use only the public API: `@ai-hero/sandcastle` and 
 
 A migration PR may delete a legacy test only when `npm run coverage:gate -- <file>` passes: every line only that file covers must now be covered by `tests/`. Paste its output into the PR body.
 
+Never delete a test to satisfy the test ratchet. When a change trips the ratchet on a legacy test, either port its cases to a public-API test in `tests/` first (the deletion then follows the rule above), or leave the test where it is — it stays in the baseline, which is fine. The ratchet counts files, not cases: deleting a test lowers the count while the behaviour it guarded silently loses coverage, and CI can't tell. Reviewers enforce this; send back any PR that deletes a test without porting its cases.
+
 Never extend or loosen the public API to suit a test. The only test-motivated surface allowed is the test helpers entry point, which a later PR designs. If a test can't reach something through the public API, that code is either dead or missing a real public seam.
 
 ### Core Principle
