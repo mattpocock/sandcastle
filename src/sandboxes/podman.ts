@@ -288,9 +288,13 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
       // Register synchronous container cleanup via the shared shutdown registry
       // so concurrent sandboxes share a single exit/SIGINT/SIGTERM listener
       // instead of tripping Node's MaxListenersExceededWarning.
+      // `--time 0`: PID 1 is `sleep infinity`, which ignores SIGTERM, so a
+      // plain `rm -f` waits out the 10 s StopTimeout before SIGKILL. The 5 s
+      // timeout below would kill that `rm` mid-stop and leave the container
+      // in `Stopping` indefinitely.
       const removeContainerSync = () => {
         try {
-          execFileSync("podman", ["rm", "-f", containerName], {
+          execFileSync("podman", ["rm", "-f", "--time", "0", containerName], {
             stdio: "ignore",
             timeout: 5000,
           });
@@ -440,13 +444,17 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
         close: async (): Promise<void> => {
           unregisterShutdown();
           await new Promise<void>((resolve, reject) => {
-            execFile("podman", ["rm", "-f", containerName], (error) => {
-              if (error) {
-                reject(new Error(`podman rm failed: ${error.message}`));
-              } else {
-                resolve();
-              }
-            });
+            execFile(
+              "podman",
+              ["rm", "-f", "--time", "0", containerName],
+              (error) => {
+                if (error) {
+                  reject(new Error(`podman rm failed: ${error.message}`));
+                } else {
+                  resolve();
+                }
+              },
+            );
           });
         },
       };
