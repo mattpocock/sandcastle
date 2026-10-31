@@ -459,18 +459,15 @@ describe("signal (AbortSignal)", () => {
     const reason = new DOMException("user cancelled", "AbortError");
     const ac = new AbortController();
     ac.abort(reason);
-    try {
-      await run({
+    await expect(
+      run({
         agent: claudeCode("claude-opus-4-8"),
         sandbox: testSandbox,
         prompt: "test",
         branchStrategy: { type: "head" },
         signal: ac.signal,
-      });
-      expect.unreachable("should have thrown");
-    } catch (err) {
-      expect(err).toBe(reason);
-    }
+      }),
+    ).rejects.toBe(reason);
   });
 });
 
@@ -808,8 +805,8 @@ describe("inline prompt passthrough", () => {
     // matching value". With inline passthrough, {{KEY}} is delivered literally
     // and substitution is skipped entirely, so no scan happens.
     //
-    // The run still fails (fake sandbox can't actually run the agent) but the
-    // failure must not be a prompt-substitution error.
+    // The fake sandbox runs to completion, so the run resolves; a
+    // prompt-substitution error would reject it.
     const promise = run({
       agent: claudeCode("claude-opus-4-8"),
       sandbox: testSandbox,
@@ -817,10 +814,7 @@ describe("inline prompt passthrough", () => {
       branchStrategy: { type: "head" },
     });
 
-    await promise.catch((err: Error) => {
-      expect(err.message).not.toContain("matching value in promptArgs");
-      expect(err.message).not.toContain("{{BRANCH}}");
-    });
+    await expect(promise).resolves.toHaveProperty("iterations");
   });
 
   it("accepts inline prompt with empty promptArgs ({})", async () => {
@@ -835,11 +829,7 @@ describe("inline prompt passthrough", () => {
       promptArgs: {},
     });
 
-    await promise.catch((err: Error) => {
-      expect(err.message).not.toContain(
-        "promptArgs is only supported with promptFile",
-      );
-    });
+    await expect(promise).resolves.toHaveProperty("iterations");
   });
 });
 
@@ -1029,21 +1019,18 @@ describe("structured output error carries the failed session id", () => {
   it("threads iterations[].sessionId onto StructuredOutputError", async () => {
     // captureSessions: false keeps the session id from the stream without
     // attempting to transfer a (nonexistent) session file off the sandbox.
-    try {
-      await run({
-        agent: claudeCode("claude-opus-4-8", { captureSessions: false }),
-        sandbox: sessionEmittingSandbox,
-        prompt: "emit your answer inside <result> tags",
-        branchStrategy: { type: "head" },
-        output: Output.object({ tag: "result", schema: mockSchema() }),
-      });
-      expect.unreachable("should have thrown StructuredOutputError");
-    } catch (err) {
-      expect(err).toBeInstanceOf(StructuredOutputError);
-      const soe = err as StructuredOutputError;
-      expect(soe.sessionId).toBe("sess-abc-123");
-      expect(soe.rawMatched).toBe("not valid json");
-    }
+    const promise = run({
+      agent: claudeCode("claude-opus-4-8", { captureSessions: false }),
+      sandbox: sessionEmittingSandbox,
+      prompt: "emit your answer inside <result> tags",
+      branchStrategy: { type: "head" },
+      output: Output.object({ tag: "result", schema: mockSchema() }),
+    });
+    await expect(promise).rejects.toBeInstanceOf(StructuredOutputError);
+    await expect(promise).rejects.toMatchObject({
+      sessionId: "sess-abc-123",
+      rawMatched: "not valid json",
+    });
   });
 });
 
@@ -1398,7 +1385,7 @@ describe("output.maxRetries end-to-end", () => {
     const sandbox = stagedAgentSandbox([badStage, badStage, badStage]);
 
     try {
-      await run({
+      const promise = run({
         agent: claudeCode("claude-opus-4-8", {
           captureSessions: false,
           sessionStorage: { hostProjectsDir },
@@ -1412,10 +1399,10 @@ describe("output.maxRetries end-to-end", () => {
           maxRetries: 2,
         }),
       });
-      expect.unreachable("should have thrown StructuredOutputError");
-    } catch (err) {
-      expect(err).toBeInstanceOf(StructuredOutputError);
-      expect((err as StructuredOutputError).rawMatched).toBe("still not valid");
+      await expect(promise).rejects.toBeInstanceOf(StructuredOutputError);
+      await expect(promise).rejects.toMatchObject({
+        rawMatched: "still not valid",
+      });
     } finally {
       rmSync(hostProjectsDir, { recursive: true, force: true });
     }
