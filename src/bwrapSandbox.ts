@@ -14,6 +14,9 @@ import type { BindMountCreateOptions } from "./SandboxProvider.js";
 import { BoundedTail } from "./boundedTail.js";
 import { BwrapError, CopyError } from "./errors.js";
 
+export { INFO_FD, killSandboxProcess, parseChildPid } from "./bwrapProcess.js";
+export type { SandboxProcess } from "./bwrapProcess.js";
+
 /** The private home's path inside the sandbox. */
 export const SANDBOX_HOME = "/home/agent";
 const SANDBOX_TMP = "/tmp";

@@ -18,15 +18,18 @@ import type { FileSystem } from "@effect/platform";
 import { NodeFileSystem } from "@effect/platform-node";
 import { Config, Effect } from "effect";
 import {
+  INFO_FD,
   SANDBOX_HOME,
   collectOutput,
   copyCreatingParents,
+  killSandboxProcess,
   makePrivateDirs,
   removePrivateDirs,
   sandboxArgs,
+  parseChildPid,
   toHostPath,
 } from "../bwrapSandbox.js";
-import type { PrivateDirs } from "../bwrapSandbox.js";
+import type { PrivateDirs, SandboxProcess } from "../bwrapSandbox.js";
 import { createBindMountSandboxProvider } from "../SandboxProvider.js";
 import type {
   BindMountCreateOptions,
@@ -53,17 +56,39 @@ export interface BwrapOptions {
   readonly maxOutputTailChars?: number;
 }
 
+/** Tracks the sandbox PID bwrap reports on the child's {@link INFO_FD} pipe. */
+const trackSandboxProcess = (proc: ChildProcess): SandboxProcess => {
+  const info = proc.stdio[INFO_FD];
+  const tracked: { -readonly [K in keyof SandboxProcess]: SandboxProcess[K] } =
+    { proc, sandboxPid: undefined, reported: Promise.resolve() };
+  if (info !== null && info !== undefined) {
+    let text = "";
+    info.on("data", (chunk: Buffer) => {
+      text += chunk.toString();
+    });
+    const record = async (): Promise<void> => {
+      await once(info, "close").catch(() => undefined);
+      tracked.sandboxPid = parseChildPid(text);
+    };
+    tracked.reported = record();
+  }
+  return tracked;
+};
+
 type ExecOptions = Parameters<BindMountSandboxHandle["exec"]>[1];
 
 /** Runs `sh -c command` in a fresh bwrap and resolves when it exits. */
 const runInBwrap = async (
   args: readonly string[],
   opts: ExecOptions,
-  sandbox: { live: Set<ChildProcess>; maxTailChars: number },
+  sandbox: { live: Set<SandboxProcess>; maxTailChars: number },
 ): Promise<ExecResult> => {
   const { live, maxTailChars } = sandbox;
-  const proc = spawn("bwrap", args, { stdio: ["pipe", "pipe", "pipe"] });
-  live.add(proc);
+  const proc = spawn("bwrap", ["--info-fd", String(INFO_FD), ...args], {
+    stdio: ["pipe", "pipe", "pipe", "pipe"],
+  });
+  const tracked = trackSandboxProcess(proc);
+  live.add(tracked);
   const output = collectOutput(proc, opts?.onLine, maxTailChars);
   proc.stdin.on("error", () => undefined);
   proc.stdin.end(opts?.stdin ?? "");
@@ -71,7 +96,7 @@ const runInBwrap = async (
     await once(proc, "close");
     return { ...output(), exitCode: proc.exitCode ?? 1 };
   } finally {
-    live.delete(proc);
+    live.delete(tracked);
   }
 };
 
@@ -99,10 +124,10 @@ const createHandle = async (
   maxTailChars: number,
 ): Promise<BindMountSandboxHandle> => {
   const { dirs, baseArgs } = await prepare(options);
-  const live = new Set<ChildProcess>();
+  const live = new Set<SandboxProcess>();
   const killAll = (): void => {
-    for (const proc of live) {
-      proc.kill("SIGKILL");
+    for (const sandbox of live) {
+      killSandboxProcess(sandbox);
     }
   };
   const unregisterShutdown = registerShutdown(killAll);
@@ -131,7 +156,10 @@ const createHandle = async (
       copyCreatingParents(hostPathOf(sandboxFile), hostPath).pipe(runOnHost),
     close: async () => {
       closed = true;
-      const exits = [...live].map(async (proc) => once(proc, "close"));
+      const running = [...live];
+      const exits = running.map(async ({ proc }) => once(proc, "close"));
+      // Wait for each sandbox's PID 1, so a just-started exec is killed too.
+      await Promise.all(running.map(async ({ reported }) => reported));
       killAll();
       await Promise.allSettled(exits);
       unregisterShutdown();
