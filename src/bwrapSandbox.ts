@@ -22,6 +22,9 @@ import { BwrapError, CopyError } from "./errors.js";
 /** The construction check, from its own module (it runs a process, synchronously). */
 export { assertBwrapUsable } from "./bwrapPreflight.js";
 export type { IdentityMount, MountConfig } from "./identityMounts.js";
+/** Tracking and killing each exec's processes, from their own module. */
+export { INFO_FD, killSandboxProcess, parseChildPid } from "./bwrapProcess.js";
+export type { SandboxProcess } from "./bwrapProcess.js";
 
 /** The private home's path inside the sandbox. */
 export const SANDBOX_HOME = "/home/agent";
