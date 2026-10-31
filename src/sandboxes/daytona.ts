@@ -102,7 +102,7 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
       const sandbox = await client.create({
         ...options?.create,
         envVars: { ...createOptions.env, ...options?.create?.envVars },
-      } as any);
+      });
 
       const workDir =
         (await sandbox.getWorkDir()) ??
