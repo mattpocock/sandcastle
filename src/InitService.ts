@@ -146,6 +146,16 @@ export const addDependencyCommand = (
   }
 };
 
+/** Build the command that runs a package.json script for the given package manager. */
+const runScriptCommand = (
+  packageManager: PackageManager,
+  script: string,
+): string => `${packageManager} run ${script}`;
+
+/** Build the command that installs all dependencies for the given package manager. */
+const installCommand = (packageManager: PackageManager): string =>
+  `${packageManager} install`;
+
 /**
  * Whether the host package.json already declares `pkg` in any of its dependency
  * maps. Used so init doesn't offer to install something already present.
@@ -626,7 +636,10 @@ export function getNextStepsLines(
   issueTracker: IssueTrackerEntry,
   agent: AgentEntry,
   packageManager: PackageManager,
+  /** Template dependencies the host already has (declared, or installed by init). */
+  installedDependencies: readonly string[],
 ): string[] {
+  const runStep = `Run \`${runScriptCommand(packageManager, "sandcastle")}\` to start the agent`;
   // The custom issue tracker scaffolds a broken-until-configured project, so
   // its next steps are about running the setup prompt — not the template's
   // normal "set env vars and go" flow. This branch wins over template-specific
@@ -655,12 +668,14 @@ export function getNextStepsLines(
       "2. Read and customize .sandcastle/prompt.md to describe what you want the agent to do",
       `3. Customize .sandcastle/${mainFilename} — it uses the JS API (\`run()\`) to control how the agent runs`,
       `4. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
-      "5. Run `npm run sandcastle` to start the agent",
+      `5. ${runStep}`,
     );
     return lines;
   } else {
     const hasReviewer = template.includes("review");
-    const usesPlanSchema = getTemplateDependencies(template).includes("zod");
+    const needsPlanSchema =
+      getTemplateDependencies(template).includes("zod") &&
+      !installedDependencies.includes("zod");
     let step = 1;
     const lines: string[] = [
       "Next steps:",
@@ -673,9 +688,13 @@ export function getNextStepsLines(
     }
     lines.push(
       `${step++}. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
-      `${step++}. Templates use \`copyToWorktree: ["node_modules"]\` to copy your host node_modules into the sandbox for fast startup — the \`npm install\` in the onSandboxReady hook is a safety net for platform-specific binaries. Adjust both if you use a different package manager`,
+      `${step++}. Templates use \`copyToWorktree: ["node_modules"]\` to copy your host node_modules into the sandbox for fast startup — the \`npm install\` in the onSandboxReady hook is a safety net for platform-specific binaries. ${
+        packageManager === "npm"
+          ? "Adjust both if you use a different package manager"
+          : `This project uses ${packageManager}, so change the hook to \`${installCommand(packageManager)}\` and check \`copyToWorktree\` suits it`
+      }`,
     );
-    if (usesPlanSchema) {
+    if (needsPlanSchema) {
       lines.push(
         `${step++}. Install a schema validator for the planner's \`<plan>\` output — the template uses Zod (\`${addDependencyCommand(packageManager, "zod")}\`), but Valibot, ArkType, or any Standard Schema library works (https://standardschema.dev)`,
       );
@@ -688,7 +707,7 @@ export function getNextStepsLines(
         `${step++}. Customize .sandcastle/CODING_STANDARDS.md with your project's standards — the reviewer agent loads it during review`,
       );
     }
-    lines.push(`${step++}. Run \`npm run sandcastle\` to start the agent`);
+    lines.push(`${step++}. ${runStep}`);
     return lines;
   }
 }
