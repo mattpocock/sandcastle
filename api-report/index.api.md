@@ -210,11 +210,18 @@ export interface CreateWorktreeOptions {
 }
 
 // @public (undocumented)
-export const cursor: (model: string, options?: CursorOptions) => AgentProvider;
+export const cursor: (model: string, options?: CursorOptions) => AgentProvider & {
+    readonly sessionStorage: AgentSessionStorage;
+};
 
 // @public
 export interface CursorOptions {
+    readonly captureSessions?: boolean;
     readonly env?: Record<string, string>;
+    readonly sessionStorage?: {
+        readonly hostChatsDir?: string;
+        readonly sandboxChatsDir?: string;
+    };
 }
 
 // @public
