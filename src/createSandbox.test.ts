@@ -483,7 +483,7 @@ describe("createSandbox", () => {
       });
 
       // Usage was parsed out of the captured session JSONL.
-      expect(firstIteration(result).usage).toEqual({
+      expect(result.iterations[0]!.usage).toStrictEqual({
         inputTokens: 50_000,
         cacheCreationInputTokens: 0,
         cacheReadInputTokens: 0,
@@ -840,7 +840,7 @@ describe("createSandbox", () => {
       expect(resumed.iterations).toHaveLength(1);
       expect(forked.iterations).toHaveLength(1);
       // The follow-up prompts are inline: passed as-is, never substituted.
-      expect(agentStdin).toEqual([
+      expect(agentStdin).toStrictEqual([
         "Remember tok-123",
         "repeat {{TOKEN}}",
         "fork {{TOKEN}}",
@@ -2465,7 +2465,7 @@ describe("createSandbox", () => {
         join(sandbox.worktreePath, "config.json"),
         "utf8",
       );
-      expect(JSON.parse(copied)).toEqual({ key: "value" });
+      expect(JSON.parse(copied)).toStrictEqual({ key: "value" });
     } finally {
       await sandbox.close();
       await rm(hostDir, { recursive: true, force: true });
