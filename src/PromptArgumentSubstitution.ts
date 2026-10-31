@@ -83,7 +83,11 @@ export const findMissingPromptArgKeys = (
     if (builtInSet.has(key)) {
       continue;
     }
-    if (key in providedArgs && providedArgs[key] != null) {
+    if (
+      key in providedArgs &&
+      providedArgs[key] !== null &&
+      providedArgs[key] !== undefined
+    ) {
       continue;
     }
     missing.push(key);
@@ -151,7 +155,7 @@ export const substitutePromptArgs = (
         );
       }
       const value = sanitizedArgs[key];
-      if (value == null) {
+      if (value === null || value === undefined) {
         return yield* Effect.fail(
           new PromptError({
             message: `Prompt argument "{{${key}}}" has value ${value === null ? "null" : "undefined"} in promptArgs`,
