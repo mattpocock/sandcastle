@@ -42,6 +42,8 @@ const invokeAgent = (
 > =>
   Effect.gen(function* () {
     let resultText = "";
+    // Last error the agent reported in its own stream (see ParsedStreamEvent).
+    let streamError: string | undefined;
     let sessionId: string | undefined;
     let usage: IterationUsage | undefined;
     // Accumulated text/result output, scanned for the completion signal so a
@@ -169,6 +171,8 @@ const invokeAgent = (
               sessionId = parsed.sessionId;
             } else if (parsed.type === "usage") {
               usage = parsed.usage;
+            } else if (parsed.type === "error") {
+              streamError = parsed.message;
             }
           }
           // Check for the completion signal AFTER parsing this line so the
@@ -189,9 +193,13 @@ const invokeAgent = (
       });
 
       if (execResult.exitCode !== 0) {
-        // Prefer stderr; fall back to resultText (from parsed stream events),
-        // then to the tail of raw stdout (last 20 non-empty lines).
+        // Prefer stderr; fall back to the stream's own error, then resultText
+        // (from parsed stream events), then to the tail of raw stdout (last
+        // 20 non-empty lines).
         let errorDetail = execResult.stderr;
+        if (!errorDetail.trim()) {
+          errorDetail = streamError ?? "";
+        }
         if (!errorDetail.trim()) {
           errorDetail = resultText;
         }
@@ -202,6 +210,16 @@ const invokeAgent = (
         return yield* Effect.fail(
           new AgentError({
             message: `${provider.name} exited with code ${execResult.exitCode}:\n${errorDetail}`,
+          }),
+        );
+      }
+
+      // Some agents (pi, opencode) exit 0 after reporting a failure in their
+      // stream. Treat the reported error as authoritative.
+      if (streamError !== undefined) {
+        return yield* Effect.fail(
+          new AgentError({
+            message: `${provider.name} reported an error:\n${streamError}`,
           }),
         );
       }

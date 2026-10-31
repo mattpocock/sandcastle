@@ -525,59 +525,47 @@ describe("pi factory", () => {
     );
   });
 
-  it("parseStreamLine captures agent_error event with string error as result", () => {
+  it("parseStreamLine captures agent_error event with string error as an error event", () => {
     const provider = pi("claude-sonnet-4-6");
     const line = JSON.stringify({
       type: "agent_error",
       error: "Authentication failed: invalid API key",
     });
     expect(provider.parseStreamLine(line)).toEqual([
-      {
-        type: "result",
-        result: "Authentication failed: invalid API key",
-      },
+      { type: "error", message: "Authentication failed: invalid API key" },
     ]);
   });
 
-  it("parseStreamLine captures agent_error event with object error as result", () => {
+  it("parseStreamLine captures agent_error event with object error as an error event", () => {
     const provider = pi("claude-sonnet-4-6");
     const line = JSON.stringify({
       type: "agent_error",
       error: { message: "Rate limit exceeded", code: "rate_limit" },
     });
     expect(provider.parseStreamLine(line)).toEqual([
-      {
-        type: "result",
-        result: "Rate limit exceeded",
-      },
+      { type: "error", message: "Rate limit exceeded" },
     ]);
   });
 
-  it("parseStreamLine captures error event with string message as result", () => {
+  it("parseStreamLine captures error event with string message as an error event", () => {
     const provider = pi("claude-sonnet-4-6");
     const line = JSON.stringify({
       type: "error",
       message: "Internal server error",
     });
     expect(provider.parseStreamLine(line)).toEqual([
-      {
-        type: "result",
-        result: "Internal server error",
-      },
+      { type: "error", message: "Internal server error" },
     ]);
   });
 
-  it("parseStreamLine captures error event with string error field as result", () => {
+  it("parseStreamLine captures error event with string error field as an error event", () => {
     const provider = pi("claude-sonnet-4-6");
     const line = JSON.stringify({
       type: "error",
       error: "Connection refused",
     });
     expect(provider.parseStreamLine(line)).toEqual([
-      {
-        type: "result",
-        result: "Connection refused",
-      },
+      { type: "error", message: "Connection refused" },
     ]);
   });
 
@@ -1518,7 +1506,7 @@ describe("opencode factory", () => {
       },
     });
     expect(provider.parseStreamLine(line)).toEqual([
-      { type: "result", result: "Invalid API key" },
+      { type: "error", message: "Invalid API key" },
     ]);
   });
 
@@ -1835,25 +1823,25 @@ describe("copilot factory", () => {
     expect(provider.parseStreamLine("{bad json")).toEqual([]);
   });
 
-  it("parseStreamLine surfaces error events as result (string error)", () => {
+  it("parseStreamLine surfaces error events as error events (string error)", () => {
     const provider = copilot("claude-sonnet-4.5");
     const line = JSON.stringify({
       type: "error",
       error: "Connection refused",
     });
     expect(provider.parseStreamLine(line)).toEqual([
-      { type: "result", result: "Connection refused" },
+      { type: "error", message: "Connection refused" },
     ]);
   });
 
-  it("parseStreamLine surfaces error events as result (object error)", () => {
+  it("parseStreamLine surfaces error events as error events (object error)", () => {
     const provider = copilot("claude-sonnet-4.5");
     const line = JSON.stringify({
       type: "agent_error",
       error: { message: "Rate limit exceeded", code: "rate_limit" },
     });
     expect(provider.parseStreamLine(line)).toEqual([
-      { type: "result", result: "Rate limit exceeded" },
+      { type: "error", message: "Rate limit exceeded" },
     ]);
   });
 
@@ -2584,5 +2572,128 @@ describe("sessionStorage", () => {
       await rm(hostDir, { recursive: true, force: true });
       await rm(sandboxDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("errors the agent reports in its own stream", () => {
+  it("pi: agent_end whose last assistant message stopped with an error emits an error event", () => {
+    // Shape of pi 0.73.1's agent_end when the API rejects the request (here:
+    // claude-haiku-5-5 rejecting pi's default thinking). pi still exits 0.
+    const line = JSON.stringify({
+      type: "agent_end",
+      messages: [
+        { role: "user", content: [{ type: "text", text: "do it" }] },
+        {
+          role: "assistant",
+          content: [],
+          stopReason: "error",
+          errorMessage:
+            '400 {"type":"error","error":{"type":"invalid_request_error","message":"\\"thinking.type.enabled\\" is not supported for this model."}}',
+        },
+      ],
+    });
+    expect(pi("anthropic/claude-haiku-5-5").parseStreamLine(line)).toEqual([
+      {
+        type: "error",
+        message:
+          '400 {"type":"error","error":{"type":"invalid_request_error","message":"\\"thinking.type.enabled\\" is not supported for this model."}}',
+      },
+    ]);
+  });
+
+  it("pi: agent_end with stopReason error but no errorMessage still emits an error event", () => {
+    const line = JSON.stringify({
+      type: "agent_end",
+      messages: [{ role: "assistant", content: [], stopReason: "error" }],
+    });
+    expect(pi("m").parseStreamLine(line)).toEqual([
+      { type: "error", message: 'pi stopped with stopReason "error"' },
+    ]);
+  });
+
+  it("pi: a normal agent_end still emits only the result", () => {
+    const line = JSON.stringify({
+      type: "agent_end",
+      messages: [
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "done" }],
+          stopReason: "stop",
+        },
+      ],
+    });
+    expect(pi("m").parseStreamLine(line)).toEqual([
+      { type: "result", result: "done" },
+    ]);
+  });
+
+  it("claudeCode: a result with is_error emits an error event", () => {
+    const line = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: true,
+      result: "API Error: 400 invalid model",
+    });
+    expect(claudeCode("m").parseStreamLine(line)).toEqual([
+      { type: "error", message: "API Error: 400 invalid model" },
+    ]);
+  });
+
+  it("claudeCode: a successful result is unchanged", () => {
+    const line = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "done",
+    });
+    expect(claudeCode("m").parseStreamLine(line)).toEqual([
+      { type: "result", result: "done" },
+    ]);
+  });
+
+  it("cursor: a result with is_error emits an error event", () => {
+    const line = JSON.stringify({
+      type: "result",
+      subtype: "error",
+      is_error: true,
+      result: "Model not available",
+    });
+    expect(cursor("m").parseStreamLine(line)).toEqual([
+      { type: "error", message: "Model not available" },
+    ]);
+  });
+
+  it("codex: turn.failed emits an error event", () => {
+    const line = JSON.stringify({
+      type: "turn.failed",
+      error: { message: "unexpected status 400 Bad Request" },
+    });
+    expect(codex("m").parseStreamLine(line)).toEqual([
+      { type: "error", message: "unexpected status 400 Bad Request" },
+    ]);
+  });
+
+  it("opencode: an error event (exit 0 in opencode 1.3.13) emits an error event", () => {
+    const line = JSON.stringify({
+      type: "error",
+      sessionID: "ses_x",
+      error: {
+        name: "UnknownError",
+        data: { message: "Model not found: anthropic/claude-nonexistent-9." },
+      },
+    });
+    expect(opencode("m").parseStreamLine(line)).toEqual([
+      {
+        type: "error",
+        message: "Model not found: anthropic/claude-nonexistent-9.",
+      },
+    ]);
+  });
+
+  it("copilot: an error event emits an error event", () => {
+    const line = JSON.stringify({ type: "error", error: "boom" });
+    expect(copilot("m").parseStreamLine(line)).toEqual([
+      { type: "error", message: "boom" },
+    ]);
   });
 });

@@ -1673,6 +1673,121 @@ describe("Orchestrator error handling", () => {
     }
   });
 
+  it("fails the run when the agent exits 0 but reports an error in its stream", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-stream-error-"));
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    // pi 0.73.1 puts an API rejection on agent_end and still exits 0.
+    const agentEnd = JSON.stringify({
+      type: "agent_end",
+      messages: [
+        {
+          role: "assistant",
+          content: [],
+          stopReason: "error",
+          errorMessage: "400 thinking.type.enabled is not supported",
+        },
+      ],
+    });
+
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) => {
+      const real = makeLocalSandbox(dir);
+      return {
+        exec: (command, options) => {
+          if (command.startsWith("pi ") && options?.onLine) {
+            options.onLine(agentEnd);
+            return Effect.succeed({
+              stdout: agentEnd,
+              stderr: "",
+              exitCode: 0,
+            });
+          }
+          return real.exec(command, options);
+        },
+        copyIn: (hostPath, sandboxPath) => real.copyIn(hostPath, sandboxPath),
+        copyFileOut: (sandboxPath, hostPath) =>
+          real.copyFileOut(sandboxPath, hostPath),
+      };
+    });
+
+    const exit = await Effect.runPromiseExit(
+      orchestrate({
+        provider: piFactory("anthropic/claude-haiku-5-5", {
+          captureSessions: false,
+        }),
+        hostRepoDir: hostDir,
+        iterations: 1,
+        prompt: "do some work",
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+    );
+
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      const err = Cause.squash(exit.cause);
+      expect(err).toBeInstanceOf(AgentError);
+      if (err instanceof AgentError) {
+        expect(err.message).toBe(
+          "pi reported an error:\n400 thinking.type.enabled is not supported",
+        );
+      }
+    }
+  });
+
+  it("uses the stream error as detail when the agent exits non-zero with empty stderr", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-stream-error-nz-"));
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const errorLine = JSON.stringify({
+      type: "result",
+      is_error: true,
+      result: "API Error: 400 invalid model",
+    });
+
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) => {
+      const real = makeLocalSandbox(dir);
+      return {
+        exec: (command, options) => {
+          if (command.startsWith("claude ") && options?.onLine) {
+            options.onLine(errorLine);
+            return Effect.succeed({
+              stdout: errorLine,
+              stderr: "",
+              exitCode: 1,
+            });
+          }
+          return real.exec(command, options);
+        },
+        copyIn: (hostPath, sandboxPath) => real.copyIn(hostPath, sandboxPath),
+        copyFileOut: (sandboxPath, hostPath) =>
+          real.copyFileOut(sandboxPath, hostPath),
+      };
+    });
+
+    const exit = await Effect.runPromiseExit(
+      orchestrate({
+        provider: testProvider,
+        hostRepoDir: hostDir,
+        iterations: 1,
+        prompt: "do some work",
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+    );
+
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      const err = Cause.squash(exit.cause);
+      expect(err).toBeInstanceOf(AgentError);
+      if (err instanceof AgentError) {
+        expect(err.message).toBe(
+          "claude-code exited with code 1:\nAPI Error: 400 invalid model",
+        );
+      }
+    }
+  });
+
   it("falls back to resultText when stderr is empty on non-zero exit (structured parser)", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "orch-resulttext-fallback-"));
 
