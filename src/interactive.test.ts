@@ -2,7 +2,7 @@ import { execSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { assert, describe, expect, it, beforeEach, afterEach } from "vitest";
 import { interactive } from "./interactive.js";
 import type { InteractiveOptions } from "./interactive.js";
 import { createBindMountSandboxProvider } from "./SandboxProvider.js";
@@ -11,6 +11,7 @@ import type {
   InteractiveExecOptions,
 } from "./SandboxProvider.js";
 import { claudeCode, pi, codex, opencode } from "./AgentProvider.js";
+import type { AgentProvider } from "./AgentProvider.js";
 
 // --- buildInteractiveArgs prompt tests ---
 
@@ -19,50 +20,59 @@ const interactiveOpts = (prompt: string) => ({
   dangerouslySkipPermissions: true,
 });
 
+/** Builds interactive args, failing the test if the provider has no interactive mode. */
+const buildInteractiveArgs = (provider: AgentProvider, prompt: string) => {
+  assert(
+    provider.buildInteractiveArgs !== undefined,
+    `${provider.name} has no interactive mode`,
+  );
+  return provider.buildInteractiveArgs(interactiveOpts(prompt));
+};
+
 describe("buildInteractiveArgs with prompts", () => {
   it("claudeCode includes prompt as positional argument", () => {
     const provider = claudeCode("claude-opus-4-8");
-    const args = provider.buildInteractiveArgs!(interactiveOpts("fix the bug"));
+    const args = buildInteractiveArgs(provider, "fix the bug");
     expect(args[0]).toBe("claude");
     expect(args.at(-1)).toBe("fix the bug");
   });
 
   it("claudeCode omits prompt when empty string", () => {
     const provider = claudeCode("claude-opus-4-8");
-    const args = provider.buildInteractiveArgs!(interactiveOpts(""));
-    expect(args.at(-1)).not.toBe("");
+    const args = buildInteractiveArgs(provider, "");
+    expect(args[args.length - 1]).not.toBe("");
     expect(args).toContain("--model");
   });
 
   it("pi includes prompt as positional argument", () => {
     const provider = pi("claude-sonnet-4-6");
-    const args = provider.buildInteractiveArgs!(interactiveOpts("fix the bug"));
+    const args = buildInteractiveArgs(provider, "fix the bug");
     expect(args[0]).toBe("pi");
     expect(args.at(-1)).toBe("fix the bug");
   });
 
   it("pi omits prompt when empty string", () => {
     const provider = pi("claude-sonnet-4-6");
-    const args = provider.buildInteractiveArgs!(interactiveOpts(""));
+    const args = buildInteractiveArgs(provider, "");
     expect(args).not.toContain("");
   });
 
   it("codex includes prompt as positional argument", () => {
     const provider = codex("gpt-5.4-mini");
-    const args = provider.buildInteractiveArgs!(interactiveOpts("fix the bug"));
+    const args = buildInteractiveArgs(provider, "fix the bug");
     expect(args[0]).toBe("codex");
     expect(args.at(-1)).toBe("fix the bug");
   });
 
   it("codex omits prompt when empty string", () => {
     const provider = codex("gpt-5.4-mini");
-    const args = provider.buildInteractiveArgs!(interactiveOpts(""));
+    const args = buildInteractiveArgs(provider, "");
     expect(args).not.toContain("");
   });
 
   it("opencode passes prompt via --prompt flag", () => {
     const provider = opencode("opencode/big-pickle");
-    const args = provider.buildInteractiveArgs!(interactiveOpts("fix the bug"));
+    const args = buildInteractiveArgs(provider, "fix the bug");
     expect(args[0]).toBe("opencode");
     const pIdx = args.indexOf("--prompt");
     expect(pIdx).toBeGreaterThan(-1);
@@ -72,7 +82,7 @@ describe("buildInteractiveArgs with prompts", () => {
 
   it("opencode omits --prompt flag when prompt is empty", () => {
     const provider = opencode("opencode/big-pickle");
-    const args = provider.buildInteractiveArgs!(interactiveOpts(""));
+    const args = buildInteractiveArgs(provider, "");
     expect(args).not.toContain("--prompt");
     expect(args).not.toContain("-p");
   });
@@ -182,7 +192,8 @@ describe("interactive()", () => {
   it("collects commits made during the interactive session", async () => {
     const provider = makeTestProvider(async (_args, opts) => {
       // Simulate the agent making a commit inside the sandbox
-      const cwd = opts.cwd!;
+      const { cwd } = opts;
+      assert.isDefined(cwd);
       execSync('echo "new content" > newfile.txt', { cwd });
       execSync("git add newfile.txt", { cwd });
       execSync('git commit -m "agent commit"', { cwd });
@@ -196,7 +207,7 @@ describe("interactive()", () => {
     });
 
     expect(result.commits).toHaveLength(1);
-    expect(result.commits[0]!.sha).toMatch(/^[0-9a-f]{40}$/);
+    expect(result.commits[0]?.sha).toMatch(/^[0-9a-f]{40}$/);
   });
 
   it("returns non-zero exitCode from the interactive session", async () => {
@@ -280,11 +291,11 @@ describe("interactive()", () => {
       prompt: "test",
     });
 
-    expect(receivedOpts).toBeDefined();
-    expect(receivedOpts!.stdin).toBe(process.stdin);
-    expect(receivedOpts!.stdout).toBe(process.stdout);
-    expect(receivedOpts!.stderr).toBe(process.stderr);
-    expect(receivedOpts!.cwd).toBeDefined();
+    assert.isDefined(receivedOpts);
+    expect(receivedOpts.stdin).toBe(process.stdin);
+    expect(receivedOpts.stdout).toBe(process.stdout);
+    expect(receivedOpts.stderr).toBe(process.stderr);
+    expect(receivedOpts.cwd).toBeDefined();
   });
 
   // --- No-prompt tests ---
@@ -418,7 +429,7 @@ describe("interactive()", () => {
     });
 
     // The substituted prompt should contain "LoginForm" not "{{COMPONENT}}"
-    const promptArg = receivedArgs.at(-1)!;
+    const promptArg = receivedArgs.at(-1);
     expect(promptArg).toContain("LoginForm");
     expect(promptArg).not.toContain("{{COMPONENT}}");
   });
@@ -445,7 +456,7 @@ describe("interactive()", () => {
       promptFile: promptPath,
     });
 
-    const promptArg = receivedArgs.at(-1)!;
+    const promptArg = receivedArgs.at(-1);
     expect(promptArg).toContain(currentBranch);
     expect(promptArg).not.toContain("{{TARGET_BRANCH}}");
   });
@@ -470,7 +481,7 @@ describe("interactive()", () => {
     });
 
     // The shell expression should be expanded to the actual branch name
-    const promptArg = receivedArgs.at(-1)!;
+    const promptArg = receivedArgs.at(-1);
     expect(promptArg).not.toContain("!`");
     // The expanded value should be a branch name (from the sandbox worktree)
     expect(promptArg).toMatch(/Current branch: .+/);
@@ -495,7 +506,8 @@ describe("interactive()", () => {
 
   it("head strategy: commits land on current branch directly", async () => {
     const provider = makeTestProvider(async (_args, opts) => {
-      const cwd = opts.cwd!;
+      const { cwd } = opts;
+      assert.isDefined(cwd);
       execSync('echo "head change" > headfile.txt', { cwd });
       execSync("git add headfile.txt", { cwd });
       execSync('git commit -m "head commit"', { cwd });
@@ -520,7 +532,8 @@ describe("interactive()", () => {
 
   it("merge-to-head strategy: commits merge back to head", async () => {
     const provider = makeTestProvider(async (_args, opts) => {
-      const cwd = opts.cwd!;
+      const { cwd } = opts;
+      assert.isDefined(cwd);
       execSync('echo "merge change" > mergefile.txt', { cwd });
       execSync("git add mergefile.txt", { cwd });
       execSync('git commit -m "merge commit"', { cwd });
@@ -558,9 +571,10 @@ describe("interactive()", () => {
     let actualBranch: string | undefined;
 
     const provider = makeTestProvider(async (args, opts) => {
-      promptArg = args.at(-1);
+      promptArg = args[args.length - 1];
+      assert.isDefined(opts.cwd);
       actualBranch = execSync("git rev-parse --abbrev-ref HEAD", {
-        cwd: opts.cwd!,
+        cwd: opts.cwd,
         encoding: "utf8",
       }).trim();
       return { exitCode: 0 };
@@ -579,7 +593,8 @@ describe("interactive()", () => {
 
   it("branch strategy: commits land on explicit branch", async () => {
     const provider = makeTestProvider(async (_args, opts) => {
-      const cwd = opts.cwd!;
+      const { cwd } = opts;
+      assert.isDefined(cwd);
       execSync('echo "branch change" > branchfile.txt', { cwd });
       execSync("git add branchfile.txt", { cwd });
       execSync('git commit -m "branch commit"', { cwd });
@@ -611,7 +626,8 @@ describe("interactive()", () => {
 
     const provider = makeTestProvider(async (_args, opts) => {
       // Check if the hook file exists (created by the hook)
-      const cwd = opts.cwd!;
+      const { cwd } = opts;
+      assert.isDefined(cwd);
       const hookFileExists = existsSync(join(cwd, "hook-ran.txt"));
       executionOrder.push(
         hookFileExists ? "interactive-after-hook" : "interactive-no-hook",
@@ -797,8 +813,8 @@ describe("interactive()", () => {
 
     expect(result.exitCode).toBe(0);
     // The worktree should be under the other repo's .sandcastle/worktrees/ dir
-    expect(worktreeCwd).toBeDefined();
-    expect(worktreeCwd!.startsWith(otherRepo)).toBe(true);
+    assert.isDefined(worktreeCwd);
+    expect(worktreeCwd.startsWith(otherRepo)).toBe(true);
   });
 
   it("without cwd behaves identically to process.cwd()", async () => {
@@ -818,8 +834,8 @@ describe("interactive()", () => {
 
     expect(result.exitCode).toBe(0);
     // The worktree should be under process.cwd() (which is hostDir)
-    expect(worktreeCwd).toBeDefined();
-    expect(worktreeCwd!.startsWith(hostDir)).toBe(true);
+    assert.isDefined(worktreeCwd);
+    expect(worktreeCwd.startsWith(hostDir)).toBe(true);
   });
 
   it("copies files to worktree with copyToWorktree", async () => {
@@ -831,7 +847,8 @@ describe("interactive()", () => {
     let copiedFileExists = false;
 
     const provider = makeTestProvider(async (_args, opts) => {
-      const cwd = opts.cwd!;
+      const { cwd } = opts;
+      assert.isDefined(cwd);
       copiedFileExists = existsSync(join(cwd, "node_modules", "test-dep.txt"));
       return { exitCode: 0 };
     });
