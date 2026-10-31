@@ -26,6 +26,7 @@ import {
   addDependencyCommand,
   hostHasDependency,
   getTemplateDependencies,
+  buildImageShellCommand,
 } from "./InitService.js";
 import { defaultImageName } from "./sandboxes/docker.js";
 import type {
@@ -181,6 +182,9 @@ const initCommand = Command.make(
       const d = yield* Display;
       const cwd = process.cwd();
       const imageName = resolveImageName(imageNameFlag, cwd);
+      // Only an explicit --image-name is written into the scaffold; without it
+      // the sandbox factory's own default resolves to the same name as above.
+      const customImageName = Option.getOrUndefined(imageNameFlag);
 
       // Early validation of CLI flags before interactive prompts
       const templates = listTemplates();
@@ -426,6 +430,7 @@ const initCommand = Command.make(
           createLabel: shouldCreateLabel,
           issueTracker: selectedIssueTracker,
           sandboxProvider: selectedSandboxProvider,
+          imageName: customImageName,
         }).pipe(
           Effect.mapError(
             (e) =>
@@ -513,7 +518,7 @@ const initCommand = Command.make(
           );
         } else {
           yield* d.status(
-            `Init complete! Run \`sandcastle ${selectedSandboxProvider.cliNamespace} build-image\` to build the ${providerLabel} image later.`,
+            `Init complete! Run \`${buildImageShellCommand(selectedSandboxProvider, customImageName)}\` to build the ${providerLabel} image later.`,
             "success",
           );
         }

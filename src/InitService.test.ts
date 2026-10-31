@@ -8,10 +8,12 @@ import {
   scaffold,
   getNextStepsLines,
   getAgent,
+  listAgents,
   listTemplates,
   listIssueTrackers,
   getIssueTracker,
   getSandboxProvider,
+  listSandboxProviders,
 } from "./InitService.js";
 import type {
   AgentEntry,
@@ -2386,5 +2388,130 @@ describe("InitService scaffold", () => {
       );
       expect(mainTs).toContain("sandbox: docker()");
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pit of success: every combination init offers scaffolds a consistent project
+// ---------------------------------------------------------------------------
+
+/**
+ * The env var each agent's CLI reads for auth, as the agent provider and
+ * features docs describe it. `.env.example` must declare exactly this key
+ * (uncommented) so a user who fills it in gets a working run.
+ */
+const AGENT_AUTH_KEY: Record<string, string> = {
+  "claude-code": "CLAUDE_CODE_OAUTH_TOKEN",
+  pi: "ANTHROPIC_API_KEY",
+  codex: "CODEX_API_KEY",
+  cursor: "CURSOR_API_KEY",
+  opencode: "OPENCODE_API_KEY",
+  // Copilot CLI reads COPILOT_GITHUB_TOKEN > GH_TOKEN > GITHUB_TOKEN. The
+  // github-issues tracker declares GH_TOKEN (Issues scope), which would shadow
+  // GITHUB_TOKEN, so only COPILOT_GITHUB_TOKEN reliably reaches Copilot.
+  copilot: "COPILOT_GITHUB_TOKEN",
+};
+
+const declaredKeys = (envExample: string): string[] =>
+  envExample
+    .split("\n")
+    .map((l) => l.match(/^([A-Z][A-Z0-9_]*)=/)?.[1])
+    .filter((k): k is string => k !== undefined);
+
+describe("init scaffold consistency (every agent x template x sandbox x tracker)", () => {
+  const combos = listAgents().flatMap((agent) =>
+    listTemplates().flatMap((template) =>
+      listSandboxProviders().flatMap((sandboxProvider) =>
+        listIssueTrackers().map((issueTracker) => ({
+          agent,
+          template: template.name,
+          sandboxProvider,
+          issueTracker,
+        })),
+      ),
+    ),
+  );
+
+  it("every agent has a known auth key", () => {
+    for (const agent of listAgents()) {
+      expect(AGENT_AUTH_KEY[agent.name], agent.name).toBeDefined();
+    }
+  });
+
+  it.each(combos)(
+    "$agent.name x $template x $sandboxProvider.name x $issueTracker.name",
+    async ({ agent, template, sandboxProvider, issueTracker }) => {
+      const dir = await makeDir();
+      const imageName = "sandcastle:custom-image";
+      const { mainFilename } = await runScaffold(dir, {
+        agent,
+        model: "test-model",
+        templateName: template,
+        sandboxProvider,
+        issueTracker,
+        createLabel: false,
+        imageName,
+      });
+      const configDir = join(dir, ".sandcastle");
+
+      // Containerfile: every placeholder resolved, the real mount path shown.
+      const containerfile = await readFile(
+        join(configDir, sandboxProvider.containerfileName),
+        "utf-8",
+      );
+      expect(containerfile).not.toContain("${SANDBOX_REPO_DIR}");
+      expect(containerfile).not.toMatch(/\{\{[A-Z_]+\}\}/);
+      expect(containerfile).toContain(SANDBOX_REPO_DIR);
+
+      // Main file: the chosen agent, model, sandbox provider and image name.
+      const main = await readFile(join(configDir, mainFilename), "utf-8");
+      expect(main).toContain(`${agent.factoryImport}("test-model")`);
+      if (agent.factoryImport !== "claudeCode") {
+        expect(main).not.toMatch(/\bclaudeCode\b/);
+      }
+      const other = sandboxProvider.name === "docker" ? "podman" : "docker";
+      expect(main).not.toMatch(new RegExp(`\\b${other}\\(`));
+      const sandboxCalls =
+        main.match(new RegExp(`\\b${sandboxProvider.name}\\([^)]*\\)`, "g")) ??
+        [];
+      expect(sandboxCalls.length).toBeGreaterThan(0);
+      for (const call of sandboxCalls) {
+        expect(call).toBe(
+          `${sandboxProvider.name}({ imageName: "${imageName}" })`,
+        );
+      }
+
+      // .env.example: the agent's auth key declared, nothing declared twice.
+      const envExample = await readFile(
+        join(configDir, ".env.example"),
+        "utf-8",
+      );
+      const keys = declaredKeys(envExample);
+      expect(keys).toContain(AGENT_AUTH_KEY[agent.name]);
+      expect(new Set(keys).size).toBe(keys.length);
+
+      // Custom tracker: the setup doc's build command builds the same image.
+      if (issueTracker.name === "custom") {
+        const setupDoc = await readFile(
+          join(configDir, "SETUP_ISSUE_TRACKER.md"),
+          "utf-8",
+        );
+        expect(setupDoc).toContain(
+          `sandcastle ${sandboxProvider.cliNamespace} build-image --image-name ${imageName}`,
+        );
+      }
+    },
+  );
+
+  it("without an image name, the sandbox factory is called with no options", async () => {
+    for (const sandboxProvider of listSandboxProviders()) {
+      const dir = await makeDir();
+      const { mainFilename } = await runScaffold(dir, { sandboxProvider });
+      const main = await readFile(
+        join(dir, ".sandcastle", mainFilename),
+        "utf-8",
+      );
+      expect(main).toContain(`sandbox: ${sandboxProvider.name}(),`);
+    }
   });
 });

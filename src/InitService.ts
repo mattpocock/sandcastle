@@ -367,9 +367,9 @@ USER \${AGENT_UID}:\${AGENT_GID}
 
 WORKDIR /home/agent
 
-# In worktree sandbox mode, Sandcastle bind-mounts the git worktree at \${SANDBOX_REPO_DIR}
-# and overrides the working directory to \${SANDBOX_REPO_DIR} at container start.
-# Structure your Dockerfile so that \${SANDBOX_REPO_DIR} can serve as the project root.
+# In worktree sandbox mode, Sandcastle bind-mounts the git worktree at ${SANDBOX_REPO_DIR}
+# and overrides the working directory to ${SANDBOX_REPO_DIR} at container start.
+# Structure your Dockerfile so that ${SANDBOX_REPO_DIR} can serve as the project root.
 ENTRYPOINT ["sleep", "infinity"]
 `;
 
@@ -400,9 +400,9 @@ USER \${AGENT_UID}:\${AGENT_GID}
 
 WORKDIR /home/agent
 
-# In worktree sandbox mode, Sandcastle bind-mounts the git worktree at \${SANDBOX_REPO_DIR}
-# and overrides the working directory to \${SANDBOX_REPO_DIR} at container start.
-# Structure your Dockerfile so that \${SANDBOX_REPO_DIR} can serve as the project root.
+# In worktree sandbox mode, Sandcastle bind-mounts the git worktree at ${SANDBOX_REPO_DIR}
+# and overrides the working directory to ${SANDBOX_REPO_DIR} at container start.
+# Structure your Dockerfile so that ${SANDBOX_REPO_DIR} can serve as the project root.
 ENTRYPOINT ["sleep", "infinity"]
 `;
 
@@ -469,8 +469,9 @@ OPENCODE_API_KEY=`,
     dockerfileTemplate: COPILOT_DOCKERFILE,
     envExample: `# GitHub token with the "Copilot Requests" permission
 # (a fine-grained PAT, or any token from \`gh auth login\`).
-# COPILOT_GITHUB_TOKEN takes precedence over GH_TOKEN and GITHUB_TOKEN.
-GITHUB_TOKEN=`,
+# Copilot CLI reads COPILOT_GITHUB_TOKEN first, then GH_TOKEN, then GITHUB_TOKEN,
+# so this key is used even when GH_TOKEN is set for the issue tracker.
+COPILOT_GITHUB_TOKEN=`,
     setupCommand: `copilot -i "$(cat ${SETUP_ISSUE_TRACKER_PATH})"`,
   },
 ];
@@ -767,6 +768,7 @@ const rewriteMainTs = (
   model: string,
   sandboxProvider: SandboxProviderEntry,
   mainFilename: string,
+  imageName: string | undefined,
 ): Effect.Effect<void, Error, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -808,6 +810,16 @@ const rewriteMainTs = (
     // the import subpath, and every factory call site — and is a no-op when
     // docker is selected.
     content = content.replace(/\bdocker\b/g, sandboxProvider.name);
+
+    // A custom image name (init --image-name) must reach every sandbox factory
+    // call, or the scaffolded run starts the default-named image instead of
+    // the one init built.
+    if (imageName !== undefined) {
+      content = content.replace(
+        new RegExp(`\\b${sandboxProvider.name}\\(\\)`, "g"),
+        `${sandboxProvider.name}({ imageName: ${JSON.stringify(imageName)} })`,
+      );
+    }
 
     yield* fs
       .writeFileString(mainTsPath, content)
@@ -915,7 +927,19 @@ const substituteTemplateArgs = (
  * the tracker by editing the scaffolded files in place. The build command is
  * provider-parameterized so it names the actual CLI namespace (docker/podman).
  */
-const buildSetupIssueTrackerDoc = (cliNamespace: string): string =>
+/**
+ * The `sandcastle <provider> build-image` command that builds the image the
+ * scaffolded main file runs, including `--image-name` when one was chosen.
+ */
+export const buildImageShellCommand = (
+  sandboxProvider: SandboxProviderEntry,
+  imageName?: string,
+): string =>
+  `sandcastle ${sandboxProvider.cliNamespace} build-image${
+    imageName !== undefined ? ` --image-name ${imageName}` : ""
+  }`;
+
+const buildSetupIssueTrackerDoc = (buildCommand: string): string =>
   `# Set up your custom issue tracker
 
 You are a coding agent. Finish wiring up the **custom issue tracker** for this Sandcastle project. It was scaffolded in a deliberately broken-until-configured state: until you complete the steps below, every Sandcastle run hard-fails with a pointer back to this file.
@@ -964,7 +988,7 @@ Work out, together with the user, the shell commands for:
 Once the files are wired up, build the sandbox image:
 
 \`\`\`
-sandcastle ${cliNamespace} build-image
+${buildCommand}
 \`\`\`
 
 ## 5. Verify
@@ -983,6 +1007,12 @@ export interface ScaffoldOptions {
   createLabel?: boolean;
   issueTracker?: IssueTrackerEntry;
   sandboxProvider?: SandboxProviderEntry;
+  /**
+   * Custom image name (`init --image-name`). When set, every sandbox factory
+   * call in the main file is scaffolded as `<provider>({ imageName })`.
+   * Omit to keep the provider's default, repo-scoped image name.
+   */
+  imageName?: string;
 }
 
 export interface ScaffoldResult {
@@ -1026,6 +1056,7 @@ export const scaffold = (
       createLabel = true,
       issueTracker = ISSUE_TRACKER_REGISTRY[0]!, // default: github-issues
       sandboxProvider = SANDBOX_PROVIDER_REGISTRY[0]!, // default: docker
+      imageName,
     } = options;
     const fs = yield* FileSystem.FileSystem;
     const configDir = join(repoDir, ".sandcastle");
@@ -1082,6 +1113,7 @@ export const scaffold = (
       model,
       sandboxProvider,
       mainFilename,
+      imageName,
     );
 
     // Replace issue tracker template arguments in all text files (must run before label stripping)
@@ -1100,7 +1132,9 @@ export const scaffold = (
       yield* fs
         .writeFileString(
           join(configDir, SETUP_ISSUE_TRACKER_DOC),
-          buildSetupIssueTrackerDoc(sandboxProvider.cliNamespace),
+          buildSetupIssueTrackerDoc(
+            buildImageShellCommand(sandboxProvider, imageName),
+          ),
         )
         .pipe(Effect.mapError((e) => new Error(e.message)));
     }
