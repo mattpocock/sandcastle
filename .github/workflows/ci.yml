@@ -28,6 +28,9 @@ jobs:
           node-version: 22
       - run: npm ci
       - run: npm run typecheck
-      # Tests import from dist, so build before test.
+      # Tests import from dist, so build before test. Lint too: the scripts
+      # in .sandcastle/ and .factory/ import @ai-hero/sandcastle, whose types
+      # come from dist, so without it type-aware rules see them as any.
       - run: npm run build
+      - run: npm run lint
       - run: npm test
