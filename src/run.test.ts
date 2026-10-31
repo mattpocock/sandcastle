@@ -29,7 +29,7 @@ import {
   sanitizeBranchForFilename,
 } from "./run.js";
 import type { RunOptions, RunResult } from "./run.js";
-import { claudeCode, cursor, opencode } from "./AgentProvider.js";
+import { claudeCode, copilot, cursor, opencode } from "./AgentProvider.js";
 import type { AgentProvider } from "./AgentProvider.js";
 import { ForkNotSupportedError } from "./errors.js";
 import { Output, StructuredOutputError } from "./Output.js";
@@ -1725,7 +1725,7 @@ describe("resume/fork after a structured-output run", () => {
   });
 });
 
-describe("fork on cursor, which resumes but cannot fork", () => {
+describe("fork on an agent provider that resumes but cannot fork", () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -1735,7 +1735,63 @@ describe("fork on cursor, which resumes but cannot fork", () => {
     consoleSpy.mockRestore();
   });
 
-  it("fork() throws ForkNotSupportedError naming cursor, before any sandbox starts", async () => {
+  it("copilot: fork() throws ForkNotSupportedError naming copilot, before any sandbox starts", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sandcastle-copilot-fork-"));
+    const sessionId = "9f2885bc-f7a6-44ad-8c8e-4e22ca99fa26";
+    let creates = 0;
+    const sandbox = createBindMountSandboxProvider({
+      name: "copilot-fork",
+      create: async () => {
+        creates++;
+        return {
+          worktreePath: process.cwd(),
+          exec: async (
+            _command: string,
+            options?: { onLine?: (line: string) => void },
+          ) => {
+            options?.onLine?.(
+              JSON.stringify({
+                type: "assistant.message",
+                data: { content: "OK" },
+              }),
+            );
+            options?.onLine?.(
+              JSON.stringify({ type: "result", sessionId, exitCode: 0 }),
+            );
+            return { stdout: "", stderr: "", exitCode: 0 };
+          },
+          copyFileIn: async () => {},
+          copyFileOut: async () => {},
+          close: async () => {},
+        };
+      },
+    });
+
+    try {
+      const first = await run({
+        agent: copilot("claude-haiku-4.5", { captureSessions: false }),
+        sandbox,
+        prompt: "remember a token",
+        branchStrategy: { type: "head" },
+        logging: { type: "file", path: join(dir, "run.log") },
+      });
+      expect(first.iterations[0]?.sessionId).toBe(sessionId);
+      expect(creates).toBe(1);
+
+      const forked = first.fork?.("fork it");
+      await expect(forked).rejects.toBeInstanceOf(ForkNotSupportedError);
+      await expect(forked).rejects.toMatchObject({
+        name: "ForkNotSupportedError",
+        agentProvider: "copilot",
+      });
+      await expect(forked).rejects.toThrow(/copilot cannot fork/u);
+      expect(creates).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("cursor: fork() throws ForkNotSupportedError naming cursor, before any sandbox starts", async () => {
     const dir = mkdtempSync(join(tmpdir(), "sandcastle-cursor-fork-"));
     const sessionId = "dd42b549-290c-4635-b058-04801905e8cf";
     let creates = 0;

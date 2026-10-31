@@ -385,9 +385,7 @@
     "vitest(require-to-throw-message)": 1
   },
   "src/createSandbox.ts": {
-    "effect/anyUnknownInErrorContext": 2,
     "effect/globalConsole": 3,
-    "effect/multipleEffectProvide": 1,
     "effect/newPromise": 1,
     "eslint(complexity)": 3,
     "eslint(curly)": 6,
@@ -468,7 +466,6 @@
     "vitest(prefer-to-have-length)": 3
   },
   "src/createWorktree.ts": {
-    "effect/multipleEffectProvide": 2,
     "eslint(arrow-body-style)": 1,
     "eslint(complexity)": 1,
     "eslint(curly)": 1,
@@ -512,8 +509,6 @@
   },
   "src/Display.ts": {
     "effect/deterministicKeys": 1,
-    "effect/globalDateInEffect": 5,
-    "effect/missingEffectContext": 2,
     "eslint(curly)": 3,
     "eslint(max-lines-per-function)": 4,
     "eslint(max-lines)": 1,
@@ -571,7 +566,6 @@
     "unicorn(prefer-string-replace-all)": 1
   },
   "src/ErrorHandler.test.ts": {
-    "effect/missedPipeableOpportunity": 3,
     "ratchet/disable-comment": 2,
     "typescript(array-type)": 4,
     "typescript(consistent-type-imports)": 1,
@@ -725,7 +719,6 @@
   },
   "src/interactive.ts": {
     "effect/globalErrorInEffectFailure": 1,
-    "effect/multipleEffectProvide": 1,
     "eslint(complexity)": 2,
     "eslint(curly)": 1,
     "eslint(max-lines-per-function)": 4,
@@ -934,7 +927,6 @@
     "vitest(prefer-strict-equal)": 2
   },
   "src/PromptResolver.ts": {
-    "effect/catchAllToMapError": 1,
     "typescript(restrict-template-expressions)": 1
   },
   "src/raceAbortSignal.ts": {
@@ -1255,7 +1247,6 @@
   },
   "src/SandboxFactory.test.ts": {
     "effect/unnecessaryFailYieldableError": 2,
-    "effect/unsafeEffectTypeAssertion": 3,
     "eslint(curly)": 9,
     "eslint(max-params)": 1,
     "eslint(prefer-destructuring)": 2,
@@ -1269,7 +1260,7 @@
     "typescript(no-unsafe-assignment)": 2,
     "typescript(no-unsafe-member-access)": 6,
     "typescript(no-unsafe-return)": 2,
-    "typescript(no-unsafe-type-assertion)": 7,
+    "typescript(no-unsafe-type-assertion)": 4,
     "typescript(promise-function-async)": 11,
     "typescript(strict-void-return)": 1,
     "unicorn(no-object-as-default-parameter)": 2,
@@ -1285,9 +1276,7 @@
     "effect/deterministicKeys": 2,
     "effect/effectMapVoid": 1,
     "effect/effectSucceedWithVoid": 2,
-    "effect/globalConsole": 4,
-    "effect/globalConsoleInEffect": 4,
-    "eslint(curly)": 1,
+    "effect/globalConsole": 3,
     "eslint(max-lines-per-function)": 3,
     "eslint(max-lines)": 1,
     "eslint(max-params)": 1,
@@ -1423,7 +1412,6 @@
   "src/startSandbox.test.ts": {
     "effect/anyUnknownInErrorContext": 1,
     "effect/unnecessaryEffectGen": 3,
-    "effect/unsafeEffectTypeAssertion": 1,
     "eslint(max-params)": 1,
     "eslint(no-promise-executor-return)": 3,
     "eslint(no-unused-vars)": 2,
@@ -1434,13 +1422,12 @@
     "typescript(no-confusing-void-expression)": 1,
     "typescript(no-explicit-any)": 1,
     "typescript(no-unsafe-member-access)": 3,
-    "typescript(no-unsafe-type-assertion)": 1,
     "typescript(promise-function-async)": 3,
     "typescript(strict-void-return)": 4,
     "vitest(expect-expect)": 1,
-    "vitest(no-conditional-expect)": 3,
+    "vitest(no-conditional-expect)": 2,
     "vitest(no-conditional-in-test)": 4,
-    "vitest(prefer-strict-equal)": 2
+    "vitest(prefer-strict-equal)": 1
   },
   "src/startSandbox.ts": {
     "eslint(max-lines-per-function)": 2,
@@ -1482,8 +1469,6 @@
   },
   "src/syncOut.ts": {
     "effect/asyncFunction": 6,
-    "effect/globalConsoleInEffect": 1,
-    "effect/globalDateInEffect": 1,
     "eslint(complexity)": 1,
     "eslint(curly)": 2,
     "eslint(max-lines-per-function)": 2,
@@ -1574,7 +1559,6 @@
     "unicorn(no-negated-condition)": 1
   },
   "src/WorktreeManager.test.ts": {
-    "effect/unsafeEffectTypeAssertion": 2,
     "eslint(curly)": 6,
     "eslint(max-params)": 2,
     "eslint(no-promise-executor-return)": 1,
@@ -1582,8 +1566,6 @@
     "eslint(require-unicode-regexp)": 13,
     "typescript(consistent-type-imports)": 1,
     "typescript(no-non-null-assertion)": 1,
-    "typescript(no-unnecessary-type-arguments)": 2,
-    "typescript(no-unsafe-type-assertion)": 2,
     "typescript(promise-function-async)": 2,
     "typescript(strict-void-return)": 2,
     "unicorn(no-await-expression-member)": 1,
@@ -1596,7 +1578,6 @@
     "vitest(require-to-throw-message)": 2
   },
   "src/WorktreeManager.ts": {
-    "effect/globalConsoleInEffect": 6,
     "effect/globalDate": 1,
     "effect/missingReturnYieldStar": 1,
     "effect/unnecessaryFailYieldableError": 1,

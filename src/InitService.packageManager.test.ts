@@ -56,6 +56,16 @@ describe("detectPackageManager", () => {
     );
     await expect(detect(dir)).resolves.toBe("yarn");
   });
+
+  it.each(["{ not json", "null", "[]", '"pnpm@9.1.0"'])(
+    "falls back to the lockfile when package.json is %s",
+    async (content) => {
+      const dir = await makeDir();
+      await writeFile(join(dir, "yarn.lock"), "");
+      await writeFile(join(dir, "package.json"), content);
+      await expect(detect(dir)).resolves.toBe("yarn");
+    },
+  );
 });
 
 describe("addDependencyCommand", () => {
@@ -98,6 +108,15 @@ describe("hostHasDependency", () => {
         JSON.stringify({ name: "test", [key]: { zod: "^3" } }),
       );
       await expect(has(dir, "zod")).resolves.toBe(true);
+    },
+  );
+
+  it.each(["{ not json", "null", "[]", '"zod"'])(
+    "returns false when package.json is %s",
+    async (content) => {
+      const dir = await makeDir();
+      await writeFile(join(dir, "package.json"), content);
+      await expect(has(dir, "zod")).resolves.toBe(false);
     },
   );
 });

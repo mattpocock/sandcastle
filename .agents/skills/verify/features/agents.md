@@ -15,7 +15,7 @@ Each is a factory `(model, options?) => AgentProvider` exported from `@ai-hero/s
 | `codex`      | codex          | `CODEX_API_KEY`                                                                                | `codex exec --json -m <m>` (stdin)                                                     | yes             |
 | `cursor`     | cursor         | `CURSOR_API_KEY`                                                                               | `agent --print --output-format stream-json --model <m> '<prompt>'` (argv, max 120 KiB) | yes             |
 | `opencode`   | opencode       | `OPENCODE_API_KEY`                                                                             | `opencode run --format json --model <m> '<prompt>'` (argv)                             | no              |
-| `copilot`    | copilot        | `COPILOT_GITHUB_TOKEN`, which wins over `GH_TOKEN`/`GITHUB_TOKEN` and needs "Copilot Requests" | `copilot -p '<prompt>' --output-format json --model <m>` (argv, max 120 KiB)           | no              |
+| `copilot`    | copilot        | `COPILOT_GITHUB_TOKEN`, which wins over `GH_TOKEN`/`GITHUB_TOKEN` and needs "Copilot Requests" | `copilot -p '<prompt>' --output-format json --model <m>` (argv, max 120 KiB)           | yes             |
 
 ## Declare exactly the agent's key
 

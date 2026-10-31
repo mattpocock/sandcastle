@@ -15,7 +15,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { promisify } from "node:util";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   create,
   generateTempBranchName,
@@ -97,18 +97,14 @@ const setupRepoWithOrigin = async () => {
 
 /** Run an Effect and return its success value, throwing on failure. */
 const run = async <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem>) =>
-  Effect.runPromise(
-    effect.pipe(Effect.provide(NodeFileSystem.layer)) as Effect.Effect<A>,
-  );
+  Effect.runPromise(effect.pipe(Effect.provide(NodeFileSystem.layer)));
 
 /** Run an Effect and return the error, throwing if it succeeds. */
 const runFail = async <A, E>(
   effect: Effect.Effect<A, E, FileSystem.FileSystem>,
 ) =>
   Effect.runPromise(
-    Effect.flip(effect).pipe(
-      Effect.provide(NodeFileSystem.layer),
-    ) as Effect.Effect<E>,
+    Effect.flip(effect).pipe(Effect.provide(NodeFileSystem.layer)),
   );
 
 describe("sanitizeName", () => {
@@ -162,6 +158,10 @@ describe("generateTempBranchName", () => {
 });
 
 describe("WorktreeManager.create", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("creates a worktree at .sandcastle/worktrees/<name>/", async () => {
     const repoDir = await setupRepo();
     const { path } = await run(create(repoDir));
@@ -226,10 +226,17 @@ describe("WorktreeManager.create", () => {
     await execAsync("git checkout main", { cwd: repoDir });
 
     const first = await run(create(repoDir, { branch: "my-branch" }));
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
     const second = await run(create(repoDir, { branch: "my-branch" }));
 
     expect(second.path).toBe(first.path);
     expect(second.branch).toBe("my-branch");
+    // No origin to refresh from: the reuse says so and carries on.
+    expect(log).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^Could not fetch from origin \(reusing worktree at .* as-is, branch 'my-branch'\)$/u,
+      ),
+    );
 
     await run(remove(first.path));
   });
@@ -245,10 +252,16 @@ describe("WorktreeManager.create", () => {
     // Make the worktree dirty
     await writeFile(join(first.path, "dirty.txt"), "uncommitted");
 
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const second = await run(create(repoDir, { branch: "my-branch" }));
 
     expect(second.path).toBe(first.path);
     expect(second.branch).toBe("my-branch");
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^Reusing worktree at .* \(branch 'my-branch'\) — worktree has uncommitted changes$/u,
+      ),
+    );
 
     await run(remove(first.path));
   });
@@ -377,7 +390,13 @@ describe("WorktreeManager.create", () => {
     // Someone else pushes a new commit to origin/my-branch
     await pushOrigin("my-branch", "new.txt", "new", "new origin commit");
 
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
     const second = await run(create(repoDir, { branch: "my-branch" }));
+    expect(log).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^Fast-forwarded worktree at .* \(branch 'my-branch'\) to origin\/my-branch$/u,
+      ),
+    );
 
     expect(second.path).toBe(first.path);
     expect(second.branch).toBe("my-branch");
@@ -412,7 +431,13 @@ describe("WorktreeManager.create", () => {
     // Also push a different new commit to origin → true divergence
     await pushOrigin("my-branch", "remote.txt", "remote", "remote-only commit");
 
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
     const second = await run(create(repoDir, { branch: "my-branch" }));
+    expect(log).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^Branch 'my-branch' has diverged from origin \(reusing worktree at .* as-is\)$/u,
+      ),
+    );
 
     expect(second.path).toBe(first.path);
 

@@ -321,12 +321,10 @@ describe("WorktreeDockerSandboxFactory", () => {
             yield* Effect.promise(() =>
               writeFile(join(worktreePathOf(info), "dirty.txt"), "dirty"),
             );
-            return yield* Effect.fail(
-              new AgentIdleTimeoutError({
-                message: "timed out",
-                timeoutMs: 30_000,
-              }),
-            );
+            return yield* new AgentIdleTimeoutError({
+              message: "timed out",
+              timeoutMs: 30_000,
+            });
           }),
         );
       }).pipe(Effect.provide(makeLayer())),
@@ -351,9 +349,7 @@ describe("WorktreeDockerSandboxFactory", () => {
             yield* Effect.promise(() =>
               writeFile(join(worktreePathOf(info), "dirty.txt"), "dirty"),
             );
-            return yield* Effect.fail(
-              new AgentError({ message: "agent failed" }),
-            );
+            return yield* new AgentError({ message: "agent failed" });
           }),
         );
       }).pipe(Effect.provide(makeLayer())),
@@ -1336,7 +1332,7 @@ describe("WorktreeDockerSandboxFactory — interruption preserves the worktree",
   it("still removes a clean worktree on a plain failure (no abort)", async () => {
     const hostDir = await makeHostRepo();
     const ac = new AbortController();
-    vi.spyOn(console, "error").mockImplementation(() => {});
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
 
     let observedWorktreePath: string | undefined;
     await expect(
@@ -1358,6 +1354,9 @@ describe("WorktreeDockerSandboxFactory — interruption preserves the worktree",
     assert.isDefined(observedWorktreePath);
 
     expect(existsSync(observedWorktreePath)).toBe(false);
+    expect(errors).toHaveBeenCalledWith(
+      "\nWorktree removed (no uncommitted changes)",
+    );
   });
 
   it.each(providers)(
