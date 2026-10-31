@@ -140,7 +140,7 @@ const makeMockCodexLayerWithUsage = (
       if (command.startsWith("codex ")) {
         const streamOutput = toCodexStreamJsonWithUsage(output, usage);
         if (options?.onLine) {
-          const onLine = options.onLine;
+          const { onLine } = options;
           return Effect.gen(function* () {
             for (const line of streamOutput.split("\n")) {
               onLine(line);
@@ -179,7 +179,7 @@ const makeMockAgentLayer = (
     exec: (command, options) => {
       const agent = matchAgent(command);
       if (agent && options?.onLine) {
-        const onLine = options.onLine;
+        const { onLine } = options;
         return Effect.gen(function* () {
           const cwd = options?.cwd ?? sandboxDir;
           const output = yield* Effect.promise(() => mockAgentBehavior(cwd));
@@ -385,7 +385,7 @@ describe("createSandbox", () => {
       return {
         exec: (command, options) => {
           if (command.startsWith("claude ") && options?.onLine) {
-            const onLine = options.onLine;
+            const { onLine } = options;
             return Effect.gen(function* () {
               const cwd = options?.cwd ?? sandboxDir;
               const encoded = encodeProjectPath(cwd);
@@ -621,7 +621,7 @@ describe("createSandbox", () => {
         exec: (command, options) => {
           if (command.startsWith("claude ") && options?.onLine) {
             capturedCommands.push(command);
-            const onLine = options.onLine;
+            const { onLine } = options;
             return Effect.gen(function* () {
               const cwd = options?.cwd ?? sandboxDir;
               const encoded = encodeProjectPath(cwd);
@@ -756,7 +756,7 @@ describe("createSandbox", () => {
         exec: (command, options) => {
           if (command.startsWith("claude ") && options?.onLine) {
             agentStdin.push(options.stdin);
-            const onLine = options.onLine;
+            const { onLine } = options;
             return Effect.gen(function* () {
               const cwd = options?.cwd ?? sandboxDir;
               const sessionsDir = join(
@@ -874,7 +874,7 @@ describe("createSandbox", () => {
           return {
             exec: (command, options) => {
               if (command.startsWith("claude ") && options?.onLine) {
-                const onLine = options.onLine;
+                const { onLine } = options;
                 return Effect.gen(function* () {
                   for (const line of [droppedToolLine, recognisedLine]) {
                     onLine(line);
@@ -948,7 +948,7 @@ describe("createSandbox", () => {
           return {
             exec: (command, options) => {
               if (command.startsWith("claude ") && options?.onLine) {
-                const onLine = options.onLine;
+                const { onLine } = options;
                 return Effect.gen(function* () {
                   for (const line of [droppedToolLine, recognisedLine]) {
                     onLine(line);
@@ -1159,7 +1159,7 @@ describe("createSandbox", () => {
       },
     });
 
-    const worktreePath = sandbox.worktreePath;
+    const { worktreePath } = sandbox;
     const closeResult = await sandbox.close();
 
     expect(closeResult.preservedWorktreePath).toBeUndefined();
@@ -1500,7 +1500,7 @@ describe("createSandbox", () => {
           exec: async (cmd, execOpts) => {
             const cwd = execOpts?.cwd ?? workDir;
             if (cmd.startsWith("claude ") && execOpts?.onLine) {
-              const onLine = execOpts.onLine;
+              const { onLine } = execOpts;
               const output = toStreamJson("mock output");
               for (const line of output.split("\n")) {
                 onLine(line);
@@ -1583,7 +1583,7 @@ describe("createSandbox", () => {
         exec: async (cmd, execOpts) => {
           const cwd = execOpts?.cwd ?? opts.worktreePath;
           if (cmd.startsWith("claude ") && execOpts?.onLine) {
-            const onLine = execOpts.onLine;
+            const { onLine } = execOpts;
             const output = toStreamJson("mock");
             for (const line of output.split("\n")) {
               onLine(line);
@@ -1795,7 +1795,7 @@ describe("createSandbox", () => {
       cwd: hostDir,
     });
 
-    const worktreePath = sandbox.worktreePath;
+    const { worktreePath } = sandbox;
     const closeResult = await sandbox.close();
 
     expect(closeResult.preservedWorktreePath).toBeUndefined();
@@ -2108,7 +2108,7 @@ describe("createSandbox", () => {
         promptArgs: { COMPONENT: "LoginForm" },
       });
 
-      const promptArg = receivedArgs[receivedArgs.length - 1]!;
+      const promptArg = receivedArgs.at(-1)!;
       expect(promptArg).toContain("LoginForm");
       expect(promptArg).not.toContain("{{COMPONENT}}");
     } finally {

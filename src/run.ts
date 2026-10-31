@@ -90,7 +90,7 @@ export const DEFAULT_MAX_ITERATIONS = 1;
 
 /** Replace characters that are invalid or problematic in file paths with dashes. */
 export const sanitizeBranchForFilename = (branch: string): string =>
-  branch.replace(/[/\\:*?"<>|]/g, "-");
+  branch.replaceAll(/[/\\:*?"<>|]/g, "-");
 
 export interface FileDisplayStartupOptions {
   readonly logPath: string;
@@ -137,7 +137,7 @@ export const buildLogFilename = (
 ): string => {
   const sanitized = sanitizeBranchForFilename(resolvedBranch);
   const nameSuffix = name
-    ? `-${name.toLowerCase().replace(/[^a-z0-9_.-]/g, "-")}`
+    ? `-${name.toLowerCase().replaceAll(/[^a-z0-9_.-]/g, "-")}`
     : "";
   if (targetBranch) {
     return `${sanitizeBranchForFilename(targetBranch)}-${sanitized}${nameSuffix}.log`;

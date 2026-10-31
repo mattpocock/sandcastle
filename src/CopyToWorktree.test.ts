@@ -43,7 +43,7 @@ describe("copyToWorktree", () => {
 
       expect(Exit.isFailure(exit)).toBe(true);
       if (Exit.isFailure(exit) && exit.cause._tag === "Fail") {
-        const error = exit.cause.error;
+        const { error } = exit.cause;
         expect(error).toBeInstanceOf(CopyToWorktreeError);
         if (error instanceof CopyToWorktreeError) {
           expect(error.path).toBe("nested/file.txt");
@@ -194,7 +194,7 @@ describe("copyToWorktree", () => {
       // The copy may succeed before the timeout fires on fast systems,
       // but if it times out, the error should carry the custom timeout value
       if (Exit.isFailure(exit) && exit.cause._tag === "Fail") {
-        const error = exit.cause.error;
+        const { error } = exit.cause;
         expect(error).toBeInstanceOf(CopyToWorktreeTimeoutError);
         if (error instanceof CopyToWorktreeTimeoutError) {
           expect(error.timeoutMs).toBe(customTimeout);

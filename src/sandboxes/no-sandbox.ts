@@ -47,7 +47,7 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
   name: "no-sandbox",
   env: options?.env ?? {},
   create: async (createOptions): Promise<NoSandboxHandle> => {
-    const worktreePath = createOptions.worktreePath;
+    const { worktreePath } = createOptions;
     const processEnv = { ...process.env, ...createOptions.env };
     const maxOutputTailChars = options?.maxOutputTailChars ?? MAX_TAIL_CHARS;
 
@@ -97,7 +97,7 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
           });
 
           if (opts?.onLine) {
-            const onLine = opts.onLine;
+            const { onLine } = opts;
             const stdoutTail = new BoundedTail(maxOutputTailChars, "\n");
             const stderrTail = new BoundedTail(maxOutputTailChars, "");
             const rl = createInterface({ input: proc.stdout! });

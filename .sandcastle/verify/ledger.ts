@@ -116,7 +116,7 @@ const worktrees = (world: World): Section => {
   return {
     title: "(b) Leftover worktrees",
     leaks,
-    notes: leaks.length ? [] : ["none"],
+    notes: leaks.length > 0 ? [] : ["none"],
   };
 };
 
@@ -227,7 +227,7 @@ const hostFiles = (world: World): Section => {
     else others.push(entry);
   }
   notes.push(
-    others.length
+    others.length > 0
       ? `${others.length} new Sandcastle temp entr${others.length === 1 ? "y" : "ies"} in the shared $TMPDIR, none naming this world (other worlds or test runs): ${others.slice(0, 5).join(", ")}${others.length > 5 ? ", …" : ""}`
       : "no new Sandcastle temp entries in the shared $TMPDIR",
   );
@@ -264,7 +264,7 @@ const hostFiles = (world: World): Section => {
   for (const f of found) leaks.push(`real HOME: ${f}`);
   const home = filesUnder(world.home);
   notes.push(
-    home.length
+    home.length > 0
       ? `written to the world's HOME (a user's ~ would get these):\n${home.map((f) => `      ~/${f}`).join("\n")}`
       : "nothing written to the world's HOME",
   );

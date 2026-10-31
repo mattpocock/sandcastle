@@ -324,7 +324,7 @@ export const createWorktree = async (
         agentProviderEnv: provider.env,
         sandboxProviderEnv: resolvedSandbox.env,
       });
-      const effectiveEnv = { ...env, ...(opts.env ?? {}) };
+      const effectiveEnv = { ...env, ...opts.env };
 
       // 3. Prompt args substitution (skip when no prompt, or when inline passthrough)
       let substitutedPrompt = rawPrompt;
@@ -414,7 +414,7 @@ export const createWorktree = async (
         }
         const interactiveExecFn = handle.interactiveExec.bind(handle);
         const sandbox = makeSandboxFromHandle(handle);
-        const worktreePath = handle.worktreePath;
+        const { worktreePath } = handle;
 
         const applyToHost =
           resolvedSandbox.tag === "isolated"
@@ -547,7 +547,7 @@ export const createWorktree = async (
         agentProviderEnv: provider.env,
         sandboxProviderEnv: sandboxProvider.env,
       });
-      const effectiveEnv = { ...env, ...(opts.env ?? {}) };
+      const effectiveEnv = { ...env, ...opts.env };
 
       // 3. Prompt args substitution (skipped for inline prompts — passthrough)
       const userArgs = opts.promptArgs ?? {};

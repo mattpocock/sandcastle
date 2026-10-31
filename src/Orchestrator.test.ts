@@ -192,7 +192,7 @@ const makeMockAgentLayer = (
     exec: (command, options) => {
       if (command.startsWith("claude ")) {
         if (options?.onLine) {
-          const onLine = options.onLine;
+          const { onLine } = options;
           return Effect.gen(function* () {
             const cwd = options?.cwd ?? sandboxDir;
             const output = yield* Effect.promise(() => mockAgentBehavior(cwd));
@@ -1049,7 +1049,7 @@ describe("Orchestrator tool call display integration", () => {
       return {
         exec: (command, options) => {
           if (command.startsWith("claude ") && options?.onLine) {
-            const onLine = options.onLine;
+            const { onLine } = options;
             const lines = [
               JSON.stringify({
                 type: "assistant",
@@ -1154,7 +1154,7 @@ describe("Orchestrator agent stream emitter", () => {
       return {
         exec: (command, options) => {
           if (command.startsWith("claude ") && options?.onLine) {
-            const onLine = options.onLine;
+            const { onLine } = options;
             const lines = [
               JSON.stringify({
                 type: "assistant",
@@ -1239,7 +1239,7 @@ describe("Orchestrator agent stream emitter", () => {
       return {
         exec: (command, options) => {
           if (command.startsWith("claude ") && options?.onLine) {
-            const onLine = options.onLine;
+            const { onLine } = options;
             const lines = [
               JSON.stringify({
                 type: "assistant",
@@ -1329,7 +1329,7 @@ describe("Orchestrator agent stream emitter", () => {
       return {
         exec: (command, options) => {
           if (command.startsWith("claude ") && options?.onLine) {
-            const onLine = options.onLine;
+            const { onLine } = options;
             const lines = [
               droppedToolLine,
               plainLine,
@@ -1439,7 +1439,7 @@ describe("Orchestrator error handling", () => {
         return {
           exec: (command, options) => {
             if (command.startsWith("claude ") && options?.onLine) {
-              const onLine = options.onLine;
+              const { onLine } = options;
               // Only emit an assistant line, no result line
               const assistantLine = JSON.stringify({
                 type: "assistant",
@@ -1493,7 +1493,7 @@ describe("Orchestrator error handling", () => {
         return {
           exec: (command, options) => {
             if (command.startsWith("claude ") && options?.onLine) {
-              const onLine = options.onLine;
+              const { onLine } = options;
               callCount++;
               if (callCount === 1) {
                 // Iteration 1: make a commit
@@ -1899,7 +1899,7 @@ describe("Orchestrator streaming", () => {
         return {
           exec: (command, options) => {
             if (command.startsWith("claude ") && options?.onLine) {
-              const onLine = options.onLine;
+              const { onLine } = options;
               capturedCommand = command;
               const output = "Test output";
               const streamOutput = toStreamJson(output);
@@ -1983,7 +1983,7 @@ describe("Orchestrator streaming", () => {
         return {
           exec: (command, options) => {
             if (command.startsWith("claude ") && options?.onLine) {
-              const onLine = options.onLine;
+              const { onLine } = options;
               capturedCommand = command;
               const output = "Done.";
               const streamOutput = toStreamJson(output);
@@ -2033,7 +2033,7 @@ describe("Orchestrator streaming", () => {
         return {
           exec: (command, options) => {
             if (command.startsWith("claude ") && options?.onLine) {
-              const onLine = options.onLine;
+              const { onLine } = options;
               capturedCommand = command;
               const output = "Done.";
               const streamOutput = toStreamJson(output);
@@ -2086,7 +2086,7 @@ describe("Orchestrator prompt preprocessing", () => {
         return {
           exec: (command, options) => {
             if (command.startsWith("claude ") && options?.onLine) {
-              const onLine = options.onLine;
+              const { onLine } = options;
               // Capture the prompt delivered via stdin
               capturedStdin = options?.stdin ?? "";
               const output = "Done.";
@@ -2148,7 +2148,7 @@ describe("Orchestrator prompt preprocessing", () => {
         return {
           exec: (command, options) => {
             if (command.startsWith("claude ") && options?.onLine) {
-              const onLine = options.onLine;
+              const { onLine } = options;
               capturedStdin = options?.stdin ?? "";
               const output = "Done.";
               const streamOutput = toStreamJson(output);
@@ -2195,7 +2195,7 @@ describe("Orchestrator prompt preprocessing", () => {
       return {
         exec: (command, options) => {
           if (command.startsWith("claude ") && options?.onLine) {
-            const onLine = options.onLine;
+            const { onLine } = options;
             capturedStdin = options?.stdin ?? "";
             const output = "Done.";
             const streamOutput = toStreamJson(output);
@@ -2525,7 +2525,7 @@ describe("Orchestrator Display integration", () => {
         return {
           exec: (command, options) => {
             if (command.startsWith("claude ") && options?.onLine) {
-              const onLine = options.onLine;
+              const { onLine } = options;
               return Effect.gen(function* () {
                 // Wait 100ms then emit a text event (resets idle timer)
                 yield* advance(100);
@@ -2590,7 +2590,7 @@ describe("Orchestrator Display integration", () => {
         return {
           exec: (command, options) => {
             if (command.startsWith("claude ") && options?.onLine) {
-              const onLine = options.onLine;
+              const { onLine } = options;
               return Effect.gen(function* () {
                 // Wait 100ms then emit a raw, unparsable line (should still reset idle timer)
                 yield* advance(100);
@@ -2645,7 +2645,7 @@ describe("Orchestrator Display integration", () => {
         return {
           exec: (command, options) => {
             if (command.startsWith("claude ") && options?.onLine) {
-              const onLine = options.onLine;
+              const { onLine } = options;
               return Effect.gen(function* () {
                 // Stay idle for 250ms — warnings fire at 100ms and 200ms
                 yield* advance(250);
@@ -2719,7 +2719,7 @@ describe("Orchestrator Display integration", () => {
         return {
           exec: (command, options) => {
             if (command.startsWith("claude ") && options?.onLine) {
-              const onLine = options.onLine;
+              const { onLine } = options;
               return Effect.gen(function* () {
                 // Idle for 150ms — warning fires at 100ms
                 yield* advance(150);
@@ -2830,7 +2830,7 @@ const makeMockPiAgentLayer = (
     exec: (command, options) => {
       if (command.startsWith("pi ")) {
         if (options?.onLine) {
-          const onLine = options.onLine;
+          const { onLine } = options;
           return Effect.gen(function* () {
             const cwd = options?.cwd ?? sandboxDir;
             const output = yield* Effect.promise(() => mockAgentBehavior(cwd));
@@ -2972,7 +2972,7 @@ describe("Orchestrator with pi provider", () => {
     const mockSandbox: SandboxService = {
       exec: (command, options) => {
         if (command.startsWith("pi ") && options?.onLine) {
-          const onLine = options.onLine;
+          const { onLine } = options;
           return Effect.sync(() => {
             for (const line of streamLines) {
               onLine(line);
@@ -3052,7 +3052,7 @@ describe("Orchestrator with pi provider", () => {
     const mockSandbox: SandboxService = {
       exec: (command, options) => {
         if (command.startsWith("pi ") && options?.onLine) {
-          const onLine = options.onLine;
+          const { onLine } = options;
           return Effect.sync(() => {
             for (const line of streamLines) {
               onLine(line);
@@ -3146,7 +3146,7 @@ const makeMockCodexAgentLayer = (
     exec: (command, options) => {
       if (command.startsWith("codex ")) {
         if (options?.onLine) {
-          const onLine = options.onLine;
+          const { onLine } = options;
           return Effect.gen(function* () {
             const cwd = options?.cwd ?? sandboxDir;
             const output = yield* Effect.promise(() => mockAgentBehavior(cwd));
@@ -3325,7 +3325,7 @@ describe("Session capture integration", () => {
             const sandbox: SandboxService = {
               exec: (command, options) => {
                 if (command.startsWith("claude ") && options?.onLine) {
-                  const onLine = options.onLine;
+                  const { onLine } = options;
                   return Effect.gen(function* () {
                     const cwd = options?.cwd ?? sandboxBaseDir;
                     const output = yield* Effect.promise(() =>
@@ -3649,7 +3649,7 @@ describe("Session capture integration", () => {
               exec: (command, options) => {
                 if (command.startsWith("claude ") && options?.onLine) {
                   capturedCommand = command;
-                  const onLine = options.onLine;
+                  const { onLine } = options;
                   return Effect.gen(function* () {
                     // Emulate a fork: agent writes a NEW session JSONL under
                     // a fresh session id, leaving the parent untouched.
@@ -4080,7 +4080,7 @@ describe("Orchestrator completion timeout (hanging process)", () => {
     return {
       exec: (command, options) => {
         if (command.startsWith("claude ") && options?.onLine) {
-          const onLine = options.onLine;
+          const { onLine } = options;
           return Effect.gen(function* () {
             for (const line of lines) {
               onLine(line);
@@ -4192,7 +4192,7 @@ describe("Orchestrator completion timeout (hanging process)", () => {
       return {
         exec: (command, options) => {
           if (command.startsWith("claude ") && options?.onLine) {
-            const onLine = options.onLine;
+            const { onLine } = options;
             return Effect.gen(function* () {
               onLine(
                 JSON.stringify({
@@ -4345,7 +4345,7 @@ describe("Orchestrator context window (last model call)", () => {
     return {
       exec: (command, options) => {
         if (command.startsWith(prefix) && options?.onLine) {
-          const onLine = options.onLine;
+          const { onLine } = options;
           const call = perCall.shift() ?? { lines: [], exitCode: 0 };
           return Effect.sync(() => {
             for (const line of call.lines) {

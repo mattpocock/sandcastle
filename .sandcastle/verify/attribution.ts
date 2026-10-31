@@ -121,7 +121,7 @@ export const sharedTmpEntryIsWorlds = (
 export const ledgerFileName = (existing: readonly string[]): string => {
   const ns = existing
     .map((f) => /^LEDGER-(\d+)\.md$/.exec(f)?.[1])
-    .filter((n): n is string => !!n)
+    .filter((n): n is string => Boolean(n))
     .map(Number);
-  return `LEDGER-${ns.length ? Math.max(...ns) + 1 : 1}.md`;
+  return `LEDGER-${ns.length > 0 ? Math.max(...ns) + 1 : 1}.md`;
 };

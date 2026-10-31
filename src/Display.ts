@@ -261,7 +261,7 @@ export const ClackDisplay = {
       let pendingText = "";
 
       const printText = (text: string) => {
-        const trimmed = text.replace(/^\n+|\n+$/g, "");
+        const trimmed = text.replaceAll(/^\n+|\n+$/g, "");
         if (trimmed.trim().length > 0) {
           clack.log.message(trimmed);
         }

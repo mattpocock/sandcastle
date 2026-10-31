@@ -181,7 +181,7 @@ describe("testBindMount()", () => {
       mounts: [],
       env: {},
     });
-    const worktreePath = handle.worktreePath;
+    const { worktreePath } = handle;
     expect(existsSync(worktreePath)).toBe(true);
 
     await handle.close();

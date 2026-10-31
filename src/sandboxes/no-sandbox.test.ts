@@ -172,7 +172,7 @@ describe("noSandbox", () => {
         // Every line is delivered live to onLine, regardless of the tail bound.
         expect(lines).toHaveLength(5000);
         expect(lines[0]).toBe("line-1");
-        expect(lines[lines.length - 1]).toBe("line-5000");
+        expect(lines.at(-1)).toBe("line-5000");
         // The returned stdout is bounded to the configured tail.
         expect(result.stdout.length).toBeLessThanOrEqual(100);
         // ...and it is the tail, so the most recent line is present.

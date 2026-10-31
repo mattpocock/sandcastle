@@ -49,7 +49,7 @@ const pathExists = async (path: string): Promise<boolean> => {
 export const encodeProjectPath = (cwd: string): string => {
   const isRoot = cwd === "/" || /^[A-Za-z]:[\\/]?$/.test(cwd);
   const normalized = isRoot ? cwd : cwd.replace(/[\\/]+$/, "");
-  return normalized.replace(/^([A-Za-z]):/, "$1").replace(/[\\/]/g, "-");
+  return normalized.replace(/^([A-Za-z]):/, "$1").replaceAll(/[\\/]/g, "-");
 };
 
 /** Absolute host path to a Claude session JSONL file. */
@@ -310,7 +310,7 @@ export const transferCodexSession = (
  */
 export const encodePiSessionDir = (cwd: string): string => {
   const stripped = cwd.replace(/^[/\\]/, "");
-  const replaced = stripped.replace(/[/\\:]/g, "-");
+  const replaced = stripped.replaceAll(/[/\\:]/g, "-");
   return `--${replaced}--`;
 };
 

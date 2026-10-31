@@ -52,7 +52,7 @@ export type ParsedStreamEvent =
 
 /** @internal Single-quote a string for safe use in a POSIX shell command. */
 export const shellEscape = (s: string): string =>
-  `'${s.replace(/'/g, String.raw`'\''`)}'`;
+  `'${s.replaceAll("'", String.raw`'\''`)}'`;
 
 /**
  * Build a `context_window` event from ONE model call's input-side buckets
@@ -822,7 +822,7 @@ const parseCodexSessionContextWindow = (
       if (obj.type !== "event_msg" || obj.payload?.type !== "token_count") {
         continue;
       }
-      const info = obj.payload.info;
+      const { info } = obj.payload;
       const tokens = info?.last_token_usage?.input_tokens;
       if (typeof tokens !== "number" || tokens <= 0) continue;
       const limit = info.model_context_window;
@@ -851,7 +851,7 @@ const parseCodexStreamLine = (line: string): ParsedStreamEvent[] => {
       obj.item?.type === "agent_message" &&
       typeof obj.item.text === "string"
     ) {
-      const text = obj.item.text;
+      const { text } = obj.item;
       return [
         { type: "text", text },
         { type: "result", result: text },
@@ -1039,7 +1039,7 @@ const parseOpenCodeStreamLine = (line: string): ParsedStreamEvent[] => {
   if (!line.startsWith("{")) return [];
   try {
     const obj = JSON.parse(line);
-    const part = obj.part;
+    const { part } = obj;
 
     // step_start carries the session ID for the run.
     if (obj.type === "step_start" && typeof obj.sessionID === "string") {
@@ -1074,7 +1074,7 @@ const parseOpenCodeStreamLine = (line: string): ParsedStreamEvent[] => {
         | { status?: string; input?: Record<string, unknown> }
         | undefined;
       if (state?.status !== "completed") return [];
-      const input = state.input;
+      const { input } = state;
       if (!input) return [];
       const argField = OPENCODE_TOOL_ARG_FIELDS[part.tool];
       const argValue = argField === undefined ? undefined : input[argField];

@@ -210,7 +210,7 @@ export const countCommitsToSync = (
     if (countResult.exitCode !== 0) {
       return 0;
     }
-    const parsed = parseInt(countResult.stdout.trim(), 10);
+    const parsed = Number.parseInt(countResult.stdout.trim(), 10);
     return Number.isNaN(parsed) ? 0 : parsed;
   });
 
@@ -226,7 +226,7 @@ export const syncOut = (
   handle: IsolatedSandboxHandle,
 ): Effect.Effect<void, SyncError> =>
   Effect.gen(function* () {
-    const worktreePath = handle.worktreePath;
+    const { worktreePath } = handle;
 
     const hostHead = (yield* execHost(
       "git rev-parse HEAD",

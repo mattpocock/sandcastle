@@ -137,7 +137,7 @@ export interface VercelOptions {
 const resolveVercelAuth = (
   options: VercelOptions | undefined,
 ): { token?: string; teamId?: string; projectId?: string } => {
-  const env = process.env;
+  const { env } = process;
   const token = options?.token || env.VERCEL_TOKEN || undefined;
 
   if (!token) {
@@ -221,7 +221,7 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
           },
         ): Promise<ExecResult> => {
           if (opts?.onLine) {
-            const onLine = opts.onLine;
+            const { onLine } = opts;
             const stdoutTail = new BoundedTail(maxOutputTailChars, "\n");
             const stderrTail = new BoundedTail(maxOutputTailChars, "");
             let partial = "";

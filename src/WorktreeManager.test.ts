@@ -694,8 +694,8 @@ describe("WorktreeManager.create", () => {
 
     // The temp branch should also have no upstream tracking config
     const escapedBranch = branch
-      .replace(/\//g, String.raw`\/`)
-      .replace(/\./g, String.raw`\.`);
+      .replaceAll("/", String.raw`\/`)
+      .replaceAll(".", String.raw`\.`);
     const { stdout: trackingConfig } = await execAsync(
       `git config --get-regexp "branch\\.${escapedBranch}\\." || true`,
       { cwd: repoDir },

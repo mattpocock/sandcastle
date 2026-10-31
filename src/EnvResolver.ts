@@ -20,18 +20,14 @@ const parseEnvFile = (
       const key = trimmed.slice(0, eqIndex).trim();
       let value = trimmed.slice(eqIndex + 1).trim();
       const isDoubleQuoted =
-        value.length >= 2 &&
-        value[0] === '"' &&
-        value[value.length - 1] === '"';
+        value.length >= 2 && value.startsWith('"') && value.at(-1) === '"';
       const isSingleQuoted =
-        value.length >= 2 &&
-        value[0] === "'" &&
-        value[value.length - 1] === "'";
+        value.length >= 2 && value.startsWith("'") && value.at(-1) === "'";
       if (isDoubleQuoted || isSingleQuoted) {
         value = value.slice(1, -1);
       }
       if (isDoubleQuoted) {
-        value = value.replace(/\\([nrt\\])/g, (_, ch: string) => {
+        value = value.replaceAll(/\\([nrt\\])/g, (_, ch: string) => {
           const escapes: Record<string, string> = {
             n: "\n",
             r: "\r",

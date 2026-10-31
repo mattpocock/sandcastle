@@ -54,7 +54,7 @@ export interface World {
 }
 
 const stamp = (d: Date): string =>
-  d.toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
+  d.toISOString().replaceAll(/[-:]/g, "").replace("T", "-").slice(0, 15);
 
 const must = (
   command: string,
@@ -290,7 +290,7 @@ export const liveWorlds = (): World[] =>
         return undefined;
       }
     })
-    .filter((w): w is World => !!w && !w.cleanedAt);
+    .filter((w): w is World => Boolean(w) && !w.cleanedAt);
 
 // --- Running inside a world ------------------------------------------------------
 
@@ -329,7 +329,7 @@ export const declaredKeys = (world: World): Set<string> => {
     readFileSync(file, "utf8")
       .split("\n")
       .map((l) => /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(l)?.[1])
-      .filter((k): k is string => !!k),
+      .filter((k): k is string => Boolean(k)),
   );
 };
 

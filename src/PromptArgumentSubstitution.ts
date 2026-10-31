@@ -98,7 +98,7 @@ const markShellBlocks = (prompt: string): string => {
   const commentRanges = [...prompt.matchAll(HTML_COMMENT_PATTERN)].map(
     (m) => [m.index, m.index + m[0].length] as const,
   );
-  return prompt.replace(SHELL_BLOCK_PATTERN, (block, command, offset) =>
+  return prompt.replaceAll(SHELL_BLOCK_PATTERN, (block, command, offset) =>
     commentRanges.some(([start, end]) => offset >= start && offset < end)
       ? block
       : `!${SHELL_BLOCK_MARKER}\`${command}\``,
@@ -172,7 +172,7 @@ export const substitutePromptArgs = (
     }
 
     // Replace all placeholders with their values
-    const result = markedPrompt.replace(PLACEHOLDER_PATTERN, (_match, key) =>
+    const result = markedPrompt.replaceAll(PLACEHOLDER_PATTERN, (_match, key) =>
       sanitizedArgs[key as string]!.toString(),
     );
 

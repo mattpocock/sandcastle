@@ -58,7 +58,7 @@ export const makeLocalSandbox = (sandboxDir: string): SandboxService => {
         });
 
         if (options?.onLine) {
-          const onLine = options.onLine;
+          const { onLine } = options;
           const stdoutTail = new BoundedTail(MAX_TAIL_CHARS, "\n");
           const stderrTail = new BoundedTail(MAX_TAIL_CHARS, "");
           const rl = createInterface({ input: proc.stdout! });

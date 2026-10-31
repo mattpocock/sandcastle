@@ -841,19 +841,19 @@ const rewriteMainTs = (
     // Templates use main.mts as the canonical filename in comments.
     // When the target is main.ts, rewrite those references.
     if (mainFilename === "main.ts") {
-      content = content.replace(/main\.mts/g, "main.ts");
+      content = content.replaceAll("main.mts", "main.ts");
     }
 
     // Replace factory function name in imports (e.g. claudeCode → pi)
     // and all factory calls with the correct model.
     // Templates always use claudeCode as the placeholder factory.
-    content = content.replace(/\bclaudeCode\b/g, agent.factoryImport);
+    content = content.replaceAll(/\bclaudeCode\b/g, agent.factoryImport);
     // Replace model strings in factory calls: factoryImport("any-model")
     const factoryCallRe = new RegExp(
       `${agent.factoryImport}\\(["']([^"']+)["']\\)`,
       "g",
     );
-    content = content.replace(
+    content = content.replaceAll(
       factoryCallRe,
       `${agent.factoryImport}("${model}")`,
     );
@@ -864,13 +864,13 @@ const rewriteMainTs = (
     // case-sensitive word-boundary replace therefore rewrites the named import,
     // the import subpath, and every factory call site — and is a no-op when
     // docker is selected.
-    content = content.replace(/\bdocker\b/g, sandboxProvider.name);
+    content = content.replaceAll(/\bdocker\b/g, sandboxProvider.name);
 
     // A custom image name (init --image-name) must reach every sandbox factory
     // call, or the scaffolded run starts the default-named image instead of
     // the one init built.
     if (imageName !== undefined) {
-      content = content.replace(
+      content = content.replaceAll(
         new RegExp(`\\b${sandboxProvider.name}\\(\\)`, "g"),
         `${sandboxProvider.name}({ imageName: ${JSON.stringify(imageName)} })`,
       );
@@ -923,7 +923,7 @@ const applyIssueTrackerSandboxOptions = (
 
     const updated = content
       .replace(importRe, (line) => `${line}\n\n${issueTracker.sandboxOptions}`)
-      .replace(
+      .replaceAll(
         new RegExp(`\\b${provider}\\(\\)`, "g"),
         `${provider}(sandboxOptions)`,
       );
@@ -954,7 +954,7 @@ const rewritePromptFiles = (
           const content = yield* fs
             .readFileString(filePath)
             .pipe(Effect.mapError((e) => new Error(e.message)));
-          const updated = content.replace(/ --label Sandcastle/g, "");
+          const updated = content.replaceAll(" --label Sandcastle", "");
           if (updated !== content) {
             yield* fs
               .writeFileString(filePath, updated)
@@ -1012,7 +1012,7 @@ const substituteTemplateArgs = (
           for (const [key, value] of Object.entries(
             issueTracker.templateArgs,
           )) {
-            content = content.replace(
+            content = content.replaceAll(
               new RegExp(`\\{\\{${key}\\}\\}`, "g"),
               value,
             );

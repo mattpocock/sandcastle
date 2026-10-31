@@ -350,7 +350,7 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
             });
 
             if (opts?.onLine) {
-              const onLine = opts.onLine;
+              const { onLine } = opts;
               const stdoutTail = new BoundedTail(maxOutputTailChars, "\n");
               const stderrTail = new BoundedTail(maxOutputTailChars, "");
               const rl = createInterface({ input: proc.stdout! });

@@ -253,7 +253,7 @@ describe("createWorktree", () => {
       cwd: hostDir,
     });
 
-    const worktreePath = ws.worktreePath;
+    const { worktreePath } = ws;
     const result = await ws.close();
 
     expect(result.preservedWorktreePath).toBeUndefined();
@@ -563,7 +563,7 @@ describe("worktree.interactive()", () => {
         promptFile: promptPath,
       });
 
-      expect(receivedArgs[receivedArgs.length - 1]).toBe(
+      expect(receivedArgs.at(-1)).toBe(
         `source=${ws.branch} target=host-branch`,
       );
     } finally {
@@ -1509,7 +1509,7 @@ describe("worktree.createSandbox()", () => {
       cwd: hostDir,
     });
 
-    const worktreePath = ws.worktreePath;
+    const { worktreePath } = ws;
 
     const sandbox = await ws.createSandbox({
       sandbox: testSandbox,

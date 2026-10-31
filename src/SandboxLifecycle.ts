@@ -248,14 +248,14 @@ export const withSandboxLifecycle = <A>(
         if (hostGitName) {
           yield* execOkWithGitTimeout(
             sandbox,
-            `git config --global user.name "${hostGitName.replace(/"/g, String.raw`\"`)}"`,
+            `git config --global user.name "${hostGitName.replaceAll('"', String.raw`\"`)}"`,
             gitSetupTimeoutMs,
           );
         }
         if (hostGitEmail) {
           yield* execOkWithGitTimeout(
             sandbox,
-            `git config --global user.email "${hostGitEmail.replace(/"/g, String.raw`\"`)}"`,
+            `git config --global user.email "${hostGitEmail.replaceAll('"', String.raw`\"`)}"`,
             gitSetupTimeoutMs,
           );
         }
@@ -453,7 +453,7 @@ export const withSandboxLifecycle = <A>(
             `git rev-list "${baseHead}..HEAD" --count`,
             { cwd: hostSideWorktreePath },
           );
-          return parseInt(stdout.trim(), 10) > 0;
+          return Number.parseInt(stdout.trim(), 10) > 0;
         } catch {
           return false;
         }
