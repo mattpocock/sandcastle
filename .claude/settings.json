@@ -8,7 +8,7 @@
       "Bash(git add:*)",
       "Bash(git status:*)",
       "Bash(git commit:*)",
-      "Bash(npx tsgo:*)",
+      "Bash(npx tsc:*)",
       "Bash(npm test:*)",
       "Bash(npm check:*)",
       "Bash(npm run typecheck *)",
