@@ -119,6 +119,16 @@ describe("hostGit", () => {
     );
   });
 
+  it("survives git exiting without reading its input", async () => {
+    const ctx = setup();
+    await expect(
+      run(["rev-parse", "--is-inside-work-tree"], ctx.repo, {
+        env: ctx.env,
+        input: "x".repeat(8 * 1024 * 1024),
+      }),
+    ).resolves.toBe("true\n");
+  });
+
   describe("worktrees under .sandcastle/worktrees", () => {
     const setupWorktree = () => {
       const ctx = setup();

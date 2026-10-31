@@ -55,6 +55,8 @@ interface SpawnOptions {
   readonly input?: string;
 }
 
+const ignoreStdinError = (): undefined => undefined;
+
 /** Runs git with exactly `env`. */
 const spawnGit = (
   args: readonly string[],
@@ -84,6 +86,9 @@ const spawnGit = (
     );
     // Not killed on interruption: a git command stopped half-way (a merge,
     // `git am`) could leave the host repo locked or half-updated.
+    // Git may exit without reading stdin; the EPIPE that follows is harmless,
+    // but unhandled it would crash the process.
+    child.stdin?.on("error", ignoreStdinError);
     child.stdin?.end(input);
   });
 
