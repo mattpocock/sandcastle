@@ -107,8 +107,8 @@ export const detectPackageManager = (
         .readFileString(pkgPath)
         .pipe(Effect.orElseSucceed(() => ""));
       try {
-        const pkg = JSON.parse(content) as Record<string, unknown>;
-        const field = pkg["packageManager"];
+        const pkg: unknown = JSON.parse(content);
+        const field = isRecord(pkg) ? pkg["packageManager"] : undefined;
         if (typeof field === "string") {
           const name = field.split("@")[0];
           const match = PACKAGE_MANAGERS.find((pm) => pm === name);
@@ -185,17 +185,20 @@ export const hostHasDependency = (
       .readFileString(pkgPath)
       .pipe(Effect.orElseSucceed(() => ""));
     try {
-      const parsed = JSON.parse(content) as Record<string, unknown>;
+      const parsed: unknown = JSON.parse(content);
       const depMaps = [
         "dependencies",
         "devDependencies",
         "peerDependencies",
         "optionalDependencies",
       ];
-      return depMaps.some((key) => {
-        const deps = parsed[key];
-        return typeof deps === "object" && deps !== null && pkg in deps;
-      });
+      return (
+        isRecord(parsed) &&
+        depMaps.some((key) => {
+          const deps = parsed[key];
+          return typeof deps === "object" && deps !== null && pkg in deps;
+        })
+      );
     } catch {
       return false;
     }
@@ -582,7 +585,8 @@ const CUSTOM_TRACKER_TOOLS = `# TODO: install your issue tracker's CLI here. See
 const CUSTOM_ENV_EXAMPLE = `# TODO: add any env vars your issue tracker needs (e.g. an API token).
 # See ${SETUP_ISSUE_TRACKER_PATH}`;
 
-const ISSUE_TRACKER_REGISTRY: IssueTrackerEntry[] = [
+// A non-empty tuple type, so `[0]` (the default) is known to exist.
+const ISSUE_TRACKER_REGISTRY: [IssueTrackerEntry, ...IssueTrackerEntry[]] = [
   {
     name: "github-issues",
     label: "GitHub Issues",
@@ -648,7 +652,11 @@ export interface SandboxProviderEntry {
   readonly cliNamespace: string;
 }
 
-const SANDBOX_PROVIDER_REGISTRY: SandboxProviderEntry[] = [
+// A non-empty tuple type, so `[0]` (the default) is known to exist.
+const SANDBOX_PROVIDER_REGISTRY: [
+  SandboxProviderEntry,
+  ...SandboxProviderEntry[],
+] = [
   {
     name: "docker",
     label: "Docker",
@@ -1161,8 +1169,8 @@ const detectMainFilename = (
       .readFileString(pkgPath)
       .pipe(Effect.orElseSucceed(() => ""));
     try {
-      const pkg = JSON.parse(content) as Record<string, unknown>;
-      return pkg["type"] === "module" ? "main.ts" : "main.mts";
+      const pkg: unknown = JSON.parse(content);
+      return isRecord(pkg) && pkg["type"] === "module" ? "main.ts" : "main.mts";
     } catch {
       return "main.mts";
     }
@@ -1178,8 +1186,8 @@ export const scaffold = (
       model,
       templateName = "blank",
       createLabel = true,
-      issueTracker = ISSUE_TRACKER_REGISTRY[0]!, // default: github-issues
-      sandboxProvider = SANDBOX_PROVIDER_REGISTRY[0]!, // default: docker
+      issueTracker = ISSUE_TRACKER_REGISTRY[0], // default: github-issues
+      sandboxProvider = SANDBOX_PROVIDER_REGISTRY[0], // default: docker
       imageName,
     } = options;
     const fs = yield* FileSystem.FileSystem;
@@ -1273,3 +1281,7 @@ export const scaffold = (
 
     return { mainFilename };
   });
+
+/** A parsed JSON value that is an object (or array), so its fields can be read. */
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
