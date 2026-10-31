@@ -167,6 +167,28 @@ const resolveVercelAuth = (
 };
 
 /**
+ * Run the setup of a sandbox that `create()` has just made. If it fails, stop
+ * the sandbox before rethrowing: no handle exists yet, so neither Sandcastle's
+ * teardown nor `close()` can reach it, and it would run until Vercel's
+ * timeout.
+ */
+const setUpOrStop = async (
+  sandbox: { stop: () => Promise<unknown> },
+  setUp: () => Promise<void>,
+): Promise<void> => {
+  try {
+    await setUp();
+  } catch (error) {
+    try {
+      await sandbox.stop();
+    } catch {
+      // Report the setup error, which says why create() failed.
+    }
+    throw error;
+  }
+};
+
+/**
  * Create a Vercel isolated sandbox provider.
  *
  * The returned provider creates Vercel Firecracker microVM sandboxes via
@@ -207,7 +229,9 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
       const sandbox = await Sandbox.create(createParams);
 
       // Ensure worktree directory exists
-      await sandbox.mkDir(VERCEL_REPO_PATH);
+      await setUpOrStop(sandbox, async () => {
+        await sandbox.mkDir(VERCEL_REPO_PATH);
+      });
 
       const handle: IsolatedSandboxHandle = {
         worktreePath: VERCEL_REPO_PATH,

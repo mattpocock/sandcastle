@@ -62,6 +62,44 @@ describe("vercel()", () => {
   });
 });
 
+describe("vercel() when setup fails inside create()", () => {
+  beforeEach(() => {
+    vi.stubEnv("VERCEL_TOKEN", undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("stops the sandbox it created, then rethrows", async () => {
+    const stop = vi.fn<() => Promise<void>>(async () => {});
+    const setupError = new Error("error creating directory");
+    sandboxCreate.mockImplementationOnce(async () => ({
+      mkDir: async () => {
+        throw setupError;
+      },
+      stop,
+    }));
+
+    await expect(vercel().create({ env: {} })).rejects.toBe(setupError);
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("rethrows the setup error even when stopping fails too", async () => {
+    const setupError = new Error("error creating directory");
+    sandboxCreate.mockImplementationOnce(async () => ({
+      mkDir: async () => {
+        throw setupError;
+      },
+      stop: async () => {
+        throw new Error("stop failed");
+      },
+    }));
+
+    await expect(vercel().create({ env: {} })).rejects.toBe(setupError);
+  });
+});
+
 describe("vercel() auth from the environment", () => {
   const AUTH_KEYS = [
     "VERCEL_TOKEN",
