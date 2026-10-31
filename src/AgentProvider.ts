@@ -218,7 +218,7 @@ export interface AgentCommandOptions {
   readonly resumeSession?: string;
   /**
    * When true alongside `resumeSession`, the agent should fork the session
-   * instead of mutating it — Claude's `--fork-session`, Codex's
+   * instead of mutating it — Claude's `--fork-session`, pi's `--fork`, Codex's
    * `codex exec fork`. The parent session JSONL is left intact and the agent
    * writes a new session under a fresh id.
    */
@@ -667,6 +667,7 @@ export const pi = (
   buildPrintCommand({
     prompt,
     resumeSession,
+    forkSession,
   }: AgentCommandOptions): PrintCommand {
     const thinkingFlag = options?.thinking
       ? ` --thinking ${options.thinking}`
@@ -674,8 +675,13 @@ export const pi = (
     // Pi persists print-mode sessions by default; `--session <id>` resolves an
     // existing session and appends to it in place. Drop the legacy
     // `--no-session` flag so fresh runs also persist and can be resumed later.
+    // `--fork <id>` instead copies the session into a new file under a fresh
+    // id (reported on the stream's `session` header line), leaving the parent
+    // untouched. Pi rejects `--fork` combined with `--session`.
     const sessionFlag = resumeSession
-      ? ` --session ${shellEscape(resumeSession)}`
+      ? forkSession
+        ? ` --fork ${shellEscape(resumeSession)}`
+        : ` --session ${shellEscape(resumeSession)}`
       : "";
     return {
       command: `pi -p --mode json --model ${shellEscape(model)}${thinkingFlag}${sessionFlag}`,
