@@ -5,6 +5,10 @@ import {
   claudeHostSessionPath,
   claudeSandboxSessionPath,
   claudeSubagentsDirOnHost,
+  copilotHostSessionsDir,
+  copilotSessionPath,
+  cursorChatDirName,
+  cursorHostChatsDir,
   encodePiSessionDir,
   findClaudeSessionOnHost,
   findCodexSessionOnHost,
@@ -20,11 +24,13 @@ import {
   requireHostSessionPath,
   transferClaudeSession,
   transferCodexSession,
+  transferCopilotSession,
   transferPiSession,
 } from "./SessionStore.js";
 import type { HostSessionLookup } from "./SessionStore.js";
 import type { BindMountSandboxHandle } from "./SandboxProvider.js";
 import type { ContextWindow } from "./ContextWindow.js";
+import { ForkNotSupportedError } from "./errors.js";
 
 export type ParsedStreamEvent =
   | { type: "text"; text: string }
@@ -97,20 +103,36 @@ const TOOL_ARG_FIELDS: Record<string, string> = {
   Agent: "description",
 };
 
+/** `value.message` when `value` is an object whose `message` is a string. */
+const messageField = (value: unknown): string | undefined =>
+  typeof value === "object" &&
+  value !== null &&
+  "message" in value &&
+  typeof value.message === "string"
+    ? value.message
+    : undefined;
+
 /**
  * Extract an error message from a parsed JSON error event.
  * Handles { error: "string" }, { error: { message: "string" } },
  * { error: { data: { message: "string" } } }, and { message: "string" }.
  */
-const extractErrorMessage = (obj: any): string | undefined => {
-  const err = obj.error;
-  if (typeof err === "string") return err;
-  if (typeof err === "object" && err !== null) {
-    if (typeof err.message === "string") return err.message;
-    if (typeof err.data?.message === "string") return err.data.message;
+const extractErrorMessage = (obj: unknown): string | undefined => {
+  if (typeof obj !== "object" || obj === null) {
+    return undefined;
   }
-  if (typeof obj.message === "string") return obj.message;
-  return undefined;
+  const err = "error" in obj ? obj.error : undefined;
+  if (typeof err === "string") {
+    return err;
+  }
+  if (typeof err === "object" && err !== null) {
+    const nested =
+      messageField(err) ?? ("data" in err ? messageField(err.data) : undefined);
+    if (nested !== undefined) {
+      return nested;
+    }
+  }
+  return messageField(obj);
 };
 
 /** A content block of a Claude `assistant` stream-json event. */
@@ -215,61 +237,94 @@ const parseStreamJsonLine = (line: string): ParsedStreamEvent[] => {
  */
 const CURSOR_PRINT_PROMPT_MAX_BYTES = 120 * 1024;
 
-function assertCursorPrintPromptFitsArgv(prompt: string): void {
+const assertCursorPrintPromptFitsArgv = (prompt: string): void => {
   const n = Buffer.byteLength(prompt, "utf8");
   if (n > CURSOR_PRINT_PROMPT_MAX_BYTES) {
     throw new Error(
       `Cursor print-mode prompt is ${n} bytes (max ${CURSOR_PRINT_PROMPT_MAX_BYTES} bytes). The Cursor CLI accepts the prompt only as a command-line argument; shorten the prompt or split the work. Other Sandcastle providers use stdin for large prompts.`,
     );
   }
-}
+};
+
+/** Reads `<kind>ToolCall.args[field]` when it is a string. */
+const cursorToolCallArg = (
+  toolCall: unknown,
+  field: string,
+): string | undefined => {
+  if (typeof toolCall !== "object" || toolCall === null) {
+    return undefined;
+  }
+  const args: unknown = Reflect.get(toolCall, "args");
+  if (typeof args !== "object" || args === null) {
+    return undefined;
+  }
+  const value: unknown = Reflect.get(args, field);
+  return typeof value === "string" ? value : undefined;
+};
+
+/**
+ * Cursor's typed tool calls: `<kind>ToolCall` → display name and the arg it
+ * shows. Newer Cursor CLIs (verified 2026-10-31, composer-2) run shell
+ * commands as `shellToolCall` and write files as `editToolCall`.
+ */
+const CURSOR_TYPED_TOOL_CALLS: readonly {
+  readonly kind: string;
+  readonly name: string;
+  readonly field: string;
+}[] = [
+  { kind: "readToolCall", name: "Read", field: "path" },
+  { kind: "writeToolCall", name: "Write", field: "path" },
+  { kind: "editToolCall", name: "Edit", field: "path" },
+  { kind: "shellToolCall", name: "Bash", field: "command" },
+];
+
+/** Cursor's older `function` tool call: `{ name, arguments: "<json>" }`. */
+const parseCursorFunctionToolCall = (fn: unknown): ParsedStreamEvent[] => {
+  if (typeof fn !== "object" || fn === null) {
+    return [];
+  }
+  const name: unknown = Reflect.get(fn, "name");
+  if (typeof name !== "string") {
+    return [];
+  }
+  const rawArguments: unknown = Reflect.get(fn, "arguments");
+  const rawArgs = typeof rawArguments === "string" ? rawArguments : "";
+  if (rawArgs === "") {
+    return [{ type: "tool_call", name, args: "" }];
+  }
+  try {
+    const parsedArgs = JSON.parse(rawArgs) as unknown;
+    const command: unknown =
+      typeof parsedArgs === "object" && parsedArgs !== null
+        ? Reflect.get(parsedArgs, "command")
+        : undefined;
+    if (typeof command === "string") {
+      return [{ type: "tool_call", name: "Bash", args: command }];
+    }
+  } catch {
+    // Use raw arguments string for display.
+  }
+  return [{ type: "tool_call", name, args: rawArgs }];
+};
 
 /** Cursor stream-json emits top-level `tool_call` events (see Cursor CLI output-format docs). */
 const parseCursorToolCallStarted = (
   obj: Record<string, unknown>,
 ): ParsedStreamEvent[] => {
-  if (obj.type !== "tool_call" || obj.subtype !== "started") return [];
+  if (obj.type !== "tool_call" || obj.subtype !== "started") {
+    return [];
+  }
   const toolCall = obj.tool_call;
-  if (!toolCall || typeof toolCall !== "object") return [];
-
-  const tc = toolCall as Record<string, unknown>;
-
-  const readToolCall = tc.readToolCall as
-    | { args?: { path?: unknown } }
-    | undefined;
-  if (readToolCall?.args && typeof readToolCall.args.path === "string") {
-    return [{ type: "tool_call", name: "Read", args: readToolCall.args.path }];
+  if (typeof toolCall !== "object" || toolCall === null) {
+    return [];
   }
-
-  const writeToolCall = tc.writeToolCall as
-    | { args?: { path?: unknown } }
-    | undefined;
-  if (writeToolCall?.args && typeof writeToolCall.args.path === "string") {
-    return [
-      { type: "tool_call", name: "Write", args: writeToolCall.args.path },
-    ];
-  }
-
-  const fn = tc.function as { name?: unknown; arguments?: unknown } | undefined;
-  if (fn && typeof fn.name === "string") {
-    const rawArgs = typeof fn.arguments === "string" ? fn.arguments : "";
-    if (rawArgs) {
-      try {
-        const parsedArgs = JSON.parse(rawArgs) as Record<string, unknown>;
-        if (typeof parsedArgs.command === "string") {
-          return [
-            { type: "tool_call", name: "Bash", args: parsedArgs.command },
-          ];
-        }
-      } catch {
-        // Use raw arguments string for display.
-      }
-      return [{ type: "tool_call", name: fn.name, args: rawArgs }];
+  for (const { kind, name, field } of CURSOR_TYPED_TOOL_CALLS) {
+    const args = cursorToolCallArg(Reflect.get(toolCall, kind), field);
+    if (args !== undefined) {
+      return [{ type: "tool_call", name, args }];
     }
-    return [{ type: "tool_call", name: fn.name, args: "" }];
   }
-
-  return [];
+  return parseCursorFunctionToolCall(Reflect.get(toolCall, "function"));
 };
 
 /**
@@ -353,6 +408,12 @@ export interface AgentSessionStorage {
    * directory that was searched (for not-found errors).
    */
   findByIdOnHost(sessionId: string): Promise<HostSessionLookup>;
+  /**
+   * `false` when the agent's CLI can resume a session but has no native fork:
+   * `.fork()` then throws `ForkNotSupportedError` before any sandbox starts.
+   * Omitted means the agent forks.
+   */
+  readonly canFork?: boolean;
 }
 
 export interface AgentProvider {
@@ -510,10 +571,10 @@ const makeClaudeSessionStorage = (
             ),
             tag: "claude-sub",
           });
-        } catch (err) {
+        } catch (error) {
           console.error(
             `sandcastle: failed to capture Claude subagent transcript ${sandboxSubagentPath}: ${
-              err instanceof Error ? err.message : String(err)
+              error instanceof Error ? error.message : String(error)
             }`,
           );
         }
@@ -597,27 +658,39 @@ const makeCodexSessionStorage = (
 // ---------------------------------------------------------------------------
 
 /**
- * Pi resolves `--session <id>` against the *current project's* encoded
- * directory first; a transferred file in any other directory hits the "fork
- * session?" prompt, which hangs in print/json mode. So capture lands the file
- * in `--<enc-host-cwd>--/<filename>`, not the sandbox's encoded dir.
+ * Where a captured pi session lands on the host. Pi resolves `--session <id>`
+ * against the *current project's* encoded directory first; a transferred file
+ * in any other directory hits the "fork session?" prompt, which hangs in
+ * print/json mode. So we land the file in `--<enc-host-cwd>--/<filename>`, not
+ * the sandbox's encoded dir.
  */
+const piHostCaptureTarget = (
+  hostCwd: string,
+  sandboxPath: string,
+  hostSessionsDir: string | undefined,
+): string =>
+  join(piSessionDirPath(hostCwd, hostSessionsDir), posix.basename(sandboxPath));
+
+// Pi names its JSONL `<timestamp>_<id>.jsonl`, so the file is not derivable
+// from (cwd, id). captureToHost remembers what it wrote, so the iteration's
+// sessionFilePath is the JSONL itself. Before capture (the resume precheck's
+// not-found message) the best we can name is the directory.
 const makePiSessionStorage = (options?: PiOptions): AgentSessionStorage => {
   const hostSessionsDir = options?.sessionStorage?.hostSessionsDir;
   const sandboxSessionsDir =
     options?.sessionStorage?.sandboxSessionsDir ??
     posix.join("/home/agent", ".pi", "agent", "sessions");
-
+  const capturedPaths = new Map<string, string>();
   return {
-    hostSessionFilePath: (cwd, _id) => piSessionDirPath(cwd, hostSessionsDir),
+    hostSessionFilePath: (cwd, id) =>
+      capturedPaths.get(id) ?? piSessionDirPath(cwd, hostSessionsDir),
     existsOnHost: async (_cwd, id) => {
       const found = await findPiSessionOnHost(id, hostSessionsDir);
       return found.path !== undefined;
     },
     readHostSession: async (_cwd, id) => {
-      const found = await findPiSessionOnHost(id, hostSessionsDir);
-      if (!found.path) return undefined;
-      return readFile(found.path, "utf8");
+      const { path } = await findPiSessionOnHost(id, hostSessionsDir);
+      return path === undefined ? undefined : readFile(path, "utf8");
     },
     captureToHost: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
       const located = await locateSandboxSessionFile(
@@ -627,10 +700,14 @@ const makePiSessionStorage = (options?: PiOptions): AgentSessionStorage => {
       );
       const jsonl = await readSandboxFile(handle, located.path, "pi-cap");
       const rewritten = transferPiSession(jsonl, sandboxCwd, hostCwd);
-      const filename = posix.basename(located.path);
-      const target = join(piSessionDirPath(hostCwd, hostSessionsDir), filename);
+      const target = piHostCaptureTarget(
+        hostCwd,
+        located.path,
+        hostSessionsDir,
+      );
       await mkdir(dirname(target), { recursive: true });
       await writeFile(target, rewritten);
+      capturedPaths.set(sessionId, target);
     },
     resumeIntoSandbox: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
       const found = await findPiSessionOnHost(sessionId, hostSessionsDir);
@@ -803,9 +880,7 @@ export const pi = (
     // id (reported on the stream's `session` header line), leaving the parent
     // untouched. Pi rejects `--fork` combined with `--session`.
     const sessionFlag = resumeSession
-      ? forkSession
-        ? ` --fork ${shellEscape(resumeSession)}`
-        : ` --session ${shellEscape(resumeSession)}`
+      ? ` --${forkSession ? "fork" : "session"} ${shellEscape(resumeSession)}`
       : "";
     return {
       command: `pi -p --mode json --model ${shellEscape(model)}${thinkingFlag}${sessionFlag}`,
@@ -1035,28 +1110,72 @@ export const codex = (
 export interface CursorOptions {
   /** Environment variables injected by this agent provider. */
   readonly env?: Record<string, string>;
+  /** When false, session capture is disabled. Default: true. */
+  readonly captureSessions?: boolean;
+  /** Override Cursor `chats` directories for tests or non-standard installs. */
+  readonly sessionStorage?: {
+    readonly hostChatsDir?: string;
+    readonly sandboxChatsDir?: string;
+  };
 }
+
+/**
+ * A Cursor chat is one SQLite `store.db` under the chat dir of the cwd it ran
+ * in, so it moves as a single binary file, unrewritten. The CLI resumes
+ * (`--resume <id>`) but has no fork flag, so the provider declares
+ * `canFork: false` (ADR 0021).
+ */
+const makeCursorSessionStorage = (
+  options?: CursorOptions,
+): AgentSessionStorage => {
+  const hostDir = options?.sessionStorage?.hostChatsDir ?? cursorHostChatsDir();
+  const sandboxDir =
+    options?.sessionStorage?.sandboxChatsDir ?? "/home/agent/.cursor/chats";
+  return {
+    ...makeSessionFileStorage({
+      hostRoot: hostDir,
+      hostPath: (cwd, id) =>
+        join(hostDir, cursorChatDirName(cwd), id, "store.db"),
+      hostPathsById: (id, chatDirs) =>
+        chatDirs.map((chatDir) => join(hostDir, chatDir, id, "store.db")),
+      sandboxPath: (cwd, id) =>
+        posix.join(sandboxDir, cursorChatDirName(cwd), id, "store.db"),
+    }),
+    canFork: false,
+  };
+};
 
 export const cursor = (
   model: string,
   options?: CursorOptions,
-): AgentProvider => ({
+): AgentProvider & { readonly sessionStorage: AgentSessionStorage } => ({
   name: "cursor",
   env: options?.env ?? {},
-  captureSessions: false,
+  captureSessions: options?.captureSessions ?? true,
+  sessionStorage: makeCursorSessionStorage(options),
 
-  // Cursor has no filesystem-backed session storage (captureSessions: false, no
-  // sessionStorage), so it is non-resumable per ADR 0012/0016. resumeSession is
-  // ignored here — like pi and opencode — rather than wired to --resume.
   buildPrintCommand({
     prompt,
     dangerouslySkipPermissions,
+    resumeSession,
+    forkSession,
   }: AgentCommandOptions): PrintCommand {
+    if (resumeSession !== undefined && forkSession === true) {
+      throw new ForkNotSupportedError({
+        message:
+          "cursor cannot fork a session: its CLI resumes but has no fork. Use resume() to continue the session in place.",
+        agentProvider: "cursor",
+      });
+    }
     assertCursorPrintPromptFitsArgv(prompt);
     const forceFlag = dangerouslySkipPermissions ? " --force" : "";
-
+    // `--resume` takes an optional value, so the id is bound with `=`.
+    const resumeFlag =
+      resumeSession === undefined
+        ? ""
+        : ` --resume=${shellEscape(resumeSession)}`;
     return {
-      command: `agent --print --output-format stream-json --model ${shellEscape(model)} ${forceFlag} ${shellEscape(prompt)}`,
+      command: `agent --print --output-format stream-json --model ${shellEscape(model)} ${forceFlag}${resumeFlag} ${shellEscape(prompt)}`,
     };
   },
 
@@ -1261,14 +1380,14 @@ export const opencode = (
  */
 const COPILOT_PRINT_PROMPT_MAX_BYTES = 120 * 1024;
 
-function assertCopilotPrintPromptFitsArgv(prompt: string): void {
+const assertCopilotPrintPromptFitsArgv = (prompt: string): void => {
   const n = Buffer.byteLength(prompt, "utf8");
   if (n > COPILOT_PRINT_PROMPT_MAX_BYTES) {
     throw new Error(
       `Copilot print-mode prompt is ${n} bytes (max ${COPILOT_PRINT_PROMPT_MAX_BYTES} bytes). This provider passes the prompt as a command-line argument; shorten the prompt or split the work. Other Sandcastle providers use stdin for large prompts.`,
     );
   }
-}
+};
 
 /**
  * Parse one line of `copilot --output-format json` JSONL output.
@@ -1366,31 +1485,73 @@ export interface CopilotOptions {
   readonly effort?: "low" | "medium" | "high";
   /** Environment variables injected by this agent provider. */
   readonly env?: Record<string, string>;
+  /** When false, session capture is disabled. Default: true. */
+  readonly captureSessions?: boolean;
+  /** Override Copilot `session-state` directories for tests or non-standard installs. */
+  readonly sessionStorage?: {
+    readonly hostSessionsDir?: string;
+    readonly sandboxSessionsDir?: string;
+  };
 }
+
+/**
+ * Copilot's session is one `events.jsonl` keyed by id alone, so it moves as a
+ * single file. The CLI resumes (`--resume=<id>`) but has no fork flag, so the
+ * provider declares `canFork: false` (ADR 0021).
+ */
+const makeCopilotSessionStorage = (
+  options?: CopilotOptions,
+): AgentSessionStorage => {
+  const hostDir =
+    options?.sessionStorage?.hostSessionsDir ?? copilotHostSessionsDir();
+  const sandboxDir =
+    options?.sessionStorage?.sandboxSessionsDir ??
+    "/home/agent/.copilot/session-state";
+  const hostPath = (id: string): string => join(hostDir, id, "events.jsonl");
+  return {
+    ...makeSessionFileStorage({
+      hostRoot: hostDir,
+      hostPath: (_cwd, id) => hostPath(id),
+      hostPathsById: (id) => [hostPath(id)],
+      sandboxPath: (_cwd, id) => copilotSessionPath(sandboxDir, id),
+      rewrite: transferCopilotSession,
+    }),
+    canFork: false,
+  };
+};
 
 export const copilot = (
   model: string,
   options?: CopilotOptions,
-): AgentProvider => ({
+): AgentProvider & { readonly sessionStorage: AgentSessionStorage } => ({
   name: "copilot",
   env: options?.env ?? {},
-  captureSessions: false,
+  captureSessions: options?.captureSessions ?? true,
+  sessionStorage: makeCopilotSessionStorage(options),
 
-  // Copilot CLI does expose `--resume <id>`, but its session state is indexed by
-  // a SQLite database alongside the JSONL files in ~/.copilot/session-state/, so
-  // transferring a single session file between host and sandbox is not enough to
-  // make resume work (see ADR 0016). Until the round-trip is verified end-to-end,
-  // copilot is non-resumable: captureSessions is false, there is no sessionStorage,
-  // and resumeSession is ignored here — like cursor, pi, and opencode.
   buildPrintCommand({
     prompt,
     dangerouslySkipPermissions,
+    resumeSession,
+    forkSession,
   }: AgentCommandOptions): PrintCommand {
+    if (resumeSession !== undefined && forkSession === true) {
+      throw new ForkNotSupportedError({
+        message:
+          "copilot cannot fork a session: its CLI resumes but has no fork. Use resume() to continue the session in place.",
+        agentProvider: "copilot",
+      });
+    }
     assertCopilotPrintPromptFitsArgv(prompt);
     const allowAll = dangerouslySkipPermissions ? " --allow-all-tools" : "";
     const effortFlag = options?.effort ? ` --effort ${options.effort}` : "";
+    // `--resume` takes an optional value, so the id is bound with `=`.
+    const resumeFlag =
+      resumeSession === undefined
+        ? ""
+        : ` --resume=${shellEscape(resumeSession)}`;
     return {
-      command: `copilot -p ${shellEscape(prompt)} --output-format json --model ${shellEscape(model)}${allowAll}${effortFlag}`,
+      command: `copilot -p ${shellEscape(prompt)} --output-format json --model ${shellEscape(model)}${allowAll}${effortFlag}${resumeFlag}`,
     };
   },
 
@@ -1458,11 +1619,12 @@ export const claudeCode = (
     // permissionMode and --dangerously-skip-permissions are mutually exclusive
     // on Claude's CLI; an explicit mode on the provider takes precedence over
     // Sandcastle's default bypass.
+    const skipPermissionsFlag = dangerouslySkipPermissions
+      ? " --dangerously-skip-permissions"
+      : "";
     const permissionFlag = options?.permissionMode
       ? ` --permission-mode ${options.permissionMode}`
-      : dangerouslySkipPermissions
-        ? " --dangerously-skip-permissions"
-        : "";
+      : skipPermissionsFlag;
     const effortFlag = options?.effort ? ` --effort ${options.effort}` : "";
     const resumeFlag = resumeSession
       ? ` --resume ${shellEscape(resumeSession)}`

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
@@ -11,6 +12,7 @@ import {
   pi,
 } from "./AgentProvider.js";
 import type { AgentCommandOptions, AgentProvider } from "./AgentProvider.js";
+import { ForkNotSupportedError } from "./errors.js";
 import type { BindMountSandboxHandle } from "./SandboxProvider.js";
 
 /** Builds interactive args, failing the test if the provider has no interactive mode. */
@@ -1216,6 +1218,59 @@ describe("cursor factory", () => {
     ]);
   });
 
+  // Shapes from a real `cursor-agent` composer-2 run (2026-10-31), trimmed.
+  it("parseStreamLine extracts top-level tool_call shellToolCall as Bash (Cursor stream-json)", () => {
+    const provider = cursor("composer-2");
+    const line = JSON.stringify({
+      type: "tool_call",
+      subtype: "started",
+      call_id: "tool_c3c8b5b5",
+      tool_call: {
+        shellToolCall: {
+          args: {
+            command: "cat notes/notes1.md",
+            workingDirectory: "/home/agent/workspace",
+            timeout: 30_000,
+            simpleCommands: ["cat"],
+            description: "Cat notes/notes1.md",
+          },
+          description: "Cat notes/notes1.md",
+        },
+        toolCallId: "tool_c3c8b5b5",
+      },
+      session_id: "60cbceb8-65bb-4504-846b-6efc1b3d3e56",
+    });
+    expect(provider.parseStreamLine(line)).toStrictEqual([
+      { type: "tool_call", name: "Bash", args: "cat notes/notes1.md" },
+    ]);
+  });
+
+  it("parseStreamLine extracts top-level tool_call editToolCall as Edit (Cursor stream-json)", () => {
+    const provider = cursor("composer-2");
+    const line = JSON.stringify({
+      type: "tool_call",
+      subtype: "started",
+      call_id: "tool_d0facb6c",
+      tool_call: {
+        editToolCall: {
+          args: {
+            path: "/home/agent/workspace/cursor-a.txt",
+            streamContent: "hello from cursor a\n",
+          },
+        },
+        toolCallId: "tool_d0facb6c",
+      },
+      session_id: "60cbceb8-65bb-4504-846b-6efc1b3d3e56",
+    });
+    expect(provider.parseStreamLine(line)).toStrictEqual([
+      {
+        type: "tool_call",
+        name: "Edit",
+        args: "/home/agent/workspace/cursor-a.txt",
+      },
+    ]);
+  });
+
   it("parseStreamLine ignores tool_call completed events", () => {
     const provider = cursor("claude-sonnet-4-6");
     const line = JSON.stringify({
@@ -1694,15 +1749,34 @@ describe("resumeSession on non-Claude providers", () => {
     expect(command).not.toContain("--fork");
   });
 
-  it("cursor ignores resumeSession in buildPrintCommand", () => {
-    const provider = cursor("claude-sonnet-4-6");
+  it("cursor resumes a session with --resume=<id> before the prompt", () => {
+    const provider = cursor("composer-2");
     const { command } = provider.buildPrintCommand({
       prompt: "test",
       dangerouslySkipPermissions: true,
       resumeSession: "abc-123",
     });
+    expect(command).toContain("--resume='abc-123' 'test'");
+  });
+
+  it("cursor omits --resume on a fresh run", () => {
+    const { command } = cursor("composer-2").buildPrintCommand(opts("test"));
     expect(command).not.toContain("--resume");
-    expect(command).not.toContain("abc-123");
+  });
+
+  it("cursor declares that it cannot fork (the CLI has no fork flag)", () => {
+    expect(cursor("composer-2").sessionStorage.canFork).toBe(false);
+  });
+
+  it("cursor buildPrintCommand throws ForkNotSupportedError naming cursor when asked to fork", () => {
+    const fork = (): unknown =>
+      cursor("composer-2").buildPrintCommand({
+        ...opts("test"),
+        resumeSession: "abc-123",
+        forkSession: true,
+      });
+    expect(fork).toThrow(ForkNotSupportedError);
+    expect(fork).toThrow(/cursor cannot fork/u);
   });
 });
 
@@ -1716,9 +1790,48 @@ describe("copilot factory", () => {
     expect(provider.name).toBe("copilot");
   });
 
-  it("does not capture sessions by default", () => {
+  it("captures sessions by default, and can opt out", () => {
+    expect(copilot("claude-sonnet-4.5").captureSessions).toBe(true);
+    expect(
+      copilot("claude-sonnet-4.5", { captureSessions: false }).captureSessions,
+    ).toBe(false);
+  });
+
+  it("buildPrintCommand resumes a session with --resume=<id>", () => {
     const provider = copilot("claude-sonnet-4.5");
-    expect(provider.captureSessions).toBe(false);
+    const { command } = provider.buildPrintCommand({
+      ...opts("test"),
+      resumeSession: "abc-123",
+    });
+    expect(command).toContain("--resume='abc-123'");
+  });
+
+  it("buildPrintCommand omits --resume on a fresh run", () => {
+    const provider = copilot("claude-sonnet-4.5");
+    const { command } = provider.buildPrintCommand(opts("test"));
+    expect(command).not.toContain("--resume");
+  });
+
+  it("declares that it cannot fork (the CLI has no fork flag)", () => {
+    expect(copilot("claude-sonnet-4.5").sessionStorage.canFork).toBe(false);
+  });
+
+  it("buildPrintCommand throws ForkNotSupportedError naming copilot when asked to fork", () => {
+    const provider = copilot("claude-sonnet-4.5");
+    expect(() =>
+      provider.buildPrintCommand({
+        ...opts("test"),
+        resumeSession: "abc-123",
+        forkSession: true,
+      }),
+    ).toThrow(ForkNotSupportedError);
+    expect(() =>
+      provider.buildPrintCommand({
+        ...opts("test"),
+        resumeSession: "abc-123",
+        forkSession: true,
+      }),
+    ).toThrow(/copilot/u);
   });
 
   it("buildPrintCommand includes the model and -p prompt", () => {
@@ -1772,17 +1885,6 @@ describe("copilot factory", () => {
     const provider = copilot("claude-sonnet-4.5");
     const { command } = provider.buildPrintCommand(opts("test"));
     expect(command).not.toContain("--effort");
-  });
-
-  it("buildPrintCommand ignores resumeSession (resume not yet supported)", () => {
-    const provider = copilot("claude-sonnet-4.5");
-    const { command } = provider.buildPrintCommand({
-      prompt: "test",
-      dangerouslySkipPermissions: true,
-      resumeSession: "abc-123",
-    });
-    expect(command).not.toContain("--resume");
-    expect(command).not.toContain("abc-123");
   });
 
   it("buildInteractiveArgs includes copilot binary, --model, and prompt", () => {
@@ -2194,8 +2296,14 @@ describe("captureSessions flag", () => {
     ).toBe(false);
   });
 
-  it("cursor has captureSessions false", () => {
-    expect(cursor("cursor-model").captureSessions).toBe(false);
+  it("cursor defaults captureSessions to true", () => {
+    expect(cursor("cursor-model").captureSessions).toBe(true);
+  });
+
+  it("cursor allows opting out of captureSessions", () => {
+    expect(
+      cursor("cursor-model", { captureSessions: false }).captureSessions,
+    ).toBe(false);
   });
 });
 
@@ -2207,16 +2315,17 @@ describe("sessionStorage", () => {
   /** Bind-mount handle backed by the host filesystem (sandbox path == host path). */
   const fsBindMountHandle = (): BindMountSandboxHandle => ({
     worktreePath: "/workspace",
-    exec: async (command) => {
+    exec: async (command, options) => {
       const { exec } = await import("node:child_process");
       return new Promise((resolve) => {
-        exec(command, (err, stdout, stderr) => {
+        const child = exec(command, (err, stdout, stderr) => {
           resolve({
             stdout: stdout.toString(),
             stderr: stderr.toString(),
             exitCode: err && typeof err.code === "number" ? err.code : 0,
           });
         });
+        child.stdin?.end(options?.stdin);
       });
     },
     copyFileIn: async (hostPath, sandboxPath) => {
@@ -2313,6 +2422,12 @@ describe("sessionStorage", () => {
       await expect(
         sessionStorageOf(provider).existsOnHost(hostCwd, id),
       ).resolves.toBe(true);
+
+      // hostSessionFilePath (surfaced as IterationResult.sessionFilePath) is
+      // the captured JSONL itself, not its directory.
+      expect(provider.sessionStorage.hostSessionFilePath(hostCwd, id)).toBe(
+        expectedHostPath,
+      );
     } finally {
       await rm(hostDir, { recursive: true, force: true });
       await rm(sandboxDir, { recursive: true, force: true });
@@ -2371,7 +2486,7 @@ describe("sessionStorage", () => {
     }
   });
 
-  it("pi hostSessionFilePath returns the host-cwd-encoded directory", () => {
+  it("pi hostSessionFilePath falls back to the host-cwd-encoded directory before capture", () => {
     const provider = pi("claude-sonnet-4-6", {
       sessionStorage: { hostSessionsDir: "/tmp/sessions" },
     });
@@ -2683,6 +2798,243 @@ describe("sessionStorage", () => {
     } finally {
       await rm(hostDir, { recursive: true, force: true });
       await rm(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  /** The `data.context` of each event in a Copilot `events.jsonl`. */
+  const copilotContexts = (jsonl: string): unknown[] =>
+    jsonl
+      .split("\n")
+      .filter((line) => line !== "")
+      .map((line): unknown => {
+        const event: unknown = JSON.parse(line);
+        return typeof event === "object" && event !== null && "data" in event
+          ? event.data
+          : undefined;
+      });
+
+  it("copilot captureToHost copies events.jsonl to the host with the context cwd rewritten", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-copilot-host-"));
+    const sandboxDir = await mkdtemp(join(tmpdir(), "sandcastle-copilot-sbx-"));
+    try {
+      const id = "9f2885bc-f7a6-44ad-8c8e-4e22ca99fa26";
+      await mkdir(join(sandboxDir, id), { recursive: true });
+      const start = {
+        type: "session.start",
+        data: {
+          sessionId: id,
+          context: {
+            cwd: "/sandbox/repo",
+            gitRoot: "/sandbox/repo",
+            branch: "main",
+          },
+        },
+      };
+      const message = {
+        type: "user.message",
+        data: { content: "cwd is /sandbox/repo" },
+      };
+      await writeFile(
+        join(sandboxDir, id, "events.jsonl"),
+        `${JSON.stringify(start)}\n${JSON.stringify(message)}\n`,
+      );
+      const { sessionStorage } = copilot("claude-haiku-4.5", {
+        sessionStorage: {
+          hostSessionsDir: hostDir,
+          sandboxSessionsDir: sandboxDir,
+        },
+      });
+      await expect(sessionStorage.existsOnHost("/host/repo", id)).resolves.toBe(
+        false,
+      );
+
+      await sessionStorage.captureToHost({
+        hostCwd: "/host/repo",
+        sandboxCwd: "/sandbox/repo",
+        sessionId: id,
+        handle: fsBindMountHandle(),
+      });
+
+      const hostPath = join(hostDir, id, "events.jsonl");
+      expect(sessionStorage.hostSessionFilePath("/host/repo", id)).toBe(
+        hostPath,
+      );
+      // Only the structured context moves; free text is left alone.
+      expect(copilotContexts(await readFile(hostPath, "utf8"))).toStrictEqual([
+        {
+          sessionId: id,
+          context: { cwd: "/host/repo", gitRoot: "/host/repo", branch: "main" },
+        },
+        { content: "cwd is /sandbox/repo" },
+      ]);
+      await expect(sessionStorage.existsOnHost("/host/repo", id)).resolves.toBe(
+        true,
+      );
+      await expect(sessionStorage.findByIdOnHost(id)).resolves.toStrictEqual({
+        path: hostPath,
+        searchedRoot: hostDir,
+      });
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it("copilot resumeIntoSandbox writes events.jsonl into the sandbox session-state with the cwd rewritten", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-copilot-host-"));
+    const sandboxDir = await mkdtemp(join(tmpdir(), "sandcastle-copilot-sbx-"));
+    try {
+      const id = "b8c6a68f-e6fe-4253-8574-e1230d699808";
+      await mkdir(join(hostDir, id), { recursive: true });
+      const start = {
+        type: "session.start",
+        data: { context: { cwd: "/host/repo", gitRoot: "/host/repo" } },
+      };
+      await writeFile(
+        join(hostDir, id, "events.jsonl"),
+        `${JSON.stringify(start)}\n`,
+      );
+      const { sessionStorage } = copilot("claude-haiku-4.5", {
+        sessionStorage: {
+          hostSessionsDir: hostDir,
+          sandboxSessionsDir: sandboxDir,
+        },
+      });
+
+      await sessionStorage.resumeIntoSandbox({
+        hostCwd: "/host/repo",
+        sandboxCwd: "/sandbox/repo",
+        sessionId: id,
+        handle: fsBindMountHandle(),
+      });
+
+      const content = await readFile(
+        join(sandboxDir, id, "events.jsonl"),
+        "utf8",
+      );
+      expect(copilotContexts(content)).toStrictEqual([
+        { context: { cwd: "/sandbox/repo", gitRoot: "/sandbox/repo" } },
+      ]);
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it("copilot findByIdOnHost reports the searched root when the session is missing", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-copilot-host-"));
+    try {
+      const { sessionStorage } = copilot("claude-haiku-4.5", {
+        sessionStorage: { hostSessionsDir: hostDir },
+      });
+      await expect(
+        sessionStorage.findByIdOnHost("missing"),
+      ).resolves.toStrictEqual({ path: undefined, searchedRoot: hostDir });
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  /** Cursor's chat dir name for a cwd: the md5 of the path. */
+  const cursorChatDir = (cwd: string): string =>
+    createHash("md5").update(cwd).digest("hex");
+
+  /** Bytes standing in for Cursor's SQLite `store.db` (binary, with NULs). */
+  const storeBytes = Buffer.from([
+    0x53, 0x51, 0x4c, 0x69, 0x74, 0x65, 0x00, 0xff,
+  ]);
+
+  it("cursor captureToHost copies the chat's store.db, byte for byte, under the host cwd's chat dir", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-cursor-host-"));
+    const sandboxDir = await mkdtemp(join(tmpdir(), "sandcastle-cursor-sbx-"));
+    try {
+      const id = "dd42b549-290c-4635-b058-04801905e8cf";
+      const sandboxChat = join(sandboxDir, cursorChatDir("/sandbox/repo"), id);
+      await mkdir(sandboxChat, { recursive: true });
+      await writeFile(join(sandboxChat, "store.db"), storeBytes);
+      const { sessionStorage } = cursor("composer-2", {
+        sessionStorage: { hostChatsDir: hostDir, sandboxChatsDir: sandboxDir },
+      });
+      await expect(sessionStorage.existsOnHost("/host/repo", id)).resolves.toBe(
+        false,
+      );
+
+      await sessionStorage.captureToHost({
+        hostCwd: "/host/repo",
+        sandboxCwd: "/sandbox/repo",
+        sessionId: id,
+        handle: fsBindMountHandle(),
+      });
+
+      const hostPath = join(
+        hostDir,
+        cursorChatDir("/host/repo"),
+        id,
+        "store.db",
+      );
+      expect(sessionStorage.hostSessionFilePath("/host/repo", id)).toBe(
+        hostPath,
+      );
+      await expect(readFile(hostPath)).resolves.toStrictEqual(storeBytes);
+      await expect(sessionStorage.existsOnHost("/host/repo", id)).resolves.toBe(
+        true,
+      );
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it("cursor resumeIntoSandbox copies store.db, byte for byte, under the sandbox cwd's chat dir", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-cursor-host-"));
+    const sandboxDir = await mkdtemp(join(tmpdir(), "sandcastle-cursor-sbx-"));
+    try {
+      const id = "4f55759a-4a2d-4a14-b7a9-0dd29b8b99f8";
+      const hostChat = join(hostDir, cursorChatDir("/host/repo"), id);
+      await mkdir(hostChat, { recursive: true });
+      await writeFile(join(hostChat, "store.db"), storeBytes);
+      const { sessionStorage } = cursor("composer-2", {
+        sessionStorage: { hostChatsDir: hostDir, sandboxChatsDir: sandboxDir },
+      });
+
+      await sessionStorage.resumeIntoSandbox({
+        hostCwd: "/host/repo",
+        sandboxCwd: "/sandbox/repo",
+        sessionId: id,
+        handle: fsBindMountHandle(),
+      });
+
+      await expect(
+        readFile(
+          join(sandboxDir, cursorChatDir("/sandbox/repo"), id, "store.db"),
+        ),
+      ).resolves.toStrictEqual(storeBytes);
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it("cursor findByIdOnHost finds the chat under any cwd's chat dir", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-cursor-host-"));
+    try {
+      const id = "79e67ff9-0a70-4f70-8adb-ae8db52ae5d4";
+      const chat = join(hostDir, cursorChatDir("/some/worktree"), id);
+      await mkdir(chat, { recursive: true });
+      await writeFile(join(chat, "store.db"), storeBytes);
+      const { sessionStorage } = cursor("composer-2", {
+        sessionStorage: { hostChatsDir: hostDir },
+      });
+
+      await expect(sessionStorage.findByIdOnHost(id)).resolves.toStrictEqual({
+        path: join(chat, "store.db"),
+        searchedRoot: hostDir,
+      });
+      await expect(
+        sessionStorage.findByIdOnHost("missing"),
+      ).resolves.toStrictEqual({ path: undefined, searchedRoot: hostDir });
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
     }
   });
 

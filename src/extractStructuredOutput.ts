@@ -23,19 +23,15 @@ interface ExtractionContext {
  *
  * Throws `StructuredOutputError` on missing tag, invalid JSON, or schema failure.
  */
-export const extractStructuredOutput = async <T>(
+export const extractStructuredOutput = async (
   stdout: string,
   definition: OutputDefinition,
   context: ExtractionContext,
-): Promise<T> => {
+): Promise<unknown> => {
   if (definition._tag === "object") {
-    return extractObject(
-      stdout,
-      definition as OutputObjectDefinition<T>,
-      context,
-    );
+    return extractObject(stdout, definition, context);
   }
-  return extractString(stdout, definition, context) as T;
+  return extractString(stdout, definition, context);
 };
 
 // ---------------------------------------------------------------------------
@@ -62,10 +58,10 @@ const extractObject = async <T>(
   let parsed: unknown;
   try {
     parsed = JSON.parse(unwrapped);
-  } catch (cause) {
+  } catch (error) {
     throw new StructuredOutputError(
       `Structured output tag <${definition.tag}> contains invalid JSON`,
-      { tag: definition.tag, rawMatched: raw, cause, ...context },
+      { tag: definition.tag, rawMatched: raw, cause: error, ...context },
     );
   }
 
@@ -157,9 +153,9 @@ const findLastTagContent = (text: string, tag: string): string | undefined => {
  */
 const unwrapFences = (text: string): string => {
   // Match ```json ... ``` or ``` ... ``` (with optional language hint)
-  const fenceMatch = /^```(?:json)?\s*\n([\s\S]*?)\n\s*```\s*$/.exec(text);
-  if (fenceMatch) {
-    return fenceMatch[1]!.trim();
+  const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n\s*```\s*$/.exec(text)?.[1];
+  if (fenced !== undefined) {
+    return fenced.trim();
   }
   return text;
 };

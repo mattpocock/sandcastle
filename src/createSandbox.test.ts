@@ -13,7 +13,8 @@ import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { Effect, Layer } from "effect";
 import { assert, describe, expect, it } from "vitest";
-import { claudeCode, codex, pi } from "./AgentProvider.js";
+import { claudeCode, codex, copilot, cursor, pi } from "./AgentProvider.js";
+import { ForkNotSupportedError } from "./errors.js";
 import { createSandbox } from "./createSandbox.js";
 import type { CreateSandboxOptions } from "./createSandbox.js";
 import { createWorktree } from "./createWorktree.js";
@@ -548,6 +549,76 @@ describe("createSandbox", () => {
       ).rejects.toThrow(
         "idleTimeoutSeconds must be a positive number of seconds. Received: 0",
       );
+      expect(agentRan).toBe(false);
+    } finally {
+      await sandbox.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("sandbox.run() rejects a fork on copilot with ForkNotSupportedError before the agent runs", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-copilot-fork-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    let agentRan = false;
+    const sandbox = await createSandbox({
+      branch: "copilot-fork",
+      sandbox: testSandbox,
+      cwd: hostDir,
+      _test: {
+        buildSandbox: (sandboxDir) =>
+          makeMockAgentLayer(sandboxDir, async () => {
+            agentRan = true;
+            return "ok";
+          }),
+      },
+    });
+
+    try {
+      const attempt = sandbox.run({
+        agent: copilot("claude-haiku-4.5"),
+        prompt: "fork it",
+        resumeSession: "9f2885bc-f7a6-44ad-8c8e-4e22ca99fa26",
+        forkSession: true,
+      });
+      await expect(attempt).rejects.toBeInstanceOf(ForkNotSupportedError);
+      await expect(attempt).rejects.toThrow(/copilot cannot fork/u);
+      expect(agentRan).toBe(false);
+    } finally {
+      await sandbox.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("sandbox.run() rejects a fork on cursor with ForkNotSupportedError before the agent runs", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-cursor-fork-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    let agentRan = false;
+    const sandbox = await createSandbox({
+      branch: "cursor-fork",
+      sandbox: testSandbox,
+      cwd: hostDir,
+      _test: {
+        buildSandbox: (sandboxDir) =>
+          makeMockAgentLayer(sandboxDir, async () => {
+            agentRan = true;
+            return "ok";
+          }),
+      },
+    });
+
+    try {
+      const attempt = sandbox.run({
+        agent: cursor("composer-2"),
+        prompt: "fork it",
+        resumeSession: "dd42b549-290c-4635-b058-04801905e8cf",
+        forkSession: true,
+      });
+      await expect(attempt).rejects.toBeInstanceOf(ForkNotSupportedError);
+      await expect(attempt).rejects.toThrow(/cursor cannot fork/u);
       expect(agentRan).toBe(false);
     } finally {
       await sandbox.close();
@@ -1484,6 +1555,43 @@ describe("createSandbox", () => {
         "utf8",
       );
       expect(hookOutput.trim()).toBe("hook-ran");
+    } finally {
+      await sandbox.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("runs host and sandbox onSandboxReady hooks together at creation time", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const sandbox = await createSandbox({
+      branch: "test-host-hooks",
+      sandbox: testSandbox,
+      hooks: {
+        sandbox: {
+          onSandboxReady: [
+            { command: "echo 'sandbox-ran' > sandbox-hook.txt" },
+          ],
+        },
+        host: {
+          onSandboxReady: [{ command: "echo 'host-ran' > host-hook.txt" }],
+        },
+      },
+      cwd: hostDir,
+      _test: {
+        buildSandbox: (sandboxDir) => makeLocalSandbox(sandboxDir),
+      },
+    });
+
+    try {
+      await expect(
+        readFile(join(sandbox.worktreePath, "sandbox-hook.txt"), "utf8"),
+      ).resolves.toBe("sandbox-ran\n");
+      await expect(
+        readFile(join(sandbox.worktreePath, "host-hook.txt"), "utf8"),
+      ).resolves.toBe("host-ran\n");
     } finally {
       await sandbox.close();
       await rm(hostDir, { recursive: true, force: true });

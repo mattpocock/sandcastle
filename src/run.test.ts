@@ -29,8 +29,9 @@ import {
   sanitizeBranchForFilename,
 } from "./run.js";
 import type { RunOptions, RunResult } from "./run.js";
-import { claudeCode, cursor } from "./AgentProvider.js";
+import { claudeCode, copilot, cursor } from "./AgentProvider.js";
 import type { AgentProvider } from "./AgentProvider.js";
+import { ForkNotSupportedError } from "./errors.js";
 import { Output, StructuredOutputError } from "./Output.js";
 import { claudeHostSessionPath } from "./SessionStore.js";
 import type { InteractiveOptions } from "./interactive.js";
@@ -1098,10 +1099,10 @@ describe("output.maxRetries entry-time validation", () => {
     consoleSpy.mockRestore();
   });
 
-  it("throws when maxRetries > 0 and the agent provider lacks session resumption (cursor)", async () => {
+  it("throws when maxRetries > 0 and the agent provider lacks session resumption", async () => {
     await expect(
       run({
-        agent: cursor("cursor-medium"),
+        agent: noResumeAgent,
         sandbox: testSandbox,
         prompt: "emit your answer inside <result> tags",
         branchStrategy: { type: "head" },
@@ -1133,7 +1134,7 @@ describe("output.maxRetries entry-time validation", () => {
   it("names the non-resumable provider in the error message", async () => {
     await expect(
       run({
-        agent: cursor("cursor-medium"),
+        agent: noResumeAgent,
         sandbox: testSandbox,
         prompt: "emit your answer inside <result> tags",
         branchStrategy: { type: "head" },
@@ -1143,7 +1144,7 @@ describe("output.maxRetries entry-time validation", () => {
           maxRetries: 1,
         }),
       }),
-    ).rejects.toThrow(/"cursor"/);
+    ).rejects.toThrow(/"no-resume-agent"/u);
   });
 
   it("allows maxRetries = 0 with a non-resumable provider", async () => {
@@ -1151,7 +1152,7 @@ describe("output.maxRetries entry-time validation", () => {
     // <result> tag), not the maxRetries validation.
     await expect(
       run({
-        agent: cursor("cursor-medium"),
+        agent: noResumeAgent,
         sandbox: testSandbox,
         prompt: "emit your answer inside <result> tags",
         branchStrategy: { type: "head" },
@@ -1718,6 +1719,128 @@ describe("resume/fork after a structured-output run", () => {
       await expect(
         r.fork("no tag here", { output: Output.string({ tag: "summary" }) }),
       ).rejects.toThrow(/output tag <summary> not found/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("fork on an agent provider that resumes but cannot fork", () => {
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    consoleSpy.mockRestore();
+  });
+
+  it("copilot: fork() throws ForkNotSupportedError naming copilot, before any sandbox starts", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sandcastle-copilot-fork-"));
+    const sessionId = "9f2885bc-f7a6-44ad-8c8e-4e22ca99fa26";
+    let creates = 0;
+    const sandbox = createBindMountSandboxProvider({
+      name: "copilot-fork",
+      create: async () => {
+        creates++;
+        return {
+          worktreePath: process.cwd(),
+          exec: async (
+            _command: string,
+            options?: { onLine?: (line: string) => void },
+          ) => {
+            options?.onLine?.(
+              JSON.stringify({
+                type: "assistant.message",
+                data: { content: "OK" },
+              }),
+            );
+            options?.onLine?.(
+              JSON.stringify({ type: "result", sessionId, exitCode: 0 }),
+            );
+            return { stdout: "", stderr: "", exitCode: 0 };
+          },
+          copyFileIn: async () => {},
+          copyFileOut: async () => {},
+          close: async () => {},
+        };
+      },
+    });
+
+    try {
+      const first = await run({
+        agent: copilot("claude-haiku-4.5", { captureSessions: false }),
+        sandbox,
+        prompt: "remember a token",
+        branchStrategy: { type: "head" },
+        logging: { type: "file", path: join(dir, "run.log") },
+      });
+      expect(first.iterations[0]?.sessionId).toBe(sessionId);
+      expect(creates).toBe(1);
+
+      const forked = first.fork?.("fork it");
+      await expect(forked).rejects.toBeInstanceOf(ForkNotSupportedError);
+      await expect(forked).rejects.toMatchObject({
+        name: "ForkNotSupportedError",
+        agentProvider: "copilot",
+      });
+      await expect(forked).rejects.toThrow(/copilot cannot fork/u);
+      expect(creates).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("cursor: fork() throws ForkNotSupportedError naming cursor, before any sandbox starts", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sandcastle-cursor-fork-"));
+    const sessionId = "dd42b549-290c-4635-b058-04801905e8cf";
+    let creates = 0;
+    const sandbox = createBindMountSandboxProvider({
+      name: "cursor-fork",
+      create: async () => {
+        creates++;
+        return {
+          worktreePath: process.cwd(),
+          exec: async (
+            _command: string,
+            options?: { onLine?: (line: string) => void },
+          ) => {
+            options?.onLine?.(
+              JSON.stringify({
+                type: "system",
+                subtype: "init",
+                session_id: sessionId,
+              }),
+            );
+            options?.onLine?.(JSON.stringify({ type: "result", result: "OK" }));
+            return { stdout: "", stderr: "", exitCode: 0 };
+          },
+          copyFileIn: async () => {},
+          copyFileOut: async () => {},
+          close: async () => {},
+        };
+      },
+    });
+
+    try {
+      const first = await run({
+        agent: cursor("composer-2", { captureSessions: false }),
+        sandbox,
+        prompt: "remember a code word",
+        branchStrategy: { type: "head" },
+        logging: { type: "file", path: join(dir, "run.log") },
+      });
+      expect(first.iterations[0]?.sessionId).toBe(sessionId);
+      expect(creates).toBe(1);
+
+      const forked = first.fork?.("fork it");
+      await expect(forked).rejects.toBeInstanceOf(ForkNotSupportedError);
+      await expect(forked).rejects.toMatchObject({
+        name: "ForkNotSupportedError",
+        agentProvider: "cursor",
+      });
+      await expect(forked).rejects.toThrow(/cursor cannot fork/u);
+      expect(creates).toBe(1);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

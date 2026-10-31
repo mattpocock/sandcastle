@@ -11,7 +11,10 @@ import path, { join } from "node:path";
 import { styleText } from "node:util";
 import { Effect, Layer } from "effect";
 import { resolveCwd } from "./resolveCwd.js";
-import { assertResumeSessionExists } from "./resumePrecheck.js";
+import {
+  assertForkSupported,
+  assertResumeSessionExists,
+} from "./resumePrecheck.js";
 import type { AgentProvider } from "./AgentProvider.js";
 import { ClackDisplay, Display, FileDisplay } from "./Display.js";
 import type { Severity } from "./Display.js";
@@ -55,20 +58,22 @@ import { buildContextWindowLines } from "./ContextWindow.js";
  *
  * @internal
  */
+const describeParserCause = (cause: unknown): string => {
+  if (cause === undefined) {
+    return "(no parser detail)";
+  }
+  if (typeof cause === "string") {
+    return cause;
+  }
+  return JSON.stringify(cause, null, 2);
+};
+
 export const buildStructuredOutputRetryFeedback = (
   error: StructuredOutputError,
   retriesRemaining: number,
 ): string => {
-  const raw =
-    error.rawMatched === undefined
-      ? "(no matching tag was emitted)"
-      : error.rawMatched;
-  const cause =
-    error.cause === undefined
-      ? "(no parser detail)"
-      : typeof error.cause === "string"
-        ? error.cause
-        : JSON.stringify(error.cause, null, 2);
+  const raw = error.rawMatched ?? "(no matching tag was emitted)";
+  const cause = describeParserCause(error.cause);
 
   return `Your previous response did not produce valid structured output.
 
@@ -562,6 +567,9 @@ export async function run(
         "Use RunResult.fork(prompt) to fork the last captured session.",
     );
   }
+  if (options.forkSession === true) {
+    assertForkSupported(provider);
+  }
 
   // Validate: output requires maxIterations === 1
   if (options.output && maxIterations !== 1) {
@@ -822,7 +830,7 @@ export async function run(
     logFilePath:
       resolvedLogging.type === "file" ? resolvedLogging.path : undefined,
     resume: async (
-      prompt: string,
+      followUpPrompt: string,
       resumeOptions?: ResumeRunResultOptions,
     ): Promise<RunResult> => {
       const lastIteration = result.iterations.at(-1);
@@ -836,14 +844,14 @@ export async function run(
         // The follow-up prompt is new: structured output is opt-in per call.
         output: undefined,
         ...resumeOptions,
-        prompt,
+        prompt: followUpPrompt,
         promptFile: undefined,
         maxIterations: 1,
         resumeSession: lastIteration.sessionId,
       });
     },
     fork: async (
-      prompt: string,
+      followUpPrompt: string,
       forkOptions?: ResumeRunResultOptions,
     ): Promise<RunResult> => {
       const lastIteration = result.iterations.at(-1);
@@ -857,7 +865,7 @@ export async function run(
         // The follow-up prompt is new: structured output is opt-in per call.
         output: undefined,
         ...forkOptions,
-        prompt,
+        prompt: followUpPrompt,
         promptFile: undefined,
         maxIterations: 1,
         resumeSession: lastIteration.sessionId,
