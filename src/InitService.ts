@@ -1000,7 +1000,7 @@ const substituteTemplateArgs = (
     const files = yield* fs
       .readDirectory(configDir)
       .pipe(Effect.mapError((e) => new Error(e.message)));
-    const textFiles = files.filter(isTextFile);
+    const textFiles = files.filter((f) => isTextFile(f));
     yield* Effect.all(
       textFiles.map((f) =>
         Effect.gen(function* () {
