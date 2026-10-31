@@ -511,6 +511,45 @@ describe("worktree.interactive()", () => {
     }
   });
 
+  it("{{TARGET_BRANCH}} is the host's current branch, {{SOURCE_BRANCH}} the worktree's", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-interactive-target-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await execAsync("git checkout -b host-branch", { cwd: hostDir });
+    const promptPath = join(hostDir, "..", `prompt-${Date.now()}.md`);
+    await writeFile(
+      promptPath,
+      "source={{SOURCE_BRANCH}} target={{TARGET_BRANCH}}",
+    );
+
+    const receivedArgs: string[] = [];
+    const provider = makeTestProvider(async (args) => {
+      receivedArgs.push(...args);
+      return { exitCode: 0 };
+    });
+
+    const ws = await createWorktree({
+      branchStrategy: { type: "merge-to-head" },
+      cwd: hostDir,
+    });
+
+    try {
+      await ws.interactive({
+        agent: claudeCode("claude-opus-4-8"),
+        sandbox: provider,
+        promptFile: promptPath,
+      });
+
+      expect(receivedArgs[receivedArgs.length - 1]).toBe(
+        `source=${ws.branch} target=host-branch`,
+      );
+    } finally {
+      await ws.close();
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(promptPath, { force: true });
+    }
+  });
+
   it("signal option has correct type on WorktreeInteractiveOptions", () => {
     const _options: WorktreeInteractiveOptions = {
       agent: claudeCode("claude-opus-4-8"),
@@ -596,8 +635,10 @@ describe("worktree.run()", () => {
    * and runs a mock behavior, while passing other commands through.
    */
   const makeRunTestProvider = (
-    mockAgentBehavior: (cwd: string) => Promise<string> = async () =>
-      "mock output",
+    mockAgentBehavior: (
+      cwd: string,
+      stdin?: string,
+    ) => Promise<string> = async () => "mock output",
   ) =>
     createBindMountSandboxProvider({
       name: "test-run",
@@ -610,12 +651,13 @@ describe("worktree.run()", () => {
               cwd?: string;
               onLine?: (line: string) => void;
               sudo?: boolean;
+              stdin?: string;
             },
           ): Promise<ExecResult> => {
             const cwd = execOptions?.cwd ?? options.worktreePath;
             // Intercept agent commands
             if (command.startsWith("claude ")) {
-              const output = await mockAgentBehavior(cwd);
+              const output = await mockAgentBehavior(cwd, execOptions?.stdin);
               const streamOutput = toStreamJson(output);
               if (execOptions?.onLine) {
                 for (const line of streamOutput.split("\n")) {
@@ -1032,6 +1074,53 @@ describe("worktree.run()", () => {
       await rm(hostDir, { recursive: true, force: true });
     }
   });
+
+  it.each([
+    { label: "merge-to-head", strategy: { type: "merge-to-head" } as const },
+    {
+      label: "branch",
+      strategy: { type: "branch", branch: "feature-x" } as const,
+    },
+  ])(
+    "$label: {{TARGET_BRANCH}} is the host's current branch, {{SOURCE_BRANCH}} the worktree's",
+    async ({ strategy }) => {
+      const hostDir = await mkdtemp(join(tmpdir(), "ws-run-target-"));
+      await initRepo(hostDir);
+      await commitFile(hostDir, "init.txt", "init", "initial commit");
+      await execAsync("git checkout -b host-branch", { cwd: hostDir });
+      const promptPath = join(hostDir, "..", `prompt-${Date.now()}.md`);
+      await writeFile(
+        promptPath,
+        "source={{SOURCE_BRANCH}} target={{TARGET_BRANCH}}",
+      );
+
+      let receivedPrompt: string | undefined;
+      const sandbox = makeRunTestProvider(async (_cwd, stdin) => {
+        receivedPrompt = stdin;
+        return "done";
+      });
+
+      const ws = await createWorktree({
+        branchStrategy: strategy,
+        cwd: hostDir,
+      });
+
+      try {
+        await ws.run({
+          agent: claudeCode("claude-opus-4-8"),
+          sandbox,
+          promptFile: promptPath,
+          maxIterations: 1,
+        });
+
+        expect(receivedPrompt).toBe(`source=${ws.branch} target=host-branch`);
+      } finally {
+        await ws.close();
+        await rm(hostDir, { recursive: true, force: true });
+        await rm(promptPath, { force: true });
+      }
+    },
+  );
 
   it("sandbox is required (type error if omitted)", () => {
     // This test validates at the type level — sandbox is required in WorktreeRunOptions
