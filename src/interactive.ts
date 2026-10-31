@@ -15,7 +15,7 @@ import { patchGitMountsForWindows } from "./mountUtils.js";
 import { withSandboxLifecycle, runHostHooks } from "./SandboxLifecycle.js";
 import type { SandboxHooks } from "./SandboxLifecycle.js";
 import type {
-  AnySandboxProvider,
+  SandboxProvider,
   BranchStrategy,
   BindMountSandboxHandle,
   IsolatedSandboxHandle,
@@ -46,7 +46,7 @@ export interface InteractiveOptions {
   /** Agent provider to use (e.g. claudeCode("claude-opus-4-8")) */
   readonly agent: AgentProvider;
   /** Sandbox provider (e.g. docker(), noSandbox()). */
-  readonly sandbox?: AnySandboxProvider;
+  readonly sandbox?: SandboxProvider;
   /** Inline prompt string (mutually exclusive with promptFile). */
   readonly prompt?: string;
   /** Path to a prompt file (mutually exclusive with prompt). */
