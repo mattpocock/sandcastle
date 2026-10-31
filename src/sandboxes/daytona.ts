@@ -106,10 +106,14 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
       const client: DaytonaClient = new Daytona(config);
       // Pass the resolved env (env resolver + provider + agent) to the
       // sandbox. Explicit `create.envVars` win, as the most specific source.
-      const sandbox = await client.create({
-        ...options?.create,
-        envVars: { ...createOptions.env, ...options?.create?.envVars },
-      } as any);
+      const createParams = options?.create;
+      const envVars = { ...createOptions.env, ...createParams?.envVars };
+      // `client.create` is overloaded per params shape, so call the overload
+      // that matches instead of passing the union.
+      const sandbox =
+        createParams !== undefined && "image" in createParams
+          ? await client.create({ ...createParams, envVars })
+          : await client.create({ ...createParams, envVars });
 
       const workDir =
         (await sandbox.getWorkDir()) ??
@@ -173,7 +177,7 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
                 },
               );
 
-              const cmdId = execResponse.cmdId!;
+              const { cmdId } = execResponse;
 
               const stdoutTail = new BoundedTail(maxOutputTailChars, "\n");
               const stderrTail = new BoundedTail(maxOutputTailChars, "");
