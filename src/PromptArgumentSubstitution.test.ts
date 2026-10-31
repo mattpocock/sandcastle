@@ -307,7 +307,7 @@ describe("BUILT_IN_PROMPT_ARG_KEYS", () => {
 
 describe("findMissingPromptArgKeys", () => {
   it("returns empty array when prompt has no placeholders", () => {
-    expect(findMissingPromptArgKeys("plain prompt", {})).toEqual([]);
+    expect(findMissingPromptArgKeys("plain prompt", {})).toStrictEqual([]);
   });
 
   it("returns empty array when all placeholders are provided", () => {
@@ -315,7 +315,7 @@ describe("findMissingPromptArgKeys", () => {
       findMissingPromptArgKeys("Fix {{COMPONENT}} bug", {
         COMPONENT: "Login",
       }),
-    ).toEqual([]);
+    ).toStrictEqual([]);
   });
 
   it("returns missing keys not present in provided args", () => {
@@ -323,12 +323,12 @@ describe("findMissingPromptArgKeys", () => {
       "Fix {{COMPONENT}} on {{BRANCH_NAME}}",
       { COMPONENT: "Login" },
     );
-    expect(result).toEqual(["BRANCH_NAME"]);
+    expect(result).toStrictEqual(["BRANCH_NAME"]);
   });
 
   it("returns multiple missing keys", () => {
     const result = findMissingPromptArgKeys("{{A}} and {{B}} and {{C}}", {});
-    expect(result).toEqual(["A", "B", "C"]);
+    expect(result).toStrictEqual(["A", "B", "C"]);
   });
 
   it("excludes built-in keys (SOURCE_BRANCH, TARGET_BRANCH)", () => {
@@ -336,39 +336,39 @@ describe("findMissingPromptArgKeys", () => {
       "Branch: {{SOURCE_BRANCH}} target: {{TARGET_BRANCH}} component: {{COMPONENT}}",
       {},
     );
-    expect(result).toEqual(["COMPONENT"]);
+    expect(result).toStrictEqual(["COMPONENT"]);
     expect(result).not.toContain("SOURCE_BRANCH");
     expect(result).not.toContain("TARGET_BRANCH");
   });
 
   it("handles spaced placeholders like {{ KEY }}", () => {
     const result = findMissingPromptArgKeys("Fix {{ COMPONENT }}", {});
-    expect(result).toEqual(["COMPONENT"]);
+    expect(result).toStrictEqual(["COMPONENT"]);
   });
 
   it("does not return duplicate keys", () => {
     const result = findMissingPromptArgKeys("{{KEY}} and {{KEY}} again", {});
-    expect(result).toEqual(["KEY"]);
+    expect(result).toStrictEqual(["KEY"]);
   });
 
   it("skips keys already present in provided args", () => {
     const result = findMissingPromptArgKeys("{{PROVIDED}} and {{MISSING}}", {
       PROVIDED: "value",
     });
-    expect(result).toEqual(["MISSING"]);
+    expect(result).toStrictEqual(["MISSING"]);
   });
 
   it("treats a key with an undefined value as missing", () => {
     const result = findMissingPromptArgKeys("Fix {{COMPONENT}}", {
       COMPONENT: undefined,
     } as unknown as Record<string, string>);
-    expect(result).toEqual(["COMPONENT"]);
+    expect(result).toStrictEqual(["COMPONENT"]);
   });
 
   it("treats a key with a null value as missing", () => {
     const result = findMissingPromptArgKeys("Fix {{COMPONENT}}", {
       COMPONENT: null,
     } as unknown as Record<string, string>);
-    expect(result).toEqual(["COMPONENT"]);
+    expect(result).toStrictEqual(["COMPONENT"]);
   });
 });
