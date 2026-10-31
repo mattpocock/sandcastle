@@ -380,6 +380,43 @@ describe("pi factory", () => {
     expect(command).toContain("--session 'it'\\''s a session'");
   });
 
+  it("buildPrintCommand uses --fork (not --session) when resumeSession + forkSession are set", () => {
+    // `--session <id>` appends to the parent in place; `--fork <id>` copies it
+    // into a new session file under a fresh id. Pi rejects the two together.
+    const provider = pi("claude-sonnet-4-6", { thinking: "off" });
+    const { command } = provider.buildPrintCommand({
+      prompt: "branch off",
+      dangerouslySkipPermissions: true,
+      resumeSession: "abc-123",
+      forkSession: true,
+    });
+    expect(command).toContain("--fork 'abc-123'");
+    expect(command).not.toContain("--session");
+  });
+
+  it("buildPrintCommand stays on --session when forkSession is false", () => {
+    const provider = pi("claude-sonnet-4-6");
+    const { command } = provider.buildPrintCommand({
+      prompt: "go",
+      dangerouslySkipPermissions: true,
+      resumeSession: "abc-123",
+      forkSession: false,
+    });
+    expect(command).toContain("--session 'abc-123'");
+    expect(command).not.toContain("--fork");
+  });
+
+  it("buildPrintCommand ignores forkSession without resumeSession", () => {
+    const provider = pi("claude-sonnet-4-6");
+    const { command } = provider.buildPrintCommand({
+      prompt: "go",
+      dangerouslySkipPermissions: true,
+      forkSession: true,
+    });
+    expect(command).not.toContain("--fork");
+    expect(command).not.toContain("--session");
+  });
+
   it("buildPrintCommand delivers prompt via stdin, not argv", () => {
     const provider = pi("claude-sonnet-4-6");
     const { command, stdin } = provider.buildPrintCommand(opts("it's a test"));
