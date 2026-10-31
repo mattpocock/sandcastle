@@ -48,7 +48,9 @@ describe("defaultImageName", () => {
   });
 
   it("handles Windows paths with backslashes", () => {
-    expect(defaultImageName("C:\\Users\\project")).toBe("sandcastle:project");
+    expect(defaultImageName(String.raw`C:\Users\project`)).toBe(
+      "sandcastle:project",
+    );
   });
 
   it("handles Windows paths with trailing backslash", () => {
@@ -56,7 +58,9 @@ describe("defaultImageName", () => {
   });
 
   it("handles mixed separators", () => {
-    expect(defaultImageName("C:\\Users/project")).toBe("sandcastle:project");
+    expect(defaultImageName(String.raw`C:\Users/project`)).toBe(
+      "sandcastle:project",
+    );
   });
 });
 
@@ -69,8 +73,8 @@ describe("expandTilde", () => {
     expect(expandTilde("~/data")).toBe("/home/testuser/data");
   });
 
-  it("expands ~\\ prefix (Windows tilde path)", () => {
-    expect(expandTilde("~\\data")).toBe("/home/testuser/data");
+  it(String.raw`expands ~\ prefix (Windows tilde path)`, () => {
+    expect(expandTilde(String.raw`~\data`)).toBe("/home/testuser/data");
   });
 
   it("leaves absolute POSIX paths unchanged", () => {
@@ -216,13 +220,13 @@ describe("normalizeMounts", () => {
     it("normalizes backslashes to forward slashes in hostPath", () => {
       const mounts = [
         {
-          hostPath: "C:\\Users\\project\\.git",
-          sandboxPath: "C:\\Users\\project\\.git",
+          hostPath: String.raw`C:\Users\project\.git`,
+          sandboxPath: String.raw`C:\Users\project\.git`,
         },
       ];
       const result = normalizeMounts(
         mounts,
-        "C:\\Users\\project",
+        String.raw`C:\Users\project`,
         SANDBOX_REPO_DIR,
         "win32",
       );
@@ -232,13 +236,13 @@ describe("normalizeMounts", () => {
     it("remaps sandboxPath to POSIX path relative to sandboxRepoDir when under worktree path", () => {
       const mounts = [
         {
-          hostPath: "C:\\Users\\project\\.git",
-          sandboxPath: "C:\\Users\\project\\.git",
+          hostPath: String.raw`C:\Users\project\.git`,
+          sandboxPath: String.raw`C:\Users\project\.git`,
         },
       ];
       const result = normalizeMounts(
         mounts,
-        "C:\\Users\\project",
+        String.raw`C:\Users\project`,
         SANDBOX_REPO_DIR,
         "win32",
       );
@@ -247,15 +251,18 @@ describe("normalizeMounts", () => {
 
     it("normalizes the worktree mount itself", () => {
       const mounts = [
-        { hostPath: "C:\\Users\\project", sandboxPath: SANDBOX_REPO_DIR },
         {
-          hostPath: "C:\\Users\\project\\.git",
-          sandboxPath: "C:\\Users\\project\\.git",
+          hostPath: String.raw`C:\Users\project`,
+          sandboxPath: SANDBOX_REPO_DIR,
+        },
+        {
+          hostPath: String.raw`C:\Users\project\.git`,
+          sandboxPath: String.raw`C:\Users\project\.git`,
         },
       ];
       const result = normalizeMounts(
         mounts,
-        "C:\\Users\\project",
+        String.raw`C:\Users\project`,
         SANDBOX_REPO_DIR,
         "win32",
       );
@@ -267,21 +274,21 @@ describe("normalizeMounts", () => {
 
     it("handles worktree git mounts from parent repo", () => {
       // In worktree mode, the parent .git directory is also mounted
-      const parentGitDir = "C:\\Users\\repo\\.git";
+      const parentGitDir = String.raw`C:\Users\repo\.git`;
       const mounts = [
         {
-          hostPath: "C:\\Users\\worktrees\\my-wt",
+          hostPath: String.raw`C:\Users\worktrees\my-wt`,
           sandboxPath: SANDBOX_REPO_DIR,
         },
         {
-          hostPath: "C:\\Users\\worktrees\\my-wt\\.git",
-          sandboxPath: "C:\\Users\\worktrees\\my-wt\\.git",
+          hostPath: String.raw`C:\Users\worktrees\my-wt\.git`,
+          sandboxPath: String.raw`C:\Users\worktrees\my-wt\.git`,
         },
         { hostPath: parentGitDir, sandboxPath: parentGitDir },
       ];
       const result = normalizeMounts(
         mounts,
-        "C:\\Users\\worktrees\\my-wt",
+        String.raw`C:\Users\worktrees\my-wt`,
         SANDBOX_REPO_DIR,
         "win32",
       );
@@ -299,14 +306,14 @@ describe("normalizeMounts", () => {
     it("preserves readonly flag through normalization", () => {
       const mounts = [
         {
-          hostPath: "C:\\Users\\data",
+          hostPath: String.raw`C:\Users\data`,
           sandboxPath: "/mnt/data",
           readonly: true as const,
         },
       ];
       const result = normalizeMounts(
         mounts,
-        "C:\\Users\\project",
+        String.raw`C:\Users\project`,
         SANDBOX_REPO_DIR,
         "win32",
       );
@@ -315,11 +322,14 @@ describe("normalizeMounts", () => {
 
     it("normalizes backslashes in user mount hostPaths", () => {
       const mounts = [
-        { hostPath: "C:\\Users\\project\\cache", sandboxPath: "/mnt/cache" },
+        {
+          hostPath: String.raw`C:\Users\project\cache`,
+          sandboxPath: "/mnt/cache",
+        },
       ];
       const result = normalizeMounts(
         mounts,
-        "C:\\Users\\project",
+        String.raw`C:\Users\project`,
         SANDBOX_REPO_DIR,
         "win32",
       );
@@ -340,7 +350,9 @@ describe("parseGitdirPath", () => {
   });
 
   it("parses Windows gitdir path with backslashes", () => {
-    const result = parseGitdirPath("C:\\Users\\project\\.git\\worktrees\\abc");
+    const result = parseGitdirPath(
+      String.raw`C:\Users\project\.git\worktrees\abc`,
+    );
     expect(result.parentGitDir).toBe("C:/Users/project/.git");
     expect(result.worktreeName).toBe("abc");
   });
@@ -527,7 +539,7 @@ describe("patchGitMountsForWindows", () => {
 
       // Read the temp file to verify its content
       const { readFile } = await import("node:fs/promises");
-      const writtenContent = await readFile(overlayMount!.hostPath, "utf-8");
+      const writtenContent = await readFile(overlayMount!.hostPath, "utf8");
       expect(writtenContent).toBe(
         `gitdir: ${PARENT_GIT_SANDBOX_DIR}/worktrees/feat-x\n`,
       );
@@ -581,7 +593,7 @@ describe("patchGitMountsForWindows", () => {
 
       // Verify temp file content
       const { readFile } = await import("node:fs/promises");
-      const content = await readFile(result[1]!.hostPath, "utf-8");
+      const content = await readFile(result[1]!.hostPath, "utf8");
       expect(content).toBe(
         `gitdir: ${PARENT_GIT_SANDBOX_DIR}/worktrees/backslash-wt\n`,
       );

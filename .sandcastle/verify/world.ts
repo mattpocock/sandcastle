@@ -170,11 +170,11 @@ export const createWorld = (): World => {
 
   writeFileSync(
     join(project, "package.json"),
-    JSON.stringify(
+    `${JSON.stringify(
       { name: projectName, private: true, type: "module" },
       null,
       2,
-    ) + "\n",
+    )}\n`,
   );
   writeFileSync(join(project, ".gitignore"), "node_modules\n");
   writeFileSync(join(project, "README.md"), `# ${projectName}\n`);
@@ -229,7 +229,7 @@ export const createWorld = (): World => {
 export const saveWorld = (world: World): void =>
   writeFileSync(
     join(world.dir, "world.json"),
-    JSON.stringify(world, null, 2) + "\n",
+    `${JSON.stringify(world, null, 2)}\n`,
   );
 
 /** The world `runId`, which this checkout must have created. */
@@ -408,7 +408,7 @@ export const runInWorld = async (
         };
         appendFileSync(
           join(world.dir, "observed.jsonl"),
-          JSON.stringify(obs) + "\n",
+          `${JSON.stringify(obs)}\n`,
         );
         const verdict =
           obs.leaks.length === 0
@@ -434,14 +434,14 @@ export const runInWorld = async (
       const lines = buf.split("\n");
       buf = lines.pop()!;
       for (const line of lines) {
-        const clean = redact(line).split(world.canary).join("<CANARY>") + "\n";
+        const clean = `${redact(line).split(world.canary).join("<CANARY>")}\n`;
         to.write(clean);
         appendFileSync(log, clean);
       }
     });
     from.on("end", () => {
       if (buf) {
-        const clean = redact(buf) + "\n";
+        const clean = `${redact(buf)}\n`;
         to.write(clean);
         appendFileSync(log, clean);
       }

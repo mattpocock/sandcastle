@@ -44,7 +44,7 @@ describe("encodeProjectPath", () => {
   });
 
   it("encodes Windows path with backslashes and drive letter", () => {
-    expect(encodeProjectPath("D:\\projektit\\super-app")).toBe(
+    expect(encodeProjectPath(String.raw`D:\projektit\super-app`)).toBe(
       "D-projektit-super-app",
     );
   });
@@ -64,7 +64,9 @@ describe("encodeProjectPath", () => {
   });
 
   it("strips multiple trailing backslashes", () => {
-    expect(encodeProjectPath("D:\\projekts\\app\\\\")).toBe("D-projekts-app");
+    expect(encodeProjectPath(String.raw`D:\projekts\app\\`)).toBe(
+      "D-projekts-app",
+    );
   });
 });
 
@@ -306,7 +308,9 @@ describe("encodePiSessionDir", () => {
   it("encodes a Windows path with backslashes and drive colon", () => {
     // Pi maps each separator/colon to a single hyphen — so `:\\` becomes `--`,
     // not a normalised single `-`. Matches pi 0.73.1's SessionManager exactly.
-    expect(encodePiSessionDir("C:\\repos\\my-app")).toBe("--C--repos-my-app--");
+    expect(encodePiSessionDir(String.raw`C:\repos\my-app`)).toBe(
+      "--C--repos-my-app--",
+    );
   });
 });
 

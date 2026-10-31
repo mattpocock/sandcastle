@@ -111,7 +111,7 @@ describe("printFileDisplayStartup", () => {
     });
     const allOutput = consoleSpy.mock.calls.flat().join(" ");
     // Bold ANSI escape code
-    expect(allOutput).toContain("\u001b[1m");
+    expect(allOutput).toContain("\u001B[1m");
   });
 
   it("prints a relative log path when hostRepoDir equals process.cwd()", () => {
@@ -155,7 +155,7 @@ describe("buildAgentStreamHandler (verbose file mode)", () => {
         verbose: true,
       })!;
       handler(rawEvent('{"type":"assistant"}'));
-      expect(readFileSync(logPath, "utf-8")).toBe(
+      expect(readFileSync(logPath, "utf8")).toBe(
         'I\'ll commit the result myself.\n{"type":"assistant"}\n',
       );
     } finally {
@@ -175,7 +175,7 @@ describe("buildAgentStreamHandler (verbose file mode)", () => {
       })!;
       handler(rawEvent('{"type":"system"}'));
       handler(rawEvent('{"type":"assistant"}'));
-      expect(readFileSync(logPath, "utf-8")).toBe(
+      expect(readFileSync(logPath, "utf8")).toBe(
         'Agent started\n{"type":"system"}\n{"type":"assistant"}\n',
       );
     } finally {
@@ -664,7 +664,9 @@ describe("sanitizeBranchForFilename", () => {
   });
 
   it("replaces backslashes with dashes", () => {
-    expect(sanitizeBranchForFilename("feature\\branch")).toBe("feature-branch");
+    expect(sanitizeBranchForFilename(String.raw`feature\branch`)).toBe(
+      "feature-branch",
+    );
   });
 
   it("replaces all problematic filesystem characters", () => {
@@ -859,7 +861,7 @@ describe("run() error logging to file", () => {
       }),
     ).rejects.toThrow();
 
-    const log = readFileSync(logPath, "utf-8");
+    const log = readFileSync(logPath, "utf8");
     expect(log).toContain("SOURCE_BRANCH");
     expect(log).toContain("built-in prompt argument");
   });
@@ -1301,7 +1303,7 @@ describe("output.maxRetries end-to-end", () => {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(
       path,
-      JSON.stringify({ type: "system", cwd: hostRepoDir }) + "\n",
+      `${JSON.stringify({ type: "system", cwd: hostRepoDir })}\n`,
     );
   };
 
@@ -1349,7 +1351,7 @@ describe("output.maxRetries end-to-end", () => {
       ],
       [
         `{"type":"system","subtype":"init","session_id":"${sessionId}"}`,
-        '{"type":"result","result":"<result>{\\"answer\\":42}</result>"}',
+        String.raw`{"type":"result","result":"<result>{\"answer\":42}</result>"}`,
       ],
     ]);
 
@@ -1420,7 +1422,7 @@ describe("output.maxRetries end-to-end", () => {
         // Should never reach this stage — a stray success would mask a missing
         // guard around the recursion.
         `{"type":"system","subtype":"init","session_id":"sess-noretry"}`,
-        '{"type":"result","result":"<result>{\\"answer\\":1}</result>"}',
+        String.raw`{"type":"result","result":"<result>{\"answer\":1}</result>"}`,
       ],
     ]);
 
@@ -1463,7 +1465,7 @@ describe("merge-to-head temp branch name", () => {
       exec: async (command) => {
         const stdout = execSync(command, {
           cwd: options.worktreePath,
-          encoding: "utf-8",
+          encoding: "utf8",
           stdio: ["pipe", "pipe", "pipe"],
         });
         return { stdout, stderr: "", exitCode: 0 };
@@ -1543,7 +1545,7 @@ describe("resume/fork after a promptFile + promptArgs run", () => {
     mkdirSync(dirname(sessionPath), { recursive: true });
     writeFileSync(
       sessionPath,
-      JSON.stringify({ type: "system", cwd: process.cwd() }) + "\n",
+      `${JSON.stringify({ type: "system", cwd: process.cwd() })}\n`,
     );
     const promptFile = join(dir, "prompt.md");
     writeFileSync(promptFile, "Remember {{TOKEN}}");
@@ -1624,7 +1626,7 @@ describe("resume/fork after a structured-output run", () => {
     mkdirSync(dirname(sessionPath), { recursive: true });
     writeFileSync(
       sessionPath,
-      JSON.stringify({ type: "system", cwd: process.cwd() }) + "\n",
+      `${JSON.stringify({ type: "system", cwd: process.cwd() })}\n`,
     );
 
     const agentStdin: (string | undefined)[] = [];

@@ -43,7 +43,7 @@ const execAsync = promisify(exec);
 const testProvider = claudeCode("test-model");
 
 const testDisplayLayer = Layer.mergeAll(
-  SilentDisplay.layer(Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([])),
+  SilentDisplay.layer(Ref.unsafeMake<readonly DisplayEntry[]>([])),
   noopAgentStreamEmitterLayer,
 );
 
@@ -257,7 +257,7 @@ describe("Orchestrator", () => {
     expect(result.completionSignal).toBeUndefined();
 
     // Verify the agent's commit was synced back to host
-    const content = await readFile(join(hostDir, "agent-output.txt"), "utf-8");
+    const content = await readFile(join(hostDir, "agent-output.txt"), "utf8");
     expect(content).toBe("agent was here");
   });
 
@@ -271,9 +271,10 @@ describe("Orchestrator", () => {
     const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory(
       hostDir,
       (dir) =>
-        makeMockAgentLayer(dir, async () => {
-          return "All done. <promise>COMPLETE</promise>";
-        }),
+        makeMockAgentLayer(
+          dir,
+          async () => "All done. <promise>COMPLETE</promise>",
+        ),
     );
 
     const result = await Effect.runPromise(
@@ -300,10 +301,7 @@ describe("Orchestrator", () => {
     // Mock agent: emits a custom completion signal
     const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory(
       hostDir,
-      (dir) =>
-        makeMockAgentLayer(dir, async () => {
-          return "All done. TASK_FINISHED";
-        }),
+      (dir) => makeMockAgentLayer(dir, async () => "All done. TASK_FINISHED"),
     );
 
     const result = await Effect.runPromise(
@@ -331,9 +329,10 @@ describe("Orchestrator", () => {
     const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory(
       hostDir,
       (dir) =>
-        makeMockAgentLayer(dir, async () => {
-          return "All done. <promise>COMPLETE</promise>";
-        }),
+        makeMockAgentLayer(
+          dir,
+          async () => "All done. <promise>COMPLETE</promise>",
+        ),
     );
 
     const result = await Effect.runPromise(
@@ -361,10 +360,7 @@ describe("Orchestrator", () => {
     // Mock agent: emits the second signal in the array
     const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory(
       hostDir,
-      (dir) =>
-        makeMockAgentLayer(dir, async () => {
-          return "All done. TASK_ABORTED";
-        }),
+      (dir) => makeMockAgentLayer(dir, async () => "All done. TASK_ABORTED"),
     );
 
     const result = await Effect.runPromise(
@@ -391,10 +387,7 @@ describe("Orchestrator", () => {
     // Mock agent: emits the first signal in the array
     const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory(
       hostDir,
-      (dir) =>
-        makeMockAgentLayer(dir, async () => {
-          return "All done. TASK_FINISHED";
-        }),
+      (dir) => makeMockAgentLayer(dir, async () => "All done. TASK_FINISHED"),
     );
 
     const result = await Effect.runPromise(
@@ -421,10 +414,7 @@ describe("Orchestrator", () => {
     // Mock agent: emits neither signal
     const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory(
       hostDir,
-      (dir) =>
-        makeMockAgentLayer(dir, async () => {
-          return "Still working.";
-        }),
+      (dir) => makeMockAgentLayer(dir, async () => "Still working."),
     );
 
     const result = await Effect.runPromise(
@@ -496,7 +486,7 @@ describe("Orchestrator", () => {
 
     // Verify all 3 iteration files arrived on host
     for (let i = 1; i <= 3; i++) {
-      const content = await readFile(join(hostDir, `iter-${i}.txt`), "utf-8");
+      const content = await readFile(join(hostDir, `iter-${i}.txt`), "utf8");
       expect(content).toBe(`iteration ${i}`);
     }
   });
@@ -510,10 +500,7 @@ describe("Orchestrator", () => {
     // Mock agent: doesn't make any commits
     const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory(
       hostDir,
-      (dir) =>
-        makeMockAgentLayer(dir, async () => {
-          return "Nothing to do.";
-        }),
+      (dir) => makeMockAgentLayer(dir, async () => "Nothing to do."),
     );
 
     const result = await Effect.runPromise(
@@ -589,9 +576,10 @@ describe("OrchestrateResult", () => {
     const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory(
       hostDir,
       (dir) =>
-        makeMockAgentLayer(dir, async () => {
-          return 'Here is my structured output: {"plan": [1, 2, 3]}';
-        }),
+        makeMockAgentLayer(
+          dir,
+          async () => 'Here is my structured output: {"plan": [1, 2, 3]}',
+        ),
     );
 
     const result = await Effect.runPromise(
@@ -670,10 +658,7 @@ describe("OrchestrateResult", () => {
 
     const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory(
       hostDir,
-      (dir) =>
-        makeMockAgentLayer(dir, async () => {
-          return "Nothing to do.";
-        }),
+      (dir) => makeMockAgentLayer(dir, async () => "Nothing to do."),
     );
 
     const result = await Effect.runPromise(
@@ -807,10 +792,10 @@ describe("OrchestrateResult", () => {
               } catch {}
             }),
         ).pipe(
-          Effect.map((value) => {
+          Effect.map((value) =>
             // Check for uncommitted changes before cleanup
-            return { value, preservedWorktreePath: sandboxBaseDir };
-          }),
+            ({ value, preservedWorktreePath: sandboxBaseDir }),
+          ),
         ),
     });
 
@@ -1054,7 +1039,7 @@ describe("Orchestrator tool call display integration", () => {
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
-    const ref = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const ref = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     const displayLayer = Layer.merge(
       SilentDisplay.layer(ref),
       noopAgentStreamEmitterLayer,
@@ -1155,7 +1140,7 @@ describe("Orchestrator agent stream emitter", () => {
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
-    const ref = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const ref = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     const displayLayer = SilentDisplay.layer(ref);
 
     const events: AgentStreamEvent[] = [];
@@ -1239,7 +1224,7 @@ describe("Orchestrator agent stream emitter", () => {
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
-    const ref = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const ref = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     const displayLayer = SilentDisplay.layer(ref);
 
     const emitterLayer = agentStreamEmitterLayer(() => {
@@ -1300,7 +1285,7 @@ describe("Orchestrator agent stream emitter", () => {
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
-    const ref = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const ref = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     const displayLayer = SilentDisplay.layer(ref);
 
     const events: AgentStreamEvent[] = [];
@@ -1557,7 +1542,7 @@ describe("Orchestrator error handling", () => {
     expect(exit._tag).toBe("Failure");
 
     // But iteration 1's commit should be preserved on host
-    const content = await readFile(join(hostDir, "iter1.txt"), "utf-8");
+    const content = await readFile(join(hostDir, "iter1.txt"), "utf8");
     expect(content).toBe("iteration 1 data");
   });
 
@@ -1955,9 +1940,10 @@ describe("Orchestrator streaming", () => {
     const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory(
       hostDir,
       (dir) =>
-        makeMockAgentLayer(dir, async () => {
-          return "All done. <promise>COMPLETE</promise>";
-        }),
+        makeMockAgentLayer(
+          dir,
+          async () => "All done. <promise>COMPLETE</promise>",
+        ),
     );
 
     const result = await Effect.runPromise(
@@ -2250,7 +2236,7 @@ describe("Orchestrator Display integration", () => {
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
-    const ref = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const ref = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     const displayLayer = Layer.merge(
       SilentDisplay.layer(ref),
       noopAgentStreamEmitterLayer,
@@ -2259,9 +2245,10 @@ describe("Orchestrator Display integration", () => {
     const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory(
       hostDir,
       (dir) =>
-        makeMockAgentLayer(dir, async () => {
-          return "All done. <promise>COMPLETE</promise>";
-        }),
+        makeMockAgentLayer(
+          dir,
+          async () => "All done. <promise>COMPLETE</promise>",
+        ),
     );
 
     await Effect.runPromise(
@@ -2315,7 +2302,7 @@ describe("Orchestrator Display integration", () => {
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
-    const ref = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const ref = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     const displayLayer = Layer.merge(
       SilentDisplay.layer(ref),
       noopAgentStreamEmitterLayer,
@@ -2324,10 +2311,12 @@ describe("Orchestrator Display integration", () => {
     const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory(
       hostDir,
       (dir) =>
-        makeMockAgentLayer(dir, async () => {
-          // Never signals completion
-          return "Nothing to do.";
-        }),
+        makeMockAgentLayer(
+          dir,
+          async () =>
+            // Never signals completion
+            "Nothing to do.",
+        ),
     );
 
     await Effect.runPromise(
@@ -2392,7 +2381,7 @@ describe("Orchestrator Display integration", () => {
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
-    const ref = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const ref = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     const displayLayer = Layer.merge(
       SilentDisplay.layer(ref),
       noopAgentStreamEmitterLayer,
@@ -2401,9 +2390,10 @@ describe("Orchestrator Display integration", () => {
     const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory(
       hostDir,
       (dir) =>
-        makeMockAgentLayer(dir, async () => {
-          return "All done. <promise>COMPLETE</promise>";
-        }),
+        makeMockAgentLayer(
+          dir,
+          async () => "All done. <promise>COMPLETE</promise>",
+        ),
     );
 
     await Effect.runPromise(
@@ -2436,7 +2426,7 @@ describe("Orchestrator Display integration", () => {
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
-    const ref = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const ref = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     const displayLayer = Layer.merge(
       SilentDisplay.layer(ref),
       noopAgentStreamEmitterLayer,
@@ -2445,9 +2435,10 @@ describe("Orchestrator Display integration", () => {
     const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory(
       hostDir,
       (dir) =>
-        makeMockAgentLayer(dir, async () => {
-          return "All done. <promise>COMPLETE</promise>";
-        }),
+        makeMockAgentLayer(
+          dir,
+          async () => "All done. <promise>COMPLETE</promise>",
+        ),
     );
 
     await Effect.runPromise(
@@ -2664,7 +2655,7 @@ describe("Orchestrator Display integration", () => {
       },
     );
 
-    const displayEntries = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const displayEntries = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     const displayLayer = Layer.merge(
       SilentDisplay.layer(displayEntries),
       noopAgentStreamEmitterLayer,
@@ -2749,7 +2740,7 @@ describe("Orchestrator Display integration", () => {
       },
     );
 
-    const displayEntries = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const displayEntries = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     const displayLayer = Layer.merge(
       SilentDisplay.layer(displayEntries),
       noopAgentStreamEmitterLayer,
@@ -2893,7 +2884,7 @@ describe("Orchestrator with pi provider", () => {
     );
 
     expect(result.iterations).toHaveLength(1);
-    const content = await readFile(join(hostDir, "pi-output.txt"), "utf-8");
+    const content = await readFile(join(hostDir, "pi-output.txt"), "utf8");
     expect(content).toBe("pi was here");
   });
 
@@ -2905,9 +2896,10 @@ describe("Orchestrator with pi provider", () => {
     const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory(
       hostDir,
       (dir) =>
-        makeMockPiAgentLayer(dir, async () => {
-          return "All done. <promise>COMPLETE</promise>";
-        }),
+        makeMockPiAgentLayer(
+          dir,
+          async () => "All done. <promise>COMPLETE</promise>",
+        ),
     );
 
     const result = await Effect.runPromise(
@@ -2965,7 +2957,7 @@ describe("Orchestrator with pi provider", () => {
       }),
     );
 
-    const ref = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const ref = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     const displayLayer = Layer.merge(
       SilentDisplay.layer(ref),
       noopAgentStreamEmitterLayer,
@@ -3045,7 +3037,7 @@ describe("Orchestrator with pi provider", () => {
       }),
     ];
 
-    const ref = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const ref = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     const displayLayer = Layer.merge(
       SilentDisplay.layer(ref),
       noopAgentStreamEmitterLayer,
@@ -3208,7 +3200,7 @@ describe("Orchestrator with codex provider", () => {
     );
 
     expect(result.iterations).toHaveLength(1);
-    const content = await readFile(join(hostDir, "codex-output.txt"), "utf-8");
+    const content = await readFile(join(hostDir, "codex-output.txt"), "utf8");
     expect(content).toBe("codex was here");
   });
 
@@ -3220,9 +3212,10 @@ describe("Orchestrator with codex provider", () => {
     const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory(
       hostDir,
       (dir) =>
-        makeMockCodexAgentLayer(dir, async () => {
-          return "All done. <promise>COMPLETE</promise>";
-        }),
+        makeMockCodexAgentLayer(
+          dir,
+          async () => "All done. <promise>COMPLETE</promise>",
+        ),
     );
 
     const result = await Effect.runPromise(
@@ -3429,7 +3422,7 @@ describe("Session capture integration", () => {
 
     // Verify the captured file exists on the host
     const capturedPath = result.iterations[0]!.sessionFilePath!;
-    const capturedContent = await readFile(capturedPath, "utf-8");
+    const capturedContent = await readFile(capturedPath, "utf8");
     const lines = capturedContent.split("\n");
 
     // Verify cwd was rewritten from sandbox cwd to host cwd
@@ -3451,9 +3444,7 @@ describe("Session capture integration", () => {
     const provider = claudeCode("test-model", { captureSessions: false });
 
     const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) =>
-      makeMockAgentLayer(dir, async () => {
-        return "Done.";
-      }),
+      makeMockAgentLayer(dir, async () => "Done."),
     );
 
     const result = await Effect.runPromise(
@@ -3477,9 +3468,7 @@ describe("Session capture integration", () => {
 
     // Use default factory (no bindMountHandle, no session_id in stream)
     const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) =>
-      makeMockAgentLayer(dir, async () => {
-        return "Done.";
-      }),
+      makeMockAgentLayer(dir, async () => "Done."),
     );
 
     const result = await Effect.runPromise(
@@ -3534,7 +3523,7 @@ describe("Session capture integration", () => {
           sbEncoded,
           `${mockSessionId}.jsonl`,
         );
-        const content = await readFile(sbSessionPath, "utf-8");
+        const content = await readFile(sbSessionPath, "utf8");
         const lines = content.split("\n");
         // Verify cwd was rewritten from host to sandbox
         const firstEntry = JSON.parse(lines[0]!) as { cwd: string };
@@ -3577,7 +3566,7 @@ describe("Session capture integration", () => {
 
     // Verify the captured file on host has rewritten cwd
     const capturedPath = result.iterations[0]!.sessionFilePath!;
-    const capturedContent = await readFile(capturedPath, "utf-8");
+    const capturedContent = await readFile(capturedPath, "utf8");
     const capturedLines = capturedContent.split("\n");
     const entry = JSON.parse(capturedLines[0]!) as { cwd: string };
     expect(entry.cwd).toBe(hostDir);
@@ -3741,13 +3730,13 @@ describe("Session capture integration", () => {
     expect(result.iterations[0]!.sessionId).toBe(childSessionId);
 
     // The parent JSONL on the host is untouched — fork must not overwrite it.
-    const parentAfter = await readFile(parentSessionPath, "utf-8");
+    const parentAfter = await readFile(parentSessionPath, "utf8");
     expect(parentAfter).toBe(parentContent);
 
     // A child session file was captured to the host under the child id.
     const childCaptured = result.iterations[0]!.sessionFilePath!;
     expect(childCaptured).toContain(`${childSessionId}.jsonl`);
-    const childContent = await readFile(childCaptured, "utf-8");
+    const childContent = await readFile(childCaptured, "utf8");
     expect(childContent).toContain("forked work");
   });
 
@@ -3826,9 +3815,7 @@ describe("Session capture integration", () => {
     const provider = claudeCode("test-model", { captureSessions: false });
 
     const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) =>
-      makeMockAgentLayer(dir, async () => {
-        return "Done.";
-      }),
+      makeMockAgentLayer(dir, async () => "Done."),
     );
 
     const result = await Effect.runPromise(
@@ -3873,7 +3860,7 @@ describe("Orchestrator signal (AbortSignal)", () => {
         };
       });
 
-      const displayEntries = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+      const displayEntries = Ref.unsafeMake<readonly DisplayEntry[]>([]);
       const exit = await Effect.runPromise(
         orchestrate({
           provider: testProvider,
@@ -4025,9 +4012,10 @@ describe("Orchestrator signal (AbortSignal)", () => {
     const ac = new AbortController();
 
     const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) =>
-      makeMockAgentLayer(dir, async () => {
-        return "All done. <promise>COMPLETE</promise>";
-      }),
+      makeMockAgentLayer(
+        dir,
+        async () => "All done. <promise>COMPLETE</promise>",
+      ),
     );
 
     const result = await Effect.runPromise(
@@ -4053,9 +4041,7 @@ describe("Orchestrator signal (AbortSignal)", () => {
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
     const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) =>
-      makeMockAgentLayer(dir, async () => {
-        return "Done. <promise>COMPLETE</promise>";
-      }),
+      makeMockAgentLayer(dir, async () => "Done. <promise>COMPLETE</promise>"),
     );
 
     const result = await Effect.runPromise(
@@ -4280,7 +4266,7 @@ describe("Orchestrator completion timeout (hanging process)", () => {
 
     expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
     // Clean exit beats the grace window — no waiting added.
-    expect(elapsedMs).toBeLessThan(2_000);
+    expect(elapsedMs).toBeLessThan(2000);
   }, 10_000);
 
   it("emits a warning when the completion timeout fires", async () => {
@@ -4306,7 +4292,7 @@ describe("Orchestrator completion timeout (hanging process)", () => {
       makeHangingClaudeAgentLayer(dir, lines),
     );
 
-    const ref = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const ref = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     const displayLayer = Layer.merge(
       SilentDisplay.layer(ref),
       noopAgentStreamEmitterLayer,
@@ -4337,7 +4323,7 @@ describe("Orchestrator context window (last model call)", () => {
   const fixtureLines = (name: string): string[] =>
     readFileSync(
       join(import.meta.dirname, "__fixtures__", "context-window", name),
-      "utf-8",
+      "utf8",
     )
       .split("\n")
       .filter((l) => l.length > 0);
@@ -4398,8 +4384,8 @@ describe("Orchestrator context window (last model call)", () => {
     );
 
     expect(result.iterations.map((it) => it.contextWindow)).toEqual([
-      { tokens: 46633 },
-      { tokens: 46633 },
+      { tokens: 46_633 },
+      { tokens: 46_633 },
     ]);
   });
 
@@ -4451,14 +4437,14 @@ describe("Orchestrator context window (last model call)", () => {
     );
 
     expect(result.iterations[0]!.contextWindow).toEqual({
-      tokens: 31899,
-      limit: 258400,
+      tokens: 31_899,
+      limit: 258_400,
     });
   });
 
   it("shows the context window of completed iterations when a later one fails", async () => {
     const hostDir = await newHost();
-    const ref = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const ref = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     // Shared across iterations: the factory builds a fresh sandbox per
     // iteration, so iteration 1 succeeds and iteration 2 fails.
     const calls = [

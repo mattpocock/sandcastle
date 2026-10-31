@@ -114,7 +114,7 @@ export const createTempSandbox = async (
 
 export interface StubProviderRecord {
   readonly provider: BindMountSandboxProvider;
-  readonly createCalls: ReadonlyArray<unknown>;
+  readonly createCalls: readonly unknown[];
   readonly closeCalls: { count: number };
 }
 

@@ -79,7 +79,7 @@ export type PackageManager = (typeof PACKAGE_MANAGERS)[number];
 
 // Lockfiles checked in priority order. bun.lock / bun.lockb are both valid bun
 // lockfiles (text vs binary), so both map to bun.
-const LOCKFILES: ReadonlyArray<readonly [string, PackageManager]> = [
+const LOCKFILES: readonly (readonly [string, PackageManager])[] = [
   ["bun.lockb", "bun"],
   ["bun.lock", "bun"],
   ["pnpm-lock.yaml", "pnpm"],
@@ -556,7 +556,7 @@ RUN ARCH=$(dpkg --print-architecture) \\
   && BEADS_URL="https://github.com/gastownhall/beads/releases/download/v\${BEADS_VERSION}" \\
   && cd /tmp \\
   && curl -fsSLO "\${BEADS_URL}/\${BEADS_TARBALL}" \\
-  && curl -fsSL "\${BEADS_URL}/checksums.txt" | grep " \${BEADS_TARBALL}\$" | sha256sum -c - \\
+  && curl -fsSL "\${BEADS_URL}/checksums.txt" | grep " \${BEADS_TARBALL}$" | sha256sum -c - \\
   && tar -xzf "\${BEADS_TARBALL}" -C /usr/local/bin bd \\
   && rm "\${BEADS_TARBALL}" \\
   && bd version
@@ -1193,7 +1193,7 @@ export const scaffold = (
     if (issueTracker.envExample) {
       envExampleParts.push(issueTracker.envExample);
     }
-    const envExampleContent = envExampleParts.join("\n") + "\n";
+    const envExampleContent = `${envExampleParts.join("\n")}\n`;
 
     yield* Effect.all(
       [

@@ -338,7 +338,7 @@ describe("worktree.interactive()", () => {
           exec: async (command) => {
             const result = execSync(command, {
               cwd: options.worktreePath,
-              encoding: "utf-8",
+              encoding: "utf8",
               stdio: ["pipe", "pipe", "pipe"],
             });
             return { stdout: result, stderr: "", exitCode: 0 };
@@ -357,9 +357,9 @@ describe("worktree.interactive()", () => {
     await initRepo(hostDir);
     await commitFile(hostDir, "init.txt", "init", "initial commit");
 
-    const provider = makeTestProvider(async (_args, _opts) => {
-      return { exitCode: 0 };
-    });
+    const provider = makeTestProvider(async (_args, _opts) => ({
+      exitCode: 0,
+    }));
 
     const ws = await createWorktree({
       branchStrategy: { type: "branch", branch: "interactive-test" },
@@ -445,7 +445,7 @@ describe("worktree.interactive()", () => {
       // The commit should be in the worktree
       const log = execSync("git log --oneline -1", {
         cwd: ws.worktreePath,
-        encoding: "utf-8",
+        encoding: "utf8",
       });
       expect(log).toContain("agent commit");
     } finally {
@@ -690,7 +690,7 @@ describe("worktree.run()", () => {
             if (command.startsWith("codex ")) {
               const output = await mockAgentBehavior(cwd);
               const streamOutput = toCodexStreamJsonWithUsage(output, {
-                input_tokens: 50000,
+                input_tokens: 50_000,
                 cached_input_tokens: 0,
                 output_tokens: 100,
               });
@@ -704,7 +704,7 @@ describe("worktree.run()", () => {
             // Pass through other commands
             const result = execSync(command, {
               cwd,
-              encoding: "utf-8",
+              encoding: "utf8",
               stdio: ["pipe", "pipe", "pipe"],
             });
             return { stdout: result, stderr: "", exitCode: 0 };
@@ -808,7 +808,7 @@ describe("worktree.run()", () => {
       expect(result.iterations[0]!.usage).toBeDefined();
       expect(result.iterations[0]!.contextWindow).toBeUndefined();
 
-      const log = await readFile(logPath, "utf-8");
+      const log = await readFile(logPath, "utf8");
       expect(log).not.toContain("Context window");
     } finally {
       await ws.close();
@@ -858,7 +858,7 @@ describe("worktree.run()", () => {
                     message: {
                       model: "claude-opus-4-8",
                       usage: {
-                        input_tokens: 50000,
+                        input_tokens: 50_000,
                         cache_creation_input_tokens: 0,
                         cache_read_input_tokens: 0,
                         output_tokens: 100,
@@ -879,7 +879,7 @@ describe("worktree.run()", () => {
                   message: {
                     content: [{ type: "text", text: "ok" }],
                     usage: {
-                      input_tokens: 50000,
+                      input_tokens: 50_000,
                       cache_creation_input_tokens: 0,
                       cache_read_input_tokens: 0,
                       output_tokens: 100,
@@ -898,7 +898,7 @@ describe("worktree.run()", () => {
             try {
               const result = execSync(command, {
                 cwd,
-                encoding: "utf-8",
+                encoding: "utf8",
                 stdio: ["pipe", "pipe", "pipe"],
               });
               return { stdout: result, stderr: "", exitCode: 0 };
@@ -944,14 +944,14 @@ describe("worktree.run()", () => {
       });
 
       expect(result.iterations[0]!.usage).toEqual({
-        inputTokens: 50000,
+        inputTokens: 50_000,
         cacheCreationInputTokens: 0,
         cacheReadInputTokens: 0,
         outputTokens: 100,
       });
       expect(result.iterations[0]!.sessionFilePath).toBeDefined();
 
-      const log = await readFile(logPath, "utf-8");
+      const log = await readFile(logPath, "utf8");
       expect(log).toContain("Context window: 50k");
     } finally {
       await ws.close();
@@ -991,7 +991,7 @@ describe("worktree.run()", () => {
       // The commit should be in the worktree
       const log = execSync("git log --oneline -1", {
         cwd: ws.worktreePath,
-        encoding: "utf-8",
+        encoding: "utf8",
       });
       expect(log).toContain("agent commit");
     } finally {
@@ -1578,7 +1578,7 @@ describe("isolated provider: createWorktree({ copyToWorktree })", () => {
   /** Reads `secret.txt` from where the agent runs inside the sandbox. */
   const readSecret = async (cwd: string) =>
     existsSync(join(cwd, "secret.txt"))
-      ? (await readFile(join(cwd, "secret.txt"), "utf-8")).trim()
+      ? (await readFile(join(cwd, "secret.txt"), "utf8")).trim()
       : "MISSING";
 
   /**

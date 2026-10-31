@@ -25,7 +25,7 @@ import {
 const fixture = (name: string): string =>
   readFileSync(
     join(import.meta.dirname, "__fixtures__", "context-window", name),
-    "utf-8",
+    "utf8",
   );
 
 /** Every context_window event the provider's stream parser emits, in order. */
@@ -45,10 +45,10 @@ describe("context window from real agent output", () => {
       "claude-code.stream.jsonl",
     );
     // Call 1: 1977 + 5670 + 23816. Call 2 (last): 2 + 17145 + 29486.
-    expect(events.at(0)).toEqual({ tokens: 31463 });
-    expect(events.at(-1)).toEqual({ tokens: 46633 });
+    expect(events.at(0)).toEqual({ tokens: 31_463 });
+    expect(events.at(-1)).toEqual({ tokens: 46_633 });
     // result.usage sums every call of the turn: 1979 + 22815 + 53302.
-    expect(events.map((e) => e.tokens)).not.toContain(78096);
+    expect(events.map((e) => e.tokens)).not.toContain(78_096);
   });
 
   it("codex: the stream's turn.completed total is never used", () => {
@@ -64,7 +64,7 @@ describe("context window from real agent output", () => {
     const provider = codex("gpt-6-luna");
     expect(
       provider.parseSessionContextWindow!(fixture("codex.session.jsonl")),
-    ).toEqual({ tokens: 31899, limit: 258400 });
+    ).toEqual({ tokens: 31_899, limit: 258_400 });
   });
 
   it("pi: last assistant message_end usage, not agent_end summed", () => {
@@ -74,9 +74,9 @@ describe("context window from real agent output", () => {
     );
     // Call 1: 4 + 0 + 2190. Call 2 (last): 2 + 2190 + 17694.
     expect(events.at(0)).toEqual({ tokens: 2194 });
-    expect(events.at(-1)).toEqual({ tokens: 19886 });
+    expect(events.at(-1)).toEqual({ tokens: 19_886 });
     // Summing agent_end.messages[] usage gives 2194 + 19886.
-    expect(events.map((e) => e.tokens)).not.toContain(22080);
+    expect(events.map((e) => e.tokens)).not.toContain(22_080);
   });
 
   it("opencode: last step_finish input + cache.read + cache.write", () => {
@@ -88,9 +88,9 @@ describe("context window from real agent output", () => {
     // of iteration 1); 8541, then 12460 + 8511 (last of iteration 2).
     expect(events).toEqual([
       { tokens: 8541 },
-      { tokens: 21003 },
+      { tokens: 21_003 },
       { tokens: 8541 },
-      { tokens: 20971 },
+      { tokens: 20_971 },
     ]);
   });
 
@@ -99,7 +99,7 @@ describe("context window from real agent output", () => {
       copilot("claude-haiku-4.5"),
       "copilot.stream.jsonl",
     );
-    expect(events).toEqual([{ tokens: 18190 }]);
+    expect(events).toEqual([{ tokens: 18_190 }]);
     // modelMetrics[...].usage.inputTokens is 35908, summed over both calls.
   });
 
@@ -116,11 +116,11 @@ describe("context window from real agent output", () => {
 
 describe("formatContextWindow", () => {
   it("rounds tokens up to the next 1k", () => {
-    expect(formatContextWindow({ tokens: 46633 })).toBe("47k");
+    expect(formatContextWindow({ tokens: 46_633 })).toBe("47k");
   });
 
   it("shows the limit, rounded down, when known", () => {
-    expect(formatContextWindow({ tokens: 31899, limit: 258400 })).toBe(
+    expect(formatContextWindow({ tokens: 31_899, limit: 258_400 })).toBe(
       "32k / 258k",
     );
   });
@@ -130,9 +130,9 @@ describe("buildContextWindowLines", () => {
   it("returns one line per iteration with a context window", () => {
     expect(
       buildContextWindowLines([
-        { contextWindow: { tokens: 46633 } },
+        { contextWindow: { tokens: 46_633 } },
         {},
-        { contextWindow: { tokens: 33989, limit: 258400 } },
+        { contextWindow: { tokens: 33_989, limit: 258_400 } },
       ]),
     ).toEqual(["Context window: 47k", "Context window: 34k / 258k"]);
   });

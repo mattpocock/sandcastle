@@ -19,7 +19,7 @@ export const execHostShell = (
   command: string,
   options: {
     readonly cwd: string;
-    readonly signals: ReadonlyArray<AbortSignal | undefined>;
+    readonly signals: readonly (AbortSignal | undefined)[];
   },
 ): Promise<{ stdout: string; stderr: string }> =>
   new Promise((resolve, reject) => {

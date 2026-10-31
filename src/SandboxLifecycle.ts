@@ -86,21 +86,21 @@ const execAsync = promisify(exec);
 
 export type SandboxHooks = {
   readonly host?: {
-    readonly onWorktreeReady?: ReadonlyArray<{
+    readonly onWorktreeReady?: readonly {
       readonly command: string;
       readonly timeoutMs?: number;
-    }>;
-    readonly onSandboxReady?: ReadonlyArray<{
+    }[];
+    readonly onSandboxReady?: readonly {
       readonly command: string;
       readonly timeoutMs?: number;
-    }>;
+    }[];
   };
   readonly sandbox?: {
-    readonly onSandboxReady?: ReadonlyArray<{
+    readonly onSandboxReady?: readonly {
       readonly command: string;
       readonly sudo?: boolean;
       readonly timeoutMs?: number;
-    }>;
+    }[];
   };
 };
 
@@ -110,10 +110,10 @@ export type SandboxHooks = {
  * Fails fast on non-zero exit.
  */
 export const runHostHooks = (
-  hooks: ReadonlyArray<{
+  hooks: readonly {
     readonly command: string;
     readonly timeoutMs?: number;
-  }>,
+  }[],
   cwd: string,
   signal?: AbortSignal,
 ): Effect.Effect<void, ExecError | HookTimeoutError> =>
@@ -248,14 +248,14 @@ export const withSandboxLifecycle = <A>(
         if (hostGitName) {
           yield* execOkWithGitTimeout(
             sandbox,
-            `git config --global user.name "${hostGitName.replace(/"/g, '\\"')}"`,
+            `git config --global user.name "${hostGitName.replace(/"/g, String.raw`\"`)}"`,
             gitSetupTimeoutMs,
           );
         }
         if (hostGitEmail) {
           yield* execOkWithGitTimeout(
             sandbox,
-            `git config --global user.email "${hostGitEmail.replace(/"/g, '\\"')}"`,
+            `git config --global user.email "${hostGitEmail.replace(/"/g, String.raw`\"`)}"`,
             gitSetupTimeoutMs,
           );
         }
@@ -473,11 +473,11 @@ export const withSandboxLifecycle = <A>(
                   }).catch(() => {});
                 }
                 throw new Error(
-                  `Merge of '${resolvedBranch}' onto '${hostCurrentBranch}' failed` +
-                    (mergeStarted ? " and was aborted" : "") +
-                    `, so '${hostCurrentBranch}' is unchanged.` +
-                    (gitOutput ? `\ngit merge said:\n${gitOutput}\n` : " ") +
-                    `The temporary branch '${resolvedBranch}' has been preserved. ` +
+                  `Merge of '${resolvedBranch}' onto '${hostCurrentBranch}' failed${
+                    mergeStarted ? " and was aborted" : ""
+                  }, so '${hostCurrentBranch}' is unchanged.${
+                    gitOutput ? `\ngit merge said:\n${gitOutput}\n` : " "
+                  }The temporary branch '${resolvedBranch}' has been preserved. ` +
                     `To retry: git merge ${resolvedBranch} (resolve any conflicts and commit), ` +
                     `then clean up: git branch -D ${resolvedBranch}`,
                 );

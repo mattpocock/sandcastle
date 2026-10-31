@@ -52,7 +52,7 @@ export type ParsedStreamEvent =
 
 /** @internal Single-quote a string for safe use in a POSIX shell command. */
 export const shellEscape = (s: string): string =>
-  "'" + s.replace(/'/g, "'\\''") + "'";
+  `'${s.replace(/'/g, String.raw`'\''`)}'`;
 
 /**
  * Build a `context_window` event from ONE model call's input-side buckets
@@ -366,7 +366,7 @@ const readSandboxFile = async (
   );
   await handle.copyFileOut(sandboxPath, tmpPath);
   try {
-    return await readFile(tmpPath, "utf-8");
+    return await readFile(tmpPath, "utf8");
   } finally {
     await rm(tmpPath, { force: true }).catch(() => {});
   }
@@ -435,7 +435,7 @@ const makeClaudeSessionStorage = (
     readHostSession: async (cwd, id) => {
       const path = claudeHostSessionPath(cwd, id, hostProjectsDir);
       if (!(await fileExists(path))) return undefined;
-      return readFile(path, "utf-8");
+      return readFile(path, "utf8");
     },
     captureToHost: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
       // Main session: failure is fatal — the user expects their session.
@@ -495,7 +495,7 @@ const makeClaudeSessionStorage = (
         sessionId,
         hostProjectsDir,
       );
-      const jsonl = await readFile(hostPath, "utf-8");
+      const jsonl = await readFile(hostPath, "utf8");
       const rewritten = transferClaudeSession(jsonl, hostCwd, sandboxCwd);
       const sandboxPath = claudeSandboxSessionPath(
         sandboxCwd,
@@ -530,7 +530,7 @@ const makeCodexSessionStorage = (
     readHostSession: async (_cwd, id) => {
       const found = await findCodexSessionOnHost(id, hostSessionsDir);
       if (!found.path) return undefined;
-      return readFile(found.path, "utf-8");
+      return readFile(found.path, "utf8");
     },
     captureToHost: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
       const located = await locateCodexSandboxSession(
@@ -549,7 +549,7 @@ const makeCodexSessionStorage = (
     },
     resumeIntoSandbox: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
       const located = await locateCodexHostSession(sessionId, hostSessionsDir);
-      const jsonl = await readFile(located.path, "utf-8");
+      const jsonl = await readFile(located.path, "utf8");
       const rewritten = transferCodexSession(jsonl, hostCwd, sandboxCwd);
       const target = posix.join(sandboxSessionsDir, located.relativePath);
       await writeSandboxFile(handle, target, rewritten, "codex-res");
@@ -577,7 +577,7 @@ const makePiSessionStorage = (options?: PiOptions): AgentSessionStorage => {
     readHostSession: async (_cwd, id) => {
       const found = await findPiSessionOnHost(id, hostSessionsDir);
       if (!found.path) return undefined;
-      return readFile(found.path, "utf-8");
+      return readFile(found.path, "utf8");
     },
     captureToHost: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
       const located = await locatePiSandboxSession(
@@ -599,7 +599,7 @@ const makePiSessionStorage = (options?: PiOptions): AgentSessionStorage => {
     },
     resumeIntoSandbox: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
       const located = await locatePiHostSession(sessionId, hostSessionsDir);
-      const jsonl = await readFile(located.path, "utf-8");
+      const jsonl = await readFile(located.path, "utf8");
       const rewritten = transferPiSession(jsonl, hostCwd, sandboxCwd);
       const filename = located.relativePath.split(/[\\/]/).pop()!;
       const target = posix.join(

@@ -377,7 +377,7 @@ describe("pi factory", () => {
       dangerouslySkipPermissions: true,
       resumeSession: "it's a session",
     });
-    expect(command).toContain("--session 'it'\\''s a session'");
+    expect(command).toContain(String.raw`--session 'it'\''s a session'`);
   });
 
   it("buildPrintCommand uses --fork (not --session) when resumeSession + forkSession are set", () => {
@@ -1075,7 +1075,7 @@ describe("cursor factory", () => {
   it("buildPrintCommand passes prompt as a positional shell-escaped argument", () => {
     const provider = cursor("claude-sonnet-4-6");
     const { command, stdin } = provider.buildPrintCommand(opts("it's a test"));
-    expect(command.endsWith("'it'\\''s a test'")).toBe(true);
+    expect(command.endsWith(String.raw`'it'\''s a test'`)).toBe(true);
     expect(command).not.toContain(" -p ");
     expect(stdin).toBeUndefined();
   });
@@ -1273,7 +1273,7 @@ describe("opencode factory", () => {
   it("buildPrintCommand shell-escapes the prompt", () => {
     const provider = opencode("opencode/big-pickle");
     const { command } = provider.buildPrintCommand(opts("it's a test"));
-    expect(command).toContain("'it'\\''s a test'");
+    expect(command).toContain(String.raw`'it'\''s a test'`);
   });
 
   it("buildPrintCommand shell-escapes the model", () => {
@@ -1314,7 +1314,7 @@ describe("opencode factory", () => {
       variant: "it's tricky",
     });
     const { command } = provider.buildPrintCommand(opts("test"));
-    expect(command).toContain("--variant 'it'\\''s tricky'");
+    expect(command).toContain(String.raw`--variant 'it'\''s tricky'`);
   });
 
   it("buildPrintCommand includes --agent when specified", () => {
@@ -1349,7 +1349,7 @@ describe("opencode factory", () => {
       agent: "it's tricky",
     });
     const { command } = provider.buildPrintCommand(opts("test"));
-    expect(command).toContain("--agent 'it'\\''s tricky'");
+    expect(command).toContain(String.raw`--agent 'it'\''s tricky'`);
   });
 
   it("buildInteractiveArgs includes --agent when specified", () => {
@@ -1700,7 +1700,7 @@ describe("copilot factory", () => {
   it("buildPrintCommand shell-escapes the prompt", () => {
     const provider = copilot("claude-sonnet-4.5");
     const { command } = provider.buildPrintCommand(opts("it's a test"));
-    expect(command).toContain("'it'\\''s a test'");
+    expect(command).toContain(String.raw`'it'\''s a test'`);
   });
 
   it("buildPrintCommand rejects prompts larger than the argv-safe limit", () => {
@@ -2235,7 +2235,7 @@ describe("sessionStorage", () => {
       // File lands in the host-cwd-encoded directory, preserving the filename
       // so pi's `--session <id>` glob (`*_<id>.jsonl`) resolves it.
       const expectedHostPath = join(hostDir, "--host-repo--", filename);
-      const content = await readFile(expectedHostPath, "utf-8");
+      const content = await readFile(expectedHostPath, "utf8");
       const lines = content.split("\n");
       const header = JSON.parse(lines[0]!);
       expect(header.type).toBe("session");
@@ -2300,7 +2300,7 @@ describe("sessionStorage", () => {
         "--sandbox-repo--",
         filename,
       );
-      const content = await readFile(expectedSandboxPath, "utf-8");
+      const content = await readFile(expectedSandboxPath, "utf8");
       const header = JSON.parse(content);
       expect(header.type).toBe("session");
       expect(header.cwd).toBe(sandboxCwd);
@@ -2382,7 +2382,7 @@ describe("sessionStorage", () => {
         id,
       );
       expect(captured).toBe(join(hostDir, relativePath));
-      const content = await readFile(captured!, "utf-8");
+      const content = await readFile(captured!, "utf8");
       expect(JSON.parse(content).payload.cwd).toBe("/host/repo");
     } finally {
       await rm(hostDir, { recursive: true, force: true });
@@ -2424,7 +2424,7 @@ describe("sessionStorage", () => {
       });
 
       const expectedHostPath = join(hostDir, "-host-repo", `${id}.jsonl`);
-      const main = await readFile(expectedHostPath, "utf-8");
+      const main = await readFile(expectedHostPath, "utf8");
       expect(JSON.parse(main).cwd).toBe(hostCwd);
     } finally {
       await rm(hostDir, { recursive: true, force: true });
@@ -2488,7 +2488,7 @@ describe("sessionStorage", () => {
       // Main session captured with cwd rewritten.
       const mainContent = await readFile(
         join(hostDir, "-host-repo", `${id}.jsonl`),
-        "utf-8",
+        "utf8",
       );
       expect(JSON.parse(mainContent).cwd).toBe(hostCwd);
 
@@ -2496,14 +2496,14 @@ describe("sessionStorage", () => {
       const hostSubagentsDir = join(hostDir, "-host-repo", id, "subagents");
       const alpha = await readFile(
         join(hostSubagentsDir, "agent-alpha.jsonl"),
-        "utf-8",
+        "utf8",
       );
       for (const line of alpha.split("\n")) {
         expect(JSON.parse(line).cwd).toBe(hostCwd);
       }
       const beta = await readFile(
         join(hostSubagentsDir, "agent-beta.jsonl"),
-        "utf-8",
+        "utf8",
       );
       for (const line of beta.split("\n")) {
         expect(JSON.parse(line).cwd).toBe(hostCwd);
@@ -2511,7 +2511,7 @@ describe("sessionStorage", () => {
 
       // The non-matching sibling must not have been copied.
       await expect(
-        readFile(join(hostSubagentsDir, "notes.txt"), "utf-8"),
+        readFile(join(hostSubagentsDir, "notes.txt"), "utf8"),
       ).rejects.toThrow();
     } finally {
       await rm(hostDir, { recursive: true, force: true });
@@ -2595,7 +2595,7 @@ describe("sessionStorage", () => {
       // Main session captured.
       const mainContent = await readFile(
         join(hostDir, "-host-repo", `${id}.jsonl`),
-        "utf-8",
+        "utf8",
       );
       expect(JSON.parse(mainContent).cwd).toBe(hostCwd);
 
@@ -2603,13 +2603,13 @@ describe("sessionStorage", () => {
       const hostSubagentsDir = join(hostDir, "-host-repo", id, "subagents");
       const good = await readFile(
         join(hostSubagentsDir, "agent-good.jsonl"),
-        "utf-8",
+        "utf8",
       );
       expect(JSON.parse(good).cwd).toBe(hostCwd);
 
       // Bad subagent NOT copied.
       await expect(
-        readFile(join(hostSubagentsDir, "agent-bad.jsonl"), "utf-8"),
+        readFile(join(hostSubagentsDir, "agent-bad.jsonl"), "utf8"),
       ).rejects.toThrow();
 
       // Exactly one warning emitted, naming the bad path — successful
@@ -2635,16 +2635,14 @@ describe("errors the agent reports in its own stream", () => {
           role: "assistant",
           content: [],
           stopReason: "error",
-          errorMessage:
-            '400 {"type":"error","error":{"type":"invalid_request_error","message":"\\"thinking.type.enabled\\" is not supported for this model."}}',
+          errorMessage: String.raw`400 {"type":"error","error":{"type":"invalid_request_error","message":"\"thinking.type.enabled\" is not supported for this model."}}`,
         },
       ],
     });
     expect(pi("anthropic/claude-haiku-5-5").parseStreamLine(line)).toEqual([
       {
         type: "error",
-        message:
-          '400 {"type":"error","error":{"type":"invalid_request_error","message":"\\"thinking.type.enabled\\" is not supported for this model."}}',
+        message: String.raw`400 {"type":"error","error":{"type":"invalid_request_error","message":"\"thinking.type.enabled\" is not supported for this model."}}`,
       },
     ]);
   });

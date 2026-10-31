@@ -370,7 +370,7 @@ const buildSandboxHandle = (
 
   const sandboxHandle: Sandbox = {
     branch,
-    worktreePath: worktreePath,
+    worktreePath,
 
     run: async (runOptions: SandboxRunOptions): Promise<SandboxRunResult> => {
       // If signal is already aborted, reject immediately without any setup
@@ -422,7 +422,7 @@ const buildSandboxHandle = (
         WorktreeManager.getCurrentBranch(hostRepoDir),
       );
 
-      const displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+      const displayRef = Ref.unsafeMake<readonly DisplayEntry[]>([]);
       const silentDisplayLayer = SilentDisplay.layer(displayRef);
 
       const resolvedPrompt = await Effect.runPromise(

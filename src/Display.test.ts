@@ -14,13 +14,12 @@ import {
 
 describe("SilentDisplay", () => {
   const setup = () => {
-    const ref = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const ref = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     const layer = SilentDisplay.layer(ref);
     return { ref, layer };
   };
 
-  const readEntries = (ref: Ref.Ref<ReadonlyArray<DisplayEntry>>) =>
-    Ref.get(ref);
+  const readEntries = (ref: Ref.Ref<readonly DisplayEntry[]>) => Ref.get(ref);
 
   describe("status", () => {
     it("captures status messages with severity", async () => {
@@ -212,7 +211,7 @@ describe("FileDisplay", () => {
     return { logPath, layer };
   };
 
-  const readLog = (logPath: string) => readFileSync(logPath, "utf-8");
+  const readLog = (logPath: string) => readFileSync(logPath, "utf8");
 
   it("intro is a no-op (only delimiter in log)", async () => {
     const { logPath, layer } = setup();
@@ -455,7 +454,7 @@ describe("FileDisplay", () => {
     );
 
     const log = readLog(logPath);
-    expect(log).not.toContain("\u001b[");
+    expect(log).not.toContain("\u001B[");
   });
 
   it("appends a run delimiter on initialization instead of truncating", async () => {
@@ -527,13 +526,13 @@ describe("FileDisplay", () => {
     );
 
     const log = readLog(logPath);
-    expect(log).not.toContain("\u001b[");
+    expect(log).not.toContain("\u001B[");
   });
 });
 
 describe("SilentDisplay - toolCall", () => {
   const setup = () => {
-    const ref = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const ref = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     const layer = SilentDisplay.layer(ref);
     return { ref, layer };
   };
@@ -590,7 +589,7 @@ describe("FileDisplay - toolCall", () => {
     return { logPath, layer };
   };
 
-  const readLog = (logPath: string) => readFileSync(logPath, "utf-8");
+  const readLog = (logPath: string) => readFileSync(logPath, "utf8");
 
   it("writes tool call as Name(args) line in log file", async () => {
     const { logPath, layer } = setup();
@@ -633,18 +632,18 @@ describe("terminalStyle", () => {
 
   it("wraps status messages with bold ANSI codes", () => {
     const styled = terminalStyle.status("Agent started");
-    expect(styled).toBe("\u001b[1mAgent started\u001b[22m");
+    expect(styled).toBe("\u001B[1mAgent started\u001B[22m");
   });
 
   it("wraps summary title with bold ANSI codes", () => {
     const styled = terminalStyle.summaryTitle("Token Usage");
-    expect(styled).toBe("\u001b[1mToken Usage\u001b[22m");
+    expect(styled).toBe("\u001B[1mToken Usage\u001B[22m");
   });
 
   it("formats summary row with bold key and dim value", () => {
     const styled = terminalStyle.summaryRow("Tokens", "1,234 in / 567 out");
-    expect(styled).toContain("\u001b[1mTokens\u001b[22m");
-    expect(styled).toContain("\u001b[2m1,234 in / 567 out\u001b[22m");
+    expect(styled).toContain("\u001B[1mTokens\u001B[22m");
+    expect(styled).toContain("\u001B[2m1,234 in / 567 out\u001B[22m");
     expect(styled).toContain(": ");
   });
 });

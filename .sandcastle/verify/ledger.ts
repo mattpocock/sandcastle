@@ -314,7 +314,7 @@ export const runLedger = (
     lines.push("");
   }
   lines.push(leaks === 0 ? "LEDGER: CLEAN" : `LEDGER: LEAK (${leaks})`);
-  const text = lines.join("\n") + "\n";
+  const text = `${lines.join("\n")}\n`;
   const file = join(world.dir, ledgerFileName(readdirSync(world.dir)));
   writeFileSync(file, text);
   return { text, leaks, file };

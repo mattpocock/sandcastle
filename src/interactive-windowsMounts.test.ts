@@ -15,7 +15,7 @@ const execAsync = promisify(exec);
 
 const mockPatchGitMountsForWindows = vi.fn(
   (
-    gitMounts: Array<{ hostPath: string; sandboxPath: string }>,
+    gitMounts: { hostPath: string; sandboxPath: string }[],
     _worktreePath: string,
     _sandboxRepoDir: string,
   ) => gitMounts,
@@ -26,7 +26,7 @@ vi.mock("./mountUtils.js", async (importOriginal) => {
   return {
     ...actual,
     patchGitMountsForWindows: (
-      gitMounts: Array<{ hostPath: string; sandboxPath: string }>,
+      gitMounts: { hostPath: string; sandboxPath: string }[],
       worktreePath: string,
       sandboxRepoDir: string,
     ) =>

@@ -21,7 +21,7 @@ import { PromptError, PromptExpansionTimeoutError } from "./errors.js";
 describe("PromptPreprocessor", () => {
   const setup = async () => {
     const sandboxDir = await mkdtemp(join(tmpdir(), "preprocess-test-"));
-    const displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const displayRef = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     const displayLayer = SilentDisplay.layer(displayRef);
     const sandbox = makeLocalSandbox(sandboxDir);
     return { sandboxDir, sandbox, displayLayer, displayRef };
@@ -117,7 +117,7 @@ describe("PromptPreprocessor", () => {
     };
 
     const displayLayer = SilentDisplay.layer(
-      Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]),
+      Ref.unsafeMake<readonly DisplayEntry[]>([]),
     );
 
     const marked = await Effect.runPromise(
@@ -197,7 +197,7 @@ describe("PromptPreprocessor", () => {
     const rawTemplate = "Payload: {{DATA}}";
     const substituted = await Effect.runPromise(
       substitutePromptArgs(rawTemplate, {
-        DATA: "!\x01`rm -rf /`",
+        DATA: "!\u0001`rm -rf /`",
       }).pipe(Effect.provide(displayLayer)),
     );
     const result = await Effect.runPromise(

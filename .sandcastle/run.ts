@@ -18,7 +18,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   const planMatch = plan.stdout.match(/<plan>([\s\S]*?)<\/plan>/);
   if (!planMatch) {
     throw new Error(
-      "Orchestrator did not produce a <plan> tag.\n\n" + plan.stdout,
+      `Orchestrator did not produce a <plan> tag.\n\n${plan.stdout}`,
     );
   }
 
@@ -70,7 +70,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
         });
 
         const result = await sandbox.run({
-          name: "Implementer #" + issue.number,
+          name: `Implementer #${issue.number}`,
           agent: sandcastle.claudeCode("claude-opus-4-8"),
           promptFile: "./.sandcastle/implement-prompt.md",
           promptArgs: {
@@ -82,7 +82,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
 
         if (result.commits.length > 0) {
           await sandbox.run({
-            name: "Reviewer #" + issue.number,
+            name: `Reviewer #${issue.number}`,
             agent: sandcastle.claudeCode("claude-opus-4-8"),
             promptFile: "./.sandcastle/review-prompt.md",
             promptArgs: {

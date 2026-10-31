@@ -29,8 +29,8 @@ export const makeLocalSandbox = (sandboxDir: string): SandboxService => {
   const env = { ...process.env, ...gitEnv };
 
   return {
-    exec: (command, options) => {
-      return Effect.async<ExecResult, ExecError>((resume) => {
+    exec: (command, options) =>
+      Effect.async<ExecResult, ExecError>((resume) => {
         const proc = spawn("sh", ["-c", command], {
           cwd: options?.cwd ?? sandboxDir,
           stdio: [
@@ -97,9 +97,7 @@ export const makeLocalSandbox = (sandboxDir: string): SandboxService => {
             );
           });
         }
-      });
-    },
-
+      }),
     copyIn: (hostPath, sandboxPath) =>
       Effect.tryPromise({
         try: async () => {

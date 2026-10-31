@@ -138,8 +138,8 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
       interactiveExec: (
         args: string[],
         opts: InteractiveExecOptions,
-      ): Promise<{ exitCode: number }> => {
-        return new Promise((resolve, reject) => {
+      ): Promise<{ exitCode: number }> =>
+        new Promise((resolve, reject) => {
           const [cmd, ...rest] = args;
           // Agent CLIs on Windows are typically installed as `.cmd`/`.ps1`
           // npm wrappers; bare `spawn("claude", …)` only resolves `.exe`
@@ -158,9 +158,7 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
           proc.on("close", (code: number | null) => {
             resolve({ exitCode: code ?? 0 });
           });
-        });
-      },
-
+        }),
       close: async (): Promise<void> => {
         // No-op — no container to tear down
       },
