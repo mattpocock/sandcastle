@@ -43,7 +43,7 @@ export interface OutputStringDefinition {
 
 /** Union of all output definition shapes accepted by `run()`. */
 export type OutputDefinition =
-  | OutputObjectDefinition<any>
+  | OutputObjectDefinition<unknown>
   | OutputStringDefinition;
 
 // ---------------------------------------------------------------------------

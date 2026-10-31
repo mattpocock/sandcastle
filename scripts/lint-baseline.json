@@ -921,7 +921,6 @@
   },
   "src/Output.ts": {
     "effect/extendsNativeError": 1,
-    "typescript(no-explicit-any)": 1,
     "typescript(no-unnecessary-type-assertion)": 1
   },
   "src/PodmanLifecycle.test.ts": {
