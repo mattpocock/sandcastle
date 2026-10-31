@@ -14,6 +14,9 @@ import type { BindMountCreateOptions } from "./SandboxProvider.js";
 import { BoundedTail } from "./boundedTail.js";
 import { BwrapError, CopyError } from "./errors.js";
 
+/** The construction check, from its own module (it runs a process, synchronously). */
+export { assertBwrapUsable } from "./bwrapPreflight.js";
+/** Tracking and killing each exec's processes, from their own module. */
 export { INFO_FD, killSandboxProcess, parseChildPid } from "./bwrapProcess.js";
 export type { SandboxProcess } from "./bwrapProcess.js";
 

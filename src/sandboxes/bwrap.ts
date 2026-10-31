@@ -20,6 +20,7 @@ import { Config, Effect } from "effect";
 import {
   INFO_FD,
   SANDBOX_HOME,
+  assertBwrapUsable,
   collectOutput,
   copyCreatingParents,
   killSandboxProcess,
@@ -176,8 +177,15 @@ const createHandle = async (
  * home at `/home/agent`. Both private dirs are removed on close, and so is
  * every process the sandbox started. It has no root: `exec` with
  * `sudo: true` rejects. All three branch strategies are supported.
+ *
+ * Checks once per process that Bubblewrap is usable, and throws
+ * `NativeSandboxUnavailableError` (with a `fixCommand` when there is
+ * one) if it isn't: on a non-Linux OS, when `bwrap` isn't on `PATH`, or when
+ * the kernel blocks unprivileged user namespaces. It never falls back to
+ * running unsandboxed.
  */
 export const bwrap = (options?: BwrapOptions): BindMountSandboxProvider => {
+  assertBwrapUsable();
   const maxTailChars = options?.maxOutputTailChars ?? MAX_TAIL_CHARS;
   return markNativeSandboxProvider(
     createBindMountSandboxProvider({
