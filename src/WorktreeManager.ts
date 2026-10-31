@@ -1,4 +1,4 @@
-import { Effect, Option } from "effect";
+import { Console, Effect, Option } from "effect";
 import { FileSystem } from "@effect/platform";
 import { randomBytes } from "node:crypto";
 import { join, normalize } from "node:path";
@@ -205,7 +205,7 @@ const fastForwardFromOrigin = (
       Effect.orElseSucceed(() => ""),
     );
     if (headRef !== `refs/heads/${branch}`) {
-      console.log(
+      yield* Console.log(
         `Reusing worktree at ${worktreePath} (branch '${branch}') — HEAD is not on '${branch}', skipping origin refresh`,
       );
       return;
@@ -217,7 +217,7 @@ const fastForwardFromOrigin = (
       ),
     );
     if (fetchResult._tag === "Left") {
-      console.log(
+      yield* Console.log(
         `Could not fetch from origin (reusing worktree at ${worktreePath} as-is, branch '${branch}')`,
       );
       return;
@@ -233,7 +233,7 @@ const fastForwardFromOrigin = (
       ),
     );
     if (mergeResult._tag === "Left") {
-      console.log(
+      yield* Console.log(
         `Branch '${branch}' has diverged from origin (reusing worktree at ${worktreePath} as-is)`,
       );
       return;
@@ -242,15 +242,11 @@ const fastForwardFromOrigin = (
       Effect.map((s) => s.trim()),
       Effect.orElseSucceed(() => ""),
     );
-    if (before && after && before !== after) {
-      console.log(
-        `Fast-forwarded worktree at ${worktreePath} (branch '${branch}') to origin/${branch}`,
-      );
-    } else {
-      console.log(
-        `Reusing existing worktree at ${worktreePath} (branch '${branch}')`,
-      );
-    }
+    yield* Console.log(
+      before && after && before !== after
+        ? `Fast-forwarded worktree at ${worktreePath} (branch '${branch}') to origin/${branch}`
+        : `Reusing existing worktree at ${worktreePath} (branch '${branch}')`,
+    );
   });
 
 /**
@@ -312,13 +308,11 @@ export const create = (
         // Only reuse worktrees managed by sandcastle (under .sandcastle/worktrees/)
         if (isManagedWorktreePath(collision.path, worktreesDir)) {
           const dirty = yield* hasUncommittedChanges(collision.path);
-          if (dirty) {
-            console.warn(
-              `Reusing worktree at ${collision.path} (branch '${branch}') — worktree has uncommitted changes`,
-            );
-          } else {
-            yield* fastForwardFromOrigin(collision.path, branch);
-          }
+          yield* dirty
+            ? Console.warn(
+                `Reusing worktree at ${collision.path} (branch '${branch}') — worktree has uncommitted changes`,
+              )
+            : fastForwardFromOrigin(collision.path, branch);
           // git reports forward slashes even on Windows; return a
           // platform-native path so downstream join/fs calls stay consistent.
           return { path: normalize(collision.path), branch };
