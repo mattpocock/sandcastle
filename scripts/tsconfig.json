@@ -9,5 +9,10 @@
     "declarationMap": false,
     "plugins": []
   },
-  "include": ["lint-ratchet*.ts", "coverage-gate.ts", "api-report.ts"]
+  "include": [
+    "lint-ratchet*.ts",
+    "coverage-gate.ts",
+    "api-report.ts",
+    "ensure-build.ts"
+  ]
 }
