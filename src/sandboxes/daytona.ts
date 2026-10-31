@@ -123,13 +123,24 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
             onLine?: (line: string) => void;
             cwd?: string;
             sudo?: boolean;
+            stdin?: string;
           },
         ): Promise<ExecResult> => {
           // Wrap the whole command in `sh -c`, so sudo elevates all of it
           // (`a && b`, not just `a`).
-          const effectiveCommand = opts?.sudo
+          let effectiveCommand = opts?.sudo
             ? `sudo sh -c ${shellEscape(command)}`
             : command;
+          if (opts?.stdin !== undefined) {
+            // Daytona's exec APIs have no stdin channel: the command reads
+            // EOF. So write stdin to a file in the sandbox and redirect it in
+            // (a file, not an argument, keeps clear of the per-arg size
+            // limit). The redirect opens the file before the group runs, so
+            // the group can delete it straight away and leave nothing behind.
+            const stdinPath = `/tmp/sandcastle-stdin-${crypto.randomUUID()}`;
+            await sandbox.fs.uploadFile(Buffer.from(opts.stdin), stdinPath);
+            effectiveCommand = `{ rm -f ${stdinPath}; ${effectiveCommand}\n} < ${stdinPath}`;
+          }
           if (opts?.onLine) {
             const onLine = opts.onLine;
             const sessionId = `sandcastle-${crypto.randomUUID()}`;
@@ -191,9 +202,13 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
             effectiveCommand,
             opts?.cwd ?? worktreePath,
           );
+          // `executeCommand` merges stdout and stderr into `result` and has
+          // no separate stderr. On failure, surface that output as stderr
+          // too, so the error says why the command failed, not just its exit
+          // code.
           return {
             stdout: response.result,
-            stderr: "",
+            stderr: response.exitCode === 0 ? "" : response.result,
             exitCode: response.exitCode,
           };
         },

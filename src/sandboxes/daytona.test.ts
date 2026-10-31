@@ -1,13 +1,34 @@
+import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // A fake @daytona/sdk modelling the default snapshot: the work dir is the
 // `daytona` user's home, /home/daytona, whose parent (/home) it can't write.
+//
+// Commands run in a real local `sh`, with the semantics the Daytona API has
+// (observed against a live sandbox, SDK 0.227.0):
+// - `process.executeCommand` gives no stdin, and returns stdout and stderr
+//   merged into `result`, with no separate stderr;
+// - session commands give no stdin either, and stream stdout and stderr apart.
+// `fs.uploadFile(buffer, path)` writes the file where a command can read it.
 const sdk = vi.hoisted(() => ({
   createParams: [] as unknown[],
   createdFolders: [] as string[],
+  uploadedPaths: [] as string[],
 }));
 
-vi.mock("@daytona/sdk", () => {
+vi.mock("@daytona/sdk", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const { writeFileSync } = await import("node:fs");
+  // No stdin: the child reads EOF, as in a Daytona sandbox.
+  const sh = (command: string, cwd?: string) =>
+    spawnSync("sh", ["-c", command], {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf8",
+    });
+  const sessionCommands = new Map<string, ReturnType<typeof sh>>();
+
   class Daytona {
     async create(params: unknown) {
       sdk.createParams.push(params);
@@ -18,8 +39,40 @@ vi.mock("@daytona/sdk", () => {
           createFolder: async (path: string) => {
             sdk.createdFolders.push(path);
           },
+          uploadFile: async (file: Buffer | string, remotePath: string) => {
+            sdk.uploadedPaths.push(remotePath);
+            if (Buffer.isBuffer(file)) writeFileSync(remotePath, file);
+          },
         },
-        process: {},
+        process: {
+          executeCommand: async (command: string, cwd?: string) => {
+            const r = sh(`${command} 2>&1`, cwd);
+            return { exitCode: r.status, result: r.stdout };
+          },
+          createSession: async () => {},
+          deleteSession: async () => {},
+          executeSessionCommand: async (
+            _sessionId: string,
+            req: { command: string },
+          ) => {
+            const cmdId = `cmd-${sessionCommands.size}`;
+            sessionCommands.set(cmdId, sh(req.command));
+            return { cmdId };
+          },
+          getSessionCommandLogs: async (
+            _sessionId: string,
+            cmdId: string,
+            onStdout: (chunk: string) => void,
+            onStderr: (chunk: string) => void,
+          ) => {
+            const r = sessionCommands.get(cmdId)!;
+            if (r.stdout) onStdout(r.stdout);
+            if (r.stderr) onStderr(r.stderr);
+          },
+          getSessionCommand: async (_sessionId: string, cmdId: string) => ({
+            exitCode: sessionCommands.get(cmdId)!.status,
+          }),
+        },
       };
     }
     async delete() {}
@@ -32,6 +85,7 @@ import { daytona } from "./daytona.js";
 beforeEach(() => {
   sdk.createParams.length = 0;
   sdk.createdFolders.length = 0;
+  sdk.uploadedPaths.length = 0;
 });
 
 describe("daytona()", () => {
@@ -72,6 +126,59 @@ describe("daytona()", () => {
       ephemeral: true,
       labels: { a: "b" },
       envVars: { USER_VAR: "u", FOO: "from-create", BAR: "2" },
+    });
+  });
+
+  describe("exec", () => {
+    const cwd = tmpdir();
+    const prompt =
+      "Create a file named a.txt\nwith 'quotes' and $HOME, verbatim";
+
+    it("delivers stdin to the command", async () => {
+      const handle = await daytona().create({ env: {} });
+
+      const result = await handle.exec("cat", { cwd, stdin: prompt });
+
+      expect(result).toMatchObject({ exitCode: 0, stdout: prompt });
+    });
+
+    it("delivers stdin to a streamed command", async () => {
+      const handle = await daytona().create({ env: {} });
+      const lines: string[] = [];
+
+      const result = await handle.exec("cat", {
+        cwd,
+        stdin: prompt,
+        onLine: (line) => lines.push(line),
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(lines).toEqual(prompt.split("\n"));
+    });
+
+    it("removes the stdin file once the command has run", async () => {
+      const handle = await daytona().create({ env: {} });
+
+      await handle.exec("cat", { cwd, stdin: prompt });
+      await handle.exec("cat", { cwd, stdin: prompt, onLine: () => {} });
+
+      expect(sdk.uploadedPaths).toHaveLength(2);
+      for (const path of sdk.uploadedPaths)
+        expect(existsSync(path)).toBe(false);
+    });
+
+    it("surfaces a failed command's output as stderr", async () => {
+      // Daytona merges stdout and stderr, so without this a failure reads
+      // only "exit 128" with nothing to say why.
+      const handle = await daytona().create({ env: {} });
+
+      const result = await handle.exec(
+        `git clone "/nonexistent/repo.bundle" "${cwd}/sandcastle-test-clone"`,
+        { cwd },
+      );
+
+      expect(result.exitCode).toBe(128);
+      expect(result.stderr).toContain("/nonexistent/repo.bundle");
     });
   });
 });
