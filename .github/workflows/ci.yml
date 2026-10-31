@@ -44,6 +44,8 @@ jobs:
       # Tests import from dist, so build before test. Lint too: the scripts
       # in .sandcastle/ and .factory/ import @ai-hero/sandcastle, whose types
       # come from dist, so without it type-aware rules see them as any.
+      # (Locally, `pretest`/`prelint` build via scripts/ensure-build.ts when
+      # dist/ is missing or stale; after this step it is fresh, so they skip.)
       - run: npm run build
       # api-report/ must match the built .d.ts: a public API change shows up
       # in the PR as a report diff, which CODEOWNERS routes to Matt.
