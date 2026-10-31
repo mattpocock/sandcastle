@@ -256,7 +256,7 @@ export interface SandboxExecOptions {
   readonly onLine?: (line: string) => void;
   /** Working directory for the command. Defaults to the sandbox repo path. */
   readonly cwd?: string;
-  /** Run the command with sudo, when the provider supports it. */
+  /** Run the whole command as root, when the provider supports it. */
   readonly sudo?: boolean;
   /** Stdin payload — piped to the child process and then closed. Avoids the Linux 128 KB per-arg limit. */
   readonly stdin?: string;

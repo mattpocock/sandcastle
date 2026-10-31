@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { execFile } from "node:child_process";
 import { resolve } from "node:path";
-import { PodmanError } from "./errors.js";
+import { PodmanError, ImageNotFoundError } from "./errors.js";
 
 const podmanExec = (args: string[]): Effect.Effect<string, PodmanError> =>
   Effect.async((resume) => {
@@ -57,7 +57,18 @@ export const buildImage = (
  */
 export const removeImage = (
   imageName: string,
-): Effect.Effect<void, PodmanError> =>
-  Effect.gen(function* () {
-    yield* podmanExec(["rmi", imageName]);
-  });
+): Effect.Effect<void, PodmanError | ImageNotFoundError> =>
+  podmanExec(["rmi", imageName]).pipe(
+    Effect.asVoid,
+    Effect.catchTag(
+      "PodmanError",
+      (error): Effect.Effect<never, PodmanError | ImageNotFoundError> =>
+        error.message.includes("image not known")
+          ? Effect.fail(
+              new ImageNotFoundError({
+                message: `Podman image '${imageName}' does not exist, so there is nothing to remove.`,
+              }),
+            )
+          : Effect.fail(error),
+    ),
+  );

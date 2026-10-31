@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { execFile } from "node:child_process";
 import { resolve } from "node:path";
-import { DockerError } from "./errors.js";
+import { DockerError, ImageNotFoundError } from "./errors.js";
 import { formatVolumeMount, type SelinuxLabel } from "./mountUtils.js";
 
 const dockerExec = (args: string[]): Effect.Effect<string, DockerError> =>
@@ -188,7 +188,18 @@ export const removeContainer = (
  */
 export const removeImage = (
   imageName: string,
-): Effect.Effect<void, DockerError> =>
-  Effect.gen(function* () {
-    yield* dockerExec(["rmi", imageName]);
-  });
+): Effect.Effect<void, DockerError | ImageNotFoundError> =>
+  dockerExec(["rmi", imageName]).pipe(
+    Effect.asVoid,
+    Effect.catchTag(
+      "DockerError",
+      (error): Effect.Effect<never, DockerError | ImageNotFoundError> =>
+        error.message.includes("No such image")
+          ? Effect.fail(
+              new ImageNotFoundError({
+                message: `Docker image '${imageName}' does not exist, so there is nothing to remove.`,
+              }),
+            )
+          : Effect.fail(error),
+    ),
+  );
