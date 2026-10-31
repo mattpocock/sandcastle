@@ -248,6 +248,14 @@ export const terminalStyle = {
   toolCall: (text: string): string => styleText("dim", text),
 };
 
+/** Prints a text chunk via clack, dropping leading/trailing blank lines. */
+const printClackText = (text: string) => {
+  const trimmed = text.replace(/^\n+|\n+$/g, "");
+  if (trimmed.trim().length > 0) {
+    clack.log.message(trimmed);
+  }
+};
+
 export const ClackDisplay = {
   layer: Layer.scoped(
     Display,
@@ -260,17 +268,10 @@ export const ClackDisplay = {
       // when the layer is released. Mirrors FileDisplay's `midLine`.
       let pendingText = "";
 
-      const printText = (text: string) => {
-        const trimmed = text.replaceAll(/^\n+|\n+$/g, "");
-        if (trimmed.trim().length > 0) {
-          clack.log.message(trimmed);
-        }
-      };
-
       const flushText = () => {
         const text = pendingText;
         pendingText = "";
-        printText(text);
+        printClackText(text);
       };
 
       const writeText = (chunk: string) => {
@@ -281,7 +282,7 @@ export const ClackDisplay = {
         }
         const complete = pendingText.slice(0, lastNewline);
         pendingText = pendingText.slice(lastNewline + 1);
-        printText(complete);
+        printClackText(complete);
       };
 
       const sync = (f: () => void) =>

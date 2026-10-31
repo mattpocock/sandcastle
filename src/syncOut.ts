@@ -132,6 +132,8 @@ const isEmptyPatch = (patchPath: string): Effect.Effect<boolean, SyncError> =>
       }),
   });
 
+const pad = (n: number) => String(n).padStart(2, "0");
+
 /**
  * Generate a YYYYMMDD-HHMMSS timestamp directory name.
  * Appends a counter suffix (-1, -2, ...) if the directory already exists.
@@ -142,7 +144,6 @@ const createPatchDir = (
   Effect.tryPromise({
     try: async () => {
       const now = new Date();
-      const pad = (n: number) => String(n).padStart(2, "0");
       const base = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
 
       const patchesRoot = join(hostRepoDir, ".sandcastle", "patches");
