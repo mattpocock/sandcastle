@@ -3,7 +3,7 @@ import { Effect } from "effect";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import {
   scaffold,
   getNextStepsLines,
@@ -2606,10 +2606,12 @@ describe("init scaffold consistency (every agent x template x sandbox x tracker)
         imageName,
       });
       const configDir = join(dir, ".sandcastle");
+      const { image } = sandboxProvider;
+      assert.isDefined(image);
 
       // Containerfile: every placeholder resolved, the real mount path shown.
       const containerfile = await readFile(
-        join(configDir, sandboxProvider.containerfileName),
+        join(configDir, image.containerfileName),
         "utf8",
       );
       expect(containerfile).not.toContain("${SANDBOX_REPO_DIR}");
@@ -2650,7 +2652,7 @@ describe("init scaffold consistency (every agent x template x sandbox x tracker)
           "utf8",
         );
         expect(setupDoc).toContain(
-          `sandcastle ${sandboxProvider.cliNamespace} build-image --image-name ${imageName}`,
+          `sandcastle ${image.cliNamespace} build-image --image-name ${imageName}`,
         );
       }
     },

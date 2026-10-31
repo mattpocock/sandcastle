@@ -11,15 +11,15 @@ describe("Sandbox provider registry", () => {
   it("getSandboxProvider returns docker entry", () => {
     const provider = getSandboxProvider("docker");
     assert.isDefined(provider);
-    expect(provider.containerfileName).toBe("Dockerfile");
-    expect(provider.cliNamespace).toBe("docker");
+    expect(provider.image?.containerfileName).toBe("Dockerfile");
+    expect(provider.image?.cliNamespace).toBe("docker");
   });
 
   it("getSandboxProvider returns podman entry", () => {
     const provider = getSandboxProvider("podman");
     assert.isDefined(provider);
-    expect(provider.containerfileName).toBe("Containerfile");
-    expect(provider.cliNamespace).toBe("podman");
+    expect(provider.image?.containerfileName).toBe("Containerfile");
+    expect(provider.image?.cliNamespace).toBe("podman");
   });
 
   it("getSandboxProvider returns undefined for unknown provider", () => {
