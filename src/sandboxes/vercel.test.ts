@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import type { Writable } from "node:stream";
 import {
   afterEach,
   assert,
@@ -9,14 +12,72 @@ import {
 } from "vitest";
 import { vercel } from "./vercel.js";
 
+// A fake @vercel/sandbox. Commands run in a real local `sh` with no stdin,
+// as `runCommand` gives none: the command reads EOF. Streamed output is
+// written to the given streams, which are not ended (as observed with SDK
+// 3.9.1). `writeFiles` writes the file where a command can read it.
+const sdk = vi.hoisted(() => ({ writtenPaths: [] as string[] }));
+
+interface FakeSandbox {
+  mkDir: () => Promise<void>;
+  writeFiles: (files: { path: string; content: Uint8Array }[]) => Promise<void>;
+  runCommand: (params: {
+    cmd: string;
+    args: string[];
+    cwd?: string;
+    stdout?: Writable;
+    stderr?: Writable;
+  }) => Promise<{
+    exitCode: number | null;
+    stdout: () => Promise<string>;
+    stderr: () => Promise<string>;
+  }>;
+}
+
 const sandboxCreate = vi.hoisted(() =>
-  vi
-    .fn<
-      (
-        params: Record<string, unknown>,
-      ) => Promise<{ mkDir: () => Promise<void> }>
-    >()
-    .mockResolvedValue({ mkDir: async () => {} }),
+  vi.fn<(params: Record<string, unknown>) => Promise<FakeSandbox>>(async () => {
+    const { spawnSync } = await import("node:child_process");
+    const { writeFileSync } = await import("node:fs");
+    return {
+      mkDir: async () => {},
+      writeFiles: async (files: { path: string; content: Uint8Array }[]) => {
+        for (const file of files) {
+          sdk.writtenPaths.push(file.path);
+          writeFileSync(file.path, file.content);
+        }
+      },
+      runCommand: async (params: {
+        cmd: string;
+        args: string[];
+        cwd?: string;
+        stdout?: Writable;
+        stderr?: Writable;
+      }) => {
+        const r = spawnSync(params.cmd, params.args, {
+          cwd: params.cwd,
+          stdio: ["ignore", "pipe", "pipe"],
+          encoding: "utf8",
+        });
+        const write = async (stream: Writable | undefined, text: string) =>
+          new Promise<void>((resolve) => {
+            if (stream === undefined || text === "") {
+              resolve();
+              return;
+            }
+            stream.write(text, () => {
+              resolve();
+            });
+          });
+        await write(params.stdout, r.stdout);
+        await write(params.stderr, r.stderr);
+        return {
+          exitCode: r.status,
+          stdout: async () => r.stdout,
+          stderr: async () => r.stderr,
+        };
+      },
+    };
+  }),
 );
 
 vi.mock("@vercel/sandbox", () => ({
@@ -165,5 +226,75 @@ describe("vercel() auth from the environment", () => {
     expect(params).not.toHaveProperty("token");
     expect(params).not.toHaveProperty("teamId");
     expect(params).not.toHaveProperty("projectId");
+  });
+});
+
+describe("vercel() exec", () => {
+  const cwd = tmpdir();
+  const prompt = "Create a file named a.txt\nwith 'quotes' and $HOME, verbatim";
+
+  beforeEach(() => {
+    sdk.writtenPaths.length = 0;
+    vi.stubEnv("VERCEL_TOKEN", undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("delivers stdin to the command", async () => {
+    const handle = await vercel().create({ env: {} });
+
+    const result = await handle.exec("cat", { cwd, stdin: prompt });
+
+    expect(result).toMatchObject({ exitCode: 0, stdout: prompt });
+  });
+
+  it("delivers stdin to a streamed command", async () => {
+    const handle = await vercel().create({ env: {} });
+    const lines: string[] = [];
+
+    const result = await handle.exec("cat", {
+      cwd,
+      stdin: `${prompt}\n`,
+      onLine: (line) => {
+        lines.push(line);
+      },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(lines).toStrictEqual(prompt.split("\n"));
+  });
+
+  it("delivers stdin to every command of a compound command", async () => {
+    const handle = await vercel().create({ env: {} });
+
+    const result = await handle.exec("echo first && cat", {
+      cwd,
+      stdin: prompt,
+    });
+
+    expect(result.stdout).toBe(`first\n${prompt}`);
+  });
+
+  it("removes the stdin file once the command has run", async () => {
+    const handle = await vercel().create({ env: {} });
+
+    await handle.exec("cat", { cwd, stdin: prompt });
+    await handle.exec("cat", { cwd, stdin: prompt, onLine: () => {} });
+
+    expect(sdk.writtenPaths).toHaveLength(2);
+    for (const path of sdk.writtenPaths) {
+      expect(existsSync(path)).toBe(false);
+    }
+  });
+
+  it("writes no stdin file when there is no stdin", async () => {
+    const handle = await vercel().create({ env: {} });
+
+    const result = await handle.exec("echo ok", { cwd });
+
+    expect(result.stdout).toBe("ok\n");
+    expect(sdk.writtenPaths).toHaveLength(0);
   });
 });
