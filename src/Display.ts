@@ -67,7 +67,7 @@ export interface DisplayService {
   ) => Effect.Effect<void>;
 }
 
-export class Display extends Context.Tag("Display")<
+export class Display extends Context.Tag("@ai-hero/sandcastle/Display")<
   Display,
   DisplayService
 >() {}

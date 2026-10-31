@@ -151,7 +151,9 @@ export interface WithSandboxResult<A> {
   readonly preservedWorktreePath?: string;
 }
 
-export class SandboxFactory extends Context.Tag("SandboxFactory")<
+export class SandboxFactory extends Context.Tag(
+  "@ai-hero/sandcastle/SandboxFactory",
+)<
   SandboxFactory,
   {
     readonly withSandbox: <A, E, R>(
@@ -184,7 +186,9 @@ export const reuseSandboxFactoryLayer = (
       ),
   });
 
-export class SandboxConfig extends Context.Tag("SandboxConfig")<
+export class SandboxConfig extends Context.Tag(
+  "@ai-hero/sandcastle/SandboxFactory/SandboxConfig",
+)<
   SandboxConfig,
   {
     readonly env: Record<string, string>;
