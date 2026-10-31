@@ -8,14 +8,14 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 
 const execAsync = promisify(exec);
 
 const mockPatchGitMountsForWindows = vi.fn(
   (
-    gitMounts: Array<{ hostPath: string; sandboxPath: string }>,
+    gitMounts: { hostPath: string; sandboxPath: string }[],
     _worktreePath: string,
     _sandboxRepoDir: string,
   ) => gitMounts,
@@ -26,7 +26,7 @@ vi.mock("./mountUtils.js", async (importOriginal) => {
   return {
     ...actual,
     patchGitMountsForWindows: (
-      gitMounts: Array<{ hostPath: string; sandboxPath: string }>,
+      gitMounts: { hostPath: string; sandboxPath: string }[],
       worktreePath: string,
       sandboxRepoDir: string,
     ) =>
@@ -104,7 +104,8 @@ describe("interactive() Windows mount patching", () => {
     });
 
     expect(mockPatchGitMountsForWindows).toHaveBeenCalledTimes(1);
-    const call = mockPatchGitMountsForWindows.mock.calls[0]!;
+    const [call] = mockPatchGitMountsForWindows.mock.calls;
+    assert.isDefined(call);
     const gitMounts = call[0];
     const worktreePath = call[1];
     const sandboxRepoDir = call[2];
@@ -129,7 +130,8 @@ describe("interactive() Windows mount patching", () => {
     });
 
     expect(mockPatchGitMountsForWindows).toHaveBeenCalledTimes(1);
-    const call = mockPatchGitMountsForWindows.mock.calls[0]!;
+    const [call] = mockPatchGitMountsForWindows.mock.calls;
+    assert.isDefined(call);
     const worktreePath = call[1];
     const sandboxRepoDir = call[2];
     expect(worktreePath).toBe(hostDir);

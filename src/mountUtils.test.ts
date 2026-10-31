@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import { rm } from "node:fs/promises";
 import { dirname } from "node:path";
 import { Effect } from "effect";
@@ -48,7 +48,9 @@ describe("defaultImageName", () => {
   });
 
   it("handles Windows paths with backslashes", () => {
-    expect(defaultImageName("C:\\Users\\project")).toBe("sandcastle:project");
+    expect(defaultImageName(String.raw`C:\Users\project`)).toBe(
+      "sandcastle:project",
+    );
   });
 
   it("handles Windows paths with trailing backslash", () => {
@@ -56,7 +58,9 @@ describe("defaultImageName", () => {
   });
 
   it("handles mixed separators", () => {
-    expect(defaultImageName("C:\\Users/project")).toBe("sandcastle:project");
+    expect(defaultImageName(String.raw`C:\Users/project`)).toBe(
+      "sandcastle:project",
+    );
   });
 });
 
@@ -69,8 +73,8 @@ describe("expandTilde", () => {
     expect(expandTilde("~/data")).toBe("/home/testuser/data");
   });
 
-  it("expands ~\\ prefix (Windows tilde path)", () => {
-    expect(expandTilde("~\\data")).toBe("/home/testuser/data");
+  it(String.raw`expands ~\ prefix (Windows tilde path)`, () => {
+    expect(expandTilde(String.raw`~\data`)).toBe("/home/testuser/data");
   });
 
   it("leaves absolute POSIX paths unchanged", () => {
@@ -129,7 +133,7 @@ describe("resolveUserMounts", () => {
     const result = resolveUserMounts([
       { hostPath: "/existing/path", sandboxPath: "/mnt/data" },
     ]);
-    expect(result).toEqual([
+    expect(result).toStrictEqual([
       { hostPath: "/existing/path", sandboxPath: "/mnt/data" },
     ]);
   });
@@ -146,7 +150,7 @@ describe("resolveUserMounts", () => {
     const result = resolveUserMounts([
       { hostPath: "/existing/path", sandboxPath: "/mnt/data", readonly: true },
     ]);
-    expect(result[0]!.readonly).toBe(true);
+    expect(result[0]?.readonly).toBe(true);
   });
 
   it("expands ~ in sandboxPath when sandboxHomedir is provided", () => {
@@ -154,7 +158,7 @@ describe("resolveUserMounts", () => {
       [{ hostPath: "/existing/path", sandboxPath: "~/.npm" }],
       "/home/agent",
     );
-    expect(result[0]!.sandboxPath).toBe("/home/agent/.npm");
+    expect(result[0]?.sandboxPath).toBe("/home/agent/.npm");
   });
 
   it("expands ~ alone in sandboxPath when sandboxHomedir is provided", () => {
@@ -162,7 +166,7 @@ describe("resolveUserMounts", () => {
       [{ hostPath: "/existing/path", sandboxPath: "~" }],
       "/home/agent",
     );
-    expect(result[0]!.sandboxPath).toBe("/home/agent");
+    expect(result[0]?.sandboxPath).toBe("/home/agent");
   });
 
   it("throws when ~ used in sandboxPath but sandboxHomedir is undefined", () => {
@@ -178,7 +182,7 @@ describe("resolveUserMounts", () => {
       [{ hostPath: "~/data", sandboxPath: "/mnt/data" }],
       undefined,
     );
-    expect(result[0]!.hostPath).toBe("/home/testuser/data");
+    expect(result[0]?.hostPath).toBe("/home/testuser/data");
   });
 });
 
@@ -192,7 +196,7 @@ describe("normalizeMounts", () => {
         SANDBOX_REPO_DIR,
         "linux",
       );
-      expect(result).toEqual(mounts);
+      expect(result).toStrictEqual(mounts);
     });
 
     it("preserves sandboxPath === hostPath for git mounts on POSIX", () => {
@@ -208,7 +212,7 @@ describe("normalizeMounts", () => {
         SANDBOX_REPO_DIR,
         "darwin",
       );
-      expect(result[0]!.sandboxPath).toBe("/home/user/project/.git");
+      expect(result[0]?.sandboxPath).toBe("/home/user/project/.git");
     });
   });
 
@@ -216,116 +220,122 @@ describe("normalizeMounts", () => {
     it("normalizes backslashes to forward slashes in hostPath", () => {
       const mounts = [
         {
-          hostPath: "C:\\Users\\project\\.git",
-          sandboxPath: "C:\\Users\\project\\.git",
+          hostPath: String.raw`C:\Users\project\.git`,
+          sandboxPath: String.raw`C:\Users\project\.git`,
         },
       ];
       const result = normalizeMounts(
         mounts,
-        "C:\\Users\\project",
+        String.raw`C:\Users\project`,
         SANDBOX_REPO_DIR,
         "win32",
       );
-      expect(result[0]!.hostPath).toBe("C:/Users/project/.git");
+      expect(result[0]?.hostPath).toBe("C:/Users/project/.git");
     });
 
     it("remaps sandboxPath to POSIX path relative to sandboxRepoDir when under worktree path", () => {
       const mounts = [
         {
-          hostPath: "C:\\Users\\project\\.git",
-          sandboxPath: "C:\\Users\\project\\.git",
+          hostPath: String.raw`C:\Users\project\.git`,
+          sandboxPath: String.raw`C:\Users\project\.git`,
         },
       ];
       const result = normalizeMounts(
         mounts,
-        "C:\\Users\\project",
+        String.raw`C:\Users\project`,
         SANDBOX_REPO_DIR,
         "win32",
       );
-      expect(result[0]!.sandboxPath).toBe(`${SANDBOX_REPO_DIR}/.git`);
+      expect(result[0]?.sandboxPath).toBe(`${SANDBOX_REPO_DIR}/.git`);
     });
 
     it("normalizes the worktree mount itself", () => {
       const mounts = [
-        { hostPath: "C:\\Users\\project", sandboxPath: SANDBOX_REPO_DIR },
         {
-          hostPath: "C:\\Users\\project\\.git",
-          sandboxPath: "C:\\Users\\project\\.git",
+          hostPath: String.raw`C:\Users\project`,
+          sandboxPath: SANDBOX_REPO_DIR,
+        },
+        {
+          hostPath: String.raw`C:\Users\project\.git`,
+          sandboxPath: String.raw`C:\Users\project\.git`,
         },
       ];
       const result = normalizeMounts(
         mounts,
-        "C:\\Users\\project",
+        String.raw`C:\Users\project`,
         SANDBOX_REPO_DIR,
         "win32",
       );
-      expect(result[0]!.hostPath).toBe("C:/Users/project");
-      expect(result[0]!.sandboxPath).toBe(SANDBOX_REPO_DIR);
-      expect(result[1]!.hostPath).toBe("C:/Users/project/.git");
-      expect(result[1]!.sandboxPath).toBe(`${SANDBOX_REPO_DIR}/.git`);
+      expect(result[0]?.hostPath).toBe("C:/Users/project");
+      expect(result[0]?.sandboxPath).toBe(SANDBOX_REPO_DIR);
+      expect(result[1]?.hostPath).toBe("C:/Users/project/.git");
+      expect(result[1]?.sandboxPath).toBe(`${SANDBOX_REPO_DIR}/.git`);
     });
 
     it("handles worktree git mounts from parent repo", () => {
       // In worktree mode, the parent .git directory is also mounted
-      const parentGitDir = "C:\\Users\\repo\\.git";
+      const parentGitDir = String.raw`C:\Users\repo\.git`;
       const mounts = [
         {
-          hostPath: "C:\\Users\\worktrees\\my-wt",
+          hostPath: String.raw`C:\Users\worktrees\my-wt`,
           sandboxPath: SANDBOX_REPO_DIR,
         },
         {
-          hostPath: "C:\\Users\\worktrees\\my-wt\\.git",
-          sandboxPath: "C:\\Users\\worktrees\\my-wt\\.git",
+          hostPath: String.raw`C:\Users\worktrees\my-wt\.git`,
+          sandboxPath: String.raw`C:\Users\worktrees\my-wt\.git`,
         },
         { hostPath: parentGitDir, sandboxPath: parentGitDir },
       ];
       const result = normalizeMounts(
         mounts,
-        "C:\\Users\\worktrees\\my-wt",
+        String.raw`C:\Users\worktrees\my-wt`,
         SANDBOX_REPO_DIR,
         "win32",
       );
       // worktree mount: hostPath normalized, sandboxPath already POSIX
-      expect(result[0]!.hostPath).toBe("C:/Users/worktrees/my-wt");
-      expect(result[0]!.sandboxPath).toBe(SANDBOX_REPO_DIR);
+      expect(result[0]?.hostPath).toBe("C:/Users/worktrees/my-wt");
+      expect(result[0]?.sandboxPath).toBe(SANDBOX_REPO_DIR);
       // .git file mount: under worktree, so sandboxPath remapped
-      expect(result[1]!.hostPath).toBe("C:/Users/worktrees/my-wt/.git");
-      expect(result[1]!.sandboxPath).toBe(`${SANDBOX_REPO_DIR}/.git`);
+      expect(result[1]?.hostPath).toBe("C:/Users/worktrees/my-wt/.git");
+      expect(result[1]?.sandboxPath).toBe(`${SANDBOX_REPO_DIR}/.git`);
       // parent .git dir: NOT under worktree, sandboxPath gets backslashes normalized
-      expect(result[2]!.hostPath).toBe("C:/Users/repo/.git");
-      expect(result[2]!.sandboxPath).toBe("C:/Users/repo/.git");
+      expect(result[2]?.hostPath).toBe("C:/Users/repo/.git");
+      expect(result[2]?.sandboxPath).toBe("C:/Users/repo/.git");
     });
 
     it("preserves readonly flag through normalization", () => {
       const mounts = [
         {
-          hostPath: "C:\\Users\\data",
+          hostPath: String.raw`C:\Users\data`,
           sandboxPath: "/mnt/data",
           readonly: true as const,
         },
       ];
       const result = normalizeMounts(
         mounts,
-        "C:\\Users\\project",
+        String.raw`C:\Users\project`,
         SANDBOX_REPO_DIR,
         "win32",
       );
-      expect(result[0]!.readonly).toBe(true);
+      expect(result[0]?.readonly).toBe(true);
     });
 
     it("normalizes backslashes in user mount hostPaths", () => {
       const mounts = [
-        { hostPath: "C:\\Users\\project\\cache", sandboxPath: "/mnt/cache" },
+        {
+          hostPath: String.raw`C:\Users\project\cache`,
+          sandboxPath: "/mnt/cache",
+        },
       ];
       const result = normalizeMounts(
         mounts,
-        "C:\\Users\\project",
+        String.raw`C:\Users\project`,
         SANDBOX_REPO_DIR,
         "win32",
       );
-      expect(result[0]!.hostPath).toBe("C:/Users/project/cache");
+      expect(result[0]?.hostPath).toBe("C:/Users/project/cache");
       // sandboxPath is already a valid POSIX path, unchanged
-      expect(result[0]!.sandboxPath).toBe("/mnt/cache");
+      expect(result[0]?.sandboxPath).toBe("/mnt/cache");
     });
   });
 });
@@ -340,7 +350,9 @@ describe("parseGitdirPath", () => {
   });
 
   it("parses Windows gitdir path with backslashes", () => {
-    const result = parseGitdirPath("C:\\Users\\project\\.git\\worktrees\\abc");
+    const result = parseGitdirPath(
+      String.raw`C:\Users\project\.git\worktrees\abc`,
+    );
     expect(result.parentGitDir).toBe("C:/Users/project/.git");
     expect(result.worktreeName).toBe("abc");
   });
@@ -387,7 +399,7 @@ describe("patchGitMountsForWindows", () => {
           "linux",
         ),
       );
-      expect(result).toEqual(mounts);
+      expect(result).toStrictEqual(mounts);
     });
   });
 
@@ -400,14 +412,17 @@ describe("patchGitMountsForWindows", () => {
     ) => {
       const result = await Effect.runPromise(effect);
       for (const m of result) {
-        if (m.hostPath.endsWith("git-override"))
+        if (m.hostPath.endsWith("git-override")) {
           tempDirs.push(dirname(m.hostPath));
+        }
       }
       return result;
     };
     afterEach(async () => {
       await Promise.all(
-        tempDirs.splice(0).map((d) => rm(d, { recursive: true, force: true })),
+        tempDirs
+          .splice(0)
+          .map(async (d) => rm(d, { recursive: true, force: true })),
       );
     });
 
@@ -428,7 +443,7 @@ describe("patchGitMountsForWindows", () => {
           "win32",
         ),
       );
-      expect(result).toEqual(mounts);
+      expect(result).toStrictEqual(mounts);
     });
 
     it("remaps parent .git dir and adds overlay mount for Sandcastle-created worktree", async () => {
@@ -454,14 +469,14 @@ describe("patchGitMountsForWindows", () => {
 
       expect(result).toHaveLength(2);
       // Parent .git dir remapped to deterministic sandbox path
-      expect(result[0]).toEqual({
+      expect(result[0]).toStrictEqual({
         hostPath: "C:/Users/project/.git",
         sandboxPath: PARENT_GIT_SANDBOX_DIR,
       });
       // Overlay mount for corrected .git file
-      expect(result[1]!.sandboxPath).toBe(`${SANDBOX_REPO_DIR}/.git`);
+      expect(result[1]?.sandboxPath).toBe(`${SANDBOX_REPO_DIR}/.git`);
       // The hostPath is a temp file — just verify it exists
-      expect(result[1]!.hostPath).toBeTruthy();
+      expect(result[1]?.hostPath).toBeTruthy();
     });
 
     it("replaces .git file mount when host repo is a worktree", async () => {
@@ -492,9 +507,9 @@ describe("patchGitMountsForWindows", () => {
 
       expect(result).toHaveLength(2);
       // .git file mount replaced with corrected version
-      expect(result[0]!.sandboxPath).toBe(`${SANDBOX_REPO_DIR}/.git`);
+      expect(result[0]?.sandboxPath).toBe(`${SANDBOX_REPO_DIR}/.git`);
       // Parent .git dir remapped
-      expect(result[1]).toEqual({
+      expect(result[1]).toStrictEqual({
         hostPath: "C:/Users/parent-repo/.git",
         sandboxPath: PARENT_GIT_SANDBOX_DIR,
       });
@@ -523,11 +538,11 @@ describe("patchGitMountsForWindows", () => {
       const overlayMount = result.find(
         (m) => m.sandboxPath === `${SANDBOX_REPO_DIR}/.git`,
       );
-      expect(overlayMount).toBeDefined();
+      assert.isDefined(overlayMount);
 
       // Read the temp file to verify its content
       const { readFile } = await import("node:fs/promises");
-      const writtenContent = await readFile(overlayMount!.hostPath, "utf-8");
+      const writtenContent = await readFile(overlayMount.hostPath, "utf8");
       expect(writtenContent).toBe(
         `gitdir: ${PARENT_GIT_SANDBOX_DIR}/worktrees/feat-x\n`,
       );
@@ -550,7 +565,7 @@ describe("patchGitMountsForWindows", () => {
           "win32",
         ),
       );
-      expect(result).toEqual(mounts);
+      expect(result).toStrictEqual(mounts);
     });
 
     it("handles Windows backslash gitdir paths", async () => {
@@ -574,14 +589,16 @@ describe("patchGitMountsForWindows", () => {
       );
 
       expect(result).toHaveLength(2);
-      expect(result[0]).toEqual({
+      expect(result[0]).toStrictEqual({
         hostPath: "C:/Users/project/.git",
         sandboxPath: PARENT_GIT_SANDBOX_DIR,
       });
 
       // Verify temp file content
       const { readFile } = await import("node:fs/promises");
-      const content = await readFile(result[1]!.hostPath, "utf-8");
+      const [, overlayMount] = result;
+      assert.isDefined(overlayMount);
+      const content = await readFile(overlayMount.hostPath, "utf8");
       expect(content).toBe(
         `gitdir: ${PARENT_GIT_SANDBOX_DIR}/worktrees/backslash-wt\n`,
       );
@@ -667,7 +684,7 @@ describe("processFileMountParents", () => {
       },
     ];
     const result = processFileMountParents(mounts, sandboxHomedir, fileStatFn);
-    expect(result).toEqual(["/home/agent/.codex"]);
+    expect(result).toStrictEqual(["/home/agent/.codex"]);
   });
 
   it("throws for a file mount whose parent is outside /home/agent", () => {
@@ -702,7 +719,7 @@ describe("processFileMountParents", () => {
       },
     ];
     const result = processFileMountParents(mounts, sandboxHomedir, dirStatFn);
-    expect(result).toEqual([]);
+    expect(result).toStrictEqual([]);
   });
 
   it("skips mounts whose parent IS /home/agent itself", () => {
@@ -713,7 +730,7 @@ describe("processFileMountParents", () => {
       },
     ];
     const result = processFileMountParents(mounts, sandboxHomedir, fileStatFn);
-    expect(result).toEqual([]);
+    expect(result).toStrictEqual([]);
   });
 
   it("deduplicates parent dirs across multiple file mounts", () => {
@@ -728,7 +745,7 @@ describe("processFileMountParents", () => {
       },
     ];
     const result = processFileMountParents(mounts, sandboxHomedir, fileStatFn);
-    expect(result).toEqual(["/home/agent/.codex"]);
+    expect(result).toStrictEqual(["/home/agent/.codex"]);
   });
 
   it("returns multiple distinct parent dirs", () => {
@@ -743,7 +760,7 @@ describe("processFileMountParents", () => {
       },
     ];
     const result = processFileMountParents(mounts, sandboxHomedir, fileStatFn);
-    expect(result).toEqual(["/home/agent/.codex", "/home/agent/.claude"]);
+    expect(result).toStrictEqual(["/home/agent/.codex", "/home/agent/.claude"]);
   });
 
   it("skips mounts that cannot be stat'd", () => {
@@ -757,7 +774,7 @@ describe("processFileMountParents", () => {
       },
     ];
     const result = processFileMountParents(mounts, sandboxHomedir, throwStatFn);
-    expect(result).toEqual([]);
+    expect(result).toStrictEqual([]);
   });
 
   it("handles deeply nested file mounts under /home/agent", () => {
@@ -768,6 +785,6 @@ describe("processFileMountParents", () => {
       },
     ];
     const result = processFileMountParents(mounts, sandboxHomedir, fileStatFn);
-    expect(result).toEqual(["/home/agent/.config/deep/nested"]);
+    expect(result).toStrictEqual(["/home/agent/.config/deep/nested"]);
   });
 });

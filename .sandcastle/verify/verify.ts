@@ -42,9 +42,8 @@ import {
   saveWorld,
   worldContainer,
   worldTmp,
-  type Engine,
-  type World,
 } from "./world.ts";
+import type { Engine, World } from "./world.ts";
 
 loadKeys();
 const TSX = join(REPO_ROOT, "node_modules", ".bin", "tsx");
@@ -81,10 +80,10 @@ const doctor = (world?: World): number => {
     const cmdOk = !need.command || works(need.command);
     const why = [
       ...(cmdOk ? [] : [`\`${need.command!.join(" ")}\` fails`]),
-      ...(missing.length ? [`missing ${missing.join(", ")}`] : []),
+      ...(missing.length > 0 ? [`missing ${missing.join(", ")}`] : []),
     ];
     console.log(
-      `  ${s.padEnd(8)} ${why.length ? `UNVERIFIABLE (${why.join("; ")})` : "ready"}`,
+      `  ${s.padEnd(8)} ${why.length > 0 ? `UNVERIFIABLE (${why.join("; ")})` : "ready"}`,
     );
   }
   console.log(
@@ -93,7 +92,7 @@ const doctor = (world?: World): number => {
   for (const a of AGENTS) {
     const missing = missingKeys(AGENT_KEYS[a]);
     console.log(
-      `  ${a.padEnd(10)} ${cheapAgentCall(a).padEnd(56)} ${missing.length ? `UNVERIFIABLE (missing ${missing.join(", ")})` : "ready"}`,
+      `  ${a.padEnd(10)} ${cheapAgentCall(a).padEnd(56)} ${missing.length > 0 ? `UNVERIFIABLE (missing ${missing.join(", ")})` : "ready"}`,
     );
   }
   console.log(
@@ -169,8 +168,9 @@ const main = async (): Promise<number> => {
       console.log(world.runId);
       return 0;
     }
-    case "doctor":
+    case "doctor": {
       return doctor(rest[0] ? loadWorld(rest[0]) : undefined);
+    }
     case "sandcastle":
     case "tsx":
     case "sh": {
@@ -197,7 +197,7 @@ const main = async (): Promise<number> => {
         );
       return verb === "tsx"
         ? runInWorld(world, "tsx", TSX, args)
-        : runInWorld(world, "sh", args[0]!, args.slice(1));
+        : runInWorld(world, "sh", args[0], args.slice(1));
     }
     case "ledger": {
       const { text, leaks, file } = runLedger(loadWorld(rest[0]));
@@ -211,14 +211,16 @@ const main = async (): Promise<number> => {
       for (const w of worlds) cleanup(w);
       return 0;
     }
-    case "dir":
+    case "dir": {
       console.log(loadWorld(rest[0]).dir);
       return 0;
-    default:
+    }
+    default: {
       console.error(
         "verbs: world | doctor [run] | sandcastle <run> … | tsx <run> <file> … | sh <run> <cmd> … | ledger <run> | cleanup <run>|--all | dir <run>",
       );
       return 2;
+    }
   }
 };
 

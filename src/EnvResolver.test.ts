@@ -3,12 +3,12 @@ import { Effect } from "effect";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { resolveEnv } from "./EnvResolver.js";
 
-const makeDir = () => mkdtemp(join(tmpdir(), "env-resolver-"));
+const makeDir = async () => mkdtemp(join(tmpdir(), "env-resolver-"));
 
-const runResolveEnv = (dir: string) =>
+const runResolveEnv = async (dir: string) =>
   Effect.runPromise(resolveEnv(dir).pipe(Effect.provide(NodeContext.layer)));
 
 describe("resolveEnv", () => {
@@ -21,7 +21,7 @@ describe("resolveEnv", () => {
     );
 
     const env = await runResolveEnv(dir);
-    expect(env).toEqual({
+    expect(env).toStrictEqual({
       ANTHROPIC_API_KEY: "sc-key",
       GH_TOKEN: "sc-gh",
     });
@@ -37,7 +37,7 @@ describe("resolveEnv", () => {
     const env = await runResolveEnv(dir);
     expect(env["ROOT_SECRET"]).toBeUndefined();
     expect(env["ANOTHER_ROOT_KEY"]).toBeUndefined();
-    expect(env).toEqual({});
+    expect(env).toStrictEqual({});
   });
 
   it("root .env is ignored even when .sandcastle/.env also exists", async () => {
@@ -61,14 +61,12 @@ describe("resolveEnv", () => {
     // .sandcastle/.env declares the key but with empty value
     await writeFile(join(dir, ".sandcastle", ".env"), "MY_TOKEN=\n");
 
-    const orig = process.env["MY_TOKEN"];
+    vi.stubEnv("MY_TOKEN", "from-process");
     try {
-      process.env["MY_TOKEN"] = "from-process";
       const env = await runResolveEnv(dir);
       expect(env["MY_TOKEN"]).toBe("from-process");
     } finally {
-      if (orig === undefined) delete process.env["MY_TOKEN"];
-      else process.env["MY_TOKEN"] = orig;
+      vi.unstubAllEnvs();
     }
   });
 
@@ -89,21 +87,19 @@ describe("resolveEnv", () => {
     await mkdir(join(dir, ".sandcastle"));
     await writeFile(join(dir, ".sandcastle", ".env"), "MY_VAR=sc-val\n");
 
-    const orig = process.env["MY_VAR"];
+    vi.stubEnv("MY_VAR", "from-process");
     try {
-      process.env["MY_VAR"] = "from-process";
       const env = await runResolveEnv(dir);
       expect(env["MY_VAR"]).toBe("sc-val");
     } finally {
-      if (orig === undefined) delete process.env["MY_VAR"];
-      else process.env["MY_VAR"] = orig;
+      vi.unstubAllEnvs();
     }
   });
 
   it("returns empty object when no .env files exist", async () => {
     const dir = await makeDir();
     const env = await runResolveEnv(dir);
-    expect(env).toEqual({});
+    expect(env).toStrictEqual({});
   });
 
   it("ignores comments and blank lines in .sandcastle/.env", async () => {
@@ -115,7 +111,7 @@ describe("resolveEnv", () => {
     );
 
     const env = await runResolveEnv(dir);
-    expect(env).toEqual({ KEY1: "val1", KEY2: "val2" });
+    expect(env).toStrictEqual({ KEY1: "val1", KEY2: "val2" });
   });
 
   it("does no validation — returns whatever keys are present in .sandcastle/.env", async () => {
@@ -128,7 +124,7 @@ describe("resolveEnv", () => {
     );
 
     const env = await runResolveEnv(dir);
-    expect(env).toEqual({
+    expect(env).toStrictEqual({
       NPM_TOKEN: "npm123",
       DATABASE_URL: "pg://localhost",
     });
@@ -179,7 +175,7 @@ describe("resolveEnv", () => {
     await writeFile(join(dir, ".sandcastle", ".env"), 'KEY=""\n');
 
     const env = await runResolveEnv(dir);
-    expect(env).toEqual({});
+    expect(env).toStrictEqual({});
   });
 
   it("process.env fallback works for keys in .sandcastle/.env too", async () => {
@@ -187,54 +183,43 @@ describe("resolveEnv", () => {
     await mkdir(join(dir, ".sandcastle"));
     await writeFile(join(dir, ".sandcastle", ".env"), "FALLBACK_KEY=\n");
 
-    const orig = process.env["FALLBACK_KEY"];
+    vi.stubEnv("FALLBACK_KEY", "from-env");
     try {
-      process.env["FALLBACK_KEY"] = "from-env";
       const env = await runResolveEnv(dir);
       expect(env["FALLBACK_KEY"]).toBe("from-env");
     } finally {
-      if (orig === undefined) delete process.env["FALLBACK_KEY"];
-      else process.env["FALLBACK_KEY"] = orig;
+      vi.unstubAllEnvs();
     }
   });
 
-  it("unescapes \\n in double-quoted values", async () => {
+  it(String.raw`unescapes \n in double-quoted values`, async () => {
     const dir = await makeDir();
     await mkdir(join(dir, ".sandcastle"));
-    await writeFile(
-      join(dir, ".sandcastle", ".env"),
-      'KEY="line1\\nline2"\n',
-    );
+    await writeFile(join(dir, ".sandcastle", ".env"), 'KEY="line1\\nline2"\n');
 
     const env = await runResolveEnv(dir);
     expect(env["KEY"]).toBe("line1\nline2");
   });
 
-  it("does not unescape \\n in single-quoted values", async () => {
+  it(String.raw`does not unescape \n in single-quoted values`, async () => {
     const dir = await makeDir();
     await mkdir(join(dir, ".sandcastle"));
-    await writeFile(
-      join(dir, ".sandcastle", ".env"),
-      "KEY='line1\\nline2'\n",
-    );
+    await writeFile(join(dir, ".sandcastle", ".env"), "KEY='line1\\nline2'\n");
 
     const env = await runResolveEnv(dir);
-    expect(env["KEY"]).toBe("line1\\nline2");
+    expect(env["KEY"]).toBe(String.raw`line1\nline2`);
   });
 
   it("preserves internal whitespace in double-quoted values", async () => {
     const dir = await makeDir();
     await mkdir(join(dir, ".sandcastle"));
-    await writeFile(
-      join(dir, ".sandcastle", ".env"),
-      'KEY="  spaced  "\n',
-    );
+    await writeFile(join(dir, ".sandcastle", ".env"), 'KEY="  spaced  "\n');
 
     const env = await runResolveEnv(dir);
     expect(env["KEY"]).toBe("  spaced  ");
   });
 
-  it("unescapes \\r, \\t, and \\\\ in double-quoted values", async () => {
+  it(String.raw`unescapes \r, \t, and \\ in double-quoted values`, async () => {
     const dir = await makeDir();
     await mkdir(join(dir, ".sandcastle"));
     await writeFile(
@@ -245,20 +230,17 @@ describe("resolveEnv", () => {
     const env = await runResolveEnv(dir);
     expect(env["TAB"]).toBe("a\tb");
     expect(env["CR"]).toBe("a\rb");
-    expect(env["BS"]).toBe("a\\b");
+    expect(env["BS"]).toBe(String.raw`a\b`);
   });
 
   it("handles escaped backslash before n in double-quoted values", async () => {
     const dir = await makeDir();
     await mkdir(join(dir, ".sandcastle"));
-    await writeFile(
-      join(dir, ".sandcastle", ".env"),
-      'KEY="a\\\\nb"\n',
-    );
+    await writeFile(join(dir, ".sandcastle", ".env"), 'KEY="a\\\\nb"\n');
 
     const env = await runResolveEnv(dir);
     // \\n in the file → literal backslash + literal n (not a newline)
-    expect(env["KEY"]).toBe("a\\nb");
+    expect(env["KEY"]).toBe(String.raw`a\nb`);
   });
 
   it("parses unquoted values unchanged", async () => {

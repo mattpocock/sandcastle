@@ -21,11 +21,11 @@ describe("classifyEnv", () => {
         ],
         ctx,
       ),
-    ).toEqual([]);
+    ).toStrictEqual([]);
   });
 
   it("flags an undeclared host secret by name", () => {
-    expect(classifyEnv([["ANTHROPIC_API_KEY", "x"]], ctx)).toEqual([
+    expect(classifyEnv([["ANTHROPIC_API_KEY", "x"]], ctx)).toStrictEqual([
       {
         name: "ANTHROPIC_API_KEY",
         reason: "a host secret the world never declared",

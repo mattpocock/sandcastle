@@ -13,7 +13,7 @@ const PROMPT_EXPANSION_TIMEOUT_MS = 30_000;
  * `!`...`` patterns arriving via argument substitution are treated as data.
  * Used only by `substitutePromptArgs`; not part of the public API.
  */
-export const SHELL_BLOCK_MARKER = "\x01";
+export const SHELL_BLOCK_MARKER = "\u0001";
 
 const MARKED_SHELL_BLOCK_PATTERN = new RegExp(
   `!${SHELL_BLOCK_MARKER}\`([^\`]+)\``,
@@ -29,9 +29,16 @@ export const preprocessPrompt = (
   ExecError | PromptError | PromptExpansionTimeoutError,
   Display
 > => {
-  const matches = [...prompt.matchAll(MARKED_SHELL_BLOCK_PATTERN)];
+  // The capture group is required, so the `?? ""` fallback never applies.
+  const blocks = [...prompt.matchAll(MARKED_SHELL_BLOCK_PATTERN)].map(
+    (match) => ({
+      text: match[0],
+      command: match[1] ?? "",
+      index: match.index,
+    }),
+  );
 
-  if (matches.length === 0) {
+  if (blocks.length === 0) {
     return Effect.succeed(prompt.replaceAll(SHELL_BLOCK_MARKER, ""));
   }
 
@@ -40,9 +47,9 @@ export const preprocessPrompt = (
     return yield* display.taskLog("Expanding shell expressions", (message) =>
       Effect.gen(function* () {
         // Execute all commands in parallel
-        const results = yield* Effect.all(
-          matches.map((match) => {
-            const command = match[1]!;
+        const expanded = yield* Effect.all(
+          blocks.map((block) => {
+            const { command } = block;
             return Effect.gen(function* () {
               const start = yield* Clock.currentTimeMillis;
               const maybeResult = yield* sandbox
@@ -54,47 +61,41 @@ export const preprocessPrompt = (
                 );
               if (Option.isNone(maybeResult)) {
                 const elapsedMs = (yield* Clock.currentTimeMillis) - start;
-                return yield* Effect.fail(
-                  new PromptExpansionTimeoutError({
-                    message: `Shell expression \`${command}\` timed out after ${elapsedMs}ms`,
-                    timeoutMs: PROMPT_EXPANSION_TIMEOUT_MS,
-                    expression: command,
-                    elapsedMs,
-                  }),
-                );
+                return yield* new PromptExpansionTimeoutError({
+                  message: `Shell expression \`${command}\` timed out after ${elapsedMs}ms`,
+                  timeoutMs: PROMPT_EXPANSION_TIMEOUT_MS,
+                  expression: command,
+                  elapsedMs,
+                });
               }
               const execResult = maybeResult.value;
               if (execResult.exitCode !== 0) {
-                return yield* Effect.fail(
-                  new PromptError({
-                    message: `Command \`${command}\` exited with code ${execResult.exitCode}: ${execResult.stderr}`,
-                    exitCode: execResult.exitCode,
-                  }),
-                );
+                return yield* new PromptError({
+                  message: `Command \`${command}\` exited with code ${execResult.exitCode}: ${execResult.stderr}`,
+                  exitCode: execResult.exitCode,
+                });
               }
-              return execResult.stdout.trimEnd();
+              return { ...block, output: execResult.stdout.trimEnd() };
             });
           }),
           { concurrency: "unbounded" },
         );
 
         // Log per-command token counts
-        for (let i = 0; i < matches.length; i++) {
-          const command = matches[i]![1]!;
-          const tokens = Math.ceil(results[i]!.length / 4);
+        for (const { command, output } of expanded) {
+          const tokens = Math.ceil(output.length / 4);
           message(`${command} → ~${tokens} tokens`);
         }
 
-        // Replace all matches using original indices (process in reverse to preserve positions)
-        let result = prompt;
-        for (let i = matches.length - 1; i >= 0; i--) {
-          const match = matches[i]!;
-          const index = match.index!;
-          result =
-            result.slice(0, index) +
-            results[i] +
-            result.slice(index + match[0].length);
+        // Splice each output in place of its block. Blocks are in prompt
+        // order and don't overlap, so one forward pass over `prompt` works.
+        let result = "";
+        let cursor = 0;
+        for (const { index, text, output } of expanded) {
+          result += prompt.slice(cursor, index) + output;
+          cursor = index + text.length;
         }
+        result += prompt.slice(cursor);
         return result.replaceAll(SHELL_BLOCK_MARKER, "");
       }),
     );
