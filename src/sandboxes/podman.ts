@@ -513,7 +513,7 @@ const checkPodmanMachine = async (): Promise<void> =>
           return;
         }
         try {
-          const machines = JSON.parse(stdout.toString()) as {
+          const machines = JSON.parse(stdout) as {
             Running?: boolean;
           }[];
           if (machines.some((m) => m.Running)) {
