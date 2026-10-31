@@ -257,7 +257,12 @@
     },
     {
       // Tests. Only rules that are wrong for a test file are loosened.
-      "files": ["**/*.test.ts", "src/testSetup.ts", "src/testSandbox.ts"],
+      "files": [
+        "**/*.test.ts",
+        "tests/**/*.ts",
+        "src/testSetup.ts",
+        "src/testSandbox.ts"
+      ],
       "rules": {
         // Tests run Effects; that is how they observe them.
         "eslint/no-restricted-properties": "off",
