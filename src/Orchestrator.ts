@@ -1,4 +1,4 @@
-import { Deferred, Duration, Effect, Fiber } from "effect";
+import { Deferred, Duration, Effect, Fiber, Runtime } from "effect";
 import { AgentStreamEmitter } from "./AgentStreamEmitter.js";
 import { Display } from "./Display.js";
 import { preprocessPrompt } from "./PromptPreprocessor.js";
@@ -66,6 +66,9 @@ const invokeAgent = (
       sessionId?: string;
       usage?: IterationUsage;
     }>();
+    // Timer and abort callbacks fire outside any fiber; they fork onto the
+    // surrounding runtime rather than a fresh default one.
+    const runFork = Runtime.runFork(yield* Effect.runtime());
     let timeoutFiber: Fiber.RuntimeFiber<unknown, unknown> | null = null;
     let completionDetected = false;
 
@@ -82,14 +85,14 @@ const invokeAgent = (
       fiber: Fiber.RuntimeFiber<unknown, unknown> | null,
     ) => {
       if (fiber !== null) {
-        Effect.runFork(Fiber.interrupt(fiber));
+        runFork(Fiber.interrupt(fiber));
       }
     };
 
     const startWarningInterval = () => {
       interruptFiber(warningFiber);
       idleMinuteCounter = 0;
-      warningFiber = Effect.runFork(
+      warningFiber = runFork(
         Effect.gen(function* () {
           while (true) {
             yield* Effect.sleep(Duration.millis(idleWarningIntervalMs));
@@ -104,7 +107,7 @@ const invokeAgent = (
       interruptFiber(timeoutFiber);
       if (completionDetected) {
         // Post-signal grace window — successful resolution on expiry.
-        timeoutFiber = Effect.runFork(
+        timeoutFiber = runFork(
           Effect.gen(function* () {
             yield* Effect.sleep(Duration.millis(completionTimeoutMs));
             onCompletionTimeout(completionTimeoutMs);
@@ -117,7 +120,7 @@ const invokeAgent = (
         );
       } else {
         // Pre-signal idle window — failure on expiry.
-        timeoutFiber = Effect.runFork(
+        timeoutFiber = runFork(
           Effect.gen(function* () {
             yield* Effect.sleep(Duration.millis(idleTimeoutMs));
             yield* Deferred.fail(
@@ -143,7 +146,7 @@ const invokeAgent = (
         return yield* Effect.die(signal.reason);
       }
       const onAbort = () => {
-        Effect.runFork(Deferred.die(abortDeferred, signal.reason));
+        runFork(Deferred.die(abortDeferred, signal.reason));
       };
       signal.addEventListener("abort", onAbort, { once: true });
       abortCleanup = () => {
@@ -360,6 +363,9 @@ export const orchestrate = (
     const factory = yield* SandboxFactory;
     const display = yield* Display;
     const streamEmitter = yield* AgentStreamEmitter;
+    // The agent's stream callbacks fire outside any fiber; they fork their
+    // display and emitter effects onto the surrounding runtime.
+    const runFork = Runtime.runFork(yield* Effect.runtime());
     const { hostRepoDir, iterations, hooks, prompt, branch, provider } =
       options;
     const { sessionStorage } = provider;
@@ -453,8 +459,8 @@ export const orchestrate = (
                   // Invoke the agent — buffer text deltas so Pi's single-token
                   // chunks are displayed as readable multi-word lines.
                   const textBuffer = new TextDeltaBuffer((chunk) => {
-                    Effect.runPromise(display.textChunk(chunk));
-                    Effect.runPromise(
+                    runFork(display.textChunk(chunk));
+                    runFork(
                       streamEmitter.emit({
                         type: "text",
                         message: chunk,
@@ -468,8 +474,8 @@ export const orchestrate = (
                   };
                   const onToolCall = (name: string, formattedArgs: string) => {
                     textBuffer.flush();
-                    Effect.runPromise(display.toolCall(name, formattedArgs));
-                    Effect.runPromise(
+                    runFork(display.toolCall(name, formattedArgs));
+                    runFork(
                       streamEmitter.emit({
                         type: "toolCall",
                         name,
@@ -480,7 +486,7 @@ export const orchestrate = (
                     );
                   };
                   const onRawLine = (line: string) => {
-                    Effect.runPromise(
+                    runFork(
                       streamEmitter.emit({
                         type: "raw",
                         line,
@@ -494,10 +500,10 @@ export const orchestrate = (
                       minutes === 1
                         ? "Agent idle for 1 minute"
                         : `Agent idle for ${minutes} minutes`;
-                    Effect.runPromise(display.status(label(msg), "warn"));
+                    runFork(display.status(label(msg), "warn"));
                   };
                   const onCompletionTimeout = (timeoutMs: number) => {
-                    Effect.runPromise(
+                    runFork(
                       display.status(
                         label(
                           `Completion signal seen but agent process is hanging — force-completing after ${timeoutMs / 1000}s grace window.`,
