@@ -8,6 +8,9 @@ on:
   # secrets and a read-only token (see the agent workflows, moved off
   # pull_request_target in 8976368).
   pull_request:
+  # The merge queue on main: each queued PR is checked against the PRs ahead
+  # of it before it lands.
+  merge_group:
 
 permissions:
   contents: read
@@ -38,9 +41,13 @@ jobs:
       - run: npm run lint
       - run: npm test
 
-  # Real cmd.exe and Windows argv rules for noSandbox (#940). Only the
-  # Windows test files run here: most of the suite assumes a POSIX host
-  # (sh, /tmp, POSIX path joins), and `npm run build`'s postbuild uses rm/cp.
+  # Everything that runs on a real Windows host, in one job: real cmd.exe and
+  # Windows argv rules for noSandbox (#940), plus the end-to-end tests
+  # (tests/, which include tests/no-sandbox.windows.test.ts). The e2e tests
+  # run from src through the vitest alias, so no build is needed — and
+  # `npm run build`'s postbuild uses rm/cp, which Windows lacks. Most of the
+  # legacy suite assumes a POSIX host (sh, /tmp, POSIX path joins), so only
+  # its Windows-relevant file runs here.
   windows:
     runs-on: windows-latest
     steps:
@@ -50,16 +57,5 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
-      - run: npx vitest run tests/no-sandbox.windows.test.ts src/sandboxes/no-sandbox.test.ts
-
-  # The end-to-end tests (tests/) on Windows. They run from src through the
-  # vitest alias, so no build is needed.
-  e2e-windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: npm ci
       - run: npx vitest run --project e2e
+      - run: npx vitest run --project legacy src/sandboxes/no-sandbox.test.ts
