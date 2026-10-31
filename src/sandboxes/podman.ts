@@ -202,11 +202,7 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
         ? [`--userns=keep-id:uid=${containerUid},gid=${containerGid}`]
         : [];
       const userArgs = ["--user", `${containerUid}:${containerGid}`];
-      const networks = options?.network
-        ? Array.isArray(options.network)
-          ? options.network
-          : [options.network]
-        : [];
+      const networks = options?.network ? [options.network].flat() : [];
       const networkArgs = networks.flatMap((n) => ["--network", n]);
       const groupArgs = (options?.groups ?? []).flatMap((g) => [
         "--group-add",
