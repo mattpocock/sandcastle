@@ -1,7 +1,7 @@
 import { NodeContext, NodeFileSystem } from "@effect/platform-node";
 import { join } from "node:path";
 import { Effect, Layer, Ref } from "effect";
-import type { AgentProvider } from "./AgentProvider.js";
+import { shellEscape, type AgentProvider } from "./AgentProvider.js";
 import {
   ClackDisplay,
   Display,
@@ -284,6 +284,8 @@ interface SandboxHandleContext {
   readonly bindMountHandle: BindMountSandboxHandle | undefined;
   /** Provider tag, used by resumeSession to dispatch the host-side session lookup. */
   readonly providerTag: SandboxProvider["tag"];
+  /** The sandbox provider's env, checked against each run's agent env for overlapping keys. */
+  readonly sandboxProviderEnv: Record<string, string>;
   readonly applyToHost: () => Effect.Effect<void, any>;
   readonly timeouts?: Timeouts;
   /** Worktree branch strategy. Set only when the handle is backed by a
@@ -293,6 +295,48 @@ interface SandboxHandleContext {
    *  worktree's source branch is preserved across calls. */
   readonly branchStrategy?: MergeToHeadBranchStrategy | NamedBranchStrategy;
 }
+
+/**
+ * @internal Applies an agent provider's `env` to its print command.
+ *
+ * `run()` merges the agent's env into the container env at start. A
+ * long-lived sandbox (`createSandbox()`, `worktree.createSandbox()`) is
+ * started before any agent is chosen, and each `sandbox.run()` may use a
+ * different agent, so the env is exported in the agent's own shell instead.
+ * It reaches only that run's agent process, with the same precedence as
+ * `run()` (agent env overrides `.sandcastle/.env`) and the same rejection of
+ * keys that overlap the sandbox provider's env.
+ */
+const withAgentEnv = (
+  agent: AgentProvider,
+  sandboxProviderEnv: Record<string, string>,
+): AgentProvider => {
+  const entries = Object.entries(agent.env);
+  if (entries.length === 0) return agent;
+  mergeProviderEnv({
+    resolvedEnv: {},
+    agentProviderEnv: agent.env,
+    sandboxProviderEnv,
+  });
+  const invalid = entries
+    .map(([key]) => key)
+    .filter((key) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key));
+  if (invalid.length > 0) {
+    throw new Error(
+      `Invalid agent provider env key(s): ${invalid.join(", ")}. Keys must match [A-Za-z_][A-Za-z0-9_]*.`,
+    );
+  }
+  const exports = entries
+    .map(([key, value]) => `export ${key}=${shellEscape(value)}; `)
+    .join("");
+  return {
+    ...agent,
+    buildPrintCommand: (options) => {
+      const printCommand = agent.buildPrintCommand(options);
+      return { ...printCommand, command: exports + printCommand.command };
+    },
+  };
+};
 
 /**
  * @internal Builds a Sandbox handle with run() and interactive() methods.
@@ -331,12 +375,10 @@ const buildSandboxHandle = (
       // If signal is already aborted, reject immediately without any setup
       runOptions.signal?.throwIfAborted();
 
-      const {
-        agent: provider,
-        prompt,
-        promptFile,
-        maxIterations = 1,
-      } = runOptions;
+      const { prompt, promptFile, maxIterations = 1 } = runOptions;
+      // The container was started before this agent was chosen, so the
+      // agent's env is applied to its own process instead (see withAgentEnv).
+      const provider = withAgentEnv(runOptions.agent, ctx.sandboxProviderEnv);
 
       // Validate: resumeSession + maxIterations > 1 is not allowed.
       if (runOptions.resumeSession && maxIterations > 1) {
@@ -883,6 +925,7 @@ export const createSandboxFromWorktree = async (
       providerHandle,
       bindMountHandle,
       providerTag: options.sandbox.tag,
+      sandboxProviderEnv: options.sandbox.env,
       applyToHost,
       timeouts: options.timeouts,
       branchStrategy: options.branchStrategy,
@@ -1125,6 +1168,7 @@ export const createSandbox = async (
       providerHandle,
       bindMountHandle,
       providerTag: options.sandbox.tag,
+      sandboxProviderEnv: options.sandbox.env,
       applyToHost,
       timeouts: options.timeouts,
     },
