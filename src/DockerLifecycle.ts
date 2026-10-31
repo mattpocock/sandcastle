@@ -108,11 +108,9 @@ export const startContainer = (
     ]);
 
     if (existing.trim() === containerName) {
-      yield* Effect.fail(
-        new DockerError({
-          message: `Container '${containerName}' already exists. Run cleanup first.`,
-        }),
-      );
+      return yield* new DockerError({
+        message: `Container '${containerName}' already exists. Run cleanup first.`,
+      });
     }
 
     const envFlags = Object.entries(env).flatMap(([k, v]) => [
@@ -141,7 +139,7 @@ export const startContainer = (
     const cpusFlags =
       options?.cpus === undefined ? [] : ["--cpus", String(options.cpus)];
 
-    yield* dockerExec([
+    return yield* dockerExec([
       "run",
       "-d",
       "--name",
@@ -155,7 +153,7 @@ export const startContainer = (
       ...deviceFlags,
       ...cpusFlags,
       imageName,
-    ]);
+    ]).pipe(Effect.asVoid);
   });
 
 /**

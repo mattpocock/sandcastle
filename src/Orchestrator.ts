@@ -226,21 +226,17 @@ const invokeAgent = (
           const lines = execResult.stdout.split("\n").filter((l) => l.trim());
           errorDetail = lines.slice(-20).join("\n");
         }
-        return yield* Effect.fail(
-          new AgentError({
-            message: `${provider.name} exited with code ${execResult.exitCode}:\n${errorDetail}`,
-          }),
-        );
+        return yield* new AgentError({
+          message: `${provider.name} exited with code ${execResult.exitCode}:\n${errorDetail}`,
+        });
       }
 
       // Some agents (pi, opencode) exit 0 after reporting a failure in their
       // stream. Treat the reported error as authoritative.
       if (streamError !== undefined) {
-        return yield* Effect.fail(
-          new AgentError({
-            message: `${provider.name} reported an error:\n${streamError}`,
-          }),
-        );
+        return yield* new AgentError({
+          message: `${provider.name} reported an error:\n${streamError}`,
+        });
       }
 
       return { result: resultText || execResult.stdout, sessionId, usage };

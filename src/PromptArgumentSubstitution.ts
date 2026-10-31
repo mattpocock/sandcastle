@@ -153,19 +153,15 @@ export const substitutePromptArgs = (
     // orchestrator building args from JSON.parse).
     for (const key of referencedKeys) {
       if (!(key in sanitizedArgs)) {
-        return yield* Effect.fail(
-          new PromptError({
-            message: `Prompt argument "{{${key}}}" has no matching value in promptArgs`,
-          }),
-        );
+        return yield* new PromptError({
+          message: `Prompt argument "{{${key}}}" has no matching value in promptArgs`,
+        });
       }
       const value = sanitizedArgs[key];
       if (value === null || value === undefined) {
-        return yield* Effect.fail(
-          new PromptError({
-            message: `Prompt argument "{{${key}}}" has value ${value === null ? "null" : "undefined"} in promptArgs`,
-          }),
-        );
+        return yield* new PromptError({
+          message: `Prompt argument "{{${key}}}" has value ${value === null ? "null" : "undefined"} in promptArgs`,
+        });
       }
     }
 
