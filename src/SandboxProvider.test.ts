@@ -2,18 +2,24 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createBindMountSandboxProvider,
   createIsolatedSandboxProvider,
-  type BindMountSandboxHandle,
-  type IsolatedSandboxHandle,
-  type SandboxProvider,
+} from "./SandboxProvider.js";
+import type {
+  BindMountSandboxHandle,
+  BindMountSandboxProviderConfig,
+  IsolatedSandboxHandle,
+  IsolatedSandboxProviderConfig,
+  SandboxProvider,
 } from "./SandboxProvider.js";
 
 describe("createBindMountSandboxProvider", () => {
   const makeMockHandle = (): BindMountSandboxHandle => ({
     worktreePath: "/workspace",
-    exec: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 })),
-    copyFileIn: vi.fn(async () => {}),
-    copyFileOut: vi.fn(async () => {}),
-    close: vi.fn(async () => {}),
+    exec: vi
+      .fn<BindMountSandboxHandle["exec"]>()
+      .mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+    copyFileIn: vi.fn<BindMountSandboxHandle["copyFileIn"]>(async () => {}),
+    copyFileOut: vi.fn<BindMountSandboxHandle["copyFileOut"]>(async () => {}),
+    close: vi.fn<BindMountSandboxHandle["close"]>(async () => {}),
   });
 
   it("returns a SandboxProvider with tag 'bind-mount'", () => {
@@ -28,7 +34,9 @@ describe("createBindMountSandboxProvider", () => {
 
   it("delegates create() to the config's create function", async () => {
     const handle = makeMockHandle();
-    const createFn = vi.fn(async () => handle);
+    const createFn = vi
+      .fn<BindMountSandboxProviderConfig["create"]>()
+      .mockResolvedValue(handle);
     const provider = createBindMountSandboxProvider({
       name: "test-provider",
       create: createFn,
@@ -69,10 +77,12 @@ describe("createBindMountSandboxProvider", () => {
 describe("createIsolatedSandboxProvider", () => {
   const makeMockHandle = (): IsolatedSandboxHandle => ({
     worktreePath: "/workspace",
-    exec: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 })),
-    copyIn: vi.fn(async () => {}),
-    copyFileOut: vi.fn(async () => {}),
-    close: vi.fn(async () => {}),
+    exec: vi
+      .fn<IsolatedSandboxHandle["exec"]>()
+      .mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+    copyIn: vi.fn<IsolatedSandboxHandle["copyIn"]>(async () => {}),
+    copyFileOut: vi.fn<IsolatedSandboxHandle["copyFileOut"]>(async () => {}),
+    close: vi.fn<IsolatedSandboxHandle["close"]>(async () => {}),
   });
 
   it("returns a SandboxProvider with tag 'isolated'", () => {
@@ -87,7 +97,9 @@ describe("createIsolatedSandboxProvider", () => {
 
   it("delegates create() to the config's create function", async () => {
     const handle = makeMockHandle();
-    const createFn = vi.fn(async () => handle);
+    const createFn = vi
+      .fn<IsolatedSandboxProviderConfig["create"]>()
+      .mockResolvedValue(handle);
     const provider = createIsolatedSandboxProvider({
       name: "test-isolated",
       create: createFn,

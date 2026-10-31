@@ -16,7 +16,8 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { WorldSpan } from "./attribution.ts";
-import { classifyEnv, type EnvLeak } from "./envLeaks.ts";
+import { classifyEnv } from "./envLeaks.ts";
+import type { EnvLeak } from "./envLeaks.ts";
 import { redact, REPO_ROOT, secretsIn, sh } from "./lib.ts";
 
 export const WORLDS_ROOT = join(tmpdir(), "sandcastle-verify");
@@ -53,7 +54,7 @@ export interface World {
 }
 
 const stamp = (d: Date): string =>
-  d.toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
+  d.toISOString().replaceAll(/[-:]/g, "").replace("T", "-").slice(0, 15);
 
 const must = (
   command: string,
@@ -128,7 +129,9 @@ export const remoteRefs = (remote: string): Record<string, string> => {
     },
   ).stdout.split("\n")) {
     const [ref, sha] = line.split(" ");
-    if (ref && sha) out[ref] = sha;
+    if (ref && sha) {
+      out[ref] = sha;
+    }
   }
   return out;
 };
@@ -156,7 +159,9 @@ export const createWorld = (): World => {
   const home = join(dir, "home");
   const logs = join(dir, "logs");
   const tmp = join(dir, "tmp");
-  for (const d of [project, home, logs, tmp]) mkdirSync(d, { recursive: true });
+  for (const d of [project, home, logs, tmp]) {
+    mkdirSync(d, { recursive: true });
+  }
 
   // The Sandcastle under test, packed as npm would publish it.
   const tgz = must(
@@ -170,11 +175,11 @@ export const createWorld = (): World => {
 
   writeFileSync(
     join(project, "package.json"),
-    JSON.stringify(
+    `${JSON.stringify(
       { name: projectName, private: true, type: "module" },
       null,
       2,
-    ) + "\n",
+    )}\n`,
   );
   writeFileSync(join(project, ".gitignore"), "node_modules\n");
   writeFileSync(join(project, "README.md"), `# ${projectName}\n`);
@@ -226,11 +231,12 @@ export const createWorld = (): World => {
   return world;
 };
 
-export const saveWorld = (world: World): void =>
+export const saveWorld = (world: World): void => {
   writeFileSync(
     join(world.dir, "world.json"),
-    JSON.stringify(world, null, 2) + "\n",
+    `${JSON.stringify(world, null, 2)}\n`,
   );
+};
 
 /** The world `runId`, which this checkout must have created. */
 export const loadWorld = (runId: string | undefined): World => {
@@ -240,8 +246,9 @@ export const loadWorld = (runId: string | undefined): World => {
     );
   }
   const file = join(WORLDS_ROOT, runId, "world.json");
-  if (!existsSync(file))
+  if (!existsSync(file)) {
     throw new Error(`no world ${runId} under ${WORLDS_ROOT}`);
+  }
   const world = JSON.parse(readFileSync(file, "utf8")) as World;
   if (world.sandcastleRoot !== REPO_ROOT) {
     throw new Error(
@@ -283,7 +290,7 @@ export const liveWorlds = (): World[] =>
         return undefined;
       }
     })
-    .filter((w): w is World => !!w && !w.cleanedAt);
+    .filter((w): w is World => Boolean(w) && !w.cleanedAt);
 
 // --- Running inside a world ------------------------------------------------------
 
@@ -315,12 +322,14 @@ const worldEnv = (world: World): NodeJS.ProcessEnv => {
 /** Keys the world's project declares in `.sandcastle/.env` (names only). */
 export const declaredKeys = (world: World): Set<string> => {
   const file = join(world.project, ".sandcastle", ".env");
-  if (!existsSync(file)) return new Set();
+  if (!existsSync(file)) {
+    return new Set();
+  }
   return new Set(
     readFileSync(file, "utf8")
       .split("\n")
       .map((l) => /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(l)?.[1])
-      .filter((k): k is string => !!k),
+      .filter((k): k is string => Boolean(k)),
   );
 };
 
@@ -334,7 +343,9 @@ export interface Observation {
 
 const inspect = (engine: Engine, name: string) => {
   const r = sh(engine, ["inspect", name, "--format", "{{json .}}"]);
-  if (r.code !== 0) return undefined;
+  if (r.code !== 0) {
+    return undefined;
+  }
   const j = JSON.parse(r.stdout) as {
     Config?: { Env?: string[]; Image?: string };
     Mounts?: { Source?: string }[];
@@ -352,8 +363,9 @@ const inspect = (engine: Engine, name: string) => {
 /** A container belongs to `world` when it mounts a path inside the world. */
 export const worldContainer = (world: World, engine: Engine, name: string) => {
   const info = inspect(engine, name);
-  if (!info || !info.mountsWorld.some((s) => s.startsWith(world.dir)))
+  if (!info || !info.mountsWorld.some((s) => s.startsWith(world.dir))) {
     return undefined;
+  }
   return info;
 };
 
@@ -391,9 +403,13 @@ export const runInWorld = async (
         .filter(Boolean);
       for (const name of names) {
         const key = `${engine}:${name}`;
-        if (seen.has(key)) continue;
+        if (seen.has(key)) {
+          continue;
+        }
         const info = worldContainer(world, engine, name);
-        if (!info) continue;
+        if (!info) {
+          continue;
+        }
         seen.add(key);
         const obs: Observation = {
           at: new Date().toISOString(),
@@ -408,7 +424,7 @@ export const runInWorld = async (
         };
         appendFileSync(
           join(world.dir, "observed.jsonl"),
-          JSON.stringify(obs) + "\n",
+          `${JSON.stringify(obs)}\n`,
         );
         const verdict =
           obs.leaks.length === 0
@@ -434,24 +450,26 @@ export const runInWorld = async (
       const lines = buf.split("\n");
       buf = lines.pop()!;
       for (const line of lines) {
-        const clean = redact(line).split(world.canary).join("<CANARY>") + "\n";
+        const clean = `${redact(line).split(world.canary).join("<CANARY>")}\n`;
         to.write(clean);
         appendFileSync(log, clean);
       }
     });
     from.on("end", () => {
       if (buf) {
-        const clean = redact(buf) + "\n";
+        const clean = `${redact(buf)}\n`;
         to.write(clean);
         appendFileSync(log, clean);
       }
     });
   };
-  pipe(child.stdout!, process.stdout);
-  pipe(child.stderr!, process.stderr);
+  pipe(child.stdout, process.stdout);
+  pipe(child.stderr, process.stderr);
   const timer = setInterval(observe, 1000);
   const code = await new Promise<number>((resolve) => {
-    child.on("close", (c) => resolve(c ?? 1));
+    child.on("close", (c) => {
+      resolve(c ?? 1);
+    });
     child.on("error", (e) => {
       appendFileSync(log, `[verify] ${e.message}\n`);
       resolve(127);
@@ -466,7 +484,9 @@ export const runInWorld = async (
 /** Read every observation made in the world so far. */
 export const observations = (world: World): Observation[] => {
   const file = join(world.dir, "observed.jsonl");
-  if (!existsSync(file)) return [];
+  if (!existsSync(file)) {
+    return [];
+  }
   return readFileSync(file, "utf8")
     .split("\n")
     .filter(Boolean)

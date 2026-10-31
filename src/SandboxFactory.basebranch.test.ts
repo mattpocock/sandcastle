@@ -6,11 +6,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-import { SilentDisplay, type DisplayEntry } from "./Display.js";
-import {
-  createBindMountSandboxProvider,
-  type BindMountSandboxHandle,
-  type SandboxProvider,
+import { SilentDisplay } from "./Display.js";
+import type { DisplayEntry } from "./Display.js";
+import { createBindMountSandboxProvider } from "./SandboxProvider.js";
+import type {
+  BindMountSandboxHandle,
+  SandboxProvider,
 } from "./SandboxProvider.js";
 import {
   SandboxConfig,
@@ -58,7 +59,7 @@ describe("WorktreeDockerSandboxFactory — baseBranch (real git)", () => {
 
   afterEach(async () => {
     await Promise.all(
-      tempDirs.map((d) => rm(d, { recursive: true, force: true })),
+      tempDirs.map(async (d) => rm(d, { recursive: true, force: true })),
     );
     tempDirs.length = 0;
   });
@@ -89,7 +90,7 @@ describe("WorktreeDockerSandboxFactory — baseBranch (real git)", () => {
           },
         }),
         NodeFileSystem.layer,
-        SilentDisplay.layer(Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([])),
+        SilentDisplay.layer(Ref.unsafeMake<readonly DisplayEntry[]>([])),
       ),
     );
 

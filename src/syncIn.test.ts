@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { testIsolated } from "./sandboxes/test-isolated.js";
+import type { IsolatedSandboxHandle } from "./SandboxProvider.js";
 import { syncIn } from "./syncIn.js";
 
 const execAsync = promisify(exec);
@@ -31,6 +32,19 @@ const getHead = async (dir: string) => {
   const { stdout } = await execAsync("git rev-parse HEAD", { cwd: dir });
   return stdout.trim();
 };
+
+// The sandbox is the system boundary: wrap a real handle so it reports a
+// different HEAD than the host's.
+const reportingSandboxHead = (
+  handle: IsolatedSandboxHandle,
+  head: string,
+): IsolatedSandboxHandle => ({
+  ...handle,
+  exec: async (command, options) =>
+    command === "git rev-parse HEAD"
+      ? { stdout: `${head}\n`, stderr: "", exitCode: 0 }
+      : handle.exec(command, options),
+});
 
 describe("syncIn", () => {
   it("bundles a repo and clones it into the sandbox — files present", async () => {
@@ -167,6 +181,27 @@ describe("syncIn", () => {
       // Untracked file should not exist
       const ls = (await handle.exec("ls")).stdout;
       expect(ls).not.toContain("untracked.txt");
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it("fails with a SyncError when the sandbox HEAD doesn't match the host after sync", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const provider = testIsolated();
+    const handle = await provider.create({ env: {} });
+    const divergedHandle = reportingSandboxHead(handle, "0000000");
+    try {
+      const error = await Effect.runPromise(
+        Effect.flip(syncIn(hostDir, divergedHandle)),
+      );
+      expect(error).toMatchObject({
+        _tag: "SyncError",
+        message: `HEAD mismatch after sync-in: host=${await getHead(hostDir)} sandbox=0000000`,
+      });
     } finally {
       await handle.close();
     }

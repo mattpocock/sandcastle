@@ -204,4 +204,4 @@ export const sh = (
 
 /** True when `command args…` exits 0. */
 export const works = (command: readonly string[]): boolean =>
-  sh(command[0]!, command.slice(1), { timeoutMs: 30_000 }).code === 0;
+  sh(command[0], command.slice(1), { timeoutMs: 30_000 }).code === 0;

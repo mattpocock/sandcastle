@@ -7,11 +7,11 @@
 
 import { readdir, stat } from "node:fs/promises";
 import { join, posix, relative } from "node:path";
-import {
-  createIsolatedSandboxProvider,
-  type ExecResult,
-  type IsolatedSandboxHandle,
-  type IsolatedSandboxProvider,
+import { createIsolatedSandboxProvider } from "../SandboxProvider.js";
+import type {
+  ExecResult,
+  IsolatedSandboxHandle,
+  IsolatedSandboxProvider,
 } from "../SandboxProvider.js";
 import { BoundedTail, MAX_TAIL_CHARS } from "../boundedTail.js";
 
@@ -22,7 +22,8 @@ import type {
   CreateSandboxFromSnapshotParams,
 } from "@daytona/sdk";
 
-const shellEscape = (s: string): string => "'" + s.replace(/'/g, "'\\''") + "'";
+const shellEscape = (s: string): string =>
+  `'${s.replaceAll("'", String.raw`'\''`)}'`;
 
 /** Options for the Daytona sandbox provider. */
 export interface DaytonaOptions {
@@ -92,17 +93,27 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
         (await import("@daytona/sdk")) as typeof import("@daytona/sdk");
 
       const config: DaytonaConfig = {};
-      if (options?.apiKey) config.apiKey = options.apiKey;
-      if (options?.apiUrl) config.apiUrl = options.apiUrl;
-      if (options?.target) config.target = options.target;
+      if (options?.apiKey) {
+        config.apiKey = options.apiKey;
+      }
+      if (options?.apiUrl) {
+        config.apiUrl = options.apiUrl;
+      }
+      if (options?.target) {
+        config.target = options.target;
+      }
 
       const client: DaytonaClient = new Daytona(config);
       // Pass the resolved env (env resolver + provider + agent) to the
       // sandbox. Explicit `create.envVars` win, as the most specific source.
-      const sandbox = await client.create({
-        ...options?.create,
-        envVars: { ...createOptions.env, ...options?.create?.envVars },
-      } as any);
+      const createParams = options?.create;
+      const envVars = { ...createOptions.env, ...createParams?.envVars };
+      // `client.create` is overloaded per params shape, so call the overload
+      // that matches instead of passing the union.
+      const sandbox =
+        createParams !== undefined && "image" in createParams
+          ? await client.create({ ...createParams, envVars })
+          : await client.create({ ...createParams, envVars });
 
       const workDir =
         (await sandbox.getWorkDir()) ??
@@ -145,7 +156,7 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
             effectiveCommand = `{ rm -f ${stdinPath}; ${effectiveCommand}\n} < ${stdinPath}`;
           }
           if (opts?.onLine) {
-            const onLine = opts.onLine;
+            const { onLine } = opts;
             const sessionId = `sandcastle-${crypto.randomUUID()}`;
             const pidPath = `/tmp/${sessionId}.pid`;
             await sandbox.process.createSession(sessionId);
@@ -166,7 +177,7 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
                 },
               );
 
-              const cmdId = execResponse.cmdId!;
+              const { cmdId } = execResponse;
 
               const stdoutTail = new BoundedTail(maxOutputTailChars, "\n");
               const stderrTail = new BoundedTail(maxOutputTailChars, "");
@@ -212,12 +223,16 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
                     : await sandbox.process
                         .getSessionCommand(sessionId, cmdId)
                         .catch(() => undefined);
-                  if (!watching) return;
+                  if (!watching) {
+                    return;
+                  }
                   if (alive) {
                     watchTimer = setTimeout(check, SESSION_WATCH_INTERVAL_MS);
                     return;
                   }
-                  if (cmd?.exitCode != null) return resolve();
+                  if (typeof cmd?.exitCode === "number") {
+                    return resolve();
+                  }
                   reject(
                     new Error(
                       `Daytona session shell exited before the command finished, so its exit code is unknown: ${command}`,

@@ -52,7 +52,7 @@ export const resolvePrompt = (
       Effect.mapError(
         (e) =>
           new PromptError({
-            message: `Failed to read prompt from ${promptFile}: ${e}`,
+            message: `Failed to read prompt from ${promptFile}: ${String(e)}`,
           }),
       ),
     );

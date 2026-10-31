@@ -22,7 +22,7 @@ export type DisplayEntry =
   | {
       readonly _tag: "taskLog";
       readonly title: string;
-      readonly messages: ReadonlyArray<string>;
+      readonly messages: readonly string[];
     }
   | { readonly _tag: "text"; readonly message: string }
   | { readonly _tag: "textChunk"; readonly message: string }
@@ -67,13 +67,13 @@ export interface DisplayService {
   ) => Effect.Effect<void>;
 }
 
-export class Display extends Context.Tag("Display")<
+export class Display extends Context.Tag("@ai-hero/sandcastle/Display")<
   Display,
   DisplayService
 >() {}
 
 export const SilentDisplay = {
-  layer: (ref: Ref.Ref<ReadonlyArray<DisplayEntry>>): Layer.Layer<Display> =>
+  layer: (ref: Ref.Ref<readonly DisplayEntry[]>): Layer.Layer<Display> =>
     Layer.succeed(Display, {
       intro: (title) =>
         Ref.update(ref, (entries) => [
@@ -174,7 +174,9 @@ export const FileDisplay = {
 
         const appendRaw = (chunk: string): Effect.Effect<void> =>
           Effect.suspend(() => {
-            if (chunk.length === 0) return Effect.void;
+            if (chunk.length === 0) {
+              return Effect.void;
+            }
             midLine = !chunk.endsWith("\n");
             return fs
               .writeFileString(filePath, chunk, { flag: "a" })
@@ -246,6 +248,14 @@ export const terminalStyle = {
   toolCall: (text: string): string => styleText("dim", text),
 };
 
+/** Prints a text chunk via clack, dropping leading/trailing blank lines. */
+const printClackText = (text: string) => {
+  const trimmed = text.replaceAll(/^\n+|\n+$/g, "");
+  if (trimmed.trim().length > 0) {
+    clack.log.message(trimmed);
+  }
+};
+
 export const ClackDisplay = {
   layer: Layer.scoped(
     Display,
@@ -258,24 +268,21 @@ export const ClackDisplay = {
       // when the layer is released. Mirrors FileDisplay's `midLine`.
       let pendingText = "";
 
-      const printText = (text: string) => {
-        const trimmed = text.replace(/^\n+|\n+$/g, "");
-        if (trimmed.trim().length > 0) clack.log.message(trimmed);
-      };
-
       const flushText = () => {
         const text = pendingText;
         pendingText = "";
-        printText(text);
+        printClackText(text);
       };
 
       const writeText = (chunk: string) => {
         pendingText += chunk;
         const lastNewline = pendingText.lastIndexOf("\n");
-        if (lastNewline === -1) return;
+        if (lastNewline === -1) {
+          return;
+        }
         const complete = pendingText.slice(0, lastNewline);
         pendingText = pendingText.slice(lastNewline + 1);
-        printText(complete);
+        printClackText(complete);
       };
 
       const sync = (f: () => void) =>
@@ -288,10 +295,14 @@ export const ClackDisplay = {
 
       return {
         intro: (title) =>
-          sync(() => clack.intro(styleText("inverse", ` ${title} `))),
+          sync(() => {
+            clack.intro(styleText("inverse", ` ${title} `));
+          }),
 
         status: (message, severity) =>
-          sync(() => severityToClack[severity](terminalStyle.status(message))),
+          sync(() => {
+            severityToClack[severity](terminalStyle.status(message));
+          }),
 
         spinner: (message, effect) =>
           Effect.acquireUseRelease(
@@ -326,7 +337,10 @@ export const ClackDisplay = {
               flushText();
               return clack.taskLog({ title });
             }),
-            (log) => effect((msg) => log.message(msg)),
+            (log) =>
+              effect((msg) => {
+                log.message(msg);
+              }),
             (log, exit) =>
               Effect.sync(() => {
                 if (exit._tag === "Success") {
@@ -337,14 +351,20 @@ export const ClackDisplay = {
               }),
           ),
 
-        text: (message) => sync(() => clack.log.message(message)),
+        text: (message) =>
+          sync(() => {
+            clack.log.message(message);
+          }),
 
-        textChunk: (chunk) => Effect.sync(() => writeText(chunk)),
+        textChunk: (chunk) =>
+          Effect.sync(() => {
+            writeText(chunk);
+          }),
 
         toolCall: (name, formattedArgs) =>
-          sync(() =>
-            clack.log.step(terminalStyle.toolCall(`${name}(${formattedArgs})`)),
-          ),
+          sync(() => {
+            clack.log.step(terminalStyle.toolCall(`${name}(${formattedArgs})`));
+          }),
       };
     }),
   ),
