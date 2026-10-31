@@ -586,7 +586,7 @@ export async function run(
     throw new Error(
       `output.maxRetries requires an agent provider that supports session resumption. ` +
         `The "${provider.name}" provider does not. ` +
-        `Use claudeCode, codex, or pi, or set maxRetries to 0.`,
+        `Use an agent provider that supports resume, or set maxRetries to 0.`,
     );
   }
 
