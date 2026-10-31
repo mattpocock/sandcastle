@@ -13,6 +13,9 @@ vi.mock("@daytona/sdk", () => {
       return {
         getWorkDir: async () => "/home/daytona",
         getUserHomeDir: async () => "/home/daytona",
+        fs: {
+          createFolder: async () => {},
+        },
         process: {
           executeCommand: async (command: string) => {
             sdk.commands.push(command);
