@@ -13,7 +13,8 @@ import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { Effect, Layer } from "effect";
 import { assert, describe, expect, it } from "vitest";
-import { claudeCode, codex, pi } from "./AgentProvider.js";
+import { claudeCode, codex, cursor, pi } from "./AgentProvider.js";
+import { ForkNotSupportedError } from "./errors.js";
 import { createSandbox } from "./createSandbox.js";
 import type { CreateSandboxOptions } from "./createSandbox.js";
 import { createWorktree } from "./createWorktree.js";
@@ -548,6 +549,41 @@ describe("createSandbox", () => {
       ).rejects.toThrow(
         "idleTimeoutSeconds must be a positive number of seconds. Received: 0",
       );
+      expect(agentRan).toBe(false);
+    } finally {
+      await sandbox.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("sandbox.run() rejects a fork on cursor with ForkNotSupportedError before the agent runs", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-cursor-fork-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    let agentRan = false;
+    const sandbox = await createSandbox({
+      branch: "cursor-fork",
+      sandbox: testSandbox,
+      cwd: hostDir,
+      _test: {
+        buildSandbox: (sandboxDir) =>
+          makeMockAgentLayer(sandboxDir, async () => {
+            agentRan = true;
+            return "ok";
+          }),
+      },
+    });
+
+    try {
+      const attempt = sandbox.run({
+        agent: cursor("composer-2"),
+        prompt: "fork it",
+        resumeSession: "dd42b549-290c-4635-b058-04801905e8cf",
+        forkSession: true,
+      });
+      await expect(attempt).rejects.toBeInstanceOf(ForkNotSupportedError);
+      await expect(attempt).rejects.toThrow(/cursor cannot fork/u);
       expect(agentRan).toBe(false);
     } finally {
       await sandbox.close();

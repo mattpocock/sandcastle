@@ -8,9 +8,13 @@
  * its own transfer function.
  */
 
-import { access, readdir } from "node:fs/promises";
-import { join, posix, relative } from "node:path";
+import { createHash } from "node:crypto";
+import { access, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { dirname, join, posix } from "node:path";
 import type { BindMountSandboxHandle } from "./SandboxProvider.js";
+
+/** The host user's home directory, where every agent keeps its sessions. */
+export const homeDir = (): string => process.env.HOME ?? "~";
 
 // ---------------------------------------------------------------------------
 // Host session lookup
@@ -29,7 +33,19 @@ export interface HostSessionLookup {
   readonly searchedRoot: string;
 }
 
-const pathExists = async (path: string): Promise<boolean> => {
+/** The first of `paths` that exists, checked in order, or `undefined`. */
+export const firstExistingPath = async (
+  paths: readonly string[],
+): Promise<string | undefined> => {
+  const [head, ...rest] = paths;
+  if (head === undefined) {
+    return undefined;
+  }
+  return (await pathExists(head)) ? head : firstExistingPath(rest);
+};
+
+/** Whether a file or directory exists at `path`. */
+export const pathExists = async (path: string): Promise<boolean> => {
   try {
     await access(path);
     return true;
@@ -58,8 +74,7 @@ export const claudeHostSessionPath = (
   id: string,
   projectsDir?: string,
 ): string => {
-  const base =
-    projectsDir ?? join(process.env.HOME ?? "~", ".claude", "projects");
+  const base = projectsDir ?? join(homeDir(), ".claude", "projects");
   return join(base, encodeProjectPath(cwd), `${id}.jsonl`);
 };
 
@@ -92,8 +107,7 @@ export const claudeSubagentsDirOnHost = (
   id: string,
   projectsDir?: string,
 ): string => {
-  const base =
-    projectsDir ?? join(process.env.HOME ?? "~", ".claude", "projects");
+  const base = projectsDir ?? join(homeDir(), ".claude", "projects");
   return join(base, encodeProjectPath(cwd), id, "subagents");
 };
 
@@ -136,24 +150,17 @@ export const findClaudeSessionOnHost = async (
   id: string,
   projectsDir?: string,
 ): Promise<HostSessionLookup> => {
-  const root =
-    projectsDir ?? join(process.env.HOME ?? "~", ".claude", "projects");
+  const root = projectsDir ?? join(homeDir(), ".claude", "projects");
   let entries;
   try {
     entries = await readdir(root, { withFileTypes: true });
   } catch {
     return { path: undefined, searchedRoot: root };
   }
-  for (const entry of entries) {
-    if (!entry.isDirectory()) {
-      continue;
-    }
-    const candidate = join(root, entry.name, `${id}.jsonl`);
-    if (await pathExists(candidate)) {
-      return { path: candidate, searchedRoot: root };
-    }
-  }
-  return { path: undefined, searchedRoot: root };
+  const candidates = entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => join(root, entry.name, `${id}.jsonl`));
+  return { path: await firstExistingPath(candidates), searchedRoot: root };
 };
 
 const rewriteSessionCwd = (
@@ -211,78 +218,71 @@ export const transferClaudeSession = (
 const isCodexSessionFilename = (filename: string, id: string): boolean =>
   filename.startsWith("rollout-") && filename.endsWith(`-${id}.jsonl`);
 
-const findCodexSessionPath = async (
-  rootDir: string,
-  id: string,
-): Promise<string | undefined> => {
-  const visit = async (dir: string): Promise<string | undefined> => {
-    let entries;
-    try {
-      entries = await readdir(dir, { withFileTypes: true });
-    } catch {
-      return undefined;
-    }
-    for (const entry of entries) {
-      const child = join(dir, entry.name);
-      if (entry.isFile() && isCodexSessionFilename(entry.name, id)) {
-        return child;
-      }
-      if (entry.isDirectory()) {
-        const found = await visit(child);
-        if (found) {
-          return found;
-        }
-      }
-    }
-    return undefined;
-  };
-  return visit(rootDir);
-};
-
 /**
- * Locate a Codex session rollout file on the host by its id, reusing the
- * date-nested scan.
+ * Locate a Codex session rollout file on the host by its id, scanning the
+ * date-nested `YYYY/MM/DD/` directories depth-first.
  */
 export const findCodexSessionOnHost = async (
   id: string,
   sessionsDir?: string,
 ): Promise<HostSessionLookup> => {
-  const root =
-    sessionsDir ?? join(process.env.HOME ?? "~", ".codex", "sessions");
-  const path = await findCodexSessionPath(root, id);
-  return { path, searchedRoot: root };
+  const root = sessionsDir ?? join(homeDir(), ".codex", "sessions");
+  let entries;
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch {
+    return { path: undefined, searchedRoot: root };
+  }
+  for (const entry of entries) {
+    const child = join(root, entry.name);
+    if (entry.isFile() && isCodexSessionFilename(entry.name, id)) {
+      return { path: child, searchedRoot: root };
+    }
+    if (entry.isDirectory()) {
+      const { path } = await findCodexSessionOnHost(id, child);
+      if (path !== undefined) {
+        return { path, searchedRoot: root };
+      }
+    }
+  }
+  return { path: undefined, searchedRoot: root };
 };
 
-/** Codex host session lookup that also returns the relative date-nested path. */
-export interface CodexSessionLocation {
+/**
+ * The path of a session found on the host, or a not-found error naming the
+ * directory searched. For resume, where the precheck already found it.
+ */
+export const requireHostSessionPath = (
+  found: HostSessionLookup,
+  id: string,
+): string => {
+  if (found.path === undefined) {
+    throw new Error(`session ${id} not found in ${found.searchedRoot}`);
+  }
+  return found.path;
+};
+
+/** A session file found in the sandbox, with its path relative to the sessions dir. */
+export interface SandboxSessionLocation {
   readonly path: string;
   readonly relativePath: string;
 }
 
-export const locateCodexHostSession = async (
-  id: string,
-  sessionsDir?: string,
-): Promise<CodexSessionLocation> => {
-  const root =
-    sessionsDir ?? join(process.env.HOME ?? "~", ".codex", "sessions");
-  const path = await findCodexSessionPath(root, id);
-  if (!path) {
-    throw new Error(`session ${id} not found in ${root}`);
-  }
-  return { path, relativePath: relative(root, path) };
-};
-
-export const locateCodexSandboxSession = async (
-  id: string,
+/**
+ * Locate a session file in the sandbox by its file-name glob (codex:
+ * `rollout-*-<id>.jsonl`, pi: `*_<id>.jsonl`), scanning `sessionsDir`.
+ */
+export const locateSandboxSessionFile = async (
   handle: Pick<BindMountSandboxHandle, "exec">,
   sessionsDir: string,
-): Promise<CodexSessionLocation> => {
+  nameGlob: string,
+): Promise<SandboxSessionLocation> => {
   const result = await handle.exec(
-    `find ${JSON.stringify(sessionsDir)} -type f -name ${JSON.stringify(`rollout-*-${id}.jsonl`)} -print -quit`,
+    `find ${JSON.stringify(sessionsDir)} -type f -name ${JSON.stringify(nameGlob)} -print -quit`,
   );
-  const path = result.stdout.trim().split("\n")[0];
-  if (result.exitCode !== 0 || !path) {
-    throw new Error(`session ${id} not found in ${sessionsDir}`);
+  const [path = ""] = result.stdout.trim().split("\n");
+  if (result.exitCode !== 0 || path === "") {
+    throw new Error(`session ${nameGlob} not found in ${sessionsDir}`);
   }
   return { path, relativePath: posix.relative(sessionsDir, path) };
 };
@@ -316,45 +316,12 @@ export const encodePiSessionDir = (cwd: string): string => {
 
 /** Absolute host path to the pi session directory for a given cwd. */
 export const piSessionDirPath = (cwd: string, sessionsDir?: string): string => {
-  const base =
-    sessionsDir ?? join(process.env.HOME ?? "~", ".pi", "agent", "sessions");
+  const base = sessionsDir ?? join(homeDir(), ".pi", "agent", "sessions");
   return join(base, encodePiSessionDir(cwd));
 };
 
 const isPiSessionFilename = (filename: string, id: string): boolean =>
   filename.endsWith(`_${id}.jsonl`);
-
-const findPiSessionPath = async (
-  rootDir: string,
-  id: string,
-): Promise<{ path: string; relativePath: string } | undefined> => {
-  let entries;
-  try {
-    entries = await readdir(rootDir, { withFileTypes: true });
-  } catch {
-    return undefined;
-  }
-  for (const entry of entries) {
-    if (!entry.isDirectory()) {
-      continue;
-    }
-    const dirAbs = join(rootDir, entry.name);
-    let files;
-    try {
-      files = await readdir(dirAbs);
-    } catch {
-      continue;
-    }
-    const match = files.find((name) => isPiSessionFilename(name, id));
-    if (match) {
-      return {
-        path: join(dirAbs, match),
-        relativePath: join(entry.name, match),
-      };
-    }
-  }
-  return undefined;
-};
 
 /**
  * Locate a pi session JSONL on the host by its id, scanning each
@@ -364,44 +331,30 @@ export const findPiSessionOnHost = async (
   id: string,
   sessionsDir?: string,
 ): Promise<HostSessionLookup> => {
-  const root =
-    sessionsDir ?? join(process.env.HOME ?? "~", ".pi", "agent", "sessions");
-  const found = await findPiSessionPath(root, id);
-  return { path: found?.path, searchedRoot: root };
-};
-
-/** Pi host session lookup that also returns the relative `--enc-cwd--/file` path. */
-export interface PiSessionLocation {
-  readonly path: string;
-  readonly relativePath: string;
-}
-
-export const locatePiHostSession = async (
-  id: string,
-  sessionsDir?: string,
-): Promise<PiSessionLocation> => {
-  const root =
-    sessionsDir ?? join(process.env.HOME ?? "~", ".pi", "agent", "sessions");
-  const found = await findPiSessionPath(root, id);
-  if (!found) {
-    throw new Error(`session ${id} not found in ${root}`);
+  const root = sessionsDir ?? join(homeDir(), ".pi", "agent", "sessions");
+  let entries;
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch {
+    return { path: undefined, searchedRoot: root };
   }
-  return found;
-};
-
-export const locatePiSandboxSession = async (
-  id: string,
-  handle: Pick<BindMountSandboxHandle, "exec">,
-  sessionsDir: string,
-): Promise<PiSessionLocation> => {
-  const result = await handle.exec(
-    `find ${JSON.stringify(sessionsDir)} -type f -name ${JSON.stringify(`*_${id}.jsonl`)} -print -quit`,
-  );
-  const path = result.stdout.trim().split("\n")[0];
-  if (result.exitCode !== 0 || !path) {
-    throw new Error(`session ${id} not found in ${sessionsDir}`);
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const dirAbs = join(root, entry.name);
+    let files;
+    try {
+      files = await readdir(dirAbs);
+    } catch {
+      continue;
+    }
+    const match = files.find((name) => isPiSessionFilename(name, id));
+    if (match !== undefined) {
+      return { path: join(dirAbs, match), searchedRoot: root };
+    }
   }
-  return { path, relativePath: posix.relative(sessionsDir, path) };
+  return { path: undefined, searchedRoot: root };
 };
 
 /**
@@ -444,3 +397,129 @@ export const transferPiSession = (
     })
     .join("\n");
 };
+
+// ---------------------------------------------------------------------------
+// Cursor session paths
+// ---------------------------------------------------------------------------
+
+/**
+ * Cursor keeps each chat in `~/.cursor/chats/<md5 of the cwd>/<chat id>/`.
+ * Its `store.db` (SQLite) is the whole conversation: `agent --resume <id>`
+ * replays it with no other file present, and rebuilds `meta.json` itself
+ * (verified with Cursor Agent CLI 2026.10.22).
+ */
+export const cursorChatDirName = (cwd: string): string =>
+  createHash("md5").update(cwd).digest("hex");
+
+/** The host's default Cursor `chats` directory. */
+export const cursorHostChatsDir = (): string =>
+  join(homeDir(), ".cursor", "chats");
+
+// ---------------------------------------------------------------------------
+// Session storage for agents that keep each session in one file
+// ---------------------------------------------------------------------------
+
+/**
+ * Where an agent keeps a session that lives in one file whose path follows
+ * from the cwd and the session id, on the host and in the sandbox.
+ */
+export interface SessionFileLayout {
+  /** The host directory searched by id; named in not-found errors. */
+  readonly hostRoot: string;
+  /** Absolute host path of the session file for a cwd. */
+  readonly hostPath: (cwd: string, id: string) => string;
+  /**
+   * Where the session file may be on the host, found by id alone (the
+   * no-sandbox precheck, where the cwd the agent used is unknown). Given the
+   * names of `hostRoot`'s subdirectories, for agents that key them by cwd.
+   */
+  readonly hostPathsById: (
+    id: string,
+    hostRootSubdirs: readonly string[],
+  ) => readonly string[];
+  /** Sandbox path of the session file for a cwd (POSIX separators). */
+  readonly sandboxPath: (cwd: string, id: string) => string;
+  /** Rewrite the session's own record of its cwd when it moves. Omit to copy verbatim. */
+  readonly rewrite?: (
+    content: string,
+    fromCwd: string,
+    toCwd: string,
+  ) => string;
+}
+
+interface SessionTransfer {
+  readonly hostCwd: string;
+  readonly sandboxCwd: string;
+  readonly sessionId: string;
+  readonly handle: BindMountSandboxHandle;
+}
+
+/** Copy a session file out of the sandbox to the host, then rewrite it. */
+const captureSessionFile =
+  (layout: SessionFileLayout) =>
+  async (transfer: SessionTransfer): Promise<void> => {
+    const { hostCwd, sandboxCwd, sessionId, handle } = transfer;
+    const target = layout.hostPath(hostCwd, sessionId);
+    await mkdir(dirname(target), { recursive: true });
+    await handle.copyFileOut(layout.sandboxPath(sandboxCwd, sessionId), target);
+    if (layout.rewrite !== undefined) {
+      const content = await readFile(target, "utf8");
+      await writeFile(target, layout.rewrite(content, sandboxCwd, hostCwd));
+    }
+  };
+
+/** Copy a session file from the host into the sandbox, rewritten on the way. */
+const resumeSessionFile =
+  (layout: SessionFileLayout) =>
+  async (transfer: SessionTransfer): Promise<void> => {
+    const { hostCwd, sandboxCwd, sessionId, handle } = transfer;
+    const source = layout.hostPath(hostCwd, sessionId);
+    const target = layout.sandboxPath(sandboxCwd, sessionId);
+    const dir = JSON.stringify(posix.dirname(target));
+    if (layout.rewrite === undefined) {
+      await handle.exec(`mkdir -p ${dir}`);
+      await handle.copyFileIn(source, target);
+      return;
+    }
+    const content = await readFile(source, "utf8");
+    const result = await handle.exec(
+      `mkdir -p ${dir} && cat > ${JSON.stringify(target)}`,
+      { stdin: layout.rewrite(content, hostCwd, sandboxCwd) },
+    );
+    if (result.exitCode !== 0) {
+      throw new Error(`writing ${target} failed: ${result.stderr}`);
+    }
+  };
+
+/**
+ * The session storage operations for a {@link SessionFileLayout}: the file is
+ * copied between host and sandbox as is, and rewritten only when the layout
+ * says how. Binary files (an SQLite store) survive when `rewrite` is omitted.
+ */
+export const makeSessionFileStorage = (layout: SessionFileLayout) => ({
+  hostSessionFilePath: (cwd: string, id: string): string =>
+    layout.hostPath(cwd, id),
+  existsOnHost: async (cwd: string, id: string): Promise<boolean> =>
+    pathExists(layout.hostPath(cwd, id)),
+  readHostSession: async (
+    cwd: string,
+    id: string,
+  ): Promise<string | undefined> => {
+    const path = layout.hostPath(cwd, id);
+    return (await pathExists(path)) ? readFile(path, "utf8") : undefined;
+  },
+  findByIdOnHost: async (id: string): Promise<HostSessionLookup> => {
+    let subdirs: string[] = [];
+    try {
+      subdirs = await readdir(layout.hostRoot);
+    } catch {
+      // No store yet: only paths outside hostRoot can match.
+    }
+    return {
+      path: await firstExistingPath(layout.hostPathsById(id, subdirs)),
+      searchedRoot: layout.hostRoot,
+    };
+  },
+  captureToHost: captureSessionFile(layout),
+  resumeIntoSandbox: resumeSessionFile(layout),
+});
