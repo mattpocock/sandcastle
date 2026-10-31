@@ -1,10 +1,22 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  assert,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { vercel } from "./vercel.js";
 
 const sandboxCreate = vi.hoisted(() =>
-  vi.fn(async (_params: unknown) => ({
-    mkDir: async () => {},
-  })),
+  vi
+    .fn<
+      (
+        params: Record<string, unknown>,
+      ) => Promise<{ mkDir: () => Promise<void> }>
+    >()
+    .mockResolvedValue({ mkDir: async () => {} }),
 );
 
 vi.mock("@vercel/sandbox", () => ({
@@ -41,12 +53,12 @@ describe("vercel()", () => {
   it("accepts an env option", () => {
     const provider = vercel({ env: { VERCEL_VAR: "value" } });
     expect(provider.tag).toBe("isolated");
-    expect(provider.env).toEqual({ VERCEL_VAR: "value" });
+    expect(provider.env).toStrictEqual({ VERCEL_VAR: "value" });
   });
 
   it("defaults env to empty object when not provided", () => {
     const provider = vercel();
-    expect(provider.env).toEqual({});
+    expect(provider.env).toStrictEqual({});
   });
 });
 
@@ -72,7 +84,9 @@ describe("vercel() auth from the environment", () => {
   const createdWith = async (options?: Parameters<typeof vercel>[0]) => {
     await vercel(options).create({ env: {} });
     expect(sandboxCreate).toHaveBeenCalledTimes(1);
-    return sandboxCreate.mock.calls[0]![0] as Record<string, unknown>;
+    const [call] = sandboxCreate.mock.calls;
+    assert.isDefined(call);
+    return call[0];
   };
 
   it("passes VERCEL_TOKEN, VERCEL_TEAM_ID and VERCEL_PROJECT_ID from the environment", async () => {
@@ -133,14 +147,14 @@ describe("vercel() auth from the environment", () => {
     vi.stubEnv("VERCEL_TOKEN", "env-token");
     vi.stubEnv("VERCEL_TEAM_ID", "team_env");
 
-    const error = await vercel()
+    const failure = await vercel()
       .create({ env: {} })
-      .catch((e: unknown) => e as Error);
+      .catch((error: unknown) => error);
 
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain("VERCEL_PROJECT_ID");
-    expect((error as Error).message).not.toContain("VERCEL_TEAM_ID");
-    expect((error as Error).message).not.toContain("env-token");
+    assert.instanceOf(failure, Error);
+    expect(failure.message).toContain("VERCEL_PROJECT_ID");
+    expect(failure.message).not.toContain("VERCEL_TEAM_ID");
+    expect(failure.message).not.toContain("env-token");
   });
 
   it("leaves auth to the SDK's OIDC flow when no token is available", async () => {
