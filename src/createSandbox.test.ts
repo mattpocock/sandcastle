@@ -1490,6 +1490,43 @@ describe("createSandbox", () => {
     }
   });
 
+  it("runs host and sandbox onSandboxReady hooks together at creation time", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const sandbox = await createSandbox({
+      branch: "test-host-hooks",
+      sandbox: testSandbox,
+      hooks: {
+        sandbox: {
+          onSandboxReady: [
+            { command: "echo 'sandbox-ran' > sandbox-hook.txt" },
+          ],
+        },
+        host: {
+          onSandboxReady: [{ command: "echo 'host-ran' > host-hook.txt" }],
+        },
+      },
+      cwd: hostDir,
+      _test: {
+        buildSandbox: (sandboxDir) => makeLocalSandbox(sandboxDir),
+      },
+    });
+
+    try {
+      await expect(
+        readFile(join(sandbox.worktreePath, "sandbox-hook.txt"), "utf8"),
+      ).resolves.toBe("sandbox-ran\n");
+      await expect(
+        readFile(join(sandbox.worktreePath, "host-hook.txt"), "utf8"),
+      ).resolves.toBe("host-ran\n");
+    } finally {
+      await sandbox.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
   it("provider's create() is called exactly once across multiple .run() calls", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);

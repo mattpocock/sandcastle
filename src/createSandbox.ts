@@ -873,13 +873,12 @@ export const createSandboxFromWorktree = async (
             sudo: hook.sudo,
           }),
         );
-        const allEffects = [...sandboxEffects] as Effect.Effect<
-          unknown,
-          unknown
-        >[];
-        if (hostOnReady?.length) {
-          allEffects.push(runHostHooks(hostOnReady, worktreePath));
-        }
+        const allEffects = [
+          ...sandboxEffects,
+          ...(hostOnReady?.length
+            ? [runHostHooks(hostOnReady, worktreePath)]
+            : []),
+        ];
         yield* Effect.all(allEffects, {
           concurrency: "unbounded",
         });
@@ -1078,13 +1077,12 @@ export const createSandbox = async (
                   sudo: hook.sudo,
                 }),
               );
-              const allEffects = [...sandboxEffects] as Effect.Effect<
-                unknown,
-                unknown
-              >[];
-              if (hostOnReady?.length) {
-                allEffects.push(runHostHooks(hostOnReady, worktreePath));
-              }
+              const allEffects = [
+                ...sandboxEffects,
+                ...(hostOnReady?.length
+                  ? [runHostHooks(hostOnReady, worktreePath)]
+                  : []),
+              ];
               yield* Effect.all(allEffects, { concurrency: "unbounded" });
             }).pipe(
               Effect.onError(() =>

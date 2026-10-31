@@ -385,7 +385,6 @@
     "vitest(require-to-throw-message)": 1
   },
   "src/createSandbox.ts": {
-    "effect/anyUnknownInErrorContext": 2,
     "effect/globalConsole": 3,
     "effect/newPromise": 1,
     "eslint(complexity)": 3,
