@@ -94,7 +94,7 @@ Instead, create a config layer using Effect for that function, then instantiate 
 
 ## The lint ratchet
 
-`npm run lint` runs oxlint (every category but `restriction` and `nursery` as errors, type-aware, `.oxlintrc.json`) and every Effect language service diagnostic (the `tsconfig.json` plugin). The compiler itself is not ratcheted: `npm run typecheck` passes clean. Code that broke a rule when the linter landed is counted, per file and rule, in `scripts/lint-baseline.json`. `scripts/lint-ratchet.ts` holds the code to that baseline, and the baseline only ever shrinks:
+`npm run lint` runs oxlint (every category but `restriction` and `nursery` as errors, type-aware, `.oxlintrc.json`) and every Effect language service diagnostic (the `tsconfig.json` plugin). The compiler itself is not ratcheted: `npm run typecheck` passes clean. Run `npm run build` first: the scripts in `.sandcastle/` and `.factory/` import `@ai-hero/sandcastle`, whose types come from `dist`, and without them type-aware rules report false `no-unsafe-*` violations. Code that broke a rule when the linter landed is counted, per file and rule, in `scripts/lint-baseline.json`. `scripts/lint-ratchet.ts` holds the code to that baseline, and the baseline only ever shrinks:
 
 - A new violation fails — a count going up, or a file or rule the baseline lacks. Fix it. Never raise the baseline.
 - A fixed violation also fails until the baseline is lowered to match. Run `npm run lint:shrink`, which lowers counts and drops entries at zero but never raises one, and commit the baseline with the fix.
