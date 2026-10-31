@@ -34,8 +34,9 @@ export const AGENTS: readonly Agent[] = [
 
 /** Sandboxes a world may run. noSandbox is left out on purpose: it runs the
  *  agent on this host with the host's full env, and its unit tests cover it. */
-export type Sandbox = "docker" | "podman" | "vercel" | "daytona";
+export type Sandbox = "bwrap" | "docker" | "podman" | "vercel" | "daytona";
 export const SANDBOXES: readonly Sandbox[] = [
+  "bwrap",
   "docker",
   "podman",
   "vercel",
@@ -105,6 +106,9 @@ export const SANDBOX_NEEDS: Record<
   Sandbox,
   { keys: readonly (readonly string[])[]; command?: readonly string[] }
 > = {
+  // The trivial probe: fails off Linux, without bwrap, or when the kernel
+  // blocks unprivileged user namespaces.
+  bwrap: { keys: [], command: ["bwrap", "--ro-bind", "/", "/", "true"] },
   docker: { keys: [], command: ["docker", "info"] },
   podman: { keys: [], command: ["podman", "info"] },
   vercel: { keys: [["VERCEL_TOKEN", "VERCEL_OIDC_TOKEN"]] },
