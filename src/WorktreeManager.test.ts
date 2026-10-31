@@ -96,7 +96,7 @@ const setupRepoWithOrigin = async () => {
 };
 
 /** Run an Effect and return its success value, throwing on failure. */
-const run = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem>) =>
+const run = async <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem>) =>
   Effect.runPromise(effect.pipe(Effect.provide(NodeFileSystem.layer)));
 
 /** Run an Effect and return the error, throwing if it succeeds. */
