@@ -5,14 +5,16 @@
 // - Effect's language service (tsconfig.json plugin)  rule: `effect/<name>`
 // - inline disable comments outside the allowlist     rule: `ratchet/disable-comment`
 //
-// It fails when a count rises or a new file × rule appears, and when a count
-// falls without the baseline being lowered with it, so the baseline only
-// ever shrinks. It also fails if the baseline grew against origin/main
+// It fails when a count rises or a new file × rule appears. A count that falls
+// below the baseline passes: lowering the baseline is optional in a PR, and
+// .github/workflows/lint-shrink.yml opens a "shrink baseline" PR after each
+// push to main. It also fails if the baseline grew against origin/main
 // (where that ref exists), and if .oxlintrc.json gains an override beyond
 // the two reviewed ones in scripts/lint-ratchet-config.ts.
 //
 //   npm run lint          oxlint, Effect diagnostics, then this check
-//   npm run lint:shrink   lower the baseline to what is found (never raises it)
+//   npm run lint:shrink   lower the baseline to what is found (never raises it);
+//                         optional, the shrink-baseline workflow does it on main
 //   npm run lint:report   totals, worst rules, worst files of the baseline
 //   tsx scripts/lint-ratchet.ts --init   first baseline; refuses once one exists
 //
@@ -103,7 +105,7 @@ const section = (title: string, lines: readonly string[]): string =>
     : `\n${title}\n${lines.map((l) => `  ${l}`).join("\n")}\n`;
 
 const check = async (found: Counts, baseline: Counts): Promise<string> => {
-  const { grown, stale } = compare(found, baseline);
+  const { grown } = compare(found, baseline);
   const base = await readBaseBaseline();
   const growth = base === undefined ? [] : baselineGrowth(baseline, base);
   const config = await checkOverrides();
@@ -111,10 +113,6 @@ const check = async (found: Counts, baseline: Counts): Promise<string> => {
     section(
       "New violations (file: rule baseline -> found). Fix them; never add a disable comment or raise the baseline. `npx oxlint <file>` shows where:",
       grown,
-    ),
-    section(
-      "Fixed violations (file: rule baseline -> found). Lower the baseline with `npm run lint:shrink`:",
-      stale,
     ),
     section(
       `${BASELINE_PATH} grew against origin/main. It only shrinks:`,
@@ -145,6 +143,14 @@ const printReport = async (): Promise<void> => {
   process.stdout.write(`${report(await readBaseline(), REPORT_LIMIT)}\n`);
 };
 
+/** A note on counts below the baseline. They pass; the workflow lowers it. */
+const belowBaseline = (found: Counts, baseline: Counts): string => {
+  const { stale } = compare(found, baseline);
+  return stale.length === 0
+    ? ""
+    : ` ${String(stale.length)} file × rule counts are below the baseline; the lint-shrink workflow lowers it after merge (or run \`npm run lint:shrink\`).`;
+};
+
 const verify = async (shrinkFirst: boolean): Promise<void> => {
   const found = await collect();
   if (shrinkFirst) {
@@ -157,7 +163,9 @@ const verify = async (shrinkFirst: boolean): Promise<void> => {
     return;
   }
   const [summary] = report(found, 0).split("\n");
-  process.stdout.write(`lint ratchet: ${summary ?? ""}, none new.\n`);
+  process.stdout.write(
+    `lint ratchet: ${summary ?? ""}, none new.${belowBaseline(found, await readBaseline())}\n`,
+  );
 };
 
 const MODES: Readonly<Record<string, () => Promise<void>>> = {
