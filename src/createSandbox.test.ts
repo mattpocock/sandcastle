@@ -315,7 +315,7 @@ describe("createSandbox", () => {
       _test: {
         buildSandbox: (sandboxDir) =>
           makeMockCodexLayerWithUsage(sandboxDir, "ok", {
-            input_tokens: 50000,
+            input_tokens: 50_000,
             cached_input_tokens: 0,
             output_tokens: 100,
           }),
@@ -335,7 +335,7 @@ describe("createSandbox", () => {
       expect(result.iterations[0]!.usage).toBeDefined();
       expect(result.iterations[0]!.contextWindow).toBeUndefined();
 
-      const log = await readFile(logPath, "utf-8");
+      const log = await readFile(logPath, "utf8");
       expect(log).not.toContain("Context window");
     } finally {
       await sandbox.close();
@@ -407,7 +407,7 @@ describe("createSandbox", () => {
                       message: {
                         model: "claude-opus-4-8",
                         usage: {
-                          input_tokens: 50000,
+                          input_tokens: 50_000,
                           cache_creation_input_tokens: 0,
                           cache_read_input_tokens: 0,
                           output_tokens: 100,
@@ -429,7 +429,7 @@ describe("createSandbox", () => {
                   message: {
                     content: [{ type: "text", text: "ok" }],
                     usage: {
-                      input_tokens: 50000,
+                      input_tokens: 50_000,
                       cache_creation_input_tokens: 0,
                       cache_read_input_tokens: 0,
                       output_tokens: 100,
@@ -472,14 +472,14 @@ describe("createSandbox", () => {
 
       // Usage was parsed out of the captured session JSONL.
       expect(result.iterations[0]!.usage).toEqual({
-        inputTokens: 50000,
+        inputTokens: 50_000,
         cacheCreationInputTokens: 0,
         cacheReadInputTokens: 0,
         outputTokens: 100,
       });
       expect(result.iterations[0]!.sessionFilePath).toBeDefined();
 
-      const log = await readFile(logPath, "utf-8");
+      const log = await readFile(logPath, "utf8");
       expect(log).toContain("Context window: 50k");
     } finally {
       await sandbox.close();
@@ -902,7 +902,7 @@ describe("createSandbox", () => {
         logging: { type: "file", path: logPath, verbose: true },
       });
 
-      const log = await readFile(logPath, "utf-8");
+      const log = await readFile(logPath, "utf8");
       expect(log).toContain(droppedToolLine);
       expect(log).toContain(recognisedLine);
     } finally {
@@ -976,7 +976,7 @@ describe("createSandbox", () => {
         logging: { type: "file", path: logPath },
       });
 
-      const log = await readFile(logPath, "utf-8");
+      const log = await readFile(logPath, "utf8");
       expect(log).not.toContain(droppedToolLine);
       expect(log).not.toContain(recognisedLine);
     } finally {
@@ -1463,7 +1463,7 @@ describe("createSandbox", () => {
       // The hook wrote a file into the worktree (cwd is sandboxRepoDir = worktreePath in test mode)
       const hookOutput = await readFile(
         join(sandbox.worktreePath, "hook-output.txt"),
-        "utf-8",
+        "utf8",
       );
       expect(hookOutput.trim()).toBe("hook-ran");
     } finally {
@@ -1637,7 +1637,7 @@ describe("createSandbox", () => {
             // Run 2: verify the file still exists
             const content = await readFile(
               join(cwd, "persistent-state.txt"),
-              "utf-8",
+              "utf8",
             );
             if (content !== "from-run-1") {
               throw new Error("State did not persist between runs!");
@@ -1657,7 +1657,7 @@ describe("createSandbox", () => {
       // Verify file exists on host between runs
       const content = await readFile(
         join(sandbox.worktreePath, "persistent-state.txt"),
-        "utf-8",
+        "utf8",
       );
       expect(content).toBe("from-run-1");
 
@@ -2436,7 +2436,7 @@ describe("createSandbox", () => {
     try {
       const copied = await readFile(
         join(sandbox.worktreePath, "config.json"),
-        "utf-8",
+        "utf8",
       );
       expect(JSON.parse(copied)).toEqual({ key: "value" });
     } finally {

@@ -53,7 +53,7 @@ export const defaultImageName = (repoDir: string): string => {
 export const expandTilde = (p: string, homeDirPath?: string): string => {
   const home = homeDirPath ?? homedir();
   if (p === "~") return home;
-  if (p.startsWith("~/") || p.startsWith("~\\")) return home + "/" + p.slice(2);
+  if (p.startsWith("~/") || p.startsWith("~\\")) return `${home}/${p.slice(2)}`;
   return p;
 };
 
@@ -98,16 +98,17 @@ export const resolveSandboxPath = (
 export const resolveUserMounts = (
   mounts: readonly MountConfig[],
   sandboxHomedir?: string,
-): Array<{ hostPath: string; sandboxPath: string; readonly?: boolean }> =>
+): { hostPath: string; sandboxPath: string; readonly?: boolean }[] =>
   mounts.map((m) => {
     const resolvedHostPath = resolveHostPath(m.hostPath);
 
     if (!existsSync(resolvedHostPath)) {
       throw new Error(
-        `Mount hostPath does not exist: ${m.hostPath}` +
-          (m.hostPath !== resolvedHostPath
+        `Mount hostPath does not exist: ${m.hostPath}${
+          m.hostPath !== resolvedHostPath
             ? ` (resolved to ${resolvedHostPath})`
-            : ""),
+            : ""
+        }`,
       );
     }
 
@@ -158,7 +159,7 @@ export const normalizeMounts = <
       // This is a Windows-style path — remap it
       const normalizedSandboxPath = sandboxPath.replace(/\\/g, "/");
 
-      if (normalizedSandboxPath.startsWith(normalizedWorktree + "/")) {
+      if (normalizedSandboxPath.startsWith(`${normalizedWorktree}/`)) {
         // Under the worktree: derive sandbox path relative to sandboxRepoDir
         const relativeSuffix = normalizedSandboxPath.slice(
           normalizedWorktree.length,
@@ -214,16 +215,13 @@ export const parseGitdirPath = (
  * @param platform - Override for `process.platform` (injectable for tests).
  */
 export const patchGitMountsForWindows = (
-  gitMounts: Array<{ hostPath: string; sandboxPath: string }>,
+  gitMounts: { hostPath: string; sandboxPath: string }[],
   worktreeHostPath: string,
   sandboxRepoDir: string,
   readFile?: (path: string) => Promise<string>,
   statFile?: (path: string) => Promise<"file" | "directory">,
   platform: string = process.platform,
-): Effect.Effect<
-  Array<{ hostPath: string; sandboxPath: string }>,
-  WorktreeError
-> =>
+): Effect.Effect<{ hostPath: string; sandboxPath: string }[], WorktreeError> =>
   Effect.gen(function* () {
     if (platform !== "win32") return gitMounts;
 
@@ -231,7 +229,7 @@ export const patchGitMountsForWindows = (
       readFile ??
       (async (p: string) => {
         const { readFile: rf } = await import("node:fs/promises");
-        return rf(p, "utf-8");
+        return rf(p, "utf8");
       });
     const _statFile =
       statFile ??
@@ -291,8 +289,7 @@ export const patchGitMountsForWindows = (
     const normalizedParentGitDir = parentGitDir.replace(/\\/g, "/");
     const gitFileHostPath = gitEntryPath.replace(/\\/g, "/");
 
-    const correctedMounts: Array<{ hostPath: string; sandboxPath: string }> =
-      [];
+    const correctedMounts: { hostPath: string; sandboxPath: string }[] = [];
     let replacedGitFile = false;
 
     for (const m of gitMounts) {
@@ -361,7 +358,7 @@ export const formatVolumeMount = (
  * @param statFn - Injectable stat function for testing (defaults to `statSync`).
  */
 export const processFileMountParents = (
-  mounts: ReadonlyArray<{ hostPath: string; sandboxPath: string }>,
+  mounts: readonly { hostPath: string; sandboxPath: string }[],
   sandboxHomedir: string,
   statFn: (path: string) => { isFile(): boolean } = statSync,
 ): string[] => {
@@ -383,7 +380,7 @@ export const processFileMountParents = (
     if (parentDir === sandboxHomedir) continue;
 
     // Parent is outside sandboxHomedir — fail at config time
-    if (!parentDir.startsWith(sandboxHomedir + "/")) {
+    if (!parentDir.startsWith(`${sandboxHomedir}/`)) {
       throw new Error(
         `Cannot mount file to '${mount.sandboxPath}': ` +
           `parent directory '${parentDir}' is outside the sandbox home directory ('${sandboxHomedir}'). ` +

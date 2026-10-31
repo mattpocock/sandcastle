@@ -97,7 +97,7 @@ describe("testIsolated()", () => {
       await handle.copyFileOut(sandboxFile, hostFile);
 
       // Verify it exists on the host
-      const content = readFileSync(hostFile, "utf-8");
+      const content = readFileSync(hostFile, "utf8");
       expect(content.trim()).toBe("hello from sandbox");
     } finally {
       await handle.close();

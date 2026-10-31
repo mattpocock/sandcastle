@@ -89,7 +89,7 @@ describe("WorktreeDockerSandboxFactory — baseBranch (real git)", () => {
           },
         }),
         NodeFileSystem.layer,
-        SilentDisplay.layer(Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([])),
+        SilentDisplay.layer(Ref.unsafeMake<readonly DisplayEntry[]>([])),
       ),
     );
 

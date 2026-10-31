@@ -386,7 +386,7 @@ describe("WorktreeManager.create", () => {
     });
     expect(afterSha.trim()).not.toBe(initialSha.trim());
     // The pushed file should now exist in the worktree
-    const newFile = await readFile(join(second.path, "new.txt"), "utf-8");
+    const newFile = await readFile(join(second.path, "new.txt"), "utf8");
     expect(newFile).toBe("new");
 
     await run(remove(first.path));
@@ -420,7 +420,7 @@ describe("WorktreeManager.create", () => {
       cwd: second.path,
     });
     expect(afterSha.trim()).toBe(localSha.trim());
-    const localFile = await readFile(join(second.path, "local.txt"), "utf-8");
+    const localFile = await readFile(join(second.path, "local.txt"), "utf8");
     expect(localFile).toBe("local");
 
     await run(remove(first.path));
@@ -454,7 +454,7 @@ describe("WorktreeManager.create", () => {
     });
     expect(afterSha.trim()).toBe(initialSha.trim());
     // The uncommitted file is still there
-    const dirty = await readFile(join(second.path, "dirty.txt"), "utf-8");
+    const dirty = await readFile(join(second.path, "dirty.txt"), "utf8");
     expect(dirty).toBe("uncommitted");
 
     await run(remove(first.path));
@@ -511,7 +511,7 @@ describe("WorktreeManager.create", () => {
       cwd: second.path,
     });
     expect(afterSha.trim()).toBe(localSha.trim());
-    const localFile = await readFile(join(second.path, "local.txt"), "utf-8");
+    const localFile = await readFile(join(second.path, "local.txt"), "utf8");
     expect(localFile).toBe("local");
 
     await run(remove(first.path));
@@ -694,7 +694,9 @@ describe("WorktreeManager.create", () => {
     const { path, branch } = await run(create(repoDir));
 
     // The temp branch should also have no upstream tracking config
-    const escapedBranch = branch.replace(/\//g, "\\/").replace(/\./g, "\\.");
+    const escapedBranch = branch
+      .replace(/\//g, String.raw`\/`)
+      .replace(/\./g, String.raw`\.`);
     const { stdout: trackingConfig } = await execAsync(
       `git config --get-regexp "branch\\.${escapedBranch}\\." || true`,
       { cwd: repoDir },

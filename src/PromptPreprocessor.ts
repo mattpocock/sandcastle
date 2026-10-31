@@ -13,7 +13,7 @@ const PROMPT_EXPANSION_TIMEOUT_MS = 30_000;
  * `!`...`` patterns arriving via argument substitution are treated as data.
  * Used only by `substitutePromptArgs`; not part of the public API.
  */
-export const SHELL_BLOCK_MARKER = "\x01";
+export const SHELL_BLOCK_MARKER = "\u0001";
 
 const MARKED_SHELL_BLOCK_PATTERN = new RegExp(
   `!${SHELL_BLOCK_MARKER}\`([^\`]+)\``,

@@ -763,8 +763,8 @@ export const createWorktree = async (
 
   const worktreeCreateSandbox = async (
     opts: WorktreeCreateSandboxOptions,
-  ): Promise<Sandbox> => {
-    return createSandboxFromWorktree({
+  ): Promise<Sandbox> =>
+    createSandboxFromWorktree({
       branch: worktreeInfo.branch,
       worktreePath: worktreeInfo.path,
       hostRepoDir,
@@ -780,8 +780,6 @@ export const createWorktree = async (
       branchStrategy: options.branchStrategy,
       _test: opts._test,
     });
-  };
-
   return {
     branch: worktreeInfo.branch,
     worktreePath: worktreeInfo.path,

@@ -22,7 +22,7 @@ export type DisplayEntry =
   | {
       readonly _tag: "taskLog";
       readonly title: string;
-      readonly messages: ReadonlyArray<string>;
+      readonly messages: readonly string[];
     }
   | { readonly _tag: "text"; readonly message: string }
   | { readonly _tag: "textChunk"; readonly message: string }
@@ -73,7 +73,7 @@ export class Display extends Context.Tag("Display")<
 >() {}
 
 export const SilentDisplay = {
-  layer: (ref: Ref.Ref<ReadonlyArray<DisplayEntry>>): Layer.Layer<Display> =>
+  layer: (ref: Ref.Ref<readonly DisplayEntry[]>): Layer.Layer<Display> =>
     Layer.succeed(Display, {
       intro: (title) =>
         Ref.update(ref, (entries) => [

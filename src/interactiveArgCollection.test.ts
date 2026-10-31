@@ -69,7 +69,7 @@ describe("interactive arg collection", () => {
           exec: async (command) => {
             const result = execSync(command, {
               cwd: options.worktreePath,
-              encoding: "utf-8",
+              encoding: "utf8",
               stdio: ["pipe", "pipe", "pipe"],
             });
             return { stdout: result, stderr: "", exitCode: 0 };

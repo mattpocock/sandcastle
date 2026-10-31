@@ -84,7 +84,7 @@ const shellProvider = (
           let stdout = "";
           let stderr = "";
           createInterface({ input: proc.stdout! }).on("line", (line) => {
-            stdout += line + "\n";
+            stdout += `${line}\n`;
             execOpts?.onLine?.(line);
           });
           proc.stderr!.on("data", (c: Buffer) => (stderr += c.toString()));

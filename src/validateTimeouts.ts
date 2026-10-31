@@ -12,7 +12,7 @@ const TIMEOUTS_KEYS = [
   "gitSetupMs",
   "commitCollectionMs",
   "mergeToHostMs",
-] as const satisfies ReadonlyArray<keyof Timeouts>;
+] as const satisfies readonly (keyof Timeouts)[];
 
 const assertPositive = (
   name: string,

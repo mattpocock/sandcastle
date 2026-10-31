@@ -163,13 +163,13 @@ describe("withFriendlyErrors", () => {
 
   const runWithDisplay = async (
     effect: Effect.Effect<unknown, never, Display>,
-  ): Promise<ReadonlyArray<DisplayEntry>> => {
-    const ref = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+  ): Promise<readonly DisplayEntry[]> => {
+    const ref = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     await Effect.runPromise(Effect.provide(effect, SilentDisplay.layer(ref)));
     return Effect.runSync(Ref.get(ref));
   };
 
-  const statusOf = (entries: ReadonlyArray<DisplayEntry>) =>
+  const statusOf = (entries: readonly DisplayEntry[]) =>
     entries.find((e) => e._tag === "status") as
       | Extract<DisplayEntry, { _tag: "status" }>
       | undefined;
@@ -218,7 +218,7 @@ describe("withFriendlyErrors", () => {
   });
 
   it("passes through successful effects unchanged", async () => {
-    const ref = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const ref = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     const result = await Effect.runPromise(
       withFriendlyErrors(Effect.succeed("ok")).pipe(
         Effect.provide(SilentDisplay.layer(ref)),

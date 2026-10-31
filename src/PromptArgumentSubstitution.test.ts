@@ -12,7 +12,7 @@ import { PromptError } from "./errors.js";
 
 describe("PromptArgumentSubstitution", () => {
   const setup = () => {
-    const displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const displayRef = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     const layer = SilentDisplay.layer(displayRef);
     return { layer, displayRef };
   };
@@ -137,7 +137,7 @@ describe("PromptArgumentSubstitution", () => {
     );
     // Template-authored shell blocks are marked with \x01 so the preprocessor
     // can distinguish them from `!`...`` patterns injected via arg values.
-    expect(result).toBe("Output: !\x01`gh issue view 123`");
+    expect(result).toBe("Output: !\u0001`gh issue view 123`");
   });
 
   it("replaces {{ KEY }} with spaces inside braces", async () => {

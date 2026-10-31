@@ -106,7 +106,7 @@ describe("WorktreeDockerSandboxFactory", () => {
   let mockProvider: ReturnType<typeof makeMockProvider>;
 
   const makeLayer = (
-    displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]),
+    displayRef = Ref.unsafeMake<readonly DisplayEntry[]>([]),
     branchStrategy: BranchStrategy = { type: "merge-to-head" },
   ) =>
     Layer.provide(
@@ -139,7 +139,7 @@ describe("WorktreeDockerSandboxFactory", () => {
 
   it("creates a real worktree on the given branch when branch is specified", async () => {
     const layerWithBranch = makeLayer(
-      Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]),
+      Ref.unsafeMake<readonly DisplayEntry[]>([]),
       { type: "branch", branch: "feature/my-branch" },
     );
 
@@ -197,7 +197,7 @@ describe("WorktreeDockerSandboxFactory", () => {
           branchStrategy: { type: "merge-to-head" },
         }),
         NodeFileSystem.layer,
-        SilentDisplay.layer(Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([])),
+        SilentDisplay.layer(Ref.unsafeMake<readonly DisplayEntry[]>([])),
       ),
     );
 
@@ -353,7 +353,7 @@ describe("WorktreeDockerSandboxFactory", () => {
   it("logs copy-to-sandbox as a spinner when copyToWorktree paths are provided", async () => {
     await writeFile(join(hostRepoDir, "some-file.txt"), "content");
 
-    const ref = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const ref = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     const layerWithCopy = Layer.provide(
       WorktreeDockerSandboxFactory.layer,
       Layer.mergeAll(
@@ -527,7 +527,7 @@ describe("WorktreeDockerSandboxFactory", () => {
           );
         }).pipe(
           Effect.provide(
-            makeLayer(Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]), {
+            makeLayer(Ref.unsafeMake<readonly DisplayEntry[]>([]), {
               type: "branch",
               branch: "feature/keep-me",
             }),
@@ -560,7 +560,7 @@ describe("WorktreeDockerSandboxFactory", () => {
           branchStrategy: { type: "merge-to-head" },
         }),
         NodeFileSystem.layer,
-        SilentDisplay.layer(Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([])),
+        SilentDisplay.layer(Ref.unsafeMake<readonly DisplayEntry[]>([])),
       ),
     );
 
@@ -624,7 +624,7 @@ describe("WorktreeDockerSandboxFactory", () => {
 
   describe("head branch strategy", () => {
     const makeHeadLayer = (
-      displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]),
+      displayRef = Ref.unsafeMake<readonly DisplayEntry[]>([]),
     ) => makeLayer(displayRef, { type: "head" });
 
     it("does not create a worktree", async () => {
@@ -715,7 +715,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
           branchStrategy: { type: "merge-to-head" },
         }),
         NodeFileSystem.layer,
-        SilentDisplay.layer(Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([])),
+        SilentDisplay.layer(Ref.unsafeMake<readonly DisplayEntry[]>([])),
       ),
     );
 
@@ -905,7 +905,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
           branchStrategy: { type: "branch", branch: "feature/my-branch" },
         }),
         NodeFileSystem.layer,
-        SilentDisplay.layer(Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([])),
+        SilentDisplay.layer(Ref.unsafeMake<readonly DisplayEntry[]>([])),
       ),
     );
 
@@ -1014,7 +1014,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
           branchStrategy: { type: "merge-to-head" },
         }),
         NodeFileSystem.layer,
-        SilentDisplay.layer(Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([])),
+        SilentDisplay.layer(Ref.unsafeMake<readonly DisplayEntry[]>([])),
       ),
     );
 
@@ -1090,7 +1090,7 @@ describe("WorktreeDockerSandboxFactory — no-sandbox provider", () => {
           branchStrategy,
         }),
         NodeFileSystem.layer,
-        SilentDisplay.layer(Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([])),
+        SilentDisplay.layer(Ref.unsafeMake<readonly DisplayEntry[]>([])),
       ),
     );
 
@@ -1178,7 +1178,7 @@ describe("WorktreeDockerSandboxFactory — no-sandbox provider", () => {
           branchStrategy: { type: "merge-to-head" },
         }),
         NodeFileSystem.layer,
-        SilentDisplay.layer(Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([])),
+        SilentDisplay.layer(Ref.unsafeMake<readonly DisplayEntry[]>([])),
       ),
     );
 
@@ -1215,7 +1215,7 @@ describe("WorktreeDockerSandboxFactory — interruption preserves the worktree",
     return dir;
   };
 
-  const providers: Array<[string, () => SandboxProvider]> = [
+  const providers: [string, () => SandboxProvider][] = [
     [
       "bind-mount",
       () =>
@@ -1242,7 +1242,7 @@ describe("WorktreeDockerSandboxFactory — interruption preserves the worktree",
           signal,
         }),
         NodeFileSystem.layer,
-        SilentDisplay.layer(Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([])),
+        SilentDisplay.layer(Ref.unsafeMake<readonly DisplayEntry[]>([])),
       ),
     );
 

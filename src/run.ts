@@ -315,14 +315,14 @@ const buildVerboseRawLineSink = (
     return (line) => {
       try {
         const prefix = fileEndsMidLine(logPath) ? "\n" : "";
-        appendFileSync(logPath, prefix + line + "\n");
+        appendFileSync(logPath, `${prefix + line}\n`);
       } catch {
         // Swallow — verbose-mode I/O errors must not kill the run.
       }
     };
   }
   return (line) => {
-    process.stdout.write(line + "\n");
+    process.stdout.write(`${line}\n`);
   };
 };
 

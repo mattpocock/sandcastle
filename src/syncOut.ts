@@ -120,7 +120,7 @@ const isEmptyPatch = (patchPath: string): Effect.Effect<boolean, SyncError> =>
     try: async () => {
       const info = await stat(patchPath);
       if (info.size === 0) return true;
-      const content = await readFile(patchPath, "utf-8");
+      const content = await readFile(patchPath, "utf8");
       return !content.includes("diff --git");
     },
     catch: (e) =>

@@ -385,8 +385,8 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
         interactiveExec: (
           args: string[],
           opts: InteractiveExecOptions,
-        ): Promise<{ exitCode: number }> => {
-          return new Promise((resolve, reject) => {
+        ): Promise<{ exitCode: number }> =>
+          new Promise((resolve, reject) => {
             const podmanArgs = ["exec"];
             // Allocate a pseudo-terminal when stdin looks like a TTY
             if (
@@ -411,9 +411,7 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
             proc.on("close", (code: number | null) => {
               resolve({ exitCode: code ?? 0 });
             });
-          });
-        },
-
+          }),
         copyFileIn: (hostPath: string, sandboxPath: string): Promise<void> =>
           new Promise((resolve, reject) => {
             execFile(
@@ -501,9 +499,9 @@ const checkPodmanMachine = (): Promise<void> =>
           return;
         }
         try {
-          const machines = JSON.parse(stdout.toString()) as Array<{
+          const machines = JSON.parse(stdout.toString()) as {
             Running?: boolean;
-          }>;
+          }[];
           if (machines.some((m) => m.Running)) {
             resolve();
           } else {

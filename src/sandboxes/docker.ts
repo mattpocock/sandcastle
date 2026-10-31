@@ -325,8 +325,8 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
         interactiveExec: (
           args: string[],
           opts: InteractiveExecOptions,
-        ): Promise<{ exitCode: number }> => {
-          return new Promise((resolve, reject) => {
+        ): Promise<{ exitCode: number }> =>
+          new Promise((resolve, reject) => {
             const dockerArgs = ["exec"];
             // Allocate a pseudo-terminal when stdin looks like a TTY
             if (
@@ -351,9 +351,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
             proc.on("close", (code: number | null) => {
               resolve({ exitCode: code ?? 0 });
             });
-          });
-        },
-
+          }),
         copyFileIn: (hostPath: string, sandboxPath: string): Promise<void> =>
           new Promise((resolve, reject) => {
             execFile(

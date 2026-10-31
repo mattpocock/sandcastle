@@ -22,7 +22,8 @@ import type {
   CreateSandboxFromSnapshotParams,
 } from "@daytona/sdk";
 
-const shellEscape = (s: string): string => "'" + s.replace(/'/g, "'\\''") + "'";
+const shellEscape = (s: string): string =>
+  `'${s.replace(/'/g, String.raw`'\''`)}'`;
 
 /** Options for the Daytona sandbox provider. */
 export interface DaytonaOptions {

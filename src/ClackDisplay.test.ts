@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const calls: Array<[string, string]> = vi.hoisted(() => []);
+const calls: [string, string][] = vi.hoisted(() => []);
 
 vi.mock("@clack/prompts", () => {
   const record = (kind: string) => (msg: string) => {
@@ -23,7 +23,7 @@ vi.mock("@clack/prompts", () => {
 
 const { ClackDisplay, Display } = await import("./Display.js");
 
-const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
+const strip = (s: string) => s.replace(/\u001B\[[0-9;]*m/g, "");
 
 const runWith = (
   program: Effect.Effect<void, never, InstanceType<typeof Display>>,

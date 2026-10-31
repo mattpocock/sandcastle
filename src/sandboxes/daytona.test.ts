@@ -230,7 +230,7 @@ describe("daytona()", () => {
           () => (settled = true),
         );
         for (let i = 0; i < 20 && !settled; i++)
-          await vi.advanceTimersByTimeAsync(5_000);
+          await vi.advanceTimersByTimeAsync(5000);
 
         await expect(outcome).rejects.toThrow(
           /session shell exited before the command finished/,

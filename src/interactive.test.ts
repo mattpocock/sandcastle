@@ -125,7 +125,7 @@ describe("interactive()", () => {
           exec: async (command) => {
             const result = execSync(command, {
               cwd: options.worktreePath,
-              encoding: "utf-8",
+              encoding: "utf8",
               stdio: ["pipe", "pipe", "pipe"],
             });
             return { stdout: result, stderr: "", exitCode: 0 };
@@ -140,9 +140,9 @@ describe("interactive()", () => {
     });
 
   it("returns InteractiveResult with exitCode, branch, and commits", async () => {
-    const provider = makeTestProvider(async (_args, _opts) => {
-      return { exitCode: 0 };
-    });
+    const provider = makeTestProvider(async (_args, _opts) => ({
+      exitCode: 0,
+    }));
 
     const result = await interactive({
       agent: claudeCode("claude-opus-4-8"),
@@ -199,9 +199,7 @@ describe("interactive()", () => {
   });
 
   it("returns non-zero exitCode from the interactive session", async () => {
-    const provider = makeTestProvider(async () => {
-      return { exitCode: 42 };
-    });
+    const provider = makeTestProvider(async () => ({ exitCode: 42 }));
 
     const result = await interactive({
       agent: claudeCode("claude-opus-4-8"),
@@ -220,7 +218,7 @@ describe("interactive()", () => {
         exec: async (command) => {
           const result = execSync(command, {
             cwd: options.worktreePath,
-            encoding: "utf-8",
+            encoding: "utf8",
             stdio: ["pipe", "pipe", "pipe"],
           });
           return { stdout: result, stderr: "", exitCode: 0 };
@@ -437,7 +435,7 @@ describe("interactive()", () => {
     // Get current branch name for verification
     const currentBranch = execSync("git rev-parse --abbrev-ref HEAD", {
       cwd: hostDir,
-      encoding: "utf-8",
+      encoding: "utf8",
     }).trim();
 
     await interactive({
@@ -505,7 +503,7 @@ describe("interactive()", () => {
 
     const currentBranch = execSync("git rev-parse --abbrev-ref HEAD", {
       cwd: hostDir,
-      encoding: "utf-8",
+      encoding: "utf8",
     }).trim();
 
     const result = await interactive({
@@ -530,7 +528,7 @@ describe("interactive()", () => {
 
     const currentBranch = execSync("git rev-parse --abbrev-ref HEAD", {
       cwd: hostDir,
-      encoding: "utf-8",
+      encoding: "utf8",
     }).trim();
 
     const result = await interactive({
@@ -547,7 +545,7 @@ describe("interactive()", () => {
     // Verify the commit is on the current branch
     const log = execSync("git log --oneline -1", {
       cwd: hostDir,
-      encoding: "utf-8",
+      encoding: "utf8",
     });
     expect(log).toContain("merge commit");
   });
@@ -562,7 +560,7 @@ describe("interactive()", () => {
       promptArg = args[args.length - 1];
       actualBranch = execSync("git rev-parse --abbrev-ref HEAD", {
         cwd: opts.cwd!,
-        encoding: "utf-8",
+        encoding: "utf8",
       }).trim();
       return { exitCode: 0 };
     });
@@ -600,7 +598,7 @@ describe("interactive()", () => {
     // Verify branch exists
     const branches = execSync("git branch", {
       cwd: hostDir,
-      encoding: "utf-8",
+      encoding: "utf8",
     });
     expect(branches).toContain("feature/test-branch");
   });
@@ -720,15 +718,16 @@ describe("interactive()", () => {
   it("aborts an active interactive session when signal fires", async () => {
     const ac = new AbortController();
 
-    const provider = makeTestProvider(async (_args, _opts) => {
-      // Simulate a long-running interactive session
-      return new Promise<{ exitCode: number }>((resolve) => {
-        // Abort mid-session
-        setTimeout(() => ac.abort("mid-session abort"), 50);
-        // This would normally run for a long time
-        setTimeout(() => resolve({ exitCode: 0 }), 10000);
-      });
-    });
+    const provider = makeTestProvider(
+      async (_args, _opts) =>
+        // Simulate a long-running interactive session
+        new Promise<{ exitCode: number }>((resolve) => {
+          // Abort mid-session
+          setTimeout(() => ac.abort("mid-session abort"), 50);
+          // This would normally run for a long time
+          setTimeout(() => resolve({ exitCode: 0 }), 10_000);
+        }),
+    );
 
     await expect(
       interactive({
