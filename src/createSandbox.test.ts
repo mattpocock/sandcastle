@@ -15,6 +15,7 @@ import { Effect, Layer } from "effect";
 import { describe, expect, it } from "vitest";
 import { claudeCode, codex, pi } from "./AgentProvider.js";
 import { createSandbox, type CreateSandboxOptions } from "./createSandbox.js";
+import { createWorktree } from "./createWorktree.js";
 import type { SandboxService } from "./SandboxFactory.js";
 import {
   createBindMountSandboxProvider,
@@ -1542,6 +1543,54 @@ describe("createSandbox", () => {
       expect(branch.trim()).toBe("test-isolated-commits");
     } finally {
       await sandbox.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("isolated provider: copyToWorktree copies gitignored files from the host repo", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, ".gitignore", "secret.txt\n", "initial commit");
+    // Gitignored, so it exists only in the host repo, never in a fresh worktree
+    await writeFile(join(hostDir, "secret.txt"), "host secret");
+
+    const sandbox = await createSandbox({
+      branch: "test-isolated-copy",
+      sandbox: testIsolated(),
+      copyToWorktree: ["secret.txt"],
+      cwd: hostDir,
+    });
+
+    try {
+      const result = await sandbox.exec("cat secret.txt");
+      expect(result.stdout.trim()).toBe("host secret");
+    } finally {
+      await sandbox.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("isolated provider: worktree.createSandbox() copyToWorktree copies gitignored files from the host repo", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, ".gitignore", "secret.txt\n", "initial commit");
+    await writeFile(join(hostDir, "secret.txt"), "host secret");
+
+    const worktree = await createWorktree({
+      branchStrategy: { type: "branch", branch: "test-wt-isolated-copy" },
+      cwd: hostDir,
+    });
+    const sandbox = await worktree.createSandbox({
+      sandbox: testIsolated(),
+      copyToWorktree: ["secret.txt"],
+    });
+
+    try {
+      const result = await sandbox.exec("cat secret.txt");
+      expect(result.stdout.trim()).toBe("host secret");
+    } finally {
+      await sandbox.close();
+      await worktree.close();
       await rm(hostDir, { recursive: true, force: true });
     }
   });

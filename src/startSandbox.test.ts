@@ -171,6 +171,7 @@ describe("startSandbox", () => {
           hostRepoDir: hostDir,
           env: {},
           copyPaths: ["extra.txt"],
+          copySourceDir: hostDir,
         }),
       );
 
@@ -221,6 +222,7 @@ describe("startSandbox", () => {
             hostRepoDir: hostDir,
             env: {},
             copyPaths: ["hang.txt"],
+            copySourceDir: hostDir,
           }),
         );
         // Yield to allow real async operations (create, syncIn) to complete
@@ -313,6 +315,7 @@ describe("startSandbox", () => {
           hostRepoDir: hostDir,
           env: {},
           copyPaths: ["extra.txt"],
+          copySourceDir: hostDir,
         }),
       );
 
@@ -362,6 +365,7 @@ describe("startSandbox", () => {
           hostRepoDir: hostDir,
           env: {},
           copyPaths: ["nonexistent.txt"],
+          copySourceDir: hostDir,
         }),
       );
 
