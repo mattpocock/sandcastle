@@ -45,6 +45,13 @@ vi.mock("@daytona/sdk", async () => {
     };
   };
   const sessionCommands = new Map<string, ReturnType<typeof sessionSh>>();
+  const sessionCommand = (cmdId: string) => {
+    const recorded = sessionCommands.get(cmdId);
+    if (recorded === undefined) {
+      throw new Error(`fake Daytona: unknown session command ${cmdId}`);
+    }
+    return recorded;
+  };
 
   class Daytona {
     async create(params: unknown) {
@@ -84,7 +91,7 @@ vi.mock("@daytona/sdk", async () => {
             onStdout: (chunk: string) => void,
             onStderr: (chunk: string) => void,
           ) => {
-            const r = sessionCommands.get(cmdId)!;
+            const r = sessionCommand(cmdId);
             if (r.stdout) {
               onStdout(r.stdout);
             }
@@ -97,7 +104,7 @@ vi.mock("@daytona/sdk", async () => {
             }
           },
           getSessionCommand: async (_sessionId: string, cmdId: string) => ({
-            exitCode: sessionCommands.get(cmdId)!.exitCode,
+            exitCode: sessionCommand(cmdId).exitCode,
           }),
         },
       };
@@ -149,7 +156,7 @@ describe("daytona()", () => {
       },
     }).create({ env: { FOO: "resolved", BAR: "2" } });
 
-    expect(sdk.createParams[0]).toEqual({
+    expect(sdk.createParams[0]).toStrictEqual({
       ephemeral: true,
       labels: { a: "b" },
       envVars: { USER_VAR: "u", FOO: "from-create", BAR: "2" },
@@ -180,7 +187,7 @@ describe("daytona()", () => {
       });
 
       expect(result.exitCode).toBe(0);
-      expect(lines).toEqual(prompt.split("\n"));
+      expect(lines).toStrictEqual(prompt.split("\n"));
     });
 
     it("removes the stdin file once the command has run", async () => {
@@ -207,7 +214,7 @@ describe("daytona()", () => {
       });
 
       expect(result.exitCode).toBe(3);
-      expect(lines).toEqual(["before"]);
+      expect(lines).toStrictEqual(["before"]);
     });
 
     it("returns a streamed command's exit code when it exits the shell, with stdin", async () => {
