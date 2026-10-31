@@ -155,7 +155,7 @@ describe("interactive()", () => {
     expect(result).toHaveProperty("branch");
     expect(result).toHaveProperty("commits");
     expect(result.exitCode).toBe(0);
-    expect(typeof result.branch).toBe("string");
+    expect(result.branch).toBeTypeOf("string");
     expect(Array.isArray(result.commits)).toBe(true);
   });
 
@@ -194,7 +194,7 @@ describe("interactive()", () => {
       prompt: "add a file",
     });
 
-    expect(result.commits.length).toBe(1);
+    expect(result.commits).toHaveLength(1);
     expect(result.commits[0]!.sha).toMatch(/^[0-9a-f]{40}$/);
   });
 
@@ -516,7 +516,7 @@ describe("interactive()", () => {
     });
 
     expect(result.branch).toBe(currentBranch);
-    expect(result.commits.length).toBe(1);
+    expect(result.commits).toHaveLength(1);
   });
 
   it("merge-to-head strategy: commits merge back to head", async () => {
@@ -542,7 +542,7 @@ describe("interactive()", () => {
 
     // Branch should be the host's current branch (temp branch was merged + deleted)
     expect(result.branch).toBe(currentBranch);
-    expect(result.commits.length).toBe(1);
+    expect(result.commits).toHaveLength(1);
 
     // Verify the commit is on the current branch
     const log = execSync("git log --oneline -1", {
@@ -595,7 +595,7 @@ describe("interactive()", () => {
     });
 
     expect(result.branch).toBe("feature/test-branch");
-    expect(result.commits.length).toBe(1);
+    expect(result.commits).toHaveLength(1);
 
     // Verify branch exists
     const branches = execSync("git branch", {

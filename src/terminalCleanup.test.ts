@@ -12,7 +12,7 @@ describe("makeTerminalCleanupHandler", () => {
     );
     handler();
 
-    expect(setRawMode).toHaveBeenCalledOnce();
+    expect(setRawMode).toHaveBeenCalledTimes(1);
     expect(setRawMode).toHaveBeenCalledWith(false);
     expect(write).toHaveBeenCalledWith(SHOW_CURSOR);
   });

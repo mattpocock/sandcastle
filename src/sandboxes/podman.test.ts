@@ -45,7 +45,7 @@ describe("podman()", () => {
 
   it("has a create function", () => {
     const provider = podman();
-    expect(typeof provider.create).toBe("function");
+    expect(provider.create).toBeTypeOf("function");
   });
 
   it("accepts selinuxLabel option", () => {

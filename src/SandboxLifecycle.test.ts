@@ -508,7 +508,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       },
     );
     expect(status.trim()).toBe("");
-    expect(await readFile(join(hostDir, "file.txt"), "utf-8")).toBe(
+    await expect(readFile(join(hostDir, "file.txt"), "utf-8")).resolves.toBe(
       "main-version\n",
     );
 
@@ -565,7 +565,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     const message = (error as { message: string }).message;
     expect(message).toMatch(/would be overwritten/);
     expect(message).not.toMatch(/aborted/);
-    expect(await readFile(join(hostDir, "file.txt"), "utf-8")).toBe(
+    await expect(readFile(join(hostDir, "file.txt"), "utf-8")).resolves.toBe(
       "uncommitted host edit",
     );
   });

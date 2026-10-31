@@ -20,7 +20,7 @@ describe("vercel()", () => {
 
   it("has a create function", () => {
     const provider = vercel();
-    expect(typeof provider.create).toBe("function");
+    expect(provider.create).toBeTypeOf("function");
   });
 
   it("accepts a token option", () => {

@@ -582,7 +582,7 @@ describe("listClaudeSubagentSessionsInSandbox", () => {
         "/sandbox/repo",
         "abc-123",
         "/sandbox/projects",
-      ).includes(posix.sep),
-    ).toBe(true);
+      ),
+    ).toContain(posix.sep);
   });
 });

@@ -94,12 +94,12 @@ describe("copyToWorktree", () => {
     try {
       await Effect.runPromise(copyToWorktree(["cfg"], hostDir, worktreeDir));
 
-      expect(
-        await readFile(join(worktreeDir, "cfg", "secret.txt"), "utf8"),
-      ).toBe("secret");
-      expect(
-        await readFile(join(worktreeDir, "cfg", "sub", "deep.txt"), "utf8"),
-      ).toBe("deep");
+      await expect(
+        readFile(join(worktreeDir, "cfg", "secret.txt"), "utf8"),
+      ).resolves.toBe("secret");
+      await expect(
+        readFile(join(worktreeDir, "cfg", "sub", "deep.txt"), "utf8"),
+      ).resolves.toBe("deep");
       expect(existsSync(join(worktreeDir, "cfg", "cfg"))).toBe(false);
     } finally {
       await rm(hostDir, { recursive: true, force: true });
@@ -119,9 +119,9 @@ describe("copyToWorktree", () => {
         copyToWorktree(["ignoredir"], hostDir, worktreeDir),
       );
 
-      expect(
-        await readFile(join(worktreeDir, "ignoredir", "x.txt"), "utf8"),
-      ).toBe("x");
+      await expect(
+        readFile(join(worktreeDir, "ignoredir", "x.txt"), "utf8"),
+      ).resolves.toBe("x");
       expect(existsSync(join(worktreeDir, "ignoredir", "ignoredir"))).toBe(
         false,
       );
@@ -146,12 +146,12 @@ describe("copyToWorktree", () => {
         copyToWorktree(["deep/a/b/c.txt", "nested/dir"], hostDir, worktreeDir),
       );
 
-      expect(
-        await readFile(join(worktreeDir, "deep", "a", "b", "c.txt"), "utf8"),
-      ).toBe("c");
-      expect(
-        await readFile(join(worktreeDir, "nested", "dir", "d.txt"), "utf8"),
-      ).toBe("d");
+      await expect(
+        readFile(join(worktreeDir, "deep", "a", "b", "c.txt"), "utf8"),
+      ).resolves.toBe("c");
+      await expect(
+        readFile(join(worktreeDir, "nested", "dir", "d.txt"), "utf8"),
+      ).resolves.toBe("d");
     } finally {
       await rm(hostDir, { recursive: true, force: true });
       await rm(worktreeDir, { recursive: true, force: true });

@@ -170,7 +170,7 @@ describe("noSandbox", () => {
         // The process survives and exits cleanly — no RangeError crash.
         expect(result.exitCode).toBe(0);
         // Every line is delivered live to onLine, regardless of the tail bound.
-        expect(lines.length).toBe(5000);
+        expect(lines).toHaveLength(5000);
         expect(lines[0]).toBe("line-1");
         expect(lines[lines.length - 1]).toBe("line-5000");
         // The returned stdout is bounded to the configured tail.

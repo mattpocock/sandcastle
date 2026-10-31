@@ -44,7 +44,7 @@ describe("docker()", () => {
 
   it("has a create function", () => {
     const provider = docker();
-    expect(typeof provider.create).toBe("function");
+    expect(provider.create).toBeTypeOf("function");
   });
 
   it("does not have a branchStrategy property", () => {

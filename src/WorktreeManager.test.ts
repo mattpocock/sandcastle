@@ -172,7 +172,7 @@ describe("WorktreeManager.create", () => {
   it("returns the branch name", async () => {
     const repoDir = await setupRepo();
     const { branch } = await run(create(repoDir));
-    expect(typeof branch).toBe("string");
+    expect(branch).toBeTypeOf("string");
     expect(branch.length).toBeGreaterThan(0);
   });
 
@@ -205,7 +205,7 @@ describe("WorktreeManager.create", () => {
       create(repoDir, { branch: "feature/my-feature" }),
     );
     expect(branch).toBe("feature/my-feature");
-    expect(await getBranch(path)).toBe("feature/my-feature");
+    await expect(getBranch(path)).resolves.toBe("feature/my-feature");
   });
 
   it("the worktree directory is on the correct branch", async () => {
@@ -281,7 +281,9 @@ describe("WorktreeManager.create", () => {
     );
 
     expect(branch).toBe("sandcastle/issue-42-new-feature");
-    expect(await getBranch(path)).toBe("sandcastle/issue-42-new-feature");
+    await expect(getBranch(path)).resolves.toBe(
+      "sandcastle/issue-42-new-feature",
+    );
 
     // The worktree should have the same HEAD as the main repo
     const { stdout: mainHead } = await execAsync("git rev-parse HEAD", {
@@ -314,7 +316,7 @@ describe("WorktreeManager.create", () => {
     );
 
     expect(branch).toBe("feature/from-base");
-    expect(await getBranch(path)).toBe("feature/from-base");
+    await expect(getBranch(path)).resolves.toBe("feature/from-base");
 
     // The worktree should be at the base commit, not HEAD
     const { stdout: worktreeHead } = await execAsync("git rev-parse HEAD", {
@@ -885,6 +887,6 @@ describe("WorktreeManager git locale", () => {
       else process.env.LC_ALL = originalLcAll;
     }
 
-    expect(await readFile(logPath, "utf8")).toBe("C");
+    await expect(readFile(logPath, "utf8")).resolves.toBe("C");
   });
 });
