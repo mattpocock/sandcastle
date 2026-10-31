@@ -1085,3 +1085,178 @@ describe("WorktreeDockerSandboxFactory — no-sandbox provider", () => {
     expect(worktree).toBeUndefined();
   });
 });
+
+describe("WorktreeDockerSandboxFactory — interruption preserves the worktree", () => {
+  const tempDirs: string[] = [];
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await Promise.all(
+      tempDirs.map((d) => rm(d, { recursive: true, force: true })),
+    );
+    tempDirs.length = 0;
+  });
+
+  const makeHostRepo = async () => {
+    const dir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
+    tempDirs.push(dir);
+    await initRepoWithCommit(dir);
+    return dir;
+  };
+
+  const providers: Array<[string, () => SandboxProvider]> = [
+    [
+      "bind-mount",
+      () =>
+        testStubProvider({ name: "test-provider", worktreePath: "/w" })
+          .provider,
+    ],
+    ["isolated", () => testIsolated()],
+    ["no-sandbox", () => noSandbox()],
+  ];
+
+  const makeLayer = (
+    hostDir: string,
+    sandboxProvider: SandboxProvider,
+    signal?: AbortSignal,
+  ) =>
+    Layer.provide(
+      WorktreeDockerSandboxFactory.layer,
+      Layer.mergeAll(
+        Layer.succeed(SandboxConfig, {
+          env: {},
+          hostRepoDir: hostDir,
+          sandboxProvider,
+          branchStrategy: { type: "merge-to-head" },
+          signal,
+        }),
+        NodeFileSystem.layer,
+        SilentDisplay.layer(Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([])),
+      ),
+    );
+
+  for (const [label, makeProvider] of providers) {
+    it(`${label}: keeps a clean worktree when the run is aborted via signal`, async () => {
+      const hostDir = await makeHostRepo();
+      const ac = new AbortController();
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      let observedWorktreePath: string | undefined;
+      await expect(
+        Effect.runPromise(
+          Effect.gen(function* () {
+            const factory = yield* SandboxFactory;
+            yield* factory.withSandbox((info) =>
+              Effect.gen(function* () {
+                observedWorktreePath = info.hostWorktreePath;
+                ac.abort("user cancelled");
+                return yield* Effect.die("aborted");
+              }),
+            );
+          }).pipe(
+            Effect.provide(makeLayer(hostDir, makeProvider(), ac.signal)),
+          ),
+        ),
+      ).rejects.toThrow();
+
+      expect(observedWorktreePath).toBeDefined();
+      expect(existsSync(observedWorktreePath!)).toBe(true);
+      expect(errors).toHaveBeenCalledWith(
+        `\nWorktree preserved at ${observedWorktreePath}`,
+      );
+    });
+  }
+
+  it("still removes a clean worktree when the signal fires after the run succeeded", async () => {
+    const hostDir = await makeHostRepo();
+    const ac = new AbortController();
+
+    let observedWorktreePath: string | undefined;
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const factory = yield* SandboxFactory;
+        yield* factory.withSandbox((info) =>
+          Effect.sync(() => {
+            observedWorktreePath = info.hostWorktreePath;
+            ac.abort("too late");
+          }),
+        );
+      }).pipe(
+        Effect.provide(makeLayer(hostDir, providers[0]![1](), ac.signal)),
+      ),
+    );
+
+    expect(existsSync(observedWorktreePath!)).toBe(false);
+  });
+
+  it("still removes a clean worktree on a plain failure (no abort)", async () => {
+    const hostDir = await makeHostRepo();
+    const ac = new AbortController();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    let observedWorktreePath: string | undefined;
+    await expect(
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const factory = yield* SandboxFactory;
+          yield* factory.withSandbox((info) =>
+            Effect.gen(function* () {
+              observedWorktreePath = info.hostWorktreePath;
+              return yield* Effect.die("boom");
+            }),
+          );
+        }).pipe(
+          Effect.provide(makeLayer(hostDir, providers[0]![1](), ac.signal)),
+        ),
+      ),
+    ).rejects.toThrow();
+
+    expect(existsSync(observedWorktreePath!)).toBe(false);
+  });
+
+  for (const [label, makeProvider] of providers) {
+    it(`${label}: prints where the worktree is kept when the process gets SIGINT`, async () => {
+      const hostDir = await makeHostRepo();
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+      vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+
+      let observedWorktreePath: string | undefined;
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const factory = yield* SandboxFactory;
+          yield* factory.withSandbox((info) =>
+            Effect.sync(() => {
+              observedWorktreePath = info.hostWorktreePath;
+              process.emit("SIGINT");
+            }),
+          );
+        }).pipe(Effect.provide(makeLayer(hostDir, makeProvider()))),
+      );
+
+      expect(errors).toHaveBeenCalledWith(
+        `\nWorktree preserved at ${observedWorktreePath}`,
+      );
+      expect(errors).toHaveBeenCalledWith(
+        `  To clean up: git worktree remove --force ${observedWorktreePath}`,
+      );
+    });
+  }
+
+  it("does not print the SIGINT guidance once the worktree is released", async () => {
+    const hostDir = await makeHostRepo();
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const factory = yield* SandboxFactory;
+        yield* factory.withSandbox(() => Effect.void);
+      }).pipe(Effect.provide(makeLayer(hostDir, providers[0]![1]()))),
+    );
+    process.emit("SIGINT");
+
+    expect(errors).not.toHaveBeenCalledWith(
+      expect.stringContaining("Worktree preserved"),
+    );
+  });
+});

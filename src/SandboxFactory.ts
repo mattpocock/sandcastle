@@ -28,6 +28,7 @@ import { runHostHooks, type SandboxHooks } from "./SandboxLifecycle.js";
 import { startSandbox } from "./startSandbox.js";
 import { syncOut } from "./syncOut.js";
 import { patchGitMountsForWindows } from "./mountUtils.js";
+import { registerShutdown } from "./shutdownRegistry.js";
 
 export interface ExecResult {
   readonly stdout: string;
@@ -203,8 +204,18 @@ const printWorktreePreservedMessage = (
 const cleanupWorktree = (
   worktreePath: string,
   exit: Exit.Exit<unknown, unknown>,
-): Effect.Effect<string | undefined, WorktreeError> =>
-  WorktreeManager.hasUncommittedChanges(worktreePath).pipe(
+  signal: AbortSignal | undefined,
+): Effect.Effect<string | undefined, WorktreeError> => {
+  // An interrupted run keeps its worktree, clean or dirty, so the caller can
+  // inspect it (ADR-0004). An abort after a successful run is a no-op.
+  if (!Exit.isSuccess(exit) && signal?.aborted) {
+    printWorktreePreservedMessage(
+      worktreePath,
+      `Worktree preserved at ${worktreePath}`,
+    );
+    return Effect.succeed(worktreePath);
+  }
+  return WorktreeManager.hasUncommittedChanges(worktreePath).pipe(
     Effect.catchAll(() => Effect.succeed(false)),
     Effect.flatMap((isDirty) => {
       if (isDirty) {
@@ -224,6 +235,7 @@ const cleanupWorktree = (
       );
     }),
   );
+};
 
 /**
  * Attach the preserved worktree path to AgentIdleTimeoutError and AgentError so
@@ -330,6 +342,27 @@ export const WorktreeDockerSandboxFactory = {
               : WorktreeManager.create(hostRepoDir, { name }),
           ),
           Effect.provideService(FileSystem.FileSystem, fileSystem),
+          // A SIGINT/SIGTERM exits the process before the release below runs,
+          // so the worktree stays on disk. Say where it is, as createSandbox()
+          // does, instead of leaving it behind silently.
+          Effect.map((info) => ({
+            ...info,
+            unregisterShutdown: registerShutdown(() =>
+              printWorktreePreservedMessage(
+                info.path,
+                `Worktree preserved at ${info.path}`,
+              ),
+            ),
+          })),
+        );
+
+      /** Release: remove or preserve the worktree (see cleanupWorktree). */
+      const releaseWorktree = (
+        worktreeInfo: { path: string; unregisterShutdown: () => void },
+        exit: Exit.Exit<unknown, unknown>,
+      ) =>
+        Effect.sync(worktreeInfo.unregisterShutdown).pipe(
+          Effect.andThen(cleanupWorktree(worktreeInfo.path, exit, signal)),
         );
 
       return {
@@ -438,7 +471,7 @@ export const WorktreeDockerSandboxFactory = {
                   ),
                 ) as Effect.Effect<A, E | SandboxError, R>,
               (worktreeInfo, exit) =>
-                cleanupWorktree(worktreeInfo.path, exit).pipe(
+                releaseWorktree(worktreeInfo, exit).pipe(
                   Effect.tap((p) => {
                     preservedPath = p;
                   }),
@@ -504,7 +537,7 @@ export const WorktreeDockerSandboxFactory = {
                   ),
                 ) as Effect.Effect<A, E | SandboxError, R>,
               (worktreeInfo, exit) =>
-                cleanupWorktree(worktreeInfo.path, exit).pipe(
+                releaseWorktree(worktreeInfo, exit).pipe(
                   Effect.tap((p) => {
                     preservedPath = p;
                   }),
@@ -668,7 +701,7 @@ export const WorktreeDockerSandboxFactory = {
               ) as Effect.Effect<A, E | SandboxError, R>,
             // Release: remove or preserve the worktree based on dirty state.
             (worktreeInfo, exit) =>
-              cleanupWorktree(worktreeInfo.path, exit).pipe(
+              releaseWorktree(worktreeInfo, exit).pipe(
                 Effect.tap((p) => {
                   preservedWorktreePath = p;
                 }),
