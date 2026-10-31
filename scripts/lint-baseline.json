@@ -611,7 +611,6 @@
     "unicorn(prefer-string-replace-all)": 1
   },
   "src/ErrorHandler.test.ts": {
-    "effect/missedPipeableOpportunity": 3,
     "ratchet/disable-comment": 2,
     "typescript(array-type)": 4,
     "typescript(consistent-type-imports)": 1,
