@@ -1,3 +1,4 @@
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { claudeHostSessionPath, encodeProjectPath } from "@ai-hero/sandcastle";
 
@@ -41,6 +42,14 @@ describe("encodeProjectPath matches Claude Code's project directory names", () =
         "abc",
         "/projects",
       ),
-    ).toBe("/projects/-home-me-repo--sandcastle-worktrees-wt/abc.jsonl");
+    ).toBe(
+      // Claude Code keeps sessions under the OS-native ~/.claude/projects,
+      // so the separators are the platform's.
+      path.join(
+        "/projects",
+        "-home-me-repo--sandcastle-worktrees-wt",
+        "abc.jsonl",
+      ),
+    );
   });
 });
