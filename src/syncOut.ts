@@ -30,7 +30,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { basename, dirname, join, relative } from "node:path";
-import { Clock, Console, Effect } from "effect";
+import { Console, DateTime, Effect } from "effect";
 import type { ExecResult, SandboxService } from "./SandboxFactory.js";
 import type { IsolatedSandboxHandle } from "./SandboxProvider.js";
 import { buildRecoveryMessage } from "./RecoveryMessage.js";
@@ -171,12 +171,15 @@ const pad = (n: number) => String(n).padStart(2, "0");
 const createPatchDir = (
   hostRepoDir: string,
 ): Effect.Effect<string, SyncError> =>
-  Clock.currentTimeMillis.pipe(
-    Effect.flatMap((nowMillis) =>
+  DateTime.now.pipe(
+    // Local time, as the directory name has always used.
+    Effect.map((now) =>
+      DateTime.toParts(DateTime.setZone(now, DateTime.zoneMakeLocal())),
+    ),
+    Effect.flatMap((now) =>
       Effect.tryPromise({
         try: async () => {
-          const now = new Date(nowMillis);
-          const base = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+          const base = `${now.year}${pad(now.month)}${pad(now.day)}-${pad(now.hours)}${pad(now.minutes)}${pad(now.seconds)}`;
 
           const patchesRoot = join(hostRepoDir, ".sandcastle", "patches");
           await mkdir(patchesRoot, { recursive: true });
