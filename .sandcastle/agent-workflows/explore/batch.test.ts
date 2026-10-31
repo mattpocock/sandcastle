@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { planEffects, TAGS, type Plan, type Tag } from "./batch";
+import { planEffects, TAGS } from "./batch";
+import type { Plan, Tag } from "./batch";
 
 const planFor = (tag: Tag): Plan => ({
   issues: [{ number: 1, tag, duplicate_of: null, comment: "Findings." }],

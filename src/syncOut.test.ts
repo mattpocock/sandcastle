@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { Effect } from "effect";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import { makeSandboxFromHandle } from "./SandboxFactory.js";
 import { testIsolated } from "./sandboxes/test-isolated.js";
 import { syncIn } from "./syncIn.js";
@@ -60,7 +60,7 @@ describe("syncOut", () => {
       expect(log[0]).toContain("add new file");
 
       // Verify file content
-      const content = await readFile(join(hostDir, "new.txt"), "utf-8");
+      const content = await readFile(join(hostDir, "new.txt"), "utf8");
       expect(content.trim()).toBe("new file");
     } finally {
       await handle.close();
@@ -160,9 +160,9 @@ describe("syncOut", () => {
       await Effect.runPromise(syncOut(hostDir, handle));
 
       // All files should be present on host
-      const mainWork = await readFile(join(hostDir, "main-work.txt"), "utf-8");
+      const mainWork = await readFile(join(hostDir, "main-work.txt"), "utf8");
       expect(mainWork.trim()).toBe("main-work");
-      const feature = await readFile(join(hostDir, "feature.txt"), "utf-8");
+      const feature = await readFile(join(hostDir, "feature.txt"), "utf8");
       expect(feature.trim()).toBe("feature");
     } finally {
       await handle.close();
@@ -191,14 +191,11 @@ describe("syncOut", () => {
       // Verify uncommitted changes appear on host
       const initialContent = await readFile(
         join(hostDir, "initial.txt"),
-        "utf-8",
+        "utf8",
       );
       expect(initialContent.trim()).toBe("modified content");
 
-      const stagedContent = await readFile(
-        join(hostDir, "staged.txt"),
-        "utf-8",
-      );
+      const stagedContent = await readFile(join(hostDir, "staged.txt"), "utf8");
       expect(stagedContent.trim()).toBe("staged file");
     } finally {
       await handle.close();
@@ -226,13 +223,10 @@ describe("syncOut", () => {
       await Effect.runPromise(syncOut(hostDir, handle));
 
       // Verify untracked files appear on host
-      const u1 = await readFile(join(hostDir, "untracked1.txt"), "utf-8");
+      const u1 = await readFile(join(hostDir, "untracked1.txt"), "utf8");
       expect(u1.trim()).toBe("untracked1");
 
-      const u2 = await readFile(
-        join(hostDir, "subdir/untracked2.txt"),
-        "utf-8",
-      );
+      const u2 = await readFile(join(hostDir, "subdir/untracked2.txt"), "utf8");
       expect(u2.trim()).toBe("untracked2");
     } finally {
       await handle.close();
@@ -268,15 +262,15 @@ describe("syncOut", () => {
       const log = await getLog(hostDir);
       expect(log).toHaveLength(2);
       expect(log[0]).toContain("add committed file");
-      const committed = await readFile(join(hostDir, "committed.txt"), "utf-8");
+      const committed = await readFile(join(hostDir, "committed.txt"), "utf8");
       expect(committed.trim()).toBe("committed");
 
       // Verify uncommitted changes
-      const modified = await readFile(join(hostDir, "initial.txt"), "utf-8");
+      const modified = await readFile(join(hostDir, "initial.txt"), "utf8");
       expect(modified.trim()).toBe("modified");
 
       // Verify untracked files
-      const untracked = await readFile(join(hostDir, "untracked.txt"), "utf-8");
+      const untracked = await readFile(join(hostDir, "untracked.txt"), "utf8");
       expect(untracked.trim()).toBe("brand new");
     } finally {
       await handle.close();
@@ -430,7 +424,11 @@ describe("syncOut", () => {
       expect(timestampDirs).toHaveLength(1);
       expect(timestampDirs[0]).toMatch(/^\d{8}-\d{6}/);
 
-      const artifactDir = join(patchesDir, timestampDirs[0]!);
+      const [timestampDir] = timestampDirs;
+
+      assert.isDefined(timestampDir);
+
+      const artifactDir = join(patchesDir, timestampDir);
       const files = await readdir(artifactDir);
       // Should have at least one .patch file
       expect(files.some((f) => f.endsWith(".patch"))).toBe(true);
@@ -482,7 +480,11 @@ describe("syncOut", () => {
       const timestampDirs = await readdir(patchesDir);
       expect(timestampDirs).toHaveLength(1);
 
-      const artifactDir = join(patchesDir, timestampDirs[0]!);
+      const [timestampDir] = timestampDirs;
+
+      assert.isDefined(timestampDir);
+
+      const artifactDir = join(patchesDir, timestampDir);
       const files = await readdir(artifactDir);
       expect(files).toContain("changes.patch");
 
@@ -571,9 +573,9 @@ describe("syncOut", () => {
       expect(log[0]).toContain("add second");
       expect(log[1]).toContain("add first");
 
-      const first = await readFile(join(hostDir, "first.txt"), "utf-8");
+      const first = await readFile(join(hostDir, "first.txt"), "utf8");
       expect(first.trim()).toBe("first");
-      const second = await readFile(join(hostDir, "second.txt"), "utf-8");
+      const second = await readFile(join(hostDir, "second.txt"), "utf8");
       expect(second.trim()).toBe("second");
     } finally {
       await handle.close();

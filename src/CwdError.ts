@@ -20,5 +20,4 @@ interface CwdErrorConstructor {
 }
 
 /** The provided `cwd` path does not exist or is not a directory. */
-export const CwdError: CwdErrorConstructor =
-  CwdErrorImpl as unknown as CwdErrorConstructor;
+export const CwdError: CwdErrorConstructor = CwdErrorImpl;

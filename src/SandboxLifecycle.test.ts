@@ -2,7 +2,6 @@ import { Effect, Layer, Ref } from "effect";
 import { exec } from "node:child_process";
 import { constants, existsSync } from "node:fs";
 import {
-  chmod,
   mkdir,
   mkdtemp,
   open,
@@ -13,9 +12,10 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { describe, expect, it } from "vitest";
-import { type DisplayEntry, SilentDisplay } from "./Display.js";
-import { type SandboxService } from "./SandboxFactory.js";
+import { assert, describe, expect, it } from "vitest";
+import { SilentDisplay } from "./Display.js";
+import type { DisplayEntry } from "./Display.js";
+import type { SandboxService } from "./SandboxFactory.js";
 import { makeLocalSandbox } from "./testSandbox.js";
 import { ExecError, SyncError } from "./errors.js";
 import { withSandboxLifecycle, runHostHooks } from "./SandboxLifecycle.js";
@@ -94,7 +94,7 @@ const makeFifoGate = async (dir: string) => {
 };
 
 const testDisplayLayer = SilentDisplay.layer(
-  Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]),
+  Ref.unsafeMake<readonly DisplayEntry[]>([]),
 );
 
 const setup = async () => {
@@ -169,7 +169,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
               cwd: ctx.sandboxRepoDir,
             });
             yield* ctx.sandbox.exec(
-              'sh -c "echo worktree-content > worktree-file.txt && git add worktree-file.txt && git commit -m \\"worktree commit\\""',
+              String.raw`sh -c "echo worktree-content > worktree-file.txt && git add worktree-file.txt && git commit -m \"worktree commit\""`,
               { cwd: ctx.sandboxRepoDir },
             );
           }),
@@ -183,7 +183,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     expect(log).toContain("worktree commit");
 
     // File is readable from the host's main branch
-    const content = await readFile(join(hostDir, "worktree-file.txt"), "utf-8");
+    const content = await readFile(join(hostDir, "worktree-file.txt"), "utf8");
     expect(content.trim()).toBe("worktree-content");
   });
 
@@ -217,10 +217,10 @@ describe("withSandboxLifecycle (worktree mode)", () => {
   it("onSandboxReady hooks pass sudo option through to exec", async () => {
     const { hostDir, worktreeDir } = await setupWorktree();
 
-    const execCalls: Array<{
+    const execCalls: {
       command: string;
       options?: { sudo?: boolean; cwd?: string };
-    }> = [];
+    }[] = [];
 
     // Custom sandbox layer that records exec calls
     const sandbox: SandboxService = {
@@ -228,8 +228,8 @@ describe("withSandboxLifecycle (worktree mode)", () => {
         execCalls.push({ command, options });
         return Effect.succeed({ stdout: "", stderr: "", exitCode: 0 });
       },
-      copyIn: () => Effect.succeed(undefined as never),
-      copyFileOut: () => Effect.succeed(undefined as never),
+      copyIn: () => Effect.void,
+      copyFileOut: () => Effect.void,
     };
 
     await Effect.runPromise(
@@ -253,20 +253,20 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     );
 
     // Find the hook exec calls (after git config calls)
-    const hookCalls = execCalls.filter(
-      (c) =>
-        c.command === "npm install" ||
-        c.command === "apt-get install -y ffmpeg",
-    );
+    const hookCommands = new Set(["npm install", "apt-get install -y ffmpeg"]);
+    const hookCalls = execCalls.filter((c) => hookCommands.has(c.command));
     expect(hookCalls).toHaveLength(2);
-    expect(hookCalls[0]).toEqual(
+    const [npmCall, aptCall] = hookCalls;
+    assert.isDefined(npmCall);
+    assert.isDefined(aptCall);
+    expect(npmCall).toStrictEqual(
       expect.objectContaining({ command: "npm install" }),
     );
-    expect(hookCalls[0]!.options?.sudo).toBeUndefined();
-    expect(hookCalls[1]).toEqual(
+    expect(npmCall.options?.sudo).toBeUndefined();
+    expect(aptCall).toStrictEqual(
       expect.objectContaining({ command: "apt-get install -y ffmpeg" }),
     );
-    expect(hookCalls[1]!.options?.sudo).toBe(true);
+    expect(aptCall.options?.sudo).toBe(true);
   });
 
   it("onSandboxReady hooks run in parallel", async () => {
@@ -288,8 +288,8 @@ describe("withSandboxLifecycle (worktree mode)", () => {
         }
         return Effect.succeed({ stdout: "", stderr: "", exitCode: 0 });
       },
-      copyIn: () => Effect.succeed(undefined as never),
-      copyFileOut: () => Effect.succeed(undefined as never),
+      copyIn: () => Effect.void,
+      copyFileOut: () => Effect.void,
     };
 
     await Effect.runPromise(
@@ -313,7 +313,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     );
 
     // With parallel execution, both hooks should start before either ends
-    expect(events).toEqual([
+    expect(events).toStrictEqual([
       "start:slow-hook-a",
       "start:slow-hook-b",
       "end:slow-hook-a",
@@ -340,7 +340,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
               cwd: ctx.sandboxRepoDir,
             });
             yield* ctx.sandbox.exec(
-              'sh -c "echo new > new-file.txt && git add new-file.txt && git commit -m \\"new commit\\""',
+              String.raw`sh -c "echo new > new-file.txt && git add new-file.txt && git commit -m \"new commit\""`,
               { cwd: ctx.sandboxRepoDir },
             );
           }),
@@ -389,7 +389,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
               cwd: ctx.sandboxRepoDir,
             });
             yield* ctx.sandbox.exec(
-              'sh -c "echo content > new-file.txt && git add new-file.txt && git commit -m \\"temp commit\\""',
+              String.raw`sh -c "echo content > new-file.txt && git add new-file.txt && git commit -m \"temp commit\""`,
               { cwd: ctx.sandboxRepoDir },
             );
           }),
@@ -445,13 +445,13 @@ describe("withSandboxLifecycle (worktree mode)", () => {
                 cwd: ctx.sandboxRepoDir,
               });
               yield* ctx.sandbox.exec(
-                'sh -c "echo worktree-version > file.txt && git add file.txt && git commit -m \\"worktree change\\""',
+                String.raw`sh -c "echo worktree-version > file.txt && git add file.txt && git commit -m \"worktree change\""`,
                 { cwd: ctx.sandboxRepoDir },
               );
               // Also commit a conflicting change to file.txt on main directly
               yield* Effect.promise(async () => {
                 await execAsync(
-                  'sh -c "echo main-version > file.txt && git add file.txt && git commit -m \\"main conflict\\""',
+                  String.raw`sh -c "echo main-version > file.txt && git add file.txt && git commit -m \"main conflict\""`,
                   { cwd: hostDir },
                 );
               });
@@ -464,7 +464,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     const { stdout } = await execAsync('git branch --list "sandcastle/test"', {
       cwd: hostDir,
     });
-    expect(stdout.trim()).toBeTruthy();
+    expect(stdout.trim()).not.toBe("");
   });
 
   it("aborts a conflicting merge so the host is clean, and the suggested retry works", async () => {
@@ -486,12 +486,12 @@ describe("withSandboxLifecycle (worktree mode)", () => {
               cwd: ctx.sandboxRepoDir,
             });
             yield* ctx.sandbox.exec(
-              'sh -c "echo worktree-version > file.txt && git add file.txt && git commit -m \\"worktree change\\""',
+              String.raw`sh -c "echo worktree-version > file.txt && git add file.txt && git commit -m \"worktree change\""`,
               { cwd: ctx.sandboxRepoDir },
             );
             yield* Effect.promise(async () => {
               await execAsync(
-                'sh -c "echo main-version > file.txt && git add file.txt && git commit -m \\"main conflict\\""',
+                String.raw`sh -c "echo main-version > file.txt && git add file.txt && git commit -m \"main conflict\""`,
                 { cwd: hostDir },
               );
             });
@@ -508,12 +508,12 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       },
     );
     expect(status.trim()).toBe("");
-    expect(await readFile(join(hostDir, "file.txt"), "utf-8")).toBe(
+    await expect(readFile(join(hostDir, "file.txt"), "utf8")).resolves.toBe(
       "main-version\n",
     );
 
     // The message says the merge was aborted and names a retry that works
-    const message = (error as { message: string }).message;
+    const { message } = error as { message: string };
     expect(message).toMatch(/aborted/i);
     expect(message).toContain("git merge sandcastle/test");
     // git's own output is included, not swallowed
@@ -525,8 +525,9 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       cwd: hostDir,
     }).then(
       () => "",
+      // join() renders a missing stdout or stderr as "".
       (e: { stdout?: string; stderr?: string }) =>
-        `${e.stdout ?? ""}${e.stderr ?? ""}`,
+        [e.stdout, e.stderr].join(""),
     );
     expect(retry).not.toMatch(/unmerged files/);
     expect(retry).toMatch(/CONFLICT/);
@@ -551,21 +552,21 @@ describe("withSandboxLifecycle (worktree mode)", () => {
               cwd: ctx.sandboxRepoDir,
             });
             yield* ctx.sandbox.exec(
-              'sh -c "echo worktree-version > file.txt && git add file.txt && git commit -m \\"worktree change\\""',
+              String.raw`sh -c "echo worktree-version > file.txt && git add file.txt && git commit -m \"worktree change\""`,
               { cwd: ctx.sandboxRepoDir },
             );
             // An uncommitted edit on the host to the same file
-            yield* Effect.promise(() =>
+            yield* Effect.promise(async () =>
               writeFile(join(hostDir, "file.txt"), "uncommitted host edit"),
             );
           }),
       ).pipe(Effect.flip, Effect.provide(testDisplayLayer)),
     );
 
-    const message = (error as { message: string }).message;
+    const { message } = error as { message: string };
     expect(message).toMatch(/would be overwritten/);
     expect(message).not.toMatch(/aborted/);
-    expect(await readFile(join(hostDir, "file.txt"), "utf-8")).toBe(
+    await expect(readFile(join(hostDir, "file.txt"), "utf8")).resolves.toBe(
       "uncommitted host edit",
     );
   });
@@ -590,13 +591,13 @@ describe("withSandboxLifecycle (worktree mode)", () => {
             });
             // Commit a change to a new file in the worktree
             yield* ctx.sandbox.exec(
-              'sh -c "echo worktree-content > worktree-file.txt && git add worktree-file.txt && git commit -m \\"worktree change\\""',
+              String.raw`sh -c "echo worktree-content > worktree-file.txt && git add worktree-file.txt && git commit -m \"worktree change\""`,
               { cwd: ctx.sandboxRepoDir },
             );
             // Commit a non-conflicting change to a different file on main directly
             yield* Effect.promise(async () => {
               await execAsync(
-                'sh -c "echo main-content > main-file.txt && git add main-file.txt && git commit -m \\"main change\\""',
+                String.raw`sh -c "echo main-content > main-file.txt && git add main-file.txt && git commit -m \"main change\""`,
                 { cwd: hostDir },
               );
             });
@@ -644,7 +645,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
               cwd: ctx.sandboxRepoDir,
             });
             yield* ctx.sandbox.exec(
-              'sh -c "echo docker-content > docker-file.txt && git add docker-file.txt && git commit -m \\"docker worktree commit\\""',
+              String.raw`sh -c "echo docker-content > docker-file.txt && git add docker-file.txt && git commit -m \"docker worktree commit\""`,
               { cwd: ctx.sandboxRepoDir },
             );
           }),
@@ -689,11 +690,11 @@ describe("withSandboxLifecycle (worktree mode)", () => {
             // Create a feature branch off the worktree, make a commit, then merge it back
             // This produces a merge commit — exactly what caused the production failure
             yield* ctx.sandbox.exec(
-              'sh -c "git checkout -b feature/merge-test && echo feat > feat.txt && git add feat.txt && git commit -m \\"feature commit\\""',
+              String.raw`sh -c "git checkout -b feature/merge-test && echo feat > feat.txt && git add feat.txt && git commit -m \"feature commit\""`,
               { cwd: ctx.sandboxRepoDir },
             );
             yield* ctx.sandbox.exec(
-              'sh -c "git checkout sandcastle/test && git merge --no-ff feature/merge-test -m \\"Merge feature/merge-test\\""',
+              String.raw`sh -c "git checkout sandcastle/test && git merge --no-ff feature/merge-test -m \"Merge feature/merge-test\""`,
               { cwd: ctx.sandboxRepoDir },
             );
           }),
@@ -737,17 +738,17 @@ describe("withSandboxLifecycle (worktree mode)", () => {
 
             // Create two independent branches from main, each modifying the shared file
             yield* ctx.sandbox.exec(
-              'sh -c "git checkout -b branch-a main && echo line-a >> file.txt && git add file.txt && git commit -m \\"branch-a change\\""',
+              String.raw`sh -c "git checkout -b branch-a main && echo line-a >> file.txt && git add file.txt && git commit -m \"branch-a change\""`,
               { cwd: ctx.sandboxRepoDir },
             );
             yield* ctx.sandbox.exec(
-              'sh -c "git checkout -b branch-b main && echo line-b >> file.txt && git add file.txt && git commit -m \\"branch-b change\\""',
+              String.raw`sh -c "git checkout -b branch-b main && echo line-b >> file.txt && git add file.txt && git commit -m \"branch-b change\""`,
               { cwd: ctx.sandboxRepoDir },
             );
 
             // Back to temp branch — merge both (resolving the conflict on file.txt)
             yield* ctx.sandbox.exec(
-              'sh -c "git checkout sandcastle/test && git merge --no-ff branch-a -m \\"Merge branch-a\\""',
+              String.raw`sh -c "git checkout sandcastle/test && git merge --no-ff branch-a -m \"Merge branch-a\""`,
               { cwd: ctx.sandboxRepoDir },
             );
             // branch-b will conflict on file.txt — resolve it manually
@@ -760,7 +761,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     );
 
     // Both changes should be on the host's main branch
-    const content = await readFile(join(hostDir, "file.txt"), "utf-8");
+    const content = await readFile(join(hostDir, "file.txt"), "utf8");
     expect(content).toContain("line-a");
     expect(content).toContain("line-b");
 
@@ -850,7 +851,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
               cwd: ctx.sandboxRepoDir,
             });
             yield* ctx.sandbox.exec(
-              'sh -c "echo explicit > explicit-file.txt && git add explicit-file.txt && git commit -m \\"explicit branch commit\\""',
+              String.raw`sh -c "echo explicit > explicit-file.txt && git add explicit-file.txt && git commit -m \"explicit branch commit\""`,
               { cwd: ctx.sandboxRepoDir },
             );
           }),
@@ -900,7 +901,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
               cwd: ctx.sandboxRepoDir,
             });
             yield* ctx.sandbox.exec(
-              'sh -c "echo content > new.txt && git add new.txt && git commit -m \\"test commit\\""',
+              String.raw`sh -c "echo content > new.txt && git add new.txt && git commit -m \"test commit\""`,
               { cwd: ctx.sandboxRepoDir },
             );
           }),
@@ -908,7 +909,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     );
 
     // applyToHost should be called after work but before the merge
-    expect(callOrder).toEqual(["work", "applyToHost"]);
+    expect(callOrder).toStrictEqual(["work", "applyToHost"]);
     // Commits should still be collected properly
     expect(result.commits).toHaveLength(1);
   });
@@ -962,7 +963,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
 
   it("logs 'No commits to sync out' when applyToHost is provided but no commits", async () => {
     const { hostDir, worktreeDir, sandbox } = await setupWorktree();
-    const displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const displayRef = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     const displayLayer = SilentDisplay.layer(displayRef);
 
     const entries = await Effect.runPromise(
@@ -981,15 +982,17 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       }).pipe(Effect.provide(displayLayer)),
     );
 
-    const syncLog = entries.find(
-      (e) => e._tag === "taskLog" && e.title === "No commits to sync out",
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        _tag: "taskLog",
+        title: "No commits to sync out",
+      }),
     );
-    expect(syncLog).toBeDefined();
   });
 
   it("logs 'Syncing N commits to host' when applyToHost is provided with commits", async () => {
     const { hostDir, worktreeDir, sandbox } = await setupWorktree();
-    const displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const displayRef = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     const displayLayer = SilentDisplay.layer(displayRef);
 
     const entries = await Effect.runPromise(
@@ -1003,26 +1006,28 @@ describe("withSandboxLifecycle (worktree mode)", () => {
           },
           sandbox,
           (ctx) =>
-            Effect.gen(function* () {
-              yield* ctx.sandbox.exec(
-                'sh -c "echo new > sync-file.txt && git add sync-file.txt && git commit -m \\"sync commit\\""',
+            ctx.sandbox
+              .exec(
+                String.raw`sh -c "echo new > sync-file.txt && git add sync-file.txt && git commit -m \"sync commit\""`,
                 { cwd: ctx.sandboxRepoDir },
-              );
-            }),
+              )
+              .pipe(Effect.asVoid),
         );
         return yield* Ref.get(displayRef);
       }).pipe(Effect.provide(displayLayer)),
     );
 
-    const syncLog = entries.find(
-      (e) => e._tag === "taskLog" && e.title === "Syncing 1 commit to host",
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        _tag: "taskLog",
+        title: "Syncing 1 commit to host",
+      }),
     );
-    expect(syncLog).toBeDefined();
   });
 
   it("does not log sync taskLog when applyToHost is not provided", async () => {
     const { hostDir, worktreeDir, sandbox } = await setupWorktree();
-    const displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const displayRef = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     const displayLayer = SilentDisplay.layer(displayRef);
 
     const entries = await Effect.runPromise(
@@ -1050,7 +1055,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
 
   it("logs 'Merging to {branch}' taskLog in temp branch mode with commits", async () => {
     const { hostDir, worktreeDir, sandbox } = await setupWorktree();
-    const displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const displayRef = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     const displayLayer = SilentDisplay.layer(displayRef);
 
     const entries = await Effect.runPromise(
@@ -1070,7 +1075,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
                 cwd: ctx.sandboxRepoDir,
               });
               yield* ctx.sandbox.exec(
-                'sh -c "echo content > merge-file.txt && git add merge-file.txt && git commit -m \\"merge test\\""',
+                String.raw`sh -c "echo content > merge-file.txt && git add merge-file.txt && git commit -m \"merge test\""`,
                 { cwd: ctx.sandboxRepoDir },
               );
             }),
@@ -1079,15 +1084,14 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       }).pipe(Effect.provide(displayLayer)),
     );
 
-    const mergeLog = entries.find(
-      (e) => e._tag === "taskLog" && e.title === "Merging to main",
+    expect(entries).toContainEqual(
+      expect.objectContaining({ _tag: "taskLog", title: "Merging to main" }),
     );
-    expect(mergeLog).toBeDefined();
   });
 
   it("logs 'Collecting commits' taskLog after agent work", async () => {
     const { hostDir, worktreeDir, sandbox } = await setupWorktree();
-    const displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const displayRef = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     const displayLayer = SilentDisplay.layer(displayRef);
 
     const entries = await Effect.runPromise(
@@ -1105,10 +1109,9 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       }).pipe(Effect.provide(displayLayer)),
     );
 
-    const commitLog = entries.find(
-      (e) => e._tag === "taskLog" && e.title === "Collecting commits",
+    expect(entries).toContainEqual(
+      expect.objectContaining({ _tag: "taskLog", title: "Collecting commits" }),
     );
-    expect(commitLog).toBeDefined();
   });
 
   it("host.onSandboxReady hooks run on the host with worktree cwd", async () => {
@@ -1136,7 +1139,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     // The marker should exist on the host worktree (cwd = worktreeDir)
     const content = await readFile(
       join(worktreeDir, "host-marker.txt"),
-      "utf-8",
+      "utf8",
     );
     expect(content.trim()).toBe("host-hook-ran");
   });
@@ -1169,13 +1172,13 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     // Both markers should exist
     const hostContent = await readFile(
       join(worktreeDir, "host-ready.txt"),
-      "utf-8",
+      "utf8",
     );
     expect(hostContent.trim()).toBe("host-ready");
 
     const sandboxContent = await readFile(
       join(worktreeDir, "sandbox-ready.txt"),
-      "utf-8",
+      "utf8",
     );
     expect(sandboxContent.trim()).toBe("sandbox-ready");
   });
@@ -1203,7 +1206,9 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     );
 
     setTimeout(() => ac.abort("cancelled"), 50);
-    await expect(promise).rejects.toThrow();
+    await expect(promise).rejects.toThrow(
+      "Command aborted: sleep 60 (cancelled)",
+    );
   });
 
   it("sandbox.onSandboxReady hook is killed when signal fires", async () => {
@@ -1229,7 +1234,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     );
 
     setTimeout(() => ac.abort("cancelled"), 50);
-    await expect(promise).rejects.toThrow();
+    await expect(promise).rejects.toThrow("Aborted: cancelled");
   });
 
   it("hooks receive never-aborted signal when no signal is provided", async () => {
@@ -1260,7 +1265,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
 
     const content = await readFile(
       join(worktreeDir, "host-signal-test.txt"),
-      "utf-8",
+      "utf8",
     );
     expect(content.trim()).toBe("ok");
   });
@@ -1302,8 +1307,8 @@ describe("withSandboxLifecycle (worktree mode)", () => {
         }
         return Effect.succeed({ stdout: "", stderr: "", exitCode: 0 });
       },
-      copyIn: () => Effect.succeed(undefined as never),
-      copyFileOut: () => Effect.succeed(undefined as never),
+      copyIn: () => Effect.void,
+      copyFileOut: () => Effect.void,
     };
 
     const result = Effect.runPromise(
@@ -1420,8 +1425,8 @@ describe("withSandboxLifecycle (worktree mode)", () => {
           }
           return { stdout: "", stderr: "", exitCode: 0 };
         }),
-      copyIn: () => Effect.succeed(undefined as never),
-      copyFileOut: () => Effect.succeed(undefined as never),
+      copyIn: () => Effect.void,
+      copyFileOut: () => Effect.void,
     };
 
     const result = await Effect.runPromise(
@@ -1453,8 +1458,8 @@ describe("withSandboxLifecycle (worktree mode)", () => {
           }
           return { stdout: "", stderr: "", exitCode: 0 };
         }),
-      copyIn: () => Effect.succeed(undefined as never),
-      copyFileOut: () => Effect.succeed(undefined as never),
+      copyIn: () => Effect.void,
+      copyFileOut: () => Effect.void,
     };
 
     await expect(
@@ -1490,8 +1495,8 @@ describe("withSandboxLifecycle (worktree mode)", () => {
         }
         return Effect.succeed({ stdout: "", stderr: "", exitCode: 0 });
       },
-      copyIn: () => Effect.succeed(undefined as never),
-      copyFileOut: () => Effect.succeed(undefined as never),
+      copyIn: () => Effect.void,
+      copyFileOut: () => Effect.void,
     };
 
     const result = Effect.runPromise(
@@ -1527,7 +1532,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
         },
         sandbox,
         () =>
-          Effect.promise(() =>
+          Effect.promise(async () =>
             execAsync(`git config include.path "${gate.path}"`, {
               cwd: hostDir,
             }),
@@ -1547,16 +1552,16 @@ describe("withSandboxLifecycle (worktree mode)", () => {
   it("respects a mergeToHostMs timeout override", async () => {
     const { hostDir, worktreeDir, sandbox } = await setupWorktree();
 
-    // A post-merge hook that blocks on the FIFO holds the host-side
-    // `git merge` open until released, so only the 1ms override (not the 30s
-    // default) can end it.
+    // Host-side git runs hooks from nowhere, so gate the merge on config
+    // instead: once the work has committed, the host checkout (on `main`)
+    // includes the FIFO, so the host-side `git merge` blocks reading its
+    // config until released, and only the 1ms override (not the 30s default)
+    // can end it. The worktree is on its own branch, so the commit count read
+    // there before the merge is not gated.
     const gate = await makeFifoGate(hostDir);
-    const hook = join(hostDir, ".git", "hooks", "post-merge");
-    await writeFile(hook, `#!/bin/sh\ncat "${gate.path}" > /dev/null\n`);
-    await chmod(hook, 0o755);
 
     // Merge-to-head path (no explicit branch) with a real commit, so the
-    // host-side merge runs and hits the gated hook.
+    // host-side merge runs and hits the gate.
     const result = Effect.runPromise(
       withSandboxLifecycle(
         {
@@ -1574,8 +1579,14 @@ describe("withSandboxLifecycle (worktree mode)", () => {
               cwd: ctx.sandboxRepoDir,
             });
             yield* ctx.sandbox.exec(
-              'sh -c "echo wt > wt.txt && git add wt.txt && git commit -m \\"wt commit\\""',
+              String.raw`sh -c "echo wt > wt.txt && git add wt.txt && git commit -m \"wt commit\""`,
               { cwd: ctx.sandboxRepoDir },
+            );
+            yield* Effect.promise(async () =>
+              execAsync(
+                `git config "includeIf.onbranch:main.path" "${gate.path}"`,
+                { cwd: hostDir },
+              ),
             );
           }),
       ).pipe(Effect.provide(testDisplayLayer)),
@@ -1601,8 +1612,8 @@ describe("withSandboxLifecycle (worktree mode)", () => {
           }
           return { stdout: "", stderr: "", exitCode: 0 };
         }),
-      copyIn: () => Effect.succeed(undefined as never),
-      copyFileOut: () => Effect.succeed(undefined as never),
+      copyIn: () => Effect.void,
+      copyFileOut: () => Effect.void,
     };
 
     await expect(
@@ -1649,7 +1660,7 @@ const waitForProcessGone = async (pid: number, withinMs = 3000) => {
 const ORPHAN_HOOK = "sleep 30 & echo $! > sleep.pid; wait";
 
 const readPid = async (dir: string) =>
-  Number((await readFile(join(dir, "sleep.pid"), "utf-8")).trim());
+  Number((await readFile(join(dir, "sleep.pid"), "utf8")).trim());
 
 describe("runHostHooks", () => {
   it("runs hooks sequentially in declared order", async () => {
@@ -1665,9 +1676,9 @@ describe("runHostHooks", () => {
       ),
     );
 
-    const content = await readFile(join(dir, "order.txt"), "utf-8");
+    const content = await readFile(join(dir, "order.txt"), "utf8");
     const lines = content.trim().split("\n");
-    expect(lines).toEqual(["first", "second"]);
+    expect(lines).toStrictEqual(["first", "second"]);
   });
 
   it("fails fast on non-zero exit", async () => {
@@ -1691,7 +1702,7 @@ describe("runHostHooks", () => {
 
     await Effect.runPromise(runHostHooks([{ command: "pwd > cwd.txt" }], dir));
 
-    const content = await readFile(join(dir, "cwd.txt"), "utf-8");
+    const content = await readFile(join(dir, "cwd.txt"), "utf8");
     expect(content.trim()).toBe(dir);
   });
 
@@ -1705,9 +1716,13 @@ describe("runHostHooks", () => {
     );
 
     // Give the process time to start, then abort
-    setTimeout(() => ac.abort("cancelled"), 50);
+    setTimeout(() => {
+      ac.abort("cancelled");
+    }, 50);
 
-    await expect(promise).rejects.toThrow();
+    await expect(promise).rejects.toThrow(
+      "Command aborted: sleep 60 (cancelled)",
+    );
   });
 
   it("works normally when signal is not provided", async () => {
@@ -1718,7 +1733,7 @@ describe("runHostHooks", () => {
       runHostHooks([{ command: "echo ok > result.txt" }], dir),
     );
 
-    const content = await readFile(join(dir, "result.txt"), "utf-8");
+    const content = await readFile(join(dir, "result.txt"), "utf8");
     expect(content.trim()).toBe("ok");
   });
 
@@ -1748,13 +1763,15 @@ describe("runHostHooks", () => {
   it("kills the hook's whole process tree when the signal aborts", async () => {
     const dir = await mkdtemp(join(tmpdir(), "host-hooks-"));
     const ac = new AbortController();
-    setTimeout(() => ac.abort("cancelled"), 500);
+    setTimeout(() => {
+      ac.abort("cancelled");
+    }, 500);
 
     await expect(
       Effect.runPromise(
         runHostHooks([{ command: ORPHAN_HOOK }], dir, ac.signal),
       ),
-    ).rejects.toThrow();
+    ).rejects.toThrow("Command aborted");
 
     await waitForProcessGone(await readPid(dir));
   });
@@ -1767,7 +1784,7 @@ describe("runHostHooks", () => {
       runHostHooks([{ command: "echo ok > timeout-default.txt" }], dir),
     );
 
-    const content = await readFile(join(dir, "timeout-default.txt"), "utf-8");
+    const content = await readFile(join(dir, "timeout-default.txt"), "utf8");
     expect(content.trim()).toBe("ok");
   });
 });

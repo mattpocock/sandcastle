@@ -19,10 +19,10 @@ const now = "2026-10-30T22:00:00.000Z";
 
 describe("runIdsIn", () => {
   it("finds every run id in an image ref", () => {
-    expect(runIdsIn("sandcastle:world-20261030-210500-bbbb")).toEqual([
+    expect(runIdsIn("sandcastle:world-20261030-210500-bbbb")).toStrictEqual([
       "20261030-210500-bbbb",
     ]);
-    expect(runIdsIn("sandcastle:local")).toEqual([]);
+    expect(runIdsIn("sandcastle:local")).toStrictEqual([]);
   });
 });
 
@@ -137,6 +137,7 @@ describe("sharedTmpEntryIsWorlds", () => {
     runId: self.runId,
     dir: `/tmp/sandcastle-verify/${self.runId}`,
   };
+
   it("claims a shared $TMPDIR entry only when its name or content names the world", () => {
     expect(sharedTmpEntryIsWorlds("sandcastle-git-Ab12", [], world)).toBe(
       false,

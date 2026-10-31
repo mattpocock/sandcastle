@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
 import { claudeCode, codex, copilot, pi } from "./AgentProvider.js";
 import { assertResumeSessionExists } from "./resumePrecheck.js";
 
@@ -110,7 +110,8 @@ describe("assertResumeSessionExists", () => {
       const sessionDir = provider.sessionStorage.hostSessionFilePath(
         hostRepoDir,
         SESSION_ID,
-      )!;
+      );
+      assert.isDefined(sessionDir);
       await mkdir(sessionDir, { recursive: true });
       await writeFile(
         join(sessionDir, `2026-05-29T08-00-00_${SESSION_ID}.jsonl`),
@@ -198,7 +199,8 @@ describe("assertResumeSessionExists", () => {
       const sessionPath = provider.sessionStorage.hostSessionFilePath(
         hostRepoDir,
         SESSION_ID,
-      )!;
+      );
+      assert.isDefined(sessionPath);
       await mkdir(join(sessionPath, ".."), { recursive: true });
       await writeFile(sessionPath, "{}");
 

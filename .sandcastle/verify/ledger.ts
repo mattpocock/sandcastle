@@ -32,9 +32,8 @@ import {
   remoteRefs,
   worldContainer,
   worldTmp,
-  type Engine,
-  type World,
 } from "./world.ts";
+import type { Engine, World } from "./world.ts";
 
 interface Section {
   readonly title: string;
@@ -117,7 +116,7 @@ const worktrees = (world: World): Section => {
   return {
     title: "(b) Leftover worktrees",
     leaks,
-    notes: leaks.length ? [] : ["none"],
+    notes: leaks.length > 0 ? [] : ["none"],
   };
 };
 
@@ -228,7 +227,7 @@ const hostFiles = (world: World): Section => {
     else others.push(entry);
   }
   notes.push(
-    others.length
+    others.length > 0
       ? `${others.length} new Sandcastle temp entr${others.length === 1 ? "y" : "ies"} in the shared $TMPDIR, none naming this world (other worlds or test runs): ${others.slice(0, 5).join(", ")}${others.length > 5 ? ", …" : ""}`
       : "no new Sandcastle temp entries in the shared $TMPDIR",
   );
@@ -265,7 +264,7 @@ const hostFiles = (world: World): Section => {
   for (const f of found) leaks.push(`real HOME: ${f}`);
   const home = filesUnder(world.home);
   notes.push(
-    home.length
+    home.length > 0
       ? `written to the world's HOME (a user's ~ would get these):\n${home.map((f) => `      ~/${f}`).join("\n")}`
       : "nothing written to the world's HOME",
   );
@@ -314,7 +313,7 @@ export const runLedger = (
     lines.push("");
   }
   lines.push(leaks === 0 ? "LEDGER: CLEAN" : `LEDGER: LEAK (${leaks})`);
-  const text = lines.join("\n") + "\n";
+  const text = `${lines.join("\n")}\n`;
   const file = join(world.dir, ledgerFileName(readdirSync(world.dir)));
   writeFileSync(file, text);
   return { text, leaks, file };

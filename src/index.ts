@@ -53,6 +53,7 @@ export type {
   OutputStringDefinition,
 } from "./Output.js";
 export { CwdError } from "./CwdError.js";
+export { SyncOutPathError } from "./SyncOutPathError.js";
 export {
   claudeCode,
   codex,

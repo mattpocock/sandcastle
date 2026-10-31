@@ -89,7 +89,7 @@ describe("testBindMount()", () => {
       await handle.copyFileOut(sandboxFile, hostFile);
 
       // Verify it exists on the host
-      const content = readFileSync(hostFile, "utf-8");
+      const content = readFileSync(hostFile, "utf8");
       expect(content.trim()).toBe("hello from sandbox");
     } finally {
       await handle.close();
@@ -136,7 +136,7 @@ describe("testBindMount()", () => {
       const sandboxFile = join(handle.worktreePath, "file.txt");
       await handle.copyFileOut(sandboxFile, hostFile);
 
-      expect(readFileSync(hostFile, "utf-8").trim()).toBe("data");
+      expect(readFileSync(hostFile, "utf8").trim()).toBe("data");
     } finally {
       await handle.close();
     }
@@ -161,13 +161,13 @@ describe("testBindMount()", () => {
       const sandboxFile = join(sandboxDir, "outside.txt");
       await handle.copyFileIn(hostFile, sandboxFile);
 
-      expect(readFileSync(sandboxFile, "utf-8")).toBe("outside worktree");
+      expect(readFileSync(sandboxFile, "utf8")).toBe("outside worktree");
 
       // Copy back out to a different host location
       const hostFile2 = join(hostDir, "roundtrip.txt");
       await handle.copyFileOut(sandboxFile, hostFile2);
 
-      expect(readFileSync(hostFile2, "utf-8")).toBe("outside worktree");
+      expect(readFileSync(hostFile2, "utf8")).toBe("outside worktree");
     } finally {
       await handle.close();
     }
@@ -181,7 +181,7 @@ describe("testBindMount()", () => {
       mounts: [],
       env: {},
     });
-    const worktreePath = handle.worktreePath;
+    const { worktreePath } = handle;
     expect(existsSync(worktreePath)).toBe(true);
 
     await handle.close();

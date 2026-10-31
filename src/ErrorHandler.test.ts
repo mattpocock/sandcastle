@@ -1,7 +1,15 @@
 import { Effect, Ref } from "effect";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Display, SilentDisplay } from "./Display.js";
-import type { DisplayEntry } from "./Display.js";
+import {
+  afterEach,
+  assert,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+import { SilentDisplay } from "./Display.js";
+import type { DisplayEntry, Display } from "./Display.js";
 import {
   AgentError,
   AgentIdleTimeoutError,
@@ -163,16 +171,14 @@ describe("withFriendlyErrors", () => {
 
   const runWithDisplay = async (
     effect: Effect.Effect<unknown, never, Display>,
-  ): Promise<ReadonlyArray<DisplayEntry>> => {
-    const ref = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+  ): Promise<readonly DisplayEntry[]> => {
+    const ref = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     await Effect.runPromise(Effect.provide(effect, SilentDisplay.layer(ref)));
     return Effect.runSync(Ref.get(ref));
   };
 
-  const statusOf = (entries: ReadonlyArray<DisplayEntry>) =>
-    entries.find((e) => e._tag === "status") as
-      | Extract<DisplayEntry, { _tag: "status" }>
-      | undefined;
+  const statusOf = (entries: readonly DisplayEntry[]) =>
+    entries.find((e) => e._tag === "status");
 
   it("routes DockerError through Display as error severity", async () => {
     const entries = await runWithDisplay(
@@ -181,9 +187,9 @@ describe("withFriendlyErrors", () => {
       ),
     );
     const s = statusOf(entries);
-    expect(s).toBeDefined();
-    expect(s!.severity).toBe("error");
-    expect(s!.message).toContain("daemon not running");
+    assert.isDefined(s);
+    expect(s.severity).toBe("error");
+    expect(s.message).toContain("daemon not running");
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 
@@ -195,7 +201,7 @@ describe("withFriendlyErrors", () => {
         }),
       ).pipe(withFriendlyErrors),
     );
-    expect(statusOf(entries)!.message).toContain("No .sandcastle/");
+    expect(statusOf(entries)?.message).toContain("No .sandcastle/");
   });
 
   it("routes AgentIdleTimeoutError through Display with timeout seconds", async () => {
@@ -209,12 +215,13 @@ describe("withFriendlyErrors", () => {
       ).pipe(withFriendlyErrors),
     );
     const s = statusOf(entries);
-    expect(s!.message).toContain("600");
-    expect(s!.severity).toBe("error");
+    assert.isDefined(s);
+    expect(s.message).toContain("600");
+    expect(s.severity).toBe("error");
   });
 
   it("passes through successful effects unchanged", async () => {
-    const ref = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const ref = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     const result = await Effect.runPromise(
       withFriendlyErrors(Effect.succeed("ok")).pipe(
         Effect.provide(SilentDisplay.layer(ref)),

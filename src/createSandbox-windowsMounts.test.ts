@@ -8,7 +8,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 
 const execAsync = promisify(exec);
@@ -16,7 +16,7 @@ const execAsync = promisify(exec);
 // Mock patchGitMountsForWindows to track calls
 const mockPatchGitMountsForWindows = vi.fn(
   (
-    gitMounts: Array<{ hostPath: string; sandboxPath: string }>,
+    gitMounts: { hostPath: string; sandboxPath: string }[],
     _worktreePath: string,
     _sandboxRepoDir: string,
   ) => gitMounts,
@@ -27,7 +27,7 @@ vi.mock("./mountUtils.js", async (importOriginal) => {
   return {
     ...actual,
     patchGitMountsForWindows: (
-      gitMounts: Array<{ hostPath: string; sandboxPath: string }>,
+      gitMounts: { hostPath: string; sandboxPath: string }[],
       worktreePath: string,
       sandboxRepoDir: string,
     ) =>
@@ -43,11 +43,11 @@ import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 
 /** A bind-mount provider that captures mounts without starting a real container */
 const captureMountsProvider = () => {
-  let capturedMounts: Array<{
+  let capturedMounts: {
     hostPath: string;
     sandboxPath: string;
     readonly?: boolean;
-  }> = [];
+  }[] = [];
   const provider = createBindMountSandboxProvider({
     name: "capture-mounts",
     create: async (opts) => {
@@ -106,7 +106,8 @@ describe("createSandbox Windows mount patching", () => {
 
     try {
       expect(mockPatchGitMountsForWindows).toHaveBeenCalledTimes(1);
-      const call = mockPatchGitMountsForWindows.mock.calls[0]!;
+      const [call] = mockPatchGitMountsForWindows.mock.calls;
+      assert.isDefined(call);
       const gitMounts = call[0];
       const calledWorktreePath = call[1];
       const sandboxRepoDir = call[2];
@@ -143,7 +144,8 @@ describe("createSandbox Windows mount patching", () => {
 
     try {
       expect(mockPatchGitMountsForWindows).toHaveBeenCalledTimes(1);
-      const call = mockPatchGitMountsForWindows.mock.calls[0]!;
+      const [call] = mockPatchGitMountsForWindows.mock.calls;
+      assert.isDefined(call);
       const gitMounts = call[0];
       const patchWorktreePath = call[1];
       const sandboxRepoDir = call[2];

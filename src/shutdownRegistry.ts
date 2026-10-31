@@ -46,7 +46,9 @@ const handleSignal = (): void => {
 };
 
 const attachListeners = (): void => {
-  if (listenersInstalled) return;
+  if (listenersInstalled) {
+    return;
+  }
   listenersInstalled = true;
   process.on("exit", handleExit);
   process.on("SIGINT", handleSignal);
@@ -54,7 +56,9 @@ const attachListeners = (): void => {
 };
 
 const detachListeners = (): void => {
-  if (!listenersInstalled) return;
+  if (!listenersInstalled) {
+    return;
+  }
   listenersInstalled = false;
   process.removeListener("exit", handleExit);
   process.removeListener("SIGINT", handleSignal);
@@ -75,9 +79,13 @@ export const registerShutdown = (teardown: ShutdownCallback): (() => void) => {
 
   let active = true;
   return () => {
-    if (!active) return;
+    if (!active) {
+      return;
+    }
     active = false;
     teardownCallbacks.delete(teardown);
-    if (teardownCallbacks.size === 0) detachListeners();
+    if (teardownCallbacks.size === 0) {
+      detachListeners();
+    }
   };
 };

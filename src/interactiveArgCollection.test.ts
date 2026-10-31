@@ -3,8 +3,16 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import { interactive } from "./interactive.js";
+import { createBindMountSandboxProvider } from "./SandboxProvider.js";
+import type {
+  BindMountSandboxHandle,
+  InteractiveExecOptions,
+} from "./SandboxProvider.js";
+import { claudeCode } from "./AgentProvider.js";
 
-const mockText = vi.fn();
+
+const mockText = vi.fn<(...args: unknown[]) => unknown>();
 vi.mock("@clack/prompts", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
@@ -12,14 +20,6 @@ vi.mock("@clack/prompts", async (importOriginal) => {
     text: (...args: unknown[]) => mockText(...args),
   };
 });
-
-import { interactive } from "./interactive.js";
-import {
-  createBindMountSandboxProvider,
-  type BindMountSandboxHandle,
-  type InteractiveExecOptions,
-} from "./SandboxProvider.js";
-import { claudeCode } from "./AgentProvider.js";
 
 describe("interactive arg collection", () => {
   let hostDir: string;
@@ -69,7 +69,7 @@ describe("interactive arg collection", () => {
           exec: async (command) => {
             const result = execSync(command, {
               cwd: options.worktreePath,
-              encoding: "utf-8",
+              encoding: "utf8",
               stdio: ["pipe", "pipe", "pipe"],
             });
             return { stdout: result, stderr: "", exitCode: 0 };
@@ -98,11 +98,10 @@ describe("interactive arg collection", () => {
       promptFile: writePrompt("Fix bug in {{COMPONENT}}"),
     });
 
-    expect(mockText).toHaveBeenCalledOnce();
-    expect(mockText).toHaveBeenCalledWith(
+    expect(mockText).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ message: "Enter value for {{COMPONENT}}" }),
     );
-    const promptArg = receivedArgs[receivedArgs.length - 1]!;
+    const promptArg = receivedArgs.at(-1);
     expect(promptArg).toContain("LoginForm");
     expect(promptArg).not.toContain("{{COMPONENT}}");
   });
@@ -123,7 +122,7 @@ describe("interactive arg collection", () => {
     });
 
     expect(mockText).not.toHaveBeenCalled();
-    const promptArg = receivedArgs[receivedArgs.length - 1]!;
+    const promptArg = receivedArgs.at(-1);
     expect(promptArg).toContain("LoginForm");
   });
 
@@ -177,7 +176,7 @@ describe("interactive arg collection", () => {
       2,
       expect.objectContaining({ message: "Enter value for {{ISSUE_NUM}}" }),
     );
-    const promptArg = receivedArgs[receivedArgs.length - 1]!;
+    const promptArg = receivedArgs.at(-1);
     expect(promptArg).toContain("LoginForm");
     expect(promptArg).toContain("42");
   });
@@ -199,8 +198,8 @@ describe("interactive arg collection", () => {
     });
 
     // Only ISSUE_NUM should be prompted (COMPONENT was provided)
-    expect(mockText).toHaveBeenCalledOnce();
-    const promptArg = receivedArgs[receivedArgs.length - 1]!;
+    expect(mockText).toHaveBeenCalledTimes(1);
+    const promptArg = receivedArgs.at(-1);
     expect(promptArg).toContain("LoginForm");
     expect(promptArg).toContain("42");
   });
