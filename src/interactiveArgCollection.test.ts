@@ -98,7 +98,7 @@ describe("interactive arg collection", () => {
       promptFile: writePrompt("Fix bug in {{COMPONENT}}"),
     });
 
-    expect(mockText).toHaveBeenCalledOnce();
+    expect(mockText).toHaveBeenCalledTimes(1);
     expect(mockText).toHaveBeenCalledWith(
       expect.objectContaining({ message: "Enter value for {{COMPONENT}}" }),
     );
@@ -199,7 +199,7 @@ describe("interactive arg collection", () => {
     });
 
     // Only ISSUE_NUM should be prompted (COMPONENT was provided)
-    expect(mockText).toHaveBeenCalledOnce();
+    expect(mockText).toHaveBeenCalledTimes(1);
     const promptArg = receivedArgs[receivedArgs.length - 1]!;
     expect(promptArg).toContain("LoginForm");
     expect(promptArg).toContain("42");

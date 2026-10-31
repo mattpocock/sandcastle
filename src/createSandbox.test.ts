@@ -293,8 +293,8 @@ describe("createSandbox", () => {
         maxIterations: 1,
       });
 
-      expect(result.iterations.length).toBe(1);
-      expect(typeof result.stdout).toBe("string");
+      expect(result.iterations).toHaveLength(1);
+      expect(result.stdout).toBeTypeOf("string");
       expect(Array.isArray(result.commits)).toBe(true);
     } finally {
       await sandbox.close();
@@ -700,16 +700,16 @@ describe("createSandbox", () => {
       });
 
       expect(first.iterations[0]!.sessionId).toBe(mockSessionId);
-      expect(typeof first.resume).toBe("function");
-      expect(typeof first.fork).toBe("function");
+      expect(first.resume).toBeTypeOf("function");
+      expect(first.fork).toBeTypeOf("function");
 
       const second = await first.resume!("now do something else");
 
       // The second iteration's agent command must include --resume <sid>.
-      expect(capturedCommands.length).toBe(2);
+      expect(capturedCommands).toHaveLength(2);
       expect(capturedCommands[1]).toContain(`--resume '${mockSessionId}'`);
       // Resume runs exactly one iteration.
-      expect(second.iterations.length).toBe(1);
+      expect(second.iterations).toHaveLength(1);
     } finally {
       await sandbox.close();
       await rm(hostDir, { recursive: true, force: true });
@@ -820,8 +820,8 @@ describe("createSandbox", () => {
       const resumed = await first.resume!("repeat {{TOKEN}}");
       const forked = await first.fork!("fork {{TOKEN}}");
 
-      expect(resumed.iterations.length).toBe(1);
-      expect(forked.iterations.length).toBe(1);
+      expect(resumed.iterations).toHaveLength(1);
+      expect(forked.iterations).toHaveLength(1);
       // The follow-up prompts are inline: passed as-is, never substituted.
       expect(agentStdin).toEqual([
         "Remember tok-123",
@@ -1375,8 +1375,8 @@ describe("createSandbox", () => {
         name: "Reviewer",
       });
 
-      expect(result1.iterations.length).toBe(1);
-      expect(result2.iterations.length).toBe(1);
+      expect(result1.iterations).toHaveLength(1);
+      expect(result2.iterations).toHaveLength(1);
     } finally {
       await sandbox.close();
       await rm(hostDir, { recursive: true, force: true });
@@ -1714,7 +1714,7 @@ describe("createSandbox", () => {
         maxIterations: 1,
       });
 
-      expect(result.iterations.length).toBe(1);
+      expect(result.iterations).toHaveLength(1);
 
       // Verify the worktree exists and is on the right branch
       const { stdout: branch } = await execAsync(
@@ -2130,7 +2130,7 @@ describe("createSandbox", () => {
         prompt: "do something",
         signal: ac.signal,
       });
-      expect(result.iterations.length).toBe(1);
+      expect(result.iterations).toHaveLength(1);
     } finally {
       await sandbox.close();
       await rm(hostDir, { recursive: true, force: true });
@@ -2203,7 +2203,7 @@ describe("createSandbox", () => {
         prompt: "should succeed",
         signal: new AbortController().signal,
       });
-      expect(result.iterations.length).toBe(1);
+      expect(result.iterations).toHaveLength(1);
     } finally {
       await sandbox.close();
       await rm(hostDir, { recursive: true, force: true });

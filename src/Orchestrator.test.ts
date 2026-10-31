@@ -253,7 +253,7 @@ describe("Orchestrator", () => {
       }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
     );
 
-    expect(result.iterations.length).toBe(1);
+    expect(result.iterations).toHaveLength(1);
     expect(result.completionSignal).toBeUndefined();
 
     // Verify the agent's commit was synced back to host
@@ -287,7 +287,7 @@ describe("Orchestrator", () => {
       }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
     );
 
-    expect(result.iterations.length).toBe(1);
+    expect(result.iterations).toHaveLength(1);
     expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
   });
 
@@ -317,7 +317,7 @@ describe("Orchestrator", () => {
       }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
     );
 
-    expect(result.iterations.length).toBe(1);
+    expect(result.iterations).toHaveLength(1);
     expect(result.completionSignal).toBe("TASK_FINISHED");
   });
 
@@ -348,7 +348,7 @@ describe("Orchestrator", () => {
     );
 
     // Custom signal not in output, so all iterations run
-    expect(result.iterations.length).toBe(2);
+    expect(result.iterations).toHaveLength(2);
     expect(result.completionSignal).toBeUndefined();
   });
 
@@ -378,7 +378,7 @@ describe("Orchestrator", () => {
       }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
     );
 
-    expect(result.iterations.length).toBe(1);
+    expect(result.iterations).toHaveLength(1);
     expect(result.completionSignal).toBe("TASK_ABORTED");
   });
 
@@ -408,7 +408,7 @@ describe("Orchestrator", () => {
       }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
     );
 
-    expect(result.iterations.length).toBe(1);
+    expect(result.iterations).toHaveLength(1);
     expect(result.completionSignal).toBe("TASK_FINISHED");
   });
 
@@ -438,7 +438,7 @@ describe("Orchestrator", () => {
       }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
     );
 
-    expect(result.iterations.length).toBe(2);
+    expect(result.iterations).toHaveLength(2);
     expect(result.completionSignal).toBeUndefined();
   });
 
@@ -491,7 +491,7 @@ describe("Orchestrator", () => {
       }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
     );
 
-    expect(result.iterations.length).toBe(3);
+    expect(result.iterations).toHaveLength(3);
     expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
 
     // Verify all 3 iteration files arrived on host
@@ -527,7 +527,7 @@ describe("Orchestrator", () => {
       }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
     );
 
-    expect(result.iterations.length).toBe(2);
+    expect(result.iterations).toHaveLength(2);
     expect(result.completionSignal).toBeUndefined();
 
     // Host should still be at the original commit
@@ -572,7 +572,7 @@ describe("Orchestrator", () => {
       }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
     );
 
-    expect(result.iterations.length).toBe(2);
+    expect(result.iterations).toHaveLength(2);
     expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
     // Untracked file from iteration 1 must not exist in iteration 2's sandbox
     expect(markerExistedInIter2).toBe(false);
@@ -1481,7 +1481,7 @@ describe("Orchestrator error handling", () => {
     );
 
     // Should detect COMPLETE from the stdout fallback
-    expect(result.iterations.length).toBe(1);
+    expect(result.iterations).toHaveLength(1);
     expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
   });
 
@@ -1971,7 +1971,7 @@ describe("Orchestrator streaming", () => {
       }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
     );
 
-    expect(result.iterations.length).toBe(1);
+    expect(result.iterations).toHaveLength(1);
     expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
   });
 
@@ -2892,7 +2892,7 @@ describe("Orchestrator with pi provider", () => {
       }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
     );
 
-    expect(result.iterations.length).toBe(1);
+    expect(result.iterations).toHaveLength(1);
     const content = await readFile(join(hostDir, "pi-output.txt"), "utf-8");
     expect(content).toBe("pi was here");
   });
@@ -2920,7 +2920,7 @@ describe("Orchestrator with pi provider", () => {
       }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
     );
 
-    expect(result.iterations.length).toBe(1);
+    expect(result.iterations).toHaveLength(1);
     expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
   });
 
@@ -3207,7 +3207,7 @@ describe("Orchestrator with codex provider", () => {
       }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
     );
 
-    expect(result.iterations.length).toBe(1);
+    expect(result.iterations).toHaveLength(1);
     const content = await readFile(join(hostDir, "codex-output.txt"), "utf-8");
     expect(content).toBe("codex was here");
   });
@@ -3235,7 +3235,7 @@ describe("Orchestrator with codex provider", () => {
       }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
     );
 
-    expect(result.iterations.length).toBe(1);
+    expect(result.iterations).toHaveLength(1);
     expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
   });
 
@@ -3423,7 +3423,7 @@ describe("Session capture integration", () => {
     );
 
     // Verify iteration result
-    expect(result.iterations.length).toBe(1);
+    expect(result.iterations).toHaveLength(1);
     expect(result.iterations[0]!.sessionId).toBe(mockSessionId);
     expect(result.iterations[0]!.sessionFilePath).toBeDefined();
 
@@ -3465,7 +3465,7 @@ describe("Session capture integration", () => {
       }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
     );
 
-    expect(result.iterations.length).toBe(1);
+    expect(result.iterations).toHaveLength(1);
     expect(result.iterations[0]!.sessionFilePath).toBeUndefined();
   });
 
@@ -3491,7 +3491,7 @@ describe("Session capture integration", () => {
       }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
     );
 
-    expect(result.iterations.length).toBe(1);
+    expect(result.iterations).toHaveLength(1);
     expect(result.iterations[0]!.sessionId).toBeUndefined();
     expect(result.iterations[0]!.sessionFilePath).toBeUndefined();
   });
@@ -3571,7 +3571,7 @@ describe("Session capture integration", () => {
     );
 
     // Verify iteration result
-    expect(result.iterations.length).toBe(1);
+    expect(result.iterations).toHaveLength(1);
     expect(result.iterations[0]!.sessionId).toBe(mockSessionId);
     expect(result.iterations[0]!.sessionFilePath).toBeDefined();
 
@@ -3915,7 +3915,7 @@ describe("Orchestrator signal (AbortSignal)", () => {
       await new Promise((r) => setTimeout(r, 200));
 
       // The run is over: no idle warning ticks, nothing keeps the loop alive.
-      expect(await idleWarnings()).toBe(warningsAtSettle);
+      await expect(idleWarnings()).resolves.toBe(warningsAtSettle);
       await rm(hostDir, { recursive: true, force: true });
     },
     10_000,
@@ -4043,7 +4043,7 @@ describe("Orchestrator signal (AbortSignal)", () => {
     // Abort after completion — should not throw or affect result
     ac.abort("too late");
 
-    expect(result.iterations.length).toBe(1);
+    expect(result.iterations).toHaveLength(1);
     expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
   });
 
@@ -4068,7 +4068,7 @@ describe("Orchestrator signal (AbortSignal)", () => {
       }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
     );
 
-    expect(result.iterations.length).toBe(1);
+    expect(result.iterations).toHaveLength(1);
     expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
   });
 });
@@ -4144,7 +4144,7 @@ describe("Orchestrator completion timeout (hanging process)", () => {
     );
 
     expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
-    expect(result.iterations.length).toBe(1);
+    expect(result.iterations).toHaveLength(1);
   }, 10_000);
 
   it("falls through to the idle timeout when the agent hangs WITHOUT emitting the signal", async () => {

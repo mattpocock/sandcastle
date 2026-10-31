@@ -376,7 +376,7 @@ describe("worktree.interactive()", () => {
       expect(result).toHaveProperty("exitCode");
       expect(result).toHaveProperty("branch");
       expect(result).toHaveProperty("commits");
-      expect(typeof result.branch).toBe("string");
+      expect(result.branch).toBeTypeOf("string");
     } finally {
       await ws.close();
       await rm(hostDir, { recursive: true, force: true });
@@ -605,7 +605,7 @@ describe("worktree.interactive()", () => {
       });
 
       expect(result.exitCode).toBe(42);
-      expect(result.commits.length).toBe(1);
+      expect(result.commits).toHaveLength(1);
       expect(result.commits[0]!.sha).toMatch(/^[0-9a-f]{40}$/);
       expect(result.branch).toBe("result-test");
     } finally {
@@ -771,8 +771,8 @@ describe("worktree.run()", () => {
         maxIterations: 1,
       });
 
-      expect(result.iterations.length).toBe(1);
-      expect(typeof result.stdout).toBe("string");
+      expect(result.iterations).toHaveLength(1);
+      expect(result.stdout).toBeTypeOf("string");
       expect(Array.isArray(result.commits)).toBe(true);
       expect(result.branch).toBe("run-test");
     } finally {
@@ -1381,7 +1381,7 @@ describe("worktree.run()", () => {
         prompt: "do something else",
       });
 
-      expect(result.iterations.length).toBe(1);
+      expect(result.iterations).toHaveLength(1);
       expect(result.branch).toBe("abort-reuse-test");
     } finally {
       await ws.close();

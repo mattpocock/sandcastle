@@ -38,7 +38,7 @@ describe("BoundedTail", () => {
     const tail = new BoundedTail(10, "\n");
     tail.push("0123456789ABCDEF"); // 16 chars, no newline
     expect(tail.toString()).toBe("6789ABCDEF");
-    expect(tail.toString().length).toBe(10);
+    expect(tail.toString()).toHaveLength(10);
   });
 
   it("keeps the tail of an oversized item even when earlier items exist", () => {

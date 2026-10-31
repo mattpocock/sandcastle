@@ -137,6 +137,7 @@ describe("sharedTmpEntryIsWorlds", () => {
     runId: self.runId,
     dir: `/tmp/sandcastle-verify/${self.runId}`,
   };
+
   it("claims a shared $TMPDIR entry only when its name or content names the world", () => {
     expect(sharedTmpEntryIsWorlds("sandcastle-git-Ab12", [], world)).toBe(
       false,

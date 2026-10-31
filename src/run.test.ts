@@ -239,7 +239,7 @@ describe("RunResult", () => {
       commits: [],
       branch: "main",
     };
-    expect(result.iterations.length).toBe(2);
+    expect(result.iterations).toHaveLength(2);
     expect(result.iterations[0]!.sessionId).toBe("abc-123");
     expect(result.iterations[1]!.sessionId).toBe("def-456");
   });
@@ -299,7 +299,7 @@ describe("RunResult", () => {
         branch: "main",
       }),
     };
-    expect(typeof result.fork).toBe("function");
+    expect(result.fork).toBeTypeOf("function");
   });
 });
 
@@ -1588,8 +1588,8 @@ describe("resume/fork after a promptFile + promptArgs run", () => {
       const resumed = await first.resume!("repeat {{TOKEN}}");
       const forked = await first.fork!("fork {{TOKEN}}");
 
-      expect(resumed.iterations.length).toBe(1);
-      expect(forked.iterations.length).toBe(1);
+      expect(resumed.iterations).toHaveLength(1);
+      expect(forked.iterations).toHaveLength(1);
       // The follow-up prompts are inline: passed as-is, never substituted.
       expect(agentStdin).toEqual([
         "Remember tok-123",
@@ -1678,8 +1678,8 @@ describe("resume/fork after a structured-output run", () => {
       const resumed = await r.resume!("write the word DONE into done.txt");
       const forked = await r.fork!("write the word DONE into done.txt");
 
-      expect(resumed.iterations.length).toBe(1);
-      expect(forked.iterations.length).toBe(1);
+      expect(resumed.iterations).toHaveLength(1);
+      expect(forked.iterations).toHaveLength(1);
       expect("output" in resumed).toBe(false);
       expect("output" in forked).toBe(false);
       expect(agentStdin).toEqual([

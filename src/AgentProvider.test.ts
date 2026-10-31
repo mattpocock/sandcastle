@@ -1678,6 +1678,7 @@ describe("copilot factory", () => {
     expect(command).toContain("--model 'claude-sonnet-4.5'");
     expect(command).toContain("--output-format json");
   });
+
   it("buildPrintCommand includes --allow-all-tools when dangerouslySkipPermissions is true", () => {
     const provider = copilot("claude-sonnet-4.5");
     const { command } = provider.buildPrintCommand({
@@ -2249,9 +2250,9 @@ describe("sessionStorage", () => {
       );
 
       // existsOnHost finds the captured session by globbing the dir.
-      expect(await provider.sessionStorage!.existsOnHost(hostCwd, id)).toBe(
-        true,
-      );
+      await expect(
+        provider.sessionStorage!.existsOnHost(hostCwd, id),
+      ).resolves.toBe(true);
     } finally {
       await rm(hostDir, { recursive: true, force: true });
       await rm(sandboxDir, { recursive: true, force: true });
@@ -2326,9 +2327,9 @@ describe("sessionStorage", () => {
       const provider = pi("claude-sonnet-4-6", {
         sessionStorage: { hostSessionsDir: hostDir },
       });
-      expect(
-        await provider.sessionStorage!.existsOnHost("/some/cwd", "missing-id"),
-      ).toBe(false);
+      await expect(
+        provider.sessionStorage!.existsOnHost("/some/cwd", "missing-id"),
+      ).resolves.toBe(false);
     } finally {
       await rm(hostDir, { recursive: true, force: true });
     }
