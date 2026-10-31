@@ -997,7 +997,6 @@
     "vitest(prefer-strict-equal)": 2
   },
   "src/PromptResolver.ts": {
-    "effect/catchAllToMapError": 1,
     "typescript(restrict-template-expressions)": 1
   },
   "src/raceAbortSignal.ts": {
