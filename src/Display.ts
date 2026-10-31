@@ -247,62 +247,105 @@ export const terminalStyle = {
 };
 
 export const ClackDisplay = {
-  layer: Layer.succeed(Display, {
-    intro: (title) =>
-      Effect.sync(() => clack.intro(styleText("inverse", ` ${title} `))),
+  layer: Layer.scoped(
+    Display,
+    Effect.gen(function* () {
+      // Each clack.log.message() call is its own message on its own line, so
+      // streamed text chunks are held here until a whole line is ready —
+      // otherwise a chunk boundary that falls mid-word ("comm" / "ands")
+      // splits the word across messages. The pending partial line is flushed
+      // before any other output (tool calls, status, …) to keep ordering, and
+      // when the layer is released. Mirrors FileDisplay's `midLine`.
+      let pendingText = "";
 
-    status: (message, severity) =>
-      Effect.sync(() =>
-        severityToClack[severity](terminalStyle.status(message)),
-      ),
+      const printText = (text: string) => {
+        const trimmed = text.replace(/^\n+|\n+$/g, "");
+        if (trimmed.trim().length > 0) clack.log.message(trimmed);
+      };
 
-    spinner: (message, effect) =>
-      Effect.acquireUseRelease(
+      const flushText = () => {
+        const text = pendingText;
+        pendingText = "";
+        printText(text);
+      };
+
+      const writeText = (chunk: string) => {
+        pendingText += chunk;
+        const lastNewline = pendingText.lastIndexOf("\n");
+        if (lastNewline === -1) return;
+        const complete = pendingText.slice(0, lastNewline);
+        pendingText = pendingText.slice(lastNewline + 1);
+        printText(complete);
+      };
+
+      const sync = (f: () => void) =>
         Effect.sync(() => {
-          const s = clack.spinner();
-          s.start(message);
-          return s;
-        }),
-        () => effect,
-        (s, exit) =>
-          Effect.sync(() => {
-            if (exit._tag === "Success") {
-              s.stop(message);
-            } else {
-              s.stop(`${message} (failed)`);
-            }
+          flushText();
+          f();
+        });
+
+      yield* Effect.addFinalizer(() => Effect.sync(flushText));
+
+      return {
+        intro: (title) =>
+          sync(() => clack.intro(styleText("inverse", ` ${title} `))),
+
+        status: (message, severity) =>
+          sync(() => severityToClack[severity](terminalStyle.status(message))),
+
+        spinner: (message, effect) =>
+          Effect.acquireUseRelease(
+            Effect.sync(() => {
+              flushText();
+              const s = clack.spinner();
+              s.start(message);
+              return s;
+            }),
+            () => effect,
+            (s, exit) =>
+              Effect.sync(() => {
+                if (exit._tag === "Success") {
+                  s.stop(message);
+                } else {
+                  s.stop(`${message} (failed)`);
+                }
+              }),
+          ),
+
+        summary: (title, rows) =>
+          sync(() => {
+            const lines = Object.entries(rows)
+              .map(([key, value]) => terminalStyle.summaryRow(key, value))
+              .join("\n");
+            clack.note(lines, terminalStyle.summaryTitle(title));
           }),
-      ),
 
-    summary: (title, rows) =>
-      Effect.sync(() => {
-        const lines = Object.entries(rows)
-          .map(([key, value]) => terminalStyle.summaryRow(key, value))
-          .join("\n");
-        clack.note(lines, terminalStyle.summaryTitle(title));
-      }),
+        taskLog: (title, effect) =>
+          Effect.acquireUseRelease(
+            Effect.sync(() => {
+              flushText();
+              return clack.taskLog({ title });
+            }),
+            (log) => effect((msg) => log.message(msg)),
+            (log, exit) =>
+              Effect.sync(() => {
+                if (exit._tag === "Success") {
+                  log.success(title, { showLog: true });
+                } else {
+                  log.error(title, { showLog: true });
+                }
+              }),
+          ),
 
-    taskLog: (title, effect) =>
-      Effect.acquireUseRelease(
-        Effect.sync(() => clack.taskLog({ title })),
-        (log) => effect((msg) => log.message(msg)),
-        (log, exit) =>
-          Effect.sync(() => {
-            if (exit._tag === "Success") {
-              log.success(title, { showLog: true });
-            } else {
-              log.error(title, { showLog: true });
-            }
-          }),
-      ),
+        text: (message) => sync(() => clack.log.message(message)),
 
-    text: (message) => Effect.sync(() => clack.log.message(message)),
+        textChunk: (chunk) => Effect.sync(() => writeText(chunk)),
 
-    textChunk: (chunk) => Effect.sync(() => clack.log.message(chunk)),
-
-    toolCall: (name, formattedArgs) =>
-      Effect.sync(() =>
-        clack.log.step(terminalStyle.toolCall(`${name}(${formattedArgs})`)),
-      ),
-  }),
+        toolCall: (name, formattedArgs) =>
+          sync(() =>
+            clack.log.step(terminalStyle.toolCall(`${name}(${formattedArgs})`)),
+          ),
+      };
+    }),
+  ),
 };
