@@ -11,6 +11,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import type { Dirent } from "node:fs";
 import { createServer } from "node:net";
 import type { Server } from "node:net";
 import { release, tmpdir, userInfo } from "node:os";
@@ -86,11 +87,29 @@ const portOf = (server: Server): number => {
 const hostProcesses = (): string =>
   execFileSync("ps", ["-eo", "args="], { encoding: "utf8" });
 
+/** The entries of `dir`, or none when it's gone (other test files delete theirs concurrently). */
+const entriesOf = (dir: string): Dirent[] => {
+  try {
+    return readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+};
+
 /** Paths under `root` whose last segment is `name`. */
-const filesNamed = (root: string, name: string): string[] =>
-  readdirSync(root, { recursive: true, encoding: "utf8" }).filter(
-    (entry) => path.basename(entry) === name,
-  );
+const filesNamed = (root: string, name: string): string[] => {
+  const found: string[] = [];
+  for (const entry of entriesOf(root)) {
+    const entryPath = path.join(root, entry.name);
+    if (entry.name === name) {
+      found.push(entryPath);
+    }
+    if (entry.isDirectory()) {
+      found.push(...filesNamed(entryPath, name));
+    }
+  }
+  return found;
+};
 
 describe.each(NATIVE_PROVIDERS)("containment: $name", (provider) => {
   describe.skipIf(skipsHere(provider))("on this host", () => {

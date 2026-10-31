@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import type { BindMountSandboxProvider } from "@ai-hero/sandcastle";
 import { bwrap } from "@ai-hero/sandcastle/sandboxes/bwrap";
+import { seatbelt } from "@ai-hero/sandcastle/sandboxes/seatbelt";
 
 /**
  * The native sandbox providers the containment suite runs against. Each one
@@ -29,6 +30,20 @@ export const NATIVE_PROVIDERS: readonly NativeProviderCase[] = [
     isUsable: () =>
       spawnSync("bwrap", ["--ro-bind", "/", "/", "true"]).status === 0,
     make: () => bwrap(),
+  },
+  {
+    name: "seatbelt()",
+    platform: "darwin",
+    setupHint:
+      "nothing to install: run on macOS 14 or later, outside any other Seatbelt sandbox",
+    isUsable: () =>
+      spawnSync("/usr/bin/sandbox-exec", [
+        "-p",
+        "(version 1)(allow default)",
+        "--",
+        "/usr/bin/true",
+      ]).status === 0,
+    make: () => seatbelt(),
   },
 ];
 

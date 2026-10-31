@@ -33,6 +33,10 @@
     "./sandboxes/bwrap": {
       "import": "./dist/sandboxes/bwrap.js",
       "types": "./dist/sandboxes/bwrap.d.ts"
+    },
+    "./sandboxes/seatbelt": {
+      "import": "./dist/sandboxes/seatbelt.js",
+      "types": "./dist/sandboxes/seatbelt.d.ts"
     }
   },
   "bin": {

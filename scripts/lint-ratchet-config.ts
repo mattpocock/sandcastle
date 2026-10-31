@@ -102,4 +102,9 @@ export const ALLOWED_DIRECTIVES: readonly Exemption[] = [
     rules: ["oxlint-disable"],
     why: "bwrap() must throw NativeSandboxUnavailableError at construction (#1272), and construction is synchronous, so its Bubblewrap probe is spawnSync and its os-release read is readFileSync. One file-level node/no-sync disable, nothing else.",
   },
+  {
+    files: ["src/seatbeltPreflight.ts"],
+    rules: ["oxlint-disable"],
+    why: "seatbelt() must throw NativeSandboxUnavailableError at construction (#1272), and construction is synchronous, so its sandbox-exec probe is spawnSync and its sandbox-exec check is existsSync. One file-level node/no-sync disable, nothing else.",
+  },
 ];
