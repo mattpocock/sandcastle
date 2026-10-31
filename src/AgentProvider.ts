@@ -221,14 +221,14 @@ const parseStreamJsonLine = (line: string): ParsedStreamEvent[] => {
  */
 const CURSOR_PRINT_PROMPT_MAX_BYTES = 120 * 1024;
 
-function assertCursorPrintPromptFitsArgv(prompt: string): void {
+const assertCursorPrintPromptFitsArgv = (prompt: string): void => {
   const n = Buffer.byteLength(prompt, "utf8");
   if (n > CURSOR_PRINT_PROMPT_MAX_BYTES) {
     throw new Error(
       `Cursor print-mode prompt is ${n} bytes (max ${CURSOR_PRINT_PROMPT_MAX_BYTES} bytes). The Cursor CLI accepts the prompt only as a command-line argument; shorten the prompt or split the work. Other Sandcastle providers use stdin for large prompts.`,
     );
   }
-}
+};
 
 /** Cursor stream-json emits top-level `tool_call` events (see Cursor CLI output-format docs). */
 const parseCursorToolCallStarted = (
@@ -1218,14 +1218,14 @@ export const opencode = (
  */
 const COPILOT_PRINT_PROMPT_MAX_BYTES = 120 * 1024;
 
-function assertCopilotPrintPromptFitsArgv(prompt: string): void {
+const assertCopilotPrintPromptFitsArgv = (prompt: string): void => {
   const n = Buffer.byteLength(prompt, "utf8");
   if (n > COPILOT_PRINT_PROMPT_MAX_BYTES) {
     throw new Error(
       `Copilot print-mode prompt is ${n} bytes (max ${COPILOT_PRINT_PROMPT_MAX_BYTES} bytes). This provider passes the prompt as a command-line argument; shorten the prompt or split the work. Other Sandcastle providers use stdin for large prompts.`,
     );
   }
-}
+};
 
 /**
  * Parse one line of `copilot --output-format json` JSONL output.
