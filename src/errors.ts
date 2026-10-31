@@ -1,4 +1,5 @@
 import { Data, Duration, Effect } from "effect";
+import type { CwdError } from "./resolveCwd.js";
 
 /** Command execution failed in the sandbox */
 export class ExecError extends Data.TaggedError("ExecError")<{
@@ -195,7 +196,6 @@ export class SessionCaptureError extends Data.TaggedError(
 
 /** The provided `cwd` path does not exist or is not a directory. */
 export { CwdError } from "./resolveCwd.js";
-import type { CwdError } from "./resolveCwd.js";
 
 /** Union of all sandbox-related errors */
 export type SandboxError =

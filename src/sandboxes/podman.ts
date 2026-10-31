@@ -480,7 +480,7 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
 };
 
 // Re-export for backwards compatibility
-export { defaultImageName };
+export { defaultImageName } from "../mountUtils.js";
 
 const checkImageExists = async (imageName: string): Promise<void> =>
   new Promise<void>((resolve, reject) => {

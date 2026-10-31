@@ -408,7 +408,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
 };
 
 // Re-export for backwards compatibility
-export { defaultImageName };
+export { defaultImageName } from "../mountUtils.js";
 
 const checkImageUid = async (
   imageName: string,
