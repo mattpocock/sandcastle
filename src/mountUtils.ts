@@ -275,7 +275,7 @@ export const patchGitMountsForWindows = (
     if (content === null) {
       return gitMounts;
     }
-    const match = content.match(/^gitdir:\s*(.+)$/);
+    const match = /^gitdir:\s*(.+)$/.exec(content);
     if (!match) {
       return gitMounts;
     }

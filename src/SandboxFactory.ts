@@ -324,7 +324,7 @@ export const resolveGitMounts = (
     }
     // Worktree: .git is a file with "gitdir: <path>"
     const content = (yield* fs.readFileString(gitPath)).trim();
-    const match = content.match(/^gitdir:\s*(.+)$/);
+    const match = /^gitdir:\s*(.+)$/.exec(content);
     if (!match) {
       // Unrecognized format — fall back to mounting the file as-is
       return [{ hostPath: gitPath, sandboxPath: gitPath }];
