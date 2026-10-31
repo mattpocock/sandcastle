@@ -5,6 +5,8 @@ import {
   claudeHostSessionPath,
   claudeSandboxSessionPath,
   claudeSubagentsDirOnHost,
+  copilotHostSessionsDir,
+  copilotSessionPath,
   encodePiSessionDir,
   findClaudeSessionOnHost,
   findCodexSessionOnHost,
@@ -12,16 +14,19 @@ import {
   homeDir,
   listClaudeSubagentSessionsInSandbox,
   locateSandboxSessionFile,
+  makeSessionFileStorage,
   pathExists,
   piSessionDirPath,
   requireHostSessionPath,
   transferClaudeSession,
   transferCodexSession,
+  transferCopilotSession,
   transferPiSession,
 } from "./SessionStore.js";
 import type { HostSessionLookup } from "./SessionStore.js";
 import type { BindMountSandboxHandle } from "./SandboxProvider.js";
 import type { ContextWindow } from "./ContextWindow.js";
+import { ForkNotSupportedError } from "./errors.js";
 
 export type ParsedStreamEvent =
   | { type: "text"; text: string }
@@ -1326,31 +1331,73 @@ export interface CopilotOptions {
   readonly effort?: "low" | "medium" | "high";
   /** Environment variables injected by this agent provider. */
   readonly env?: Record<string, string>;
+  /** When false, session capture is disabled. Default: true. */
+  readonly captureSessions?: boolean;
+  /** Override Copilot `session-state` directories for tests or non-standard installs. */
+  readonly sessionStorage?: {
+    readonly hostSessionsDir?: string;
+    readonly sandboxSessionsDir?: string;
+  };
 }
+
+/**
+ * Copilot's session is one `events.jsonl` keyed by id alone, so it moves as a
+ * single file. The CLI resumes (`--resume=<id>`) but has no fork flag, so the
+ * provider declares `canFork: false` (ADR 0021).
+ */
+const makeCopilotSessionStorage = (
+  options?: CopilotOptions,
+): AgentSessionStorage => {
+  const hostDir =
+    options?.sessionStorage?.hostSessionsDir ?? copilotHostSessionsDir();
+  const sandboxDir =
+    options?.sessionStorage?.sandboxSessionsDir ??
+    "/home/agent/.copilot/session-state";
+  const hostPath = (id: string): string => join(hostDir, id, "events.jsonl");
+  return {
+    ...makeSessionFileStorage({
+      hostRoot: hostDir,
+      hostPath: (_cwd, id) => hostPath(id),
+      hostPathsById: (id) => [hostPath(id)],
+      sandboxPath: (_cwd, id) => copilotSessionPath(sandboxDir, id),
+      rewrite: transferCopilotSession,
+    }),
+    canFork: false,
+  };
+};
 
 export const copilot = (
   model: string,
   options?: CopilotOptions,
-): AgentProvider => ({
+): AgentProvider & { readonly sessionStorage: AgentSessionStorage } => ({
   name: "copilot",
   env: options?.env ?? {},
-  captureSessions: false,
+  captureSessions: options?.captureSessions ?? true,
+  sessionStorage: makeCopilotSessionStorage(options),
 
-  // Copilot CLI does expose `--resume <id>`, but its session state is indexed by
-  // a SQLite database alongside the JSONL files in ~/.copilot/session-state/, so
-  // transferring a single session file between host and sandbox is not enough to
-  // make resume work (see ADR 0016). Until the round-trip is verified end-to-end,
-  // copilot is non-resumable: captureSessions is false, there is no sessionStorage,
-  // and resumeSession is ignored here — like cursor, pi, and opencode.
   buildPrintCommand({
     prompt,
     dangerouslySkipPermissions,
+    resumeSession,
+    forkSession,
   }: AgentCommandOptions): PrintCommand {
+    if (resumeSession !== undefined && forkSession === true) {
+      throw new ForkNotSupportedError({
+        message:
+          "copilot cannot fork a session: its CLI resumes but has no fork. Use resume() to continue the session in place.",
+        agentProvider: "copilot",
+      });
+    }
     assertCopilotPrintPromptFitsArgv(prompt);
     const allowAll = dangerouslySkipPermissions ? " --allow-all-tools" : "";
     const effortFlag = options?.effort ? ` --effort ${options.effort}` : "";
+    // `--resume` takes an optional value, so the id is bound with `=`.
+    const resumeFlag =
+      resumeSession === undefined
+        ? ""
+        : ` --resume=${shellEscape(resumeSession)}`;
     return {
-      command: `copilot -p ${shellEscape(prompt)} --output-format json --model ${shellEscape(model)}${allowAll}${effortFlag}`,
+      command: `copilot -p ${shellEscape(prompt)} --output-format json --model ${shellEscape(model)}${allowAll}${effortFlag}${resumeFlag}`,
     };
   },
 

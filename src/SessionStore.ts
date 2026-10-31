@@ -398,6 +398,68 @@ export const transferPiSession = (
 };
 
 // ---------------------------------------------------------------------------
+// Copilot session paths and transfer
+// ---------------------------------------------------------------------------
+
+/**
+ * Copilot keeps each session in `~/.copilot/session-state/<id>/`, keyed by id
+ * alone. Its `events.jsonl` is the whole conversation: `copilot --resume=<id>`
+ * replays it with no other file present, not even the `session-store.db`
+ * index beside it (verified with Copilot CLI 1.0.105).
+ */
+export const copilotSessionPath = (sessionsDir: string, id: string): string =>
+  posix.join(sessionsDir, id, "events.jsonl");
+
+/** The host's default Copilot `session-state` directory. */
+export const copilotHostSessionsDir = (): string =>
+  join(homeDir(), ".copilot", "session-state");
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+/** Rewrite one event's `data.context.cwd` / `gitRoot`; the line itself when untouched. */
+const rewriteCopilotEvent = (
+  line: string,
+  fromCwd: string,
+  toCwd: string,
+): string => {
+  let entry: unknown;
+  try {
+    entry = JSON.parse(line);
+  } catch {
+    return line;
+  }
+  const data = isRecord(entry) ? entry["data"] : undefined;
+  const context = isRecord(data) ? data["context"] : undefined;
+  if (!isRecord(context)) {
+    return line;
+  }
+  const keys = ["cwd", "gitRoot"].filter((key) => context[key] === fromCwd);
+  for (const key of keys) {
+    context[key] = toCwd;
+  }
+  return keys.length > 0 ? JSON.stringify(entry) : line;
+};
+
+/**
+ * Rewrite a Copilot `events.jsonl` string, replacing the structured
+ * `data.context.cwd` / `data.context.gitRoot` fields that match `fromCwd` with
+ * `toCwd`. Free text (the system prompt names the cwd too) is left alone, and
+ * a torn line is kept verbatim. Pure function — no file I/O.
+ */
+export const transferCopilotSession = (
+  jsonl: string,
+  fromCwd: string,
+  toCwd: string,
+): string =>
+  jsonl
+    .split("\n")
+    .map((line) =>
+      line === "" ? line : rewriteCopilotEvent(line, fromCwd, toCwd),
+    )
+    .join("\n");
+
+// ---------------------------------------------------------------------------
 // Session storage for agents that keep each session in one file
 // ---------------------------------------------------------------------------
 
