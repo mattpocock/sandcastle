@@ -9,5 +9,5 @@
     "declarationMap": false,
     "plugins": []
   },
-  "include": ["lint-ratchet*.ts"]
+  "include": ["lint-ratchet*.ts", "api-report.ts"]
 }

@@ -32,5 +32,8 @@ jobs:
       # in .sandcastle/ and .factory/ import @ai-hero/sandcastle, whose types
       # come from dist, so without it type-aware rules see them as any.
       - run: npm run build
+      # api-report/ must match the built .d.ts: a public API change shows up
+      # in the PR as a report diff, which CODEOWNERS routes to Matt.
+      - run: npm run api:report -- --check
       - run: npm run lint
       - run: npm test
