@@ -38,7 +38,6 @@ import {
   SandboxFactory,
   SANDBOX_REPO_DIR,
   resolveGitMounts,
-  makeSandboxFromHandle,
 } from "./SandboxFactory.js";
 import type { SandboxService } from "./SandboxFactory.js";
 import type {
