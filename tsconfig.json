@@ -28,9 +28,9 @@
     "stripInternal": true,
     // Effect's language service. Every v3 diagnostic is an error, checked in CI
     // by `effect-language-service diagnostics` (part of `npm run lint`) and
-    // held to scripts/lint-baseline.json. tsgo does not load plugins, so
-    // `npm run typecheck` does not see these; editors on the workspace
-    // TypeScript do.
+    // held to scripts/lint-baseline.json. The native compiler (tsgo,
+    // TypeScript 7) does not load plugins, so `npm run typecheck` does not see
+    // these; editors on the workspace TypeScript do.
     "plugins": [
       {
         "name": "@effect/language-service",
