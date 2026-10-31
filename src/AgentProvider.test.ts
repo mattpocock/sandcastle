@@ -748,7 +748,7 @@ describe("codex factory", () => {
   });
 
   it("supports all codex effort levels", () => {
-    for (const effort of ["low", "medium", "high", "xhigh"] as const) {
+    for (const effort of ["low", "medium", "high", "xhigh", "max"] as const) {
       const provider = codex("gpt-5.4-mini", { effort });
       expect(provider.buildPrintCommand(opts("test")).command).toContain(
         `model_reasoning_effort="${effort}"`,
