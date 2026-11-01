@@ -11,7 +11,7 @@
   },
   "include": [
     "lint-ratchet*.ts",
-    "coverage-gate.ts",
+    "coverage-gate*.ts",
     "api-report.ts",
     "ensure-build.ts"
   ]
