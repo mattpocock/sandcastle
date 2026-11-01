@@ -40,12 +40,14 @@ describe.skipIf(process.platform === "win32").each([
 
     binDir = mkdtempSync(path.join(tmpdir(), `e2e-fake-${engine}-`));
     runLog = path.join(binDir, "run-args");
-    // `run` writes one argument per line; every other call succeeds silently.
+    // `run` writes one argument per line; `podman machine list` (checked on
+    // macOS) reports a running machine; every other call succeeds silently.
     writeFileSync(
       path.join(binDir, engine),
       [
         "#!/bin/sh",
         `if [ "$1" = run ]; then printf '%s\\n' "$@" > '${runLog}'; fi`,
+        `if [ "$1" = machine ]; then echo '[{"Running":true}]'; fi`,
         "exit 0",
         "",
       ].join("\n"),
