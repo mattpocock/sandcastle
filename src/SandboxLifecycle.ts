@@ -262,7 +262,8 @@ export const withSandboxLifecycle = <A>(
     const signal = options.signal ?? new AbortController().signal;
 
     // Without an explicit branch, record host's current branch for cherry-pick
-    const hostCurrentBranch: string | null = branch
+    const hasBranch = branch !== undefined && branch !== "";
+    const hostCurrentBranch: string | null = hasBranch
       ? null
       : yield* hostGit(["rev-parse", "--abbrev-ref", "HEAD"], hostRepoDir).pipe(
           Effect.map((stdout) => stdout.trim()),
@@ -326,15 +327,11 @@ export const withSandboxLifecycle = <A>(
         const sandboxHooks = hooks?.sandbox?.onSandboxReady;
         const hostOnSandboxReady = hooks?.host?.onSandboxReady;
 
-        if (sandboxHooks?.length) {
-          for (const hook of sandboxHooks) {
-            message(hook.command);
-          }
+        for (const hook of sandboxHooks ?? []) {
+          message(hook.command);
         }
-        if (hostOnSandboxReady?.length) {
-          for (const hook of hostOnSandboxReady) {
-            message(`[host] ${hook.command}`);
-          }
+        for (const hook of hostOnSandboxReady ?? []) {
+          message(`[host] ${hook.command}`);
         }
 
         // Set up abort racing for sandbox hooks (sandbox.exec doesn't
@@ -505,7 +502,7 @@ export const withSandboxLifecycle = <A>(
       // Detach the worktree from the temp branch so the branch can be deleted.
       // Skipped when `keepSourceBranch` is set (createWorktree's merge-to-head
       // path) so the worktree stays on its source branch for re-use.
-      if (!options.keepSourceBranch) {
+      if (options.keepSourceBranch !== true) {
         yield* execOk(sandbox, "git checkout --detach", {
           cwd: sandboxRepoDir,
         });
@@ -532,7 +529,7 @@ export const withSandboxLifecycle = <A>(
       // Delete the temp branch (now merged into host branch). Skipped when
       // `keepSourceBranch` is set: the source branch is the worktree's active
       // branch and the worktree's lifetime outlives the lifecycle.
-      if (!options.keepSourceBranch) {
+      if (options.keepSourceBranch !== true) {
         yield* hostGit(
           ["branch", "-D", "--", resolvedBranch],
           hostRepoDir,
