@@ -72,74 +72,135 @@ export class Display extends Context.Tag("@ai-hero/sandcastle/Display")<
   DisplayService
 >() {}
 
+const silentDisplayService = (
+  ref: Ref.Ref<readonly DisplayEntry[]>,
+): DisplayService => {
+  const record = (entry: DisplayEntry): Effect.Effect<void> =>
+    Ref.update(ref, (entries) => [...entries, entry]);
+  return {
+    intro: (title) => record({ _tag: "intro", title }),
+    status: (message, severity) =>
+      record({ _tag: "status", message, severity }),
+    spinner: (message, effect) =>
+      record({ _tag: "spinner", message }).pipe(Effect.andThen(effect)),
+    summary: (title, rows) => record({ _tag: "summary", title, rows }),
+    taskLog: (title, effect) => {
+      const messages: string[] = [];
+      return Effect.flatMap(
+        effect((msg) => {
+          messages.push(msg);
+        }),
+        (result) =>
+          Effect.as(
+            record({ _tag: "taskLog", title, messages: [...messages] }),
+            result,
+          ),
+      );
+    },
+    text: (message) => record({ _tag: "text", message }),
+    textChunk: (chunk) => record({ _tag: "textChunk", message: chunk }),
+    toolCall: (name, formattedArgs) =>
+      record({ _tag: "toolCall", name, formattedArgs }),
+  };
+};
+
 export const SilentDisplay = {
   layer: (ref: Ref.Ref<readonly DisplayEntry[]>): Layer.Layer<Display> =>
-    Layer.succeed(Display, {
-      intro: (title) =>
-        Ref.update(ref, (entries) => [
-          ...entries,
-          { _tag: "intro" as const, title },
-        ]),
-
-      status: (message, severity) =>
-        Ref.update(ref, (entries) => [
-          ...entries,
-          { _tag: "status" as const, message, severity },
-        ]),
-
-      spinner: <A, E, R>(
-        message: string,
-        effect: Effect.Effect<A, E, R>,
-      ): Effect.Effect<A, E, R> =>
-        Ref.update(ref, (entries) => [
-          ...entries,
-          { _tag: "spinner" as const, message },
-        ]).pipe(Effect.andThen(effect)),
-
-      summary: (title, rows) =>
-        Ref.update(ref, (entries) => [
-          ...entries,
-          { _tag: "summary" as const, title, rows },
-        ]),
-
-      taskLog: (title, effect) => {
-        const messages: string[] = [];
-        return Effect.flatMap(
-          effect((msg) => messages.push(msg)),
-          (result) =>
-            Effect.map(
-              Ref.update(ref, (entries) => [
-                ...entries,
-                {
-                  _tag: "taskLog" as const,
-                  title,
-                  messages: [...messages],
-                },
-              ]),
-              () => result,
-            ),
-        );
-      },
-
-      text: (message) =>
-        Ref.update(ref, (entries) => [
-          ...entries,
-          { _tag: "text" as const, message },
-        ]),
-
-      textChunk: (chunk) =>
-        Ref.update(ref, (entries) => [
-          ...entries,
-          { _tag: "textChunk" as const, message: chunk },
-        ]),
-
-      toolCall: (name, formattedArgs) =>
-        Ref.update(ref, (entries) => [
-          ...entries,
-          { _tag: "toolCall" as const, name, formattedArgs },
-        ]),
-    }),
+    Layer.succeed(Display, silentDisplayService(ref)),
 };
+
+interface LogWriter {
+  /** Appends a whole line, first ending any line a raw chunk left open. */
+  readonly appendToLog: (line: string) => Effect.Effect<void>;
+  /** Appends a raw chunk with no implied line break. */
+  readonly appendRaw: (chunk: string) => Effect.Effect<void>;
+}
+
+const makeLogWriter = (
+  fs: FileSystem.FileSystem,
+  filePath: string,
+): LogWriter => {
+  // Tracks whether the last write left the cursor mid-line (a raw chunk
+  // with no trailing newline). Line-oriented entries consult this so they
+  // always begin on a fresh line, keeping structured output (tool calls,
+  // status, context-window summaries) off the tail of streamed prose.
+  let midLine = false;
+  return {
+    appendToLog: (line) =>
+      Effect.suspend(() => {
+        const prefix = midLine ? "\n" : "";
+        midLine = false;
+        return fs
+          .writeFileString(filePath, `${prefix}${line}\n`, { flag: "a" })
+          .pipe(Effect.ignore);
+      }),
+    appendRaw: (chunk) =>
+      Effect.suspend(() => {
+        if (chunk.length === 0) {
+          return Effect.void;
+        }
+        midLine = !chunk.endsWith("\n");
+        return fs
+          .writeFileString(filePath, chunk, { flag: "a" })
+          .pipe(Effect.ignore);
+      }),
+  };
+};
+
+/** Seconds since `start` (a Clock millis reading), to one decimal place. */
+const elapsedSince = (start: number): Effect.Effect<string> =>
+  Clock.currentTimeMillis.pipe(
+    Effect.map((now) => ((now - start) / 1000).toFixed(1)),
+  );
+
+const fileDisplayService = ({
+  appendToLog,
+  appendRaw,
+}: LogWriter): DisplayService => ({
+  intro: () => Effect.void,
+
+  status: (message, _severity) =>
+    appendToLog(message.replace(/^\[[^\]]+\] /u, "")),
+
+  spinner: (message, effect) =>
+    Effect.gen(function* () {
+      yield* appendToLog(`${message}...`);
+      const start = yield* Clock.currentTimeMillis;
+      const result = yield* effect;
+      const elapsed = yield* elapsedSince(start);
+      yield* appendToLog(`${message} done (${elapsed}s)`);
+      return result;
+    }),
+
+  summary: (title, rows) => {
+    const lines = Object.entries(rows)
+      .map(([key, value]) => `  ${key}: ${value}`)
+      .join("\n");
+    return appendToLog(`${title}\n${lines}`);
+  },
+
+  taskLog: (title, effect) =>
+    Effect.gen(function* () {
+      yield* appendToLog(title);
+      const start = yield* Clock.currentTimeMillis;
+      const messages: string[] = [];
+      const result = yield* effect((msg) => {
+        messages.push(msg);
+      });
+      const elapsed = yield* elapsedSince(start);
+      for (const msg of messages) {
+        yield* appendToLog(`  ${msg}`);
+      }
+      yield* appendToLog(`${title} done (${elapsed}s)`);
+      return result;
+    }),
+
+  text: (message) => appendToLog(message),
+
+  textChunk: (chunk) => appendRaw(chunk),
+
+  toolCall: (name, formattedArgs) => appendToLog(`${name}(${formattedArgs})`),
+});
 
 export const FileDisplay = {
   layer: (
@@ -156,85 +217,7 @@ export const FileDisplay = {
         yield* fs
           .writeFileString(filePath, delimiter, { flag: "a" })
           .pipe(Effect.orDie);
-
-        // Tracks whether the last write left the cursor mid-line (a raw chunk
-        // with no trailing newline). Line-oriented entries consult this so they
-        // always begin on a fresh line, keeping structured output (tool calls,
-        // status, context-window summaries) off the tail of streamed prose.
-        let midLine = false;
-
-        const appendToLog = (line: string): Effect.Effect<void> =>
-          Effect.suspend(() => {
-            const prefix = midLine ? "\n" : "";
-            midLine = false;
-            return fs
-              .writeFileString(filePath, `${prefix}${line}\n`, { flag: "a" })
-              .pipe(Effect.ignore);
-          });
-
-        const appendRaw = (chunk: string): Effect.Effect<void> =>
-          Effect.suspend(() => {
-            if (chunk.length === 0) {
-              return Effect.void;
-            }
-            midLine = !chunk.endsWith("\n");
-            return fs
-              .writeFileString(filePath, chunk, { flag: "a" })
-              .pipe(Effect.ignore);
-          });
-
-        return {
-          intro: () => Effect.void,
-
-          status: (message, _severity) =>
-            appendToLog(message.replace(/^\[[^\]]+\] /u, "")),
-
-          spinner: (message, effect) =>
-            Effect.gen(function* () {
-              yield* appendToLog(`${message}...`);
-              const start = yield* Clock.currentTimeMillis;
-              const result = yield* effect;
-              const elapsed = (
-                ((yield* Clock.currentTimeMillis) - start) /
-                1000
-              ).toFixed(1);
-              yield* appendToLog(`${message} done (${elapsed}s)`);
-              return result;
-            }),
-
-          summary: (title, rows) => {
-            const lines = Object.entries(rows)
-              .map(([key, value]) => `  ${key}: ${value}`)
-              .join("\n");
-            return appendToLog(`${title}\n${lines}`);
-          },
-
-          taskLog: (title, effect) =>
-            Effect.gen(function* () {
-              yield* appendToLog(title);
-              const start = yield* Clock.currentTimeMillis;
-              const messages: string[] = [];
-              const result = yield* effect((msg) => {
-                messages.push(msg);
-              });
-              const elapsed = (
-                ((yield* Clock.currentTimeMillis) - start) /
-                1000
-              ).toFixed(1);
-              for (const msg of messages) {
-                yield* appendToLog(`  ${msg}`);
-              }
-              yield* appendToLog(`${title} done (${elapsed}s)`);
-              return result;
-            }),
-
-          text: (message) => appendToLog(message),
-
-          textChunk: (chunk) => appendRaw(chunk),
-
-          toolCall: (name, formattedArgs) =>
-            appendToLog(`${name}(${formattedArgs})`),
-        };
+        return fileDisplayService(makeLogWriter(fs, filePath));
       }),
     ),
 };
