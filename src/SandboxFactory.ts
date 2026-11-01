@@ -18,7 +18,6 @@ import { Display } from "./Display.js";
 import type {
   SandboxProvider,
   BranchStrategy,
-  BindMountSandboxProvider,
   BindMountSandboxHandle,
   IsolatedSandboxHandle,
   NoSandboxHandle,
@@ -66,8 +65,7 @@ const getCopyIn = (
   if ("copyIn" in handle) {
     return (hostPath, sandboxPath) =>
       Effect.tryPromise({
-        try: () =>
-          (handle as IsolatedSandboxHandle).copyIn(hostPath, sandboxPath),
+        try: () => handle.copyIn(hostPath, sandboxPath),
         catch: (e) =>
           new CopyError({
             message: `copyIn failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -77,8 +75,7 @@ const getCopyIn = (
   if ("copyFileIn" in handle) {
     return (hostPath, sandboxPath) =>
       Effect.tryPromise({
-        try: () =>
-          (handle as BindMountSandboxHandle).copyFileIn(hostPath, sandboxPath),
+        try: () => handle.copyFileIn(hostPath, sandboxPath),
         catch: (e) =>
           new CopyError({
             message: `copyFileIn failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -114,10 +111,7 @@ export const makeSandboxFromHandle = (
     "copyFileOut" in handle
       ? (sandboxPath, hostPath) =>
           Effect.tryPromise({
-            try: () =>
-              (
-                handle as IsolatedSandboxHandle | BindMountSandboxHandle
-              ).copyFileOut(sandboxPath, hostPath),
+            try: () => handle.copyFileOut(sandboxPath, hostPath),
             catch: (e) =>
               new CopyError({
                 message: `copyFileOut failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -290,7 +284,7 @@ const cleanupWorktree = (
             ? `Run succeeded but worktree has uncommitted changes at ${worktreePath}`
             : `Worktree preserved at ${worktreePath}`,
         );
-        return Effect.succeed(worktreePath as string | undefined);
+        return Effect.succeed(worktreePath);
       }
       const announceRemoval = Exit.isSuccess(exit)
         ? Effect.void
@@ -751,7 +745,7 @@ export const WorktreeDockerSandboxFactory = {
                     // sandboxProvider is guaranteed bind-mount here
                     // (isolated providers return early above)
                     startSandbox({
-                      provider: sandboxProvider as BindMountSandboxProvider,
+                      provider: sandboxProvider,
                       hostRepoDir,
                       env,
                       worktreeOrRepoPath: worktreeInfo.path,
