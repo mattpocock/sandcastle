@@ -301,6 +301,7 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
 
       const handle: BindMountSandboxHandle = {
         worktreePath,
+        containerName,
 
         exec: async (
           command: string,

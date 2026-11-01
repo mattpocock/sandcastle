@@ -24,6 +24,8 @@ export interface InteractiveExecOptions {
 export interface BindMountSandboxHandle {
   /** Absolute path to the worktree inside the sandbox. */
   readonly worktreePath: string;
+  /** Container name, for providers that run a named container (Docker, Podman). */
+  readonly containerName?: string;
   /**
    * Absolute path to the agent's home directory, as commands running inside
    * the sandbox see it. Sandcastle runs commands there to find and place agent

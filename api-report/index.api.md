@@ -76,6 +76,7 @@ export interface BindMountCreateOptions {
 // @public
 export interface BindMountSandboxHandle {
     close(): Promise<void>;
+    readonly containerName?: string;
     copyFileIn(hostPath: string, sandboxPath: string): Promise<void>;
     copyFileOut(sandboxPath: string, hostPath: string): Promise<void>;
     exec(command: string, options?: {
@@ -622,6 +623,7 @@ export interface Sandbox {
     [Symbol.asyncDispose](): Promise<void>;
     readonly branch: string;
     close(): Promise<CloseResult>;
+    readonly containerName?: string;
     exec(command: string, options?: SandboxExecOptions): Promise<ExecResult>;
     interactive(options: SandboxInteractiveOptions): Promise<SandboxInteractiveResult>;
     run(options: SandboxRunOptions): Promise<SandboxRunResult>;

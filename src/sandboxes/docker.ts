@@ -242,6 +242,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
 
       const handle: BindMountSandboxHandle = {
         worktreePath,
+        containerName,
 
         exec: async (
           command: string,
