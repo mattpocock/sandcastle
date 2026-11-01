@@ -1,5 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
@@ -75,7 +81,8 @@ describe("run() structured output", () => {
   let repo = "";
 
   beforeEach(() => {
-    repo = mkdtempSync(path.join(tmpdir(), "e2e-structured-"));
+    // The real path: on Windows, tmpdir() can be an 8.3 short name.
+    repo = realpathSync(mkdtempSync(path.join(tmpdir(), "e2e-structured-")));
     const git = (...args: string[]): void => {
       execFileSync("git", args, { cwd: repo, stdio: "ignore" });
     };
