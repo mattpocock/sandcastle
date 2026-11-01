@@ -82,14 +82,17 @@ export const standardSchema = <T>(
   },
 });
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
 export const asRecord = (
   value: unknown,
   label: string,
 ): Record<string, unknown> => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (!isRecord(value)) {
     throw new Error(`${label} must be an object`);
   }
-  return value as Record<string, unknown>;
+  return value;
 };
 
 export const asString = (value: unknown, label: string): string => {
