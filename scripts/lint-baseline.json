@@ -173,9 +173,8 @@
     "vitest(require-mock-type-parameters)": 1
   },
   "src/createSandbox.agentEnv.test.ts": {
-    "eslint(require-unicode-regexp)": 1,
     "import(max-dependencies)": 1,
-    "typescript(strict-void-return)": 2
+    "typescript(strict-void-return)": 1
   },
   "src/createSandbox.test.ts": {
     "eslint(max-params)": 1,
@@ -268,9 +267,7 @@
     "eslint(max-params)": 1
   },
   "src/EnvResolver.ts": {
-    "effect/processEnvInEffect": 1,
-    "eslint(curly)": 3,
-    "eslint(prefer-named-capture-group)": 1
+    "effect/processEnvInEffect": 1
   },
   "src/ErrorHandler.ts": {
     "effect/lazyPromiseInEffectSync": 1,
@@ -310,7 +307,7 @@
     "eslint(max-lines-per-function)": 6,
     "eslint(max-lines)": 1,
     "eslint(max-params)": 3,
-    "eslint(max-statements)": 2,
+    "eslint(max-statements)": 1,
     "eslint(prefer-destructuring)": 1,
     "unicorn(prefer-import-meta-properties)": 2
   },
@@ -406,14 +403,6 @@
     "eslint(max-params)": 1,
     "import(max-dependencies)": 1
   },
-  "src/PromptPreprocessor.ts": {
-    "eslint(max-lines-per-function)": 4
-  },
-  "src/RecoveryMessage.ts": {
-    "eslint(max-lines-per-function)": 1,
-    "eslint(max-statements)": 1,
-    "unicorn(prefer-single-call)": 2
-  },
   "src/resumePrecheck.ts": {
     "effect/asyncFunction": 1
   },
@@ -433,8 +422,7 @@
     "eslint(max-lines)": 1,
     "eslint(max-statements)": 1,
     "import(max-dependencies)": 1,
-    "node(no-sync)": 6,
-    "typescript(strict-boolean-expressions)": 2
+    "node(no-sync)": 6
   },
   "src/sandboxes/daytona.sudo.test.ts": {
     "vitest(prefer-import-in-mock)": 1
@@ -569,27 +557,17 @@
     "eslint(max-lines-per-function)": 3,
     "eslint(max-lines)": 1,
     "eslint(max-params)": 1,
-    "eslint(no-unused-vars)": 1,
     "eslint(prefer-named-capture-group)": 1,
     "import(max-dependencies)": 1,
     "import(no-cycle)": 2,
-    "typescript(consistent-type-imports)": 1,
     "typescript(no-unsafe-type-assertion)": 3
   },
   "src/SandboxLifecycle.test.ts": {
-    "eslint(max-params)": 1,
     "eslint(no-await-in-loop)": 1,
-    "eslint(no-promise-executor-return)": 1,
-    "eslint(no-unused-vars)": 5,
-    "eslint(require-unicode-regexp)": 19,
-    "eslint(require-yield)": 1,
     "import(max-dependencies)": 1,
-    "promise(param-names)": 1,
-    "typescript(no-confusing-void-expression)": 2,
-    "typescript(strict-void-return)": 2,
+    "typescript(strict-void-return)": 1,
     "typescript(use-unknown-in-catch-callback-variable)": 1,
-    "unicorn(catch-error-name)": 1,
-    "unicorn(no-await-expression-member)": 2
+    "unicorn(catch-error-name)": 1
   },
   "src/SandboxLifecycle.ts": {
     "eslint(complexity)": 1,
@@ -612,8 +590,7 @@
     "effect/processEnv": 1,
     "eslint(max-lines)": 1,
     "eslint(max-params)": 1,
-    "eslint(no-await-in-loop)": 2,
-    "eslint(prefer-named-capture-group)": 1
+    "eslint(no-await-in-loop)": 2
   },
   "src/SessionStore.windowsPath.test.ts": {
     "import(first)": 1,
@@ -627,18 +604,13 @@
   "src/startSandbox.test.ts": {
     "effect/anyUnknownInErrorContext": 1,
     "eslint(max-params)": 1,
-    "eslint(no-promise-executor-return)": 3,
     "import(max-dependencies)": 1,
-    "promise(param-names)": 3,
-    "typescript(strict-void-return)": 4
+    "typescript(strict-void-return)": 1
   },
   "src/startSandbox.ts": {
     "eslint(max-lines-per-function)": 2,
-    "eslint(no-empty-function)": 1,
     "import(no-cycle)": 2,
-    "node(no-sync)": 1,
-    "typescript(method-signature-style)": 1,
-    "typescript(no-unsafe-type-assertion)": 3
+    "node(no-sync)": 1
   },
   "src/syncIn.test.ts": {
     "eslint(max-params)": 1,
@@ -660,22 +632,16 @@
     "unicorn(prefer-number-coercion)": 1
   },
   "src/templates/parallel-planner-with-review/main.mts": {
-    "eslint(no-await-in-loop)": 3,
-    "eslint(prefer-destructuring)": 1,
-    "typescript(no-non-null-assertion)": 3
+    "eslint(prefer-destructuring)": 1
   },
   "src/templates/parallel-planner/main.mts": {
-    "eslint(no-await-in-loop)": 3,
-    "eslint(prefer-destructuring)": 1,
-    "typescript(no-non-null-assertion)": 3
+    "eslint(prefer-destructuring)": 1
   },
   "src/templates/sequential-reviewer/main.mts": {
-    "eslint(no-await-in-loop)": 4,
     "unicorn(explicit-length-check)": 1
   },
   "src/testGlobalSetup.ts": {
     "effect/processEnv": 4,
-    "eslint(prefer-named-capture-group)": 1,
     "node(no-sync)": 3
   },
   "src/TextDeltaBuffer.ts": {
