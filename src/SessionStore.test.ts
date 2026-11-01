@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import {
   claudeSubagentsDirInSandbox,
   claudeSubagentsDirOnHost,
@@ -8,17 +8,23 @@ import {
   findCodexSessionOnHost,
   findPiSessionOnHost,
   listClaudeSubagentSessionsInSandbox,
-  locateCodexHostSession,
-  locatePiHostSession,
+  makeSessionFileStorage,
   piSessionDirPath,
   transferClaudeSession,
   transferCodexSession,
   transferPiSession,
 } from "./SessionStore.js";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
 import type { BindMountSandboxHandle } from "./SandboxProvider.js";
+
+/** Parses one line of a JSONL transcript, failing the test if the line is missing. */
+const parseLine = (lines: readonly string[], index: number): unknown => {
+  const line = lines[index];
+  assert.isDefined(line, `expected a line at index ${index}`);
+  return JSON.parse(line);
+};
 
 // ---------------------------------------------------------------------------
 // encodeProjectPath
@@ -44,7 +50,7 @@ describe("encodeProjectPath", () => {
   });
 
   it("encodes Windows path with backslashes and drive letter", () => {
-    expect(encodeProjectPath("D:\\projektit\\super-app")).toBe(
+    expect(encodeProjectPath(String.raw`D:\projektit\super-app`)).toBe(
       "D-projektit-super-app",
     );
   });
@@ -64,7 +70,9 @@ describe("encodeProjectPath", () => {
   });
 
   it("strips multiple trailing backslashes", () => {
-    expect(encodeProjectPath("D:\\projekts\\app\\\\")).toBe("D-projekts-app");
+    expect(encodeProjectPath(String.raw`D:\projekts\app\\`)).toBe(
+      "D-projekts-app",
+    );
   });
 });
 
@@ -91,15 +99,15 @@ describe("transferClaudeSession", () => {
     );
     const lines = written.split("\n");
 
-    expect(JSON.parse(lines[0]!)).toEqual({
+    expect(parseLine(lines, 0)).toStrictEqual({
       type: "system",
       cwd: "/home/user/repos/project",
     });
-    expect(JSON.parse(lines[1]!)).toEqual({
+    expect(parseLine(lines, 1)).toStrictEqual({
       type: "message",
       content: "hello",
     });
-    expect(JSON.parse(lines[2]!)).toEqual({
+    expect(parseLine(lines, 2)).toStrictEqual({
       type: "tool_call",
       cwd: "/home/user/repos/project",
       name: "Read",
@@ -130,8 +138,8 @@ describe("transferClaudeSession", () => {
 
     const out = transferClaudeSession(jsonl, "/sandbox/worktree", "/host/repo");
     const lines = out.split("\n");
-    expect(JSON.parse(lines[0]!).cwd).toBe("/host/repo");
-    expect(JSON.parse(lines[1]!).cwd).toBe("/other/path");
+    expect(parseLine(lines, 0)).toMatchObject({ cwd: "/host/repo" });
+    expect(parseLine(lines, 1)).toMatchObject({ cwd: "/other/path" });
   });
 
   it("preserves a malformed line verbatim instead of aborting the rewrite", () => {
@@ -147,9 +155,9 @@ describe("transferClaudeSession", () => {
 
     const out = transferClaudeSession(jsonl, "/sandbox/worktree", "/host/repo");
     const lines = out.split("\n");
-    expect(JSON.parse(lines[0]!).cwd).toBe("/host/repo");
+    expect(parseLine(lines, 0)).toMatchObject({ cwd: "/host/repo" });
     expect(lines[1]).toBe(torn);
-    expect(JSON.parse(lines[2]!).cwd).toBe("/host/repo");
+    expect(parseLine(lines, 2)).toMatchObject({ cwd: "/host/repo" });
   });
 });
 
@@ -169,8 +177,10 @@ describe("transferCodexSession", () => {
 
     const out = transferCodexSession(jsonl, "/sandbox/repo", "/host/repo");
     const lines = out.split("\n");
-    expect(JSON.parse(lines[0]!).payload.cwd).toBe("/host/repo");
-    expect(JSON.parse(lines[1]!).cwd).toBe("/host/repo");
+    expect(parseLine(lines, 0)).toMatchObject({
+      payload: { cwd: "/host/repo" },
+    });
+    expect(parseLine(lines, 1)).toMatchObject({ cwd: "/host/repo" });
   });
 
   it("handles empty JSONL", () => {
@@ -224,7 +234,7 @@ describe("findClaudeSessionOnHost", () => {
 });
 
 // ---------------------------------------------------------------------------
-// findCodexSessionOnHost & locateCodexHostSession
+// findCodexSessionOnHost
 // ---------------------------------------------------------------------------
 
 describe("findCodexSessionOnHost", () => {
@@ -263,31 +273,6 @@ describe("findCodexSessionOnHost", () => {
   });
 });
 
-describe("locateCodexHostSession", () => {
-  it("returns absolute path and relative date-nested path", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "sandcastle-locate-codex-"));
-    try {
-      const id = "9ba1c695-2222-4444-8888-e7e847bf34dd";
-      const relativePath = join(
-        "2026",
-        "05",
-        "26",
-        `rollout-2026-05-26T08-00-00-${id}.jsonl`,
-      );
-      const sessionPath = join(dir, relativePath);
-      await mkdir(join(sessionPath, ".."), { recursive: true });
-      await writeFile(sessionPath, "{}");
-
-      const result = await locateCodexHostSession(id, dir);
-
-      expect(result.path).toBe(sessionPath);
-      expect(result.relativePath).toBe(relativePath);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-});
-
 // ---------------------------------------------------------------------------
 // encodePiSessionDir
 // ---------------------------------------------------------------------------
@@ -306,7 +291,9 @@ describe("encodePiSessionDir", () => {
   it("encodes a Windows path with backslashes and drive colon", () => {
     // Pi maps each separator/colon to a single hyphen — so `:\\` becomes `--`,
     // not a normalised single `-`. Matches pi 0.73.1's SessionManager exactly.
-    expect(encodePiSessionDir("C:\\repos\\my-app")).toBe("--C--repos-my-app--");
+    expect(encodePiSessionDir(String.raw`C:\repos\my-app`)).toBe(
+      "--C--repos-my-app--",
+    );
   });
 });
 
@@ -346,7 +333,7 @@ describe("transferPiSession", () => {
     const out = transferPiSession(jsonl, "/sandbox/repo", "/host/repo");
     const lines = out.split("\n");
 
-    expect(JSON.parse(lines[0]!).cwd).toBe("/host/repo");
+    expect(parseLine(lines, 0)).toMatchObject({ cwd: "/host/repo" });
     // Non-header lines round-trip verbatim — no field renaming, no
     // whitespace shuffling.
     expect(lines[1]).toBe(
@@ -370,8 +357,8 @@ describe("transferPiSession", () => {
     const out = transferPiSession(jsonl, "/sandbox/repo", "/host/repo");
     const lines = out.split("\n");
 
-    expect(JSON.parse(lines[0]!).cwd).toBe("/host/repo");
-    expect(JSON.parse(lines[1]!).cwd).toBe("/sandbox/repo");
+    expect(parseLine(lines, 0)).toMatchObject({ cwd: "/host/repo" });
+    expect(parseLine(lines, 1)).toMatchObject({ cwd: "/sandbox/repo" });
   });
 
   it("leaves the header untouched when its cwd does not match fromCwd", () => {
@@ -399,7 +386,7 @@ describe("transferPiSession", () => {
 });
 
 // ---------------------------------------------------------------------------
-// findPiSessionOnHost & locatePiHostSession
+// findPiSessionOnHost
 // ---------------------------------------------------------------------------
 
 describe("findPiSessionOnHost", () => {
@@ -441,38 +428,6 @@ describe("findPiSessionOnHost", () => {
   });
 });
 
-describe("locatePiHostSession", () => {
-  it("returns absolute path and the --<enc-cwd>--/<filename> relative path", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "sandcastle-locate-pi-"));
-    try {
-      const id = "9ba1c695-2222-4444-8888-e7e847bf34dd";
-      const filename = `2026-05-29T08-00-00_${id}.jsonl`;
-      const encodedDir = "--home-user-repos-foo--";
-      const sessionPath = join(dir, encodedDir, filename);
-      await mkdir(join(sessionPath, ".."), { recursive: true });
-      await writeFile(sessionPath, "{}");
-
-      const result = await locatePiHostSession(id, dir);
-
-      expect(result.path).toBe(sessionPath);
-      expect(result.relativePath).toBe(join(encodedDir, filename));
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  it("throws naming the searched root when the session is missing", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "sandcastle-locate-pi-"));
-    try {
-      await expect(locatePiHostSession("missing", dir)).rejects.toThrow(
-        `session missing not found in ${dir}`,
-      );
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-});
-
 // ---------------------------------------------------------------------------
 // Claude subagent / workflow session helpers
 // ---------------------------------------------------------------------------
@@ -505,8 +460,8 @@ describe("listClaudeSubagentSessionsInSandbox", () => {
       return new Promise((resolve) => {
         exec(command, (err, stdout, stderr) => {
           resolve({
-            stdout: stdout.toString(),
-            stderr: stderr.toString(),
+            stdout,
+            stderr,
             exitCode: err && typeof err.code === "number" ? err.code : 0,
           });
         });
@@ -535,7 +490,7 @@ describe("listClaudeSubagentSessionsInSandbox", () => {
         dir,
       );
 
-      expect(result.sort()).toEqual([f1, f2].sort());
+      expect(result.sort()).toStrictEqual([f1, f2].sort());
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -550,7 +505,7 @@ describe("listClaudeSubagentSessionsInSandbox", () => {
         fsHandle(),
         dir,
       );
-      expect(result).toEqual([]);
+      expect(result).toStrictEqual([]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -568,7 +523,7 @@ describe("listClaudeSubagentSessionsInSandbox", () => {
         fsHandle(),
         dir,
       );
-      expect(result).toEqual([]);
+      expect(result).toStrictEqual([]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -582,7 +537,166 @@ describe("listClaudeSubagentSessionsInSandbox", () => {
         "/sandbox/repo",
         "abc-123",
         "/sandbox/projects",
-      ).includes(posix.sep),
-    ).toBe(true);
+      ),
+    ).toContain(posix.sep);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// makeSessionFileStorage
+// ---------------------------------------------------------------------------
+
+describe("makeSessionFileStorage", () => {
+  /** A bind-mount handle whose "sandbox" is a directory on this machine. */
+  const localHandle = (): BindMountSandboxHandle => ({
+    worktreePath: "/workspace",
+    exec: async (command, options) => {
+      const { execSync } = await import("node:child_process");
+      try {
+        const stdout = execSync(command, {
+          input: options?.stdin,
+          encoding: "utf8",
+        });
+        return { stdout, stderr: "", exitCode: 0 };
+      } catch {
+        return { stdout: "", stderr: "failed", exitCode: 1 };
+      }
+    },
+    copyFileIn: async (hostPath, sandboxPath) => {
+      const { copyFile } = await import("node:fs/promises");
+      await copyFile(hostPath, sandboxPath);
+    },
+    copyFileOut: async (sandboxPath, hostPath) => {
+      const { copyFile } = await import("node:fs/promises");
+      await copyFile(sandboxPath, hostPath);
+    },
+    close: async () => {},
+  });
+
+  const withDirs = async (
+    test: (dirs: { host: string; sandbox: string }) => Promise<void>,
+  ): Promise<void> => {
+    const host = await mkdtemp(join(tmpdir(), "sandcastle-sfs-host-"));
+    const sandbox = await mkdtemp(join(tmpdir(), "sandcastle-sfs-sbx-"));
+    try {
+      await test({ host, sandbox });
+    } finally {
+      await rm(host, { recursive: true, force: true });
+      await rm(sandbox, { recursive: true, force: true });
+    }
+  };
+
+  const layoutFor = (
+    dirs: { host: string; sandbox: string },
+    rewrite?: (content: string, from: string, to: string) => string,
+  ) => ({
+    hostRoot: dirs.host,
+    hostPath: (_cwd: string, id: string) => join(dirs.host, id, "s.log"),
+    hostPathsById: (id: string) => [join(dirs.host, id, "s.log")],
+    sandboxPath: (_cwd: string, id: string) =>
+      posix.join(dirs.sandbox, id, "s.log"),
+    rewrite,
+  });
+
+  const swap = (content: string, from: string, to: string): string =>
+    content.replaceAll(from, to);
+
+  it("captures the sandbox file to the host, rewritten", async () => {
+    await withDirs(async (dirs) => {
+      await mkdir(join(dirs.sandbox, "s1"), { recursive: true });
+      await writeFile(join(dirs.sandbox, "s1", "s.log"), "cwd=/sbx\n");
+      const storage = makeSessionFileStorage(layoutFor(dirs, swap));
+
+      await storage.captureToHost({
+        hostCwd: "/host",
+        sandboxCwd: "/sbx",
+        sessionId: "s1",
+        handle: localHandle(),
+      });
+
+      await expect(storage.readHostSession("/host", "s1")).resolves.toBe(
+        "cwd=/host\n",
+      );
+      await expect(storage.existsOnHost("/host", "s1")).resolves.toBe(true);
+      await expect(storage.findByIdOnHost("s1")).resolves.toStrictEqual({
+        path: join(dirs.host, "s1", "s.log"),
+        searchedRoot: dirs.host,
+      });
+    });
+  });
+
+  it("resumes the host file into the sandbox, rewritten", async () => {
+    await withDirs(async (dirs) => {
+      await mkdir(join(dirs.host, "s2"), { recursive: true });
+      await writeFile(join(dirs.host, "s2", "s.log"), "cwd=/host\n");
+      const storage = makeSessionFileStorage(layoutFor(dirs, swap));
+
+      await storage.resumeIntoSandbox({
+        hostCwd: "/host",
+        sandboxCwd: "/sbx",
+        sessionId: "s2",
+        handle: localHandle(),
+      });
+
+      await expect(
+        readFile(join(dirs.sandbox, "s2", "s.log"), "utf8"),
+      ).resolves.toBe("cwd=/sbx\n");
+    });
+  });
+
+  it("copies the file byte for byte both ways when there is no rewrite", async () => {
+    await withDirs(async (dirs) => {
+      const bytes = Buffer.from([0x53, 0x51, 0x4c, 0x00, 0xff, 0xfe, 0x0a]);
+      await mkdir(join(dirs.sandbox, "s3"), { recursive: true });
+      await writeFile(join(dirs.sandbox, "s3", "s.log"), bytes);
+      const storage = makeSessionFileStorage(layoutFor(dirs));
+      const transfer = {
+        hostCwd: "/host",
+        sandboxCwd: "/sbx",
+        sessionId: "s3",
+        handle: localHandle(),
+      };
+
+      await storage.captureToHost(transfer);
+      await rm(join(dirs.sandbox, "s3"), { recursive: true });
+      await storage.resumeIntoSandbox(transfer);
+
+      await expect(
+        readFile(join(dirs.host, "s3", "s.log")),
+      ).resolves.toStrictEqual(bytes);
+      await expect(
+        readFile(join(dirs.sandbox, "s3", "s.log")),
+      ).resolves.toStrictEqual(bytes);
+    });
+  });
+
+  it("finds a session by id in any subdirectory the layout names", async () => {
+    await withDirs(async (dirs) => {
+      await mkdir(join(dirs.host, "cwd-b", "s4"), { recursive: true });
+      await writeFile(join(dirs.host, "cwd-b", "s4", "s.log"), "x");
+      const storage = makeSessionFileStorage({
+        ...layoutFor(dirs),
+        hostPathsById: (id, subdirs) =>
+          subdirs.map((subdir) => join(dirs.host, subdir, id, "s.log")),
+      });
+      await expect(storage.findByIdOnHost("s4")).resolves.toStrictEqual({
+        path: join(dirs.host, "cwd-b", "s4", "s.log"),
+        searchedRoot: dirs.host,
+      });
+    });
+  });
+
+  it("reports a missing session with the searched root", async () => {
+    await withDirs(async (dirs) => {
+      const storage = makeSessionFileStorage(layoutFor(dirs));
+      await expect(storage.existsOnHost("/host", "nope")).resolves.toBe(false);
+      await expect(
+        storage.readHostSession("/host", "nope"),
+      ).resolves.toBeUndefined();
+      await expect(storage.findByIdOnHost("nope")).resolves.toStrictEqual({
+        path: undefined,
+        searchedRoot: dirs.host,
+      });
+    });
   });
 });

@@ -12,9 +12,11 @@ export const parseDiffLines = (diff: string): Map<string, Set<number>> => {
       continue;
     }
 
-    if (!currentFile) continue;
+    if (currentFile === undefined || currentFile === "") {
+      continue;
+    }
 
-    const hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    const hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/u);
     if (hunk) {
       newLine = Number(hunk[1]);
       continue;

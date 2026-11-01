@@ -11,11 +11,11 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import {
-  createBindMountSandboxProvider,
-  type BindMountSandboxHandle,
-  type BindMountSandboxProvider,
-  type ExecResult,
+import { createBindMountSandboxProvider } from "../SandboxProvider.js";
+import type {
+  BindMountSandboxHandle,
+  BindMountSandboxProvider,
+  ExecResult,
 } from "../SandboxProvider.js";
 import { BoundedTail, MAX_TAIL_CHARS } from "../boundedTail.js";
 
@@ -39,7 +39,7 @@ export const createTempSandbox = async (
   const worktreePath = join(sandboxRoot, "workspace");
   await mkdir(worktreePath, { recursive: true });
 
-  const exec = (
+  const exec = async (
     command: string,
     options?: {
       onLine?: (line: string) => void;
@@ -48,7 +48,7 @@ export const createTempSandbox = async (
     },
   ): Promise<ExecResult> => {
     if (options?.onLine) {
-      const onLine = options.onLine;
+      const { onLine } = options;
       return new Promise((resolve, reject) => {
         const proc = spawn("sh", ["-c", command], {
           cwd: options?.cwd ?? worktreePath,
@@ -58,13 +58,13 @@ export const createTempSandbox = async (
         const stdoutTail = new BoundedTail(MAX_TAIL_CHARS, "\n");
         const stderrTail = new BoundedTail(MAX_TAIL_CHARS, "");
 
-        const rl = createInterface({ input: proc.stdout! });
+        const rl = createInterface({ input: proc.stdout });
         rl.on("line", (line) => {
           stdoutTail.push(line);
           onLine(line);
         });
 
-        proc.stderr!.on("data", (chunk: Buffer) => {
+        proc.stderr.on("data", (chunk: Buffer) => {
           stderrTail.push(chunk.toString());
         });
 
@@ -95,8 +95,8 @@ export const createTempSandbox = async (
             reject(new Error(`exec failed: ${error.message}`));
           } else {
             resolve({
-              stdout: stdout.toString(),
-              stderr: stderr.toString(),
+              stdout,
+              stderr,
               exitCode: typeof error?.code === "number" ? error.code : 0,
             });
           }
@@ -108,13 +108,13 @@ export const createTempSandbox = async (
   return {
     worktreePath,
     exec,
-    close: () => rm(sandboxRoot, { recursive: true, force: true }),
+    close: async () => rm(sandboxRoot, { recursive: true, force: true }),
   };
 };
 
 export interface StubProviderRecord {
   readonly provider: BindMountSandboxProvider;
-  readonly createCalls: ReadonlyArray<unknown>;
+  readonly createCalls: readonly unknown[];
   readonly closeCalls: { count: number };
 }
 

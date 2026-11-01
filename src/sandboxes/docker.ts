@@ -6,23 +6,19 @@
  *   await run({ agent: claudeCode("claude-opus-4-8"), sandbox: docker() });
  */
 
-import {
-  execFile,
-  execFileSync,
-  spawn,
-  type StdioOptions,
-} from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
+import type { StdioOptions } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import { Effect } from "effect";
 import { startContainer, removeContainer } from "../DockerLifecycle.js";
-import {
-  createBindMountSandboxProvider,
-  type SandboxProvider,
-  type BindMountCreateOptions,
-  type BindMountSandboxHandle,
-  type ExecResult,
-  type InteractiveExecOptions,
+import { createBindMountSandboxProvider } from "../SandboxProvider.js";
+import type {
+  SandboxProvider,
+  BindMountCreateOptions,
+  BindMountSandboxHandle,
+  ExecResult,
+  InteractiveExecOptions,
 } from "../SandboxProvider.js";
 import type { MountConfig } from "../MountConfig.js";
 import type { SelinuxLabel } from "../mountUtils.js";
@@ -247,7 +243,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
       const handle: BindMountSandboxHandle = {
         worktreePath,
 
-        exec: (
+        exec: async (
           command: string,
           opts?: {
             onLine?: (line: string) => void;
@@ -256,43 +252,52 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
             stdin?: string;
           },
         ): Promise<ExecResult> => {
-          const effectiveCommand = opts?.sudo ? `sudo ${command}` : command;
           const args = ["exec"];
-          if (opts?.stdin !== undefined) args.push("-i");
-          if (opts?.cwd) args.push("-w", opts.cwd);
-          args.push(containerName, "sh", "-c", effectiveCommand);
+          // Elevate by running as root through the engine, not a `sudo`
+          // prefix: the image needs no sudo binary, and the whole command
+          // (`a && b`, not just `a`) runs as root.
+          if (opts?.sudo === true) {
+            args.push("--user", "0:0");
+          }
+          if (opts?.stdin !== undefined) {
+            args.push("-i");
+          }
+          if (opts?.cwd !== undefined && opts.cwd !== "") {
+            args.push("-w", opts.cwd);
+          }
+          args.push(containerName, "sh", "-c", command);
 
           return new Promise((resolve, reject) => {
-            const proc = spawn("docker", args, {
-              stdio: [
-                opts?.stdin !== undefined ? "pipe" : "ignore",
-                "pipe",
-                "pipe",
-              ],
-            });
+            const stdin = opts?.stdin;
+            // Two literal `stdio` tuples, so the types know stdout and stderr
+            // are always piped.
+            const proc =
+              stdin === undefined
+                ? spawn("docker", args, { stdio: ["ignore", "pipe", "pipe"] })
+                : spawn("docker", args, { stdio: ["pipe", "pipe", "pipe"] });
 
-            if (opts?.stdin !== undefined) {
-              proc.stdin!.write(opts.stdin);
-              proc.stdin!.end();
+            if (stdin !== undefined) {
+              proc.stdin?.write(stdin);
+              proc.stdin?.end();
             }
 
-            proc.on("error", (error) => {
+            proc.on("error", (error: Error) => {
               reject(new Error(`docker exec failed: ${error.message}`));
             });
 
             if (opts?.onLine) {
-              const onLine = opts.onLine;
+              const { onLine } = opts;
               const stdoutTail = new BoundedTail(maxOutputTailChars, "\n");
               const stderrTail = new BoundedTail(maxOutputTailChars, "");
-              const rl = createInterface({ input: proc.stdout! });
+              const rl = createInterface({ input: proc.stdout });
               rl.on("line", (line) => {
                 stdoutTail.push(line);
                 onLine(line);
               });
-              proc.stderr!.on("data", (chunk: Buffer) => {
+              proc.stderr.on("data", (chunk: Buffer) => {
                 stderrTail.push(chunk.toString());
               });
-              proc.on("close", (code) => {
+              proc.on("close", (code: number | null) => {
                 resolve({
                   stdout: stdoutTail.toString(),
                   stderr: stderrTail.toString(),
@@ -302,13 +307,13 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
             } else {
               const stdoutChunks: string[] = [];
               const stderrChunks: string[] = [];
-              proc.stdout!.on("data", (chunk: Buffer) => {
+              proc.stdout.on("data", (chunk: Buffer) => {
                 stdoutChunks.push(chunk.toString());
               });
-              proc.stderr!.on("data", (chunk: Buffer) => {
+              proc.stderr.on("data", (chunk: Buffer) => {
                 stderrChunks.push(chunk.toString());
               });
-              proc.on("close", (code) => {
+              proc.on("close", (code: number | null) => {
                 resolve({
                   stdout: stdoutChunks.join(""),
                   stderr: stderrChunks.join(""),
@@ -319,22 +324,24 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
           });
         },
 
-        interactiveExec: (
+        interactiveExec: async (
           args: string[],
           opts: InteractiveExecOptions,
-        ): Promise<{ exitCode: number }> => {
-          return new Promise((resolve, reject) => {
+        ): Promise<{ exitCode: number }> =>
+          new Promise((resolve, reject) => {
             const dockerArgs = ["exec"];
             // Allocate a pseudo-terminal when stdin looks like a TTY
             if (
               "isTTY" in opts.stdin &&
-              (opts.stdin as { isTTY?: boolean }).isTTY
+              (opts.stdin as { isTTY?: boolean }).isTTY === true
             ) {
               dockerArgs.push("-it");
             } else {
               dockerArgs.push("-i");
             }
-            if (opts.cwd) dockerArgs.push("-w", opts.cwd);
+            if (opts.cwd !== undefined && opts.cwd !== "") {
+              dockerArgs.push("-w", opts.cwd);
+            }
             dockerArgs.push(containerName, ...args);
 
             const proc = spawn("docker", dockerArgs, {
@@ -348,10 +355,11 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
             proc.on("close", (code: number | null) => {
               resolve({ exitCode: code ?? 0 });
             });
-          });
-        },
-
-        copyFileIn: (hostPath: string, sandboxPath: string): Promise<void> =>
+          }),
+        copyFileIn: async (
+          hostPath: string,
+          sandboxPath: string,
+        ): Promise<void> =>
           new Promise((resolve, reject) => {
             execFile(
               "docker",
@@ -366,7 +374,10 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
             );
           }),
 
-        copyFileOut: (sandboxPath: string, hostPath: string): Promise<void> =>
+        copyFileOut: async (
+          sandboxPath: string,
+          hostPath: string,
+        ): Promise<void> =>
           new Promise((resolve, reject) => {
             execFile(
               "docker",
@@ -393,9 +404,12 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
 };
 
 // Re-export for backwards compatibility
-export { defaultImageName };
+export { defaultImageName } from "../mountUtils.js";
 
-const checkImageUid = (imageName: string, expectedUid: number): Promise<void> =>
+const checkImageUid = async (
+  imageName: string,
+  expectedUid: number,
+): Promise<void> =>
   new Promise<void>((resolve, reject) => {
     execFile(
       "docker",
@@ -409,20 +423,22 @@ const checkImageUid = (imageName: string, expectedUid: number): Promise<void> =>
           );
           return;
         }
-        const imageUser = (stdout ?? "").toString().trim();
+        const imageUser = (stdout ?? "").trim();
         if (!imageUser) {
           // No USER directive in image — skip check
           resolve();
           return;
         }
-        const uidPart = imageUser.split(":")[0]!;
-        const imageUid = parseInt(uidPart, 10);
+        const uidPart = imageUser.split(":")[0] ?? "";
+        const imageUid = Number.parseInt(uidPart, 10);
         if (isNaN(imageUid)) {
           // Non-numeric user (e.g. "agent") — can't compare, skip check
           resolve();
           return;
         }
-        if (imageUid !== expectedUid) {
+        if (imageUid === expectedUid) {
+          resolve();
+        } else {
           reject(
             new Error(
               `UID mismatch: image '${imageName}' was built with UID ${imageUid}, ` +
@@ -431,8 +447,6 @@ const checkImageUid = (imageName: string, expectedUid: number): Promise<void> =>
                 `or pass containerUid: ${imageUid} to docker() to match the image.`,
             ),
           );
-        } else {
-          resolve();
         }
       },
     );

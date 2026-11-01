@@ -1,0 +1,172 @@
+// The pure half of scripts/coverage-gate.ts: covered src/ lines from vitest's
+// istanbul JSON (this machine or the windows CI job), merging every source,
+// and the report. Raw V8 coverage from CLI subprocesses is in
+// scripts/coverage-gate-v8.ts. The gate script runs vitest and reads files.
+
+import { z } from "zod";
+
+/** Repo-relative file (forward slashes) → covered line numbers. */
+export type Lines = Map<string, Set<number>>;
+
+const Istanbul = z.record(
+  z.string(),
+  z.object({
+    statementMap: z.record(
+      z.string(),
+      z.object({ start: z.object({ line: z.number() }) }),
+    ),
+    s: z.record(z.string(), z.number()),
+  }),
+);
+
+/**
+ * `file` relative to `root`, with forward slashes. A path from another
+ * checkout (the windows CI job's `D:\a\sandcastle\sandcastle\src\…`) is
+ * cut at its first `/src/`: no checkout path we merge has a `src` directory
+ * above the repo.
+ */
+const repoPath = (file: string, root: string): string => {
+  const normal = file.replaceAll("\\", "/");
+  const base = root.replaceAll("\\", "/").replace(/\/?$/u, "/");
+  if (normal.startsWith(base)) {
+    return normal.slice(base.length);
+  }
+  const src = normal.indexOf("/src/");
+  return src === -1 ? normal : normal.slice(src + 1);
+};
+
+/** The start lines of the statements whose hit count passes `keep`. */
+const statementLines = (
+  json: unknown,
+  root: string,
+  keep: (count: number) => boolean,
+): Lines => {
+  const lines: Lines = new Map();
+  for (const [file, data] of Object.entries(Istanbul.parse(json))) {
+    const kept = new Set(
+      Object.entries(data.s)
+        .filter(([, count]) => keep(count))
+        .map(([id]) => data.statementMap[id]?.start.line ?? 0)
+        .filter((line) => line > 0),
+    );
+    lines.set(repoPath(file, root), kept);
+  }
+  return lines;
+};
+
+/** Covered lines from a vitest/istanbul `coverage-final.json`. */
+export const linesFromIstanbul = (json: unknown, root: string): Lines =>
+  statementLines(json, root, (count) => count > 0);
+
+/**
+ * Every line with a statement, covered or not, from the same JSON: the
+ * denominator of line coverage. Matches vitest's own line totals.
+ */
+export const coverableLinesFromIstanbul = (
+  json: unknown,
+  root: string,
+): Lines => statementLines(json, root, () => true);
+
+/** Every line any of `sources` covers. */
+export const merge = (...sources: readonly Lines[]): Lines => {
+  const out: Lines = new Map();
+  for (const source of sources) {
+    for (const [file, lines] of source) {
+      out.set(file, new Set([...(out.get(file) ?? []), ...lines]));
+    }
+  }
+  return out;
+};
+
+const MAX_LISTED_RANGES = 40;
+
+/** Lines in `a` that `b` lacks. */
+export const minus = (a: Lines, b: Lines): Lines =>
+  new Map(
+    [...a]
+      .map(([file, lines]): [string, Set<number>] => [
+        file,
+        new Set([...lines].filter((l) => b.get(file)?.has(l) !== true)),
+      ])
+      .filter(([, lines]) => lines.size > 0),
+  );
+
+/** Every covered line in `lines`, counted. */
+export const total = (lines: Lines): number =>
+  [...lines.values()].reduce((sum, set) => sum + set.size, 0);
+
+/** `3, 4, 5, 9` → `3-5, 9`. */
+const ranges = (lines: ReadonlySet<number>): string => {
+  const sorted = [...lines].toSorted((a, b) => a - b);
+  const out: string[] = [];
+  let start = sorted[0] ?? 0;
+  let prev = start;
+  for (const line of [...sorted.slice(1), Number.NaN]) {
+    if (line !== prev + 1) {
+      out.push(
+        start === prev ? String(start) : `${String(start)}-${String(prev)}`,
+      );
+      start = line;
+    }
+    prev = line;
+  }
+  return out.join(", ");
+};
+
+const table = (lines: Lines): string[] =>
+  [...lines]
+    .toSorted(([a], [b]) => a.localeCompare(b))
+    .slice(0, MAX_LISTED_RANGES)
+    .map(
+      ([file, set]) => `| \`${file}\` | ${String(set.size)} | ${ranges(set)} |`,
+    );
+
+/** What the gate weighs for one legacy test file. */
+export interface GateInput {
+  /** The legacy test file, repo-relative. */
+  readonly file: string;
+  /** Lines only `file` covers, out of the legacy tests. */
+  readonly only: Lines;
+  /** Lines the end-to-end tests cover, every source merged. */
+  readonly e2e: Lines;
+  /** One line per coverage source merged into `e2e`, for the report. */
+  readonly sources: readonly string[];
+}
+
+/** Lines only the legacy file covers that no end-to-end source covers. */
+export const missing = ({ only, e2e }: GateInput): Lines => minus(only, e2e);
+
+/** The Markdown report for the migration PR's body. */
+export const report = (input: GateInput): string => {
+  const { file, only, sources } = input;
+  const gap = missing(input);
+  const verdict =
+    total(gap) === 0
+      ? `**Gate: pass.** The e2e tests cover all ${String(total(only))} lines that only \`${file}\` covers.`
+      : `**Gate: fail.** ${String(total(gap))} of the ${String(total(only))} lines that only \`${file}\` covers have no e2e coverage yet.`;
+  const gapTable =
+    total(gap) === 0
+      ? []
+      : [
+          "",
+          "Not yet covered end to end:",
+          "",
+          "| File | Lines | Line numbers |",
+          "| --- | --- | --- |",
+          ...table(gap),
+        ];
+  return [
+    `### Coverage gate: \`${file}\``,
+    "",
+    verdict,
+    "",
+    `Lines covered only by this file, out of the other legacy tests: ${String(total(only))} across ${String(only.size)} files.`,
+    ...gapTable,
+    "",
+    "Coverage counted as end to end:",
+    "",
+    ...sources.map((source) => `- ${source}`),
+    "",
+    "_Generated by `npm run coverage:gate`._",
+  ].join("\n");
+};

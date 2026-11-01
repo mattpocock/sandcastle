@@ -4,6 +4,22 @@ on:
   push:
     branches:
       - main
+  # pull_request, not pull_request_target: a fork PR's code runs here with no
+  # secrets and a read-only token (see the agent workflows, moved off
+  # pull_request_target in 8976368).
+  pull_request:
+  # The merge queue on main: each queued PR is checked against the PRs ahead
+  # of it before it lands.
+  merge_group:
+
+permissions:
+  contents: read
+
+# A new push to a PR cancels that PR's in-flight run. Runs on main are never
+# cancelled: each push to main gets its own group.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   ci:
@@ -14,5 +30,46 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
+      - run: npm run typecheck
+      # Tests import from dist, so build before test. Lint too: the scripts
+      # in .sandcastle/ and .factory/ import @ai-hero/sandcastle, whose types
+      # come from dist, so without it type-aware rules see them as any.
+      # (Locally, `pretest`/`prelint` build via scripts/ensure-build.ts when
+      # dist/ is missing or stale; after this step it is fresh, so they skip.)
       - run: npm run build
-      - run: npm test
+      # api-report/ must match the built .d.ts: a public API change shows up
+      # in the PR as a report diff, which CODEOWNERS routes to Matt.
+      - run: npm run api:report -- --check
+      - run: npm run lint
+      # `npm test`, split so the e2e tests run once: the floor runs them with
+      # coverage, fails on a failing test, and holds their line coverage to
+      # scripts/coverage-baseline.json (see scripts/coverage-floor.ts).
+      - run: npx vitest run --project tooling --project legacy
+      - run: npm run coverage:floor
+
+  # Everything that runs on a real Windows host, in one job: real cmd.exe and
+  # Windows argv rules for noSandbox (#940), plus the end-to-end tests
+  # (tests/, which include tests/no-sandbox.windows.test.ts). The e2e tests
+  # run from src through the vitest alias, so no build is needed — and
+  # `npm run build`'s postbuild uses rm/cp, which Windows lacks. Most of the
+  # legacy suite assumes a POSIX host (sh, /tmp, POSIX path joins), so only
+  # its Windows-relevant file runs here.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      # Coverage for scripts/coverage-gate.ts: code that runs only on win32
+      # can count toward deleting a legacy test. The gate merges this artifact
+      # with `--coverage-from <dir>` (see the comment at the top of the gate).
+      - run: npx vitest run --project e2e --coverage.enabled --coverage.reporter=json --coverage.reportsDirectory=coverage/e2e-windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e2e-coverage-windows
+          path: coverage/e2e-windows/coverage-final.json
+          retention-days: 14
+      - run: npx vitest run --project legacy src/sandboxes/no-sandbox.test.ts

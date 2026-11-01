@@ -1,24 +1,34 @@
+import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, mkdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Exit } from "effect";
-import { describe, expect, it, vi } from "vitest";
+import { Cause, Chunk, Effect, Exit } from "effect";
+import { assert, describe, expect, it, vi } from "vitest";
 import { copyToWorktree, getCopyOnWriteFlags } from "./CopyToWorktree.js";
 import { CopyToWorktreeError, CopyToWorktreeTimeoutError } from "./errors.js";
 
 describe("getCopyOnWriteFlags", () => {
   it("returns -cR on darwin (APFS clonefile)", () => {
-    expect(getCopyOnWriteFlags("darwin")).toEqual(["-cR"]);
+    expect(getCopyOnWriteFlags("darwin")).toStrictEqual(["-cR"]);
   });
 
   it("returns -R --reflink=auto on linux", () => {
-    expect(getCopyOnWriteFlags("linux")).toEqual(["-R", "--reflink=auto"]);
+    expect(getCopyOnWriteFlags("linux")).toStrictEqual([
+      "-R",
+      "--reflink=auto",
+    ]);
   });
 
   it("returns -R --reflink=auto on other platforms", () => {
-    expect(getCopyOnWriteFlags("win32")).toEqual(["-R", "--reflink=auto"]);
-    expect(getCopyOnWriteFlags("freebsd")).toEqual(["-R", "--reflink=auto"]);
+    expect(getCopyOnWriteFlags("win32")).toStrictEqual([
+      "-R",
+      "--reflink=auto",
+    ]);
+    expect(getCopyOnWriteFlags("freebsd")).toStrictEqual([
+      "-R",
+      "--reflink=auto",
+    ]);
   });
 });
 
@@ -36,22 +46,15 @@ describe("copyToWorktree", () => {
     await writeFile(join(worktreeDir, "nested"), "blocker");
 
     try {
-      const exit = await Effect.runPromiseExit(
-        copyToWorktree(["nested/file.txt"], hostDir, worktreeDir),
+      // Effect.flip: a success (or a defect) rejects, so the test fails.
+      const error = await Effect.runPromise(
+        Effect.flip(copyToWorktree(["nested/file.txt"], hostDir, worktreeDir)),
       );
 
-      expect(Exit.isFailure(exit)).toBe(true);
-      if (Exit.isFailure(exit) && exit.cause._tag === "Fail") {
-        const error = exit.cause.error;
-        expect(error).toBeInstanceOf(CopyToWorktreeError);
-        if (error instanceof CopyToWorktreeError) {
-          expect(error.path).toBe("nested/file.txt");
-          expect(error.stderr).toBeTruthy();
-          expect(error._tag).toBe("CopyToWorktreeError");
-        }
-      } else {
-        throw new Error("Expected Fail cause");
-      }
+      assert.instanceOf(error, CopyToWorktreeError);
+      expect(error.path).toBe("nested/file.txt");
+      expect(error.stderr).not.toHaveLength(0);
+      expect(error._tag).toBe("CopyToWorktreeError");
     } finally {
       await rm(hostDir, { recursive: true, force: true });
       await rm(worktreeDir, { recursive: true, force: true });
@@ -77,15 +80,96 @@ describe("copyToWorktree", () => {
     }
   });
 
+  it("merges a directory into one that already exists in the worktree", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cw-test-"));
+    const worktreeDir = await mkdtemp(join(tmpdir(), "cw-wt-"));
+
+    // Host: cfg/tracked.txt (tracked, so already in the worktree) and
+    // cfg/secret.txt (gitignored, so only on the host)
+    await mkdir(join(hostDir, "cfg", "sub"), { recursive: true });
+    await writeFile(join(hostDir, "cfg", "tracked.txt"), "tracked");
+    await writeFile(join(hostDir, "cfg", "secret.txt"), "secret");
+    await writeFile(join(hostDir, "cfg", "sub", "deep.txt"), "deep");
+    await mkdir(join(worktreeDir, "cfg"));
+    await writeFile(join(worktreeDir, "cfg", "tracked.txt"), "tracked");
+
+    try {
+      await Effect.runPromise(copyToWorktree(["cfg"], hostDir, worktreeDir));
+
+      await expect(
+        readFile(join(worktreeDir, "cfg", "secret.txt"), "utf8"),
+      ).resolves.toBe("secret");
+      await expect(
+        readFile(join(worktreeDir, "cfg", "sub", "deep.txt"), "utf8"),
+      ).resolves.toBe("deep");
+      expect(existsSync(join(worktreeDir, "cfg", "cfg"))).toBe(false);
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(worktreeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("copies a directory that does not exist in the worktree to the same path", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cw-test-"));
+    const worktreeDir = await mkdtemp(join(tmpdir(), "cw-wt-"));
+
+    await mkdir(join(hostDir, "ignoredir"));
+    await writeFile(join(hostDir, "ignoredir", "x.txt"), "x");
+
+    try {
+      await Effect.runPromise(
+        copyToWorktree(["ignoredir"], hostDir, worktreeDir),
+      );
+
+      await expect(
+        readFile(join(worktreeDir, "ignoredir", "x.txt"), "utf8"),
+      ).resolves.toBe("x");
+      expect(existsSync(join(worktreeDir, "ignoredir", "ignoredir"))).toBe(
+        false,
+      );
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(worktreeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("creates missing parent directories for a nested path", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cw-test-"));
+    const worktreeDir = await mkdtemp(join(tmpdir(), "cw-wt-"));
+
+    // deep/ is gitignored, so none of it exists in the worktree
+    await mkdir(join(hostDir, "deep", "a", "b"), { recursive: true });
+    await writeFile(join(hostDir, "deep", "a", "b", "c.txt"), "c");
+    await mkdir(join(hostDir, "nested", "dir"), { recursive: true });
+    await writeFile(join(hostDir, "nested", "dir", "d.txt"), "d");
+
+    try {
+      await Effect.runPromise(
+        copyToWorktree(["deep/a/b/c.txt", "nested/dir"], hostDir, worktreeDir),
+      );
+
+      await expect(
+        readFile(join(worktreeDir, "deep", "a", "b", "c.txt"), "utf8"),
+      ).resolves.toBe("c");
+      await expect(
+        readFile(join(worktreeDir, "nested", "dir", "d.txt"), "utf8"),
+      ).resolves.toBe("d");
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(worktreeDir, { recursive: true, force: true });
+    }
+  });
+
   it("skips missing source paths without error", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cw-test-"));
     const worktreeDir = await mkdtemp(join(tmpdir(), "cw-wt-"));
 
     try {
-      await Effect.runPromise(
-        copyToWorktree(["nonexistent.txt"], hostDir, worktreeDir),
-      );
-      // Should complete without error
+      await expect(
+        Effect.runPromise(
+          copyToWorktree(["nonexistent.txt"], hostDir, worktreeDir),
+        ),
+      ).resolves.toBeUndefined();
     } finally {
       await rm(hostDir, { recursive: true, force: true });
       await rm(worktreeDir, { recursive: true, force: true });
@@ -103,34 +187,73 @@ describe("copyToWorktree", () => {
     try {
       const customTimeout = 500;
       const exitPromise = Effect.runPromiseExit(
-        copyToWorktree(
-          ["big-file.txt"],
-          hostDir,
-          worktreeDir,
-          customTimeout,
-        ),
+        copyToWorktree(["big-file.txt"], hostDir, worktreeDir, customTimeout),
       );
 
       // Advance past the custom timeout
       await vi.advanceTimersByTimeAsync(customTimeout + 100);
 
       const exit = await exitPromise;
-      // The copy may succeed before the timeout fires on fast systems,
-      // but if it times out, the error should carry the custom timeout value
-      if (Exit.isFailure(exit) && exit.cause._tag === "Fail") {
-        const error = exit.cause.error;
+      // The copy may succeed before the timeout fires on fast systems
+      // (no failures), but if it times out, the error should carry the
+      // custom timeout value
+      const failures = Exit.match(exit, {
+        onSuccess: () => [],
+        onFailure: (cause) => Chunk.toArray(Cause.failures(cause)),
+      });
+      for (const error of failures) {
         expect(error).toBeInstanceOf(CopyToWorktreeTimeoutError);
-        if (error instanceof CopyToWorktreeTimeoutError) {
-          expect(error.timeoutMs).toBe(customTimeout);
-        }
+        expect(error).toHaveProperty("timeoutMs", customTimeout);
       }
-      // If it succeeds, that's also fine — the timeout just didn't fire
     } finally {
       vi.useRealTimers();
       await rm(hostDir, { recursive: true, force: true });
       await rm(worktreeDir, { recursive: true, force: true });
     }
   });
+
+  it.skipIf(process.platform === "win32")(
+    "kills the cp process when the copy times out, and spawns no fallback cp",
+    async () => {
+      const hostDir = await mkdtemp(join(tmpdir(), "cw-test-"));
+      const worktreeDir = await mkdtemp(join(tmpdir(), "cw-wt-"));
+      await writeFile(join(hostDir, "stuck.txt"), "content");
+      // cp blocks opening a FIFO destination that has no reader.
+      const dest = join(worktreeDir, "stuck.txt");
+      execFileSync("mkfifo", [dest]);
+      const cpPattern = `cp .*${dest}`;
+      const cpAlive = () => {
+        try {
+          execFileSync("pgrep", ["-f", cpPattern]);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+
+      try {
+        const exit = await Effect.runPromiseExit(
+          copyToWorktree(["stuck.txt"], hostDir, worktreeDir, 300),
+        );
+        expect(Exit.isFailure(exit)).toBe(true);
+
+        // Yield to the event loop so the killed cp's exit callback runs: a
+        // fallback cp spawned from it would block on the FIFO forever.
+        await new Promise((r) => setTimeout(r, 500));
+        expect(cpAlive()).toBe(false);
+      } finally {
+        // Kill any surviving cp before deleting the FIFO: once the FIFO is
+        // unlinked nothing can open it for reading, so cp would never exit.
+        try {
+          execFileSync("pkill", ["-KILL", "-f", cpPattern]);
+        } catch {
+          // No cp left to kill.
+        }
+        await rm(hostDir, { recursive: true, force: true });
+        await rm(worktreeDir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("defaults to 60s timeout when timeoutMs is omitted", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cw-test-"));

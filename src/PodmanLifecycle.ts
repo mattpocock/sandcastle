@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { execFile } from "node:child_process";
 import { resolve } from "node:path";
-import { PodmanError } from "./errors.js";
+import { PodmanError, ImageNotFoundError } from "./errors.js";
 
 const podmanExec = (args: string[]): Effect.Effect<string, PodmanError> =>
   Effect.async((resume) => {
@@ -14,12 +14,12 @@ const podmanExec = (args: string[]): Effect.Effect<string, PodmanError> =>
           resume(
             Effect.fail(
               new PodmanError({
-                message: `podman ${args[0]} failed: ${stderr?.toString() || error.message}`,
+                message: `podman ${args[0]} failed: ${stderr || error.message}`,
               }),
             ),
           );
         } else {
-          resume(Effect.succeed(stdout.toString()));
+          resume(Effect.succeed(stdout));
         }
       },
     );
@@ -38,18 +38,12 @@ export const buildImage = (
   options?: { readonly containerfile?: string },
 ): Effect.Effect<void, PodmanError> =>
   Effect.gen(function* () {
-    if (options?.containerfile) {
-      yield* podmanExec([
-        "build",
-        "-t",
-        imageName,
-        "-f",
-        resolve(options.containerfile),
-        process.cwd(),
-      ]);
-    } else {
-      yield* podmanExec(["build", "-t", imageName, resolve(containerfileDir)]);
-    }
+    const containerfile = options?.containerfile;
+    const buildContext =
+      containerfile !== undefined && containerfile !== ""
+        ? ["-f", resolve(containerfile), process.cwd()]
+        : [resolve(containerfileDir)];
+    yield* podmanExec(["build", "-t", imageName, ...buildContext]);
   });
 
 /**
@@ -57,7 +51,18 @@ export const buildImage = (
  */
 export const removeImage = (
   imageName: string,
-): Effect.Effect<void, PodmanError> =>
-  Effect.gen(function* () {
-    yield* podmanExec(["rmi", imageName]);
-  });
+): Effect.Effect<void, PodmanError | ImageNotFoundError> =>
+  podmanExec(["rmi", imageName]).pipe(
+    Effect.asVoid,
+    Effect.catchTag(
+      "PodmanError",
+      (error): Effect.Effect<never, PodmanError | ImageNotFoundError> =>
+        error.message.includes("image not known")
+          ? Effect.fail(
+              new ImageNotFoundError({
+                message: `Podman image '${imageName}' does not exist, so there is nothing to remove.`,
+              }),
+            )
+          : Effect.fail(error),
+    ),
+  );

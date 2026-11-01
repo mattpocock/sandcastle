@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, describe, expect, it, vi } from "vitest";
 
 vi.mock("node:child_process", async () => {
   const actual =
@@ -14,7 +14,9 @@ vi.mock("node:child_process", async () => {
   };
 });
 
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import { writeFileSync, mkdtempSync, unlinkSync, rmdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -42,7 +44,7 @@ describe("docker()", () => {
 
   it("has a create function", () => {
     const provider = docker();
-    expect(typeof provider.create).toBe("function");
+    expect(provider.create).toBeTypeOf("function");
   });
 
   it("does not have a branchStrategy property", () => {
@@ -140,7 +142,7 @@ describe("docker()", () => {
 
   it("passes --group-add flags to docker run, stringifying numeric GIDs", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -171,7 +173,7 @@ describe("docker()", () => {
 
   it("does not pass --group-add to docker run when groups is omitted", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -197,7 +199,7 @@ describe("docker()", () => {
 
   it("passes --device flags to docker run in order", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -228,7 +230,7 @@ describe("docker()", () => {
 
   it("does not pass --device to docker run when devices is omitted", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -254,7 +256,7 @@ describe("docker()", () => {
 
   it("passes --cpus flag to docker run when cpus is provided", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -282,7 +284,7 @@ describe("docker()", () => {
 
   it("does not pass --cpus to docker run when cpus is omitted", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -309,7 +311,7 @@ describe("docker()", () => {
   it("runs pre-flight docker image inspect before docker run", async () => {
     const callOrder: string[] = [];
     mockExecFile.mockImplementation((_command, args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       if (Array.isArray(args) && args[0] === "image" && args[1] === "inspect") {
         callOrder.push("inspect");
         const hostUid = process.getuid?.() ?? 1000;
@@ -341,7 +343,7 @@ describe("docker()", () => {
 
   it("throws on UID mismatch between image and host", async () => {
     mockExecFile.mockImplementation((_command, args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       if (Array.isArray(args) && args[0] === "image" && args[1] === "inspect") {
         callback(null, "9999:9999\n", "");
       } else {
@@ -366,7 +368,7 @@ describe("docker()", () => {
 
   it("containerUid override bypasses UID mismatch with host", async () => {
     mockExecFile.mockImplementation((_command, args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       if (Array.isArray(args) && args[0] === "image" && args[1] === "inspect") {
         // Image has UID 500, which differs from host but matches containerUid
         callback(null, "500:500\n", "");
@@ -397,7 +399,7 @@ describe("docker()", () => {
 
   it("throws a clear error when image is not found locally", async () => {
     mockExecFile.mockImplementationOnce((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(new Error("no such image"), "", "");
       return undefined as any;
     });
@@ -420,7 +422,7 @@ describe("docker()", () => {
 
   it("uses host UID/GID by default for --user flag", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -438,7 +440,8 @@ describe("docker()", () => {
     const runCall = mockExecFile.mock.calls.find(
       ([, args]) => Array.isArray(args) && args[0] === "run",
     );
-    const runArgs = runCall![1] as string[];
+    assert(runCall);
+    const runArgs = runCall[1] as string[];
     const userIdx = runArgs.indexOf("--user");
     expect(userIdx).toBeGreaterThan(-1);
     const hostUid = process.getuid?.() ?? 1000;
@@ -450,7 +453,7 @@ describe("docker()", () => {
 
   it("uses containerUid/containerGid for --user flag when provided", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -468,7 +471,8 @@ describe("docker()", () => {
     const runCall = mockExecFile.mock.calls.find(
       ([, args]) => Array.isArray(args) && args[0] === "run",
     );
-    const runArgs = runCall![1] as string[];
+    assert(runCall);
+    const runArgs = runCall[1] as string[];
     const userIdx = runArgs.indexOf("--user");
     expect(userIdx).toBeGreaterThan(-1);
     expect(runArgs[userIdx + 1]).toBe("500:500");
@@ -478,7 +482,7 @@ describe("docker()", () => {
 
   it("copyFileIn calls docker cp with correct arguments", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -503,8 +507,8 @@ describe("docker()", () => {
         args[0] === "cp" &&
         args[1] === "/host/file.txt",
     );
-    expect(cpCall).toBeDefined();
-    const cpArgs = cpCall![1] as string[];
+    assert(cpCall);
+    const cpArgs = cpCall[1] as string[];
     expect(cpArgs[0]).toBe("cp");
     expect(cpArgs[1]).toBe("/host/file.txt");
     expect(cpArgs[2]).toMatch(/^sandcastle-.*:\/sandbox\/file\.txt$/);
@@ -514,7 +518,7 @@ describe("docker()", () => {
 
   it("copyFileOut calls docker cp with correct arguments", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -539,8 +543,8 @@ describe("docker()", () => {
         args[0] === "cp" &&
         args[2] === "/host/output.txt",
     );
-    expect(cpCall).toBeDefined();
-    const cpArgs = cpCall![1] as string[];
+    assert(cpCall);
+    const cpArgs = cpCall[1] as string[];
     expect(cpArgs[0]).toBe("cp");
     expect(cpArgs[1]).toMatch(/^sandcastle-.*:\/sandbox\/output\.txt$/);
     expect(cpArgs[2]).toBe("/host/output.txt");
@@ -550,7 +554,7 @@ describe("docker()", () => {
 
   it("default mounts include :z SELinux label", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -568,7 +572,8 @@ describe("docker()", () => {
     const runCall = mockExecFile.mock.calls.find(
       ([, args]) => Array.isArray(args) && args[0] === "run",
     );
-    const runArgs = runCall![1] as string[];
+    assert(runCall);
+    const runArgs = runCall[1] as string[];
     const vIdx = runArgs.indexOf("-v");
     expect(vIdx).toBeGreaterThan(-1);
     expect(runArgs[vIdx + 1]).toMatch(/:z$/);
@@ -578,7 +583,7 @@ describe("docker()", () => {
 
   it("selinuxLabel 'Z' produces :Z suffix on mounts", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -596,7 +601,8 @@ describe("docker()", () => {
     const runCall = mockExecFile.mock.calls.find(
       ([, args]) => Array.isArray(args) && args[0] === "run",
     );
-    const runArgs = runCall![1] as string[];
+    assert(runCall);
+    const runArgs = runCall[1] as string[];
     const vIdx = runArgs.indexOf("-v");
     expect(runArgs[vIdx + 1]).toMatch(/:Z$/);
 
@@ -605,7 +611,7 @@ describe("docker()", () => {
 
   it("selinuxLabel false produces no SELinux suffix on mounts", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -623,7 +629,8 @@ describe("docker()", () => {
     const runCall = mockExecFile.mock.calls.find(
       ([, args]) => Array.isArray(args) && args[0] === "run",
     );
-    const runArgs = runCall![1] as string[];
+    assert(runCall);
+    const runArgs = runCall[1] as string[];
     const vIdx = runArgs.indexOf("-v");
     expect(runArgs[vIdx + 1]).toBe("/tmp/worktree:/home/agent/workspace");
 
@@ -636,7 +643,7 @@ describe("docker()", () => {
     writeFileSync(tmpFile, "{}");
 
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -666,14 +673,14 @@ describe("docker()", () => {
             typeof a === "string" && a.includes("mkdir") && a.includes("chown"),
         ),
     );
-    expect(mkdirCall).toBeDefined();
-    const mkdirArgs = mkdirCall![1] as string[];
+    assert(mkdirCall);
+    const mkdirArgs = mkdirCall[1] as string[];
     // Should run as root
     expect(mkdirArgs).toContain("--user");
     expect(mkdirArgs[mkdirArgs.indexOf("--user") + 1]).toBe("0:0");
     // Script body is fixed; the dir and uid:gid are passed as argv after `sh`
     const shCmdIdx = mkdirArgs.indexOf("-c");
-    const shCmd = mkdirArgs[shCmdIdx + 1]!;
+    const shCmd = mkdirArgs[shCmdIdx + 1];
     expect(shCmd).toContain("mkdir -p");
     expect(shCmd).toContain("chown");
     expect(mkdirArgs).toContain("/home/agent/.codex");
@@ -685,7 +692,7 @@ describe("docker()", () => {
 
   it("does not run mkdir+chown when there are no file mounts", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -730,7 +737,7 @@ describe("docker()", () => {
 
   it("copyFileIn rejects when docker cp fails", async () => {
     mockExecFile.mockImplementation((_command, args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       if (Array.isArray(args) && args[0] === "cp") {
         callback(new Error("no such file"));
       } else {
@@ -759,7 +766,7 @@ describe("docker()", () => {
 
   it("shares a single SIGINT listener across many concurrent sandboxes", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -788,10 +795,89 @@ describe("docker()", () => {
     expect(process.listenerCount("SIGTERM")).toBe(sigtermBefore + 1);
     expect(process.listenerCount("exit")).toBe(exitBefore + 1);
 
-    for (const h of handles) await h.close();
+    for (const h of handles) {
+      await h.close();
+    }
 
     expect(process.listenerCount("SIGINT")).toBe(sigintBefore);
     expect(process.listenerCount("SIGTERM")).toBe(sigtermBefore);
     expect(process.listenerCount("exit")).toBe(exitBefore);
+  });
+});
+
+describe("docker() exec with sudo", () => {
+  const fakeProc = () => {
+    const proc = new EventEmitter() as EventEmitter & {
+      stdout: PassThrough;
+      stderr: PassThrough;
+    };
+    proc.stdout = new PassThrough();
+    proc.stderr = new PassThrough();
+    setImmediate(() => {
+      proc.stdout.end();
+      proc.stderr.end();
+      proc.emit("close", 0);
+    });
+    return proc;
+  };
+
+  const createHandle = async () => {
+    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+      const callback = rest.at(-1);
+      callback(null, "", "");
+      return undefined as any;
+    });
+    vi.mocked(spawn).mockImplementation(() => fakeProc() as any);
+    return (await docker().create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    })) as BindMountSandboxHandle;
+  };
+
+  afterEach(() => {
+    vi.mocked(spawn).mockReset();
+  });
+
+  it("runs the whole command as root via --user 0:0, without a sudo binary", async () => {
+    const handle = await createHandle();
+
+    await handle.exec("id -u > /tmp/x && id -u >> /tmp/x", { sudo: true });
+
+    const lastSpawn = vi.mocked(spawn).mock.calls.at(-1);
+
+    assert(lastSpawn);
+
+    const [cmd, args] = lastSpawn;
+    expect(cmd).toBe("docker");
+    const execArgs = args as string[];
+    expect(execArgs[0]).toBe("exec");
+    expect(execArgs[execArgs.indexOf("--user") + 1]).toBe("0:0");
+    expect(execArgs.slice(-2)).toEqual([
+      "-c",
+      "id -u > /tmp/x && id -u >> /tmp/x",
+    ]);
+    expect(execArgs.some((a) => a.includes("sudo"))).toBe(false);
+
+    await handle.close();
+  });
+
+  it("runs as the container's default user when sudo is not set", async () => {
+    const handle = await createHandle();
+
+    await handle.exec("id -u");
+
+    const lastSpawn = vi.mocked(spawn).mock.calls.at(-1);
+
+    assert(lastSpawn);
+
+    const execArgs = lastSpawn[1] as string[];
+    expect(execArgs).not.toContain("--user");
+    expect(execArgs.slice(-2)).toEqual(["-c", "id -u"]);
+
+    await handle.close();
   });
 });

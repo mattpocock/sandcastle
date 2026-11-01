@@ -8,28 +8,35 @@ import type { SandboxError } from "./errors.js";
  */
 export const formatErrorMessage = (error: SandboxError): string => {
   switch (error._tag) {
-    case "ExecError":
+    case "ExecError": {
       return `Command failed in sandbox (${error.command}): ${error.message}`;
-    case "ExecHostError":
+    }
+    case "ExecHostError": {
       return `Command failed on host (${error.command}): ${error.message}`;
-    case "CopyError":
+    }
+    case "CopyError": {
       return `File copy failed: ${error.message}`;
-    case "DockerError":
+    }
+    case "DockerError": {
       return `Docker operation failed: ${error.message}. Is Docker running?`;
-    case "PodmanError":
+    }
+    case "PodmanError": {
       return `Podman operation failed: ${error.message}. Is Podman running?`;
-    case "SyncError":
+    }
+    case "SyncError": {
       return `Git sync failed: ${error.message}`;
-    case "WorktreeError":
+    }
+    case "WorktreeError": {
       return `Git worktree operation failed: ${error.message}`;
-    case "PromptError":
+    }
+    case "PromptError": {
       return `Failed to resolve prompt: ${error.message}`;
-    case "AgentError":
+    }
+    case "AgentError": {
       return `Agent invocation failed: ${error.message}`;
+    }
     case "ConfigDirError":
-      return `${error.message}`;
     case "InitError":
-      return `${error.message}`;
     case "AgentIdleTimeoutError":
     case "WorktreeTimeoutError":
     case "ContainerStartTimeoutError":
@@ -42,8 +49,11 @@ export const formatErrorMessage = (error: SandboxError): string => {
     case "CommitCollectionTimeoutError":
     case "MergeToHostTimeoutError":
     case "SessionCaptureError":
+    case "SyncOutPathError":
     case "CwdError":
+    case "ImageNotFoundError": {
       return error.message;
+    }
   }
 };
 
@@ -51,7 +61,7 @@ const showErrorAndExit = (error: SandboxError) =>
   Effect.gen(function* () {
     const d = yield* Display;
     yield* d.status(formatErrorMessage(error), "error");
-    return yield* Effect.sync(() => process.exit(1) as never);
+    return yield* Effect.sync(() => process.exit(1));
   });
 
 /**
@@ -62,7 +72,6 @@ const showErrorAndExit = (error: SandboxError) =>
 export const withFriendlyErrors = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
 ): Effect.Effect<A, Exclude<E, SandboxError>, R | Display> =>
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   Effect.catchTags(effect as Effect.Effect<A, SandboxError, R>, {
     ExecError: showErrorAndExit,
     ExecHostError: showErrorAndExit,
@@ -70,6 +79,7 @@ export const withFriendlyErrors = <A, E, R>(
     DockerError: showErrorAndExit,
     PodmanError: showErrorAndExit,
     SyncError: showErrorAndExit,
+    SyncOutPathError: showErrorAndExit,
     WorktreeError: showErrorAndExit,
     PromptError: showErrorAndExit,
     AgentError: showErrorAndExit,
@@ -88,4 +98,5 @@ export const withFriendlyErrors = <A, E, R>(
     MergeToHostTimeoutError: showErrorAndExit,
     SessionCaptureError: showErrorAndExit,
     CwdError: showErrorAndExit,
-  }) as Effect.Effect<A, Exclude<E, SandboxError>, R | Display>;
+    ImageNotFoundError: showErrorAndExit,
+  });

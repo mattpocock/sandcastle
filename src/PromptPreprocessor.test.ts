@@ -1,17 +1,11 @@
-import {
-  Duration,
-  Effect,
-  Exit,
-  Layer,
-  Ref,
-  TestClock,
-  TestContext,
-} from "effect";
+import type { Layer } from "effect";
+import { Duration, Effect, Exit, Ref, TestClock, TestContext } from "effect";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
-import { Display, type DisplayEntry, SilentDisplay } from "./Display.js";
+import { assert, describe, expect, it } from "vitest";
+import { SilentDisplay } from "./Display.js";
+import type { DisplayEntry, Display } from "./Display.js";
 import { preprocessPrompt } from "./PromptPreprocessor.js";
 import { substitutePromptArgs } from "./PromptArgumentSubstitution.js";
 import type { SandboxService } from "./SandboxFactory.js";
@@ -21,7 +15,7 @@ import { PromptError, PromptExpansionTimeoutError } from "./errors.js";
 describe("PromptPreprocessor", () => {
   const setup = async () => {
     const sandboxDir = await mkdtemp(join(tmpdir(), "preprocess-test-"));
-    const displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const displayRef = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     const displayLayer = SilentDisplay.layer(displayRef);
     const sandbox = makeLocalSandbox(sandboxDir);
     return { sandboxDir, sandbox, displayLayer, displayRef };
@@ -77,11 +71,10 @@ describe("PromptPreprocessor", () => {
         Effect.provide(displayLayer),
       ),
     );
-    expect(result).toBeInstanceOf(PromptError);
+    assert.instanceOf(result, PromptError);
     expect(result._tag).toBe("PromptError");
     expect(result.message).toContain("exit 7");
     expect(result.message).toContain("exited with code 7");
-    if (result._tag !== "PromptError") throw new Error("unreachable");
     expect(result.exitCode).toBe(7);
   });
 
@@ -104,20 +97,19 @@ describe("PromptPreprocessor", () => {
           events.push(`start:${command}`);
           yield* Effect.yieldNow();
           events.push(`end:${command}`);
-          if (command === "echo hello") {
-            return { stdout: "hello\n", stderr: "", exitCode: 0 };
-          }
-          if (command === "echo world") {
-            return { stdout: "world\n", stderr: "", exitCode: 0 };
-          }
-          return { stdout: "", stderr: "", exitCode: 0 };
+          // Only `echo hello` and `echo world` run here: echo their argument
+          return {
+            stdout: `${command.slice("echo ".length)}\n`,
+            stderr: "",
+            exitCode: 0,
+          };
         }),
-      copyIn: () => Effect.succeed(undefined as never),
-      copyFileOut: () => Effect.succeed(undefined as never),
+      copyIn: () => Effect.void,
+      copyFileOut: () => Effect.void,
     };
 
     const displayLayer = SilentDisplay.layer(
-      Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]),
+      Ref.unsafeMake<readonly DisplayEntry[]>([]),
     );
 
     const marked = await Effect.runPromise(
@@ -133,7 +125,7 @@ describe("PromptPreprocessor", () => {
     );
 
     expect(result).toBe("First: hello\nSecond: world");
-    expect(events).toEqual([
+    expect(events).toStrictEqual([
       "start:echo hello",
       "start:echo world",
       "end:echo hello",
@@ -147,17 +139,17 @@ describe("PromptPreprocessor", () => {
     await run(prompt, sandbox, displayLayer, sandboxDir);
     const entries = await Effect.runPromise(Ref.get(displayRef));
     const taskLogEntry = entries.find((e) => e._tag === "taskLog");
-    expect(taskLogEntry).toBeDefined();
-    if (taskLogEntry!._tag !== "taskLog") throw new Error("unreachable");
+    assert.isDefined(taskLogEntry);
+    assert(taskLogEntry._tag === "taskLog", "expected a taskLog entry");
     const helloTokens = Math.ceil("hello".length / 4);
     const worldTokens = Math.ceil("world".length / 4);
-    expect(taskLogEntry!.messages[0]).toBe(
+    expect(taskLogEntry.messages[0]).toBe(
       `echo hello → ~${helloTokens} tokens`,
     );
-    expect(taskLogEntry!.messages[1]).toBe(
+    expect(taskLogEntry.messages[1]).toBe(
       `echo world → ~${worldTokens} tokens`,
     );
-    expect(taskLogEntry!.messages).toHaveLength(2);
+    expect(taskLogEntry.messages).toHaveLength(2);
   });
 
   it("executes template shell blocks with {{KEY}} substituted into the command", async () => {
@@ -197,7 +189,7 @@ describe("PromptPreprocessor", () => {
     const rawTemplate = "Payload: {{DATA}}";
     const substituted = await Effect.runPromise(
       substitutePromptArgs(rawTemplate, {
-        DATA: "!\x01`rm -rf /`",
+        DATA: "!\u0001`rm -rf /`",
       }).pipe(Effect.provide(displayLayer)),
     );
     const result = await Effect.runPromise(
@@ -208,12 +200,57 @@ describe("PromptPreprocessor", () => {
     expect(result).toBe("Payload: !`rm -rf /`");
   });
 
+  it("does not execute shell blocks inside HTML comments", async () => {
+    const { sandboxDir, sandbox, displayLayer } = await setup();
+    const prompt = [
+      "<!-- Use !`command` to pull in dynamic context. -->",
+      "<!-- Example: !`exit 4` or",
+      "  !`exit 5` -->",
+      "Live: !`echo live`",
+    ].join("\n");
+    const result = await run(prompt, sandbox, displayLayer, sandboxDir);
+    expect(result).toBe(
+      [
+        "<!-- Use !`command` to pull in dynamic context. -->",
+        "<!-- Example: !`exit 4` or",
+        "  !`exit 5` -->",
+        "Live: live",
+      ].join("\n"),
+    );
+  });
+
+  it("treats an unclosed HTML comment as running to the end of the prompt", async () => {
+    const { sandboxDir, sandbox, displayLayer } = await setup();
+    const prompt = "Live: !`echo live`\n<!-- unclosed !`exit 4`";
+    const result = await run(prompt, sandbox, displayLayer, sandboxDir);
+    expect(result).toBe("Live: live\n<!-- unclosed !`exit 4`");
+  });
+
+  it("decides comment ranges from the raw template, not from prompt argument values", async () => {
+    const { sandboxDir, sandbox, displayLayer } = await setup();
+    // An arg value that opens or closes a comment must not hide a live
+    // template shell block, nor revive a commented-out one.
+    const rawTemplate =
+      "{{OPEN}} Live: !`echo live`\n<!-- {{CLOSE}} !`exit 4` -->";
+    const substituted = await Effect.runPromise(
+      substitutePromptArgs(rawTemplate, { OPEN: "<!--", CLOSE: "-->" }).pipe(
+        Effect.provide(displayLayer),
+      ),
+    );
+    const result = await Effect.runPromise(
+      preprocessPrompt(substituted, sandbox, sandboxDir).pipe(
+        Effect.provide(displayLayer),
+      ),
+    );
+    expect(result).toBe("<!-- Live: live\n<!-- --> !`exit 4` -->");
+  });
+
   it("fails with PromptExpansionTimeoutError carrying elapsedMs measured at the throw site", async () => {
     const { sandboxDir, displayLayer } = await setup();
     const hangingSandbox: SandboxService = {
       exec: () => Effect.never,
-      copyIn: () => Effect.succeed(undefined as never),
-      copyFileOut: () => Effect.succeed(undefined as never),
+      copyIn: () => Effect.void,
+      copyFileOut: () => Effect.void,
     };
 
     const marked = await Effect.runPromise(
@@ -236,14 +273,10 @@ describe("PromptPreprocessor", () => {
     const exit = await Effect.runPromise(program);
 
     expect(Exit.isFailure(exit)).toBe(true);
-    if (!Exit.isFailure(exit) || exit.cause._tag !== "Fail") {
-      throw new Error("Expected Fail cause");
-    }
-    const error = exit.cause.error;
-    expect(error).toBeInstanceOf(PromptExpansionTimeoutError);
-    if (!(error instanceof PromptExpansionTimeoutError)) {
-      throw new Error("unreachable");
-    }
+    assert(Exit.isFailure(exit), "Expected a failure");
+    assert(exit.cause._tag === "Fail", "Expected Fail cause");
+    const { error } = exit.cause;
+    assert.instanceOf(error, PromptExpansionTimeoutError);
     expect(error.expression).toBe("sleep forever");
     expect(error.timeoutMs).toBe(30_000);
     expect(error.elapsedMs).toBeGreaterThanOrEqual(30_000);

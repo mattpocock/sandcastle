@@ -6,9 +6,19 @@ import { promisify } from "node:util";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { testIsolated } from "./sandboxes/test-isolated.js";
+import type { IsolatedSandboxHandle } from "./SandboxProvider.js";
 import { syncIn } from "./syncIn.js";
 
 const execAsync = promisify(exec);
+
+/** A command's trimmed stdout inside the sandbox. */
+const sandboxStdout = async (
+  handle: { exec: (command: string) => Promise<{ stdout: string }> },
+  command: string,
+) => {
+  const { stdout } = await handle.exec(command);
+  return stdout.trim();
+};
 
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });
@@ -31,6 +41,19 @@ const getHead = async (dir: string) => {
   const { stdout } = await execAsync("git rev-parse HEAD", { cwd: dir });
   return stdout.trim();
 };
+
+// The sandbox is the system boundary: wrap a real handle so it reports a
+// different HEAD than the host's.
+const reportingSandboxHead = (
+  handle: IsolatedSandboxHandle,
+  head: string,
+): IsolatedSandboxHandle => ({
+  ...handle,
+  exec: async (command, options) =>
+    command === "git rev-parse HEAD"
+      ? { stdout: `${head}\n`, stderr: "", exitCode: 0 }
+      : handle.exec(command, options),
+});
 
 describe("syncIn", () => {
   it("bundles a repo and clones it into the sandbox — files present", async () => {
@@ -63,19 +86,17 @@ describe("syncIn", () => {
       await Effect.runPromise(syncIn(hostDir, handle));
 
       // Verify HEAD matches
-      const sandboxHead = (
-        await handle.exec("git rev-parse HEAD")
-      ).stdout.trim();
+      const sandboxHead = await sandboxStdout(handle, "git rev-parse HEAD");
       expect(sandboxHead).toBe(await getHead(hostDir));
 
       // Verify all 3 commits are present
-      const log = (await handle.exec("git log --oneline")).stdout.trim();
+      const log = await sandboxStdout(handle, "git log --oneline");
       expect(log.split("\n")).toHaveLength(3);
 
       // Verify all files present
-      expect((await handle.exec("cat a.txt")).stdout.trim()).toBe("a");
-      expect((await handle.exec("cat b.txt")).stdout.trim()).toBe("b");
-      expect((await handle.exec("cat c.txt")).stdout.trim()).toBe("c");
+      await expect(sandboxStdout(handle, "cat a.txt")).resolves.toBe("a");
+      await expect(sandboxStdout(handle, "cat b.txt")).resolves.toBe("b");
+      await expect(sandboxStdout(handle, "cat c.txt")).resolves.toBe("c");
     } finally {
       await handle.close();
     }
@@ -91,12 +112,10 @@ describe("syncIn", () => {
     try {
       await Effect.runPromise(syncIn(hostDir, handle));
 
-      const sandboxHead = (
-        await handle.exec("git rev-parse HEAD")
-      ).stdout.trim();
+      const sandboxHead = await sandboxStdout(handle, "git rev-parse HEAD");
       expect(sandboxHead).toBe(await getHead(hostDir));
 
-      const content = (await handle.exec("cat local-only.txt")).stdout.trim();
+      const content = await sandboxStdout(handle, "cat local-only.txt");
       expect(content).toBe("no remote");
     } finally {
       await handle.close();
@@ -132,14 +151,15 @@ describe("syncIn", () => {
       expect(result.branch).toBe("feature-branch");
 
       // Feature file should exist
-      expect((await handle.exec("cat feature.txt")).stdout.trim()).toBe(
+      await expect(sandboxStdout(handle, "cat feature.txt")).resolves.toBe(
         "feature work",
       );
 
       // Sandbox should be on the same branch
-      const sandboxBranch = (
-        await handle.exec("git rev-parse --abbrev-ref HEAD")
-      ).stdout.trim();
+      const sandboxBranch = await sandboxStdout(
+        handle,
+        "git rev-parse --abbrev-ref HEAD",
+      );
       expect(sandboxBranch).toBe("feature-branch");
     } finally {
       await handle.close();
@@ -161,12 +181,33 @@ describe("syncIn", () => {
       await Effect.runPromise(syncIn(hostDir, handle));
 
       // Committed content should be the original
-      const content = (await handle.exec("cat committed.txt")).stdout.trim();
+      const content = await sandboxStdout(handle, "cat committed.txt");
       expect(content).toBe("committed");
 
       // Untracked file should not exist
-      const ls = (await handle.exec("ls")).stdout;
+      const ls = await sandboxStdout(handle, "ls");
       expect(ls).not.toContain("untracked.txt");
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it("fails with a SyncError when the sandbox HEAD doesn't match the host after sync", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const provider = testIsolated();
+    const handle = await provider.create({ env: {} });
+    const divergedHandle = reportingSandboxHead(handle, "0000000");
+    try {
+      const error = await Effect.runPromise(
+        Effect.flip(syncIn(hostDir, divergedHandle)),
+      );
+      expect(error).toMatchObject({
+        _tag: "SyncError",
+        message: `HEAD mismatch after sync-in: host=${await getHead(hostDir)} sandbox=0000000`,
+      });
     } finally {
       await handle.close();
     }

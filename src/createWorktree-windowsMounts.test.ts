@@ -8,14 +8,19 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
+import { createWorktree } from "./createWorktree.js";
+import { createBindMountSandboxProvider } from "./SandboxProvider.js";
+import type { BindMountSandboxHandle, ExecResult } from "./SandboxProvider.js";
+import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
+import { claudeCode } from "./AgentProvider.js";
 
 const execAsync = promisify(exec);
 
 const mockPatchGitMountsForWindows = vi.fn(
   (
-    gitMounts: Array<{ hostPath: string; sandboxPath: string }>,
+    gitMounts: { hostPath: string; sandboxPath: string }[],
     _worktreePath: string,
     _sandboxRepoDir: string,
   ) => gitMounts,
@@ -26,7 +31,7 @@ vi.mock("./mountUtils.js", async (importOriginal) => {
   return {
     ...actual,
     patchGitMountsForWindows: (
-      gitMounts: Array<{ hostPath: string; sandboxPath: string }>,
+      gitMounts: { hostPath: string; sandboxPath: string }[],
       worktreePath: string,
       sandboxRepoDir: string,
     ) =>
@@ -36,15 +41,6 @@ vi.mock("./mountUtils.js", async (importOriginal) => {
   };
 });
 
-import { createWorktree } from "./createWorktree.js";
-import {
-  createBindMountSandboxProvider,
-  type BindMountSandboxHandle,
-  type ExecResult,
-} from "./SandboxProvider.js";
-import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
-import { claudeCode } from "./AgentProvider.js";
-
 /** Format a minimal stream-json response so the orchestrator parses agent output. */
 const toStreamJson = (output: string): string => {
   const lines: string[] = [];
@@ -53,8 +49,8 @@ const toStreamJson = (output: string): string => {
       type: "assistant",
       message: { content: [{ type: "text", text: output }] },
     }),
+    JSON.stringify({ type: "result", result: output }),
   );
-  lines.push(JSON.stringify({ type: "result", result: output }));
   return lines.join("\n");
 };
 
@@ -91,7 +87,9 @@ const makeRunProvider = () =>
           if (command.startsWith("claude ")) {
             const stream = toStreamJson("done");
             if (execOptions?.onLine) {
-              for (const line of stream.split("\n")) execOptions.onLine(line);
+              for (const line of stream.split("\n")) {
+                execOptions.onLine(line);
+              }
             }
             return { stdout: stream, stderr: "", exitCode: 0 };
           }
@@ -152,10 +150,9 @@ describe("createWorktree() Windows mount patching", () => {
       });
 
       expect(mockPatchGitMountsForWindows).toHaveBeenCalledTimes(1);
-      const call = mockPatchGitMountsForWindows.mock.calls[0]!;
-      const gitMounts = call[0];
-      const worktreePath = call[1];
-      const sandboxRepoDir = call[2];
+      const [call] = mockPatchGitMountsForWindows.mock.calls;
+      assert.isDefined(call);
+      const [gitMounts, worktreePath, sandboxRepoDir] = call;
       expect(Array.isArray(gitMounts)).toBe(true);
       expect(worktreePath).toBe(ws.worktreePath);
       expect(sandboxRepoDir).toBe(SANDBOX_REPO_DIR);
@@ -185,10 +182,9 @@ describe("createWorktree() Windows mount patching", () => {
       });
 
       expect(mockPatchGitMountsForWindows).toHaveBeenCalledTimes(1);
-      const call = mockPatchGitMountsForWindows.mock.calls[0]!;
-      const gitMounts = call[0];
-      const worktreePath = call[1];
-      const sandboxRepoDir = call[2];
+      const [call] = mockPatchGitMountsForWindows.mock.calls;
+      assert.isDefined(call);
+      const [gitMounts, worktreePath, sandboxRepoDir] = call;
       expect(Array.isArray(gitMounts)).toBe(true);
       expect(worktreePath).toBe(ws.worktreePath);
       expect(sandboxRepoDir).toBe(SANDBOX_REPO_DIR);

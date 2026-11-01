@@ -1,0 +1,20 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "rootDir": "..",
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "declaration": false,
+    "declarationMap": false,
+    "plugins": []
+  },
+  "include": [
+    "lint-ratchet*.ts",
+    "coverage-gate*.ts",
+    "coverage-e2e.ts",
+    "coverage-floor*.ts",
+    "api-report.ts",
+    "ensure-build.ts"
+  ]
+}

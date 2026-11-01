@@ -97,7 +97,7 @@ describe("testIsolated()", () => {
       await handle.copyFileOut(sandboxFile, hostFile);
 
       // Verify it exists on the host
-      const content = readFileSync(hostFile, "utf-8");
+      const content = readFileSync(hostFile, "utf8");
       expect(content.trim()).toBe("hello from sandbox");
     } finally {
       await handle.close();
@@ -132,7 +132,7 @@ describe("testIsolated()", () => {
   it("close cleans up the temp directory", async () => {
     const provider = testIsolated();
     const handle = await provider.create({ env: {} });
-    const worktreePath = handle.worktreePath;
+    const { worktreePath } = handle;
 
     // Worktree should exist before close
     expect(existsSync(worktreePath)).toBe(true);
@@ -150,10 +150,14 @@ describe("testIsolated()", () => {
       const lines: string[] = [];
       const result = await handle.exec(
         'echo "line1"; echo "line2"; echo "line3"',
-        { onLine: (line) => lines.push(line) },
+        {
+          onLine: (line) => {
+            lines.push(line);
+          },
+        },
       );
 
-      expect(lines).toEqual(["line1", "line2", "line3"]);
+      expect(lines).toStrictEqual(["line1", "line2", "line3"]);
       expect(result.exitCode).toBe(0);
     } finally {
       await handle.close();

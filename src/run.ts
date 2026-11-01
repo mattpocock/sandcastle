@@ -1,23 +1,25 @@
 import { NodeContext, NodeFileSystem } from "@effect/platform-node";
-import { appendFileSync, mkdirSync } from "node:fs";
+import {
+  appendFileSync,
+  closeSync,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readSync,
+} from "node:fs";
 import path, { join } from "node:path";
 import { styleText } from "node:util";
 import { Effect, Layer } from "effect";
 import { resolveCwd } from "./resolveCwd.js";
-import { assertResumeSessionExists } from "./resumePrecheck.js";
+import {
+  assertForkSupported,
+  assertResumeSessionExists,
+} from "./resumePrecheck.js";
 import type { AgentProvider } from "./AgentProvider.js";
-import {
-  ClackDisplay,
-  Display,
-  FileDisplay,
-  type Severity,
-} from "./Display.js";
-import {
-  orchestrate,
-  type IterationResult,
-  type IterationUsage,
-  type OrchestrateResult,
-} from "./Orchestrator.js";
+import { ClackDisplay, Display, FileDisplay } from "./Display.js";
+import type { Severity } from "./Display.js";
+import { orchestrate } from "./Orchestrator.js";
+import type { IterationResult, OrchestrateResult } from "./Orchestrator.js";
 import { resolvePrompt } from "./PromptResolver.js";
 import {
   WorktreeDockerSandboxFactory,
@@ -26,21 +28,18 @@ import {
 import type { SandboxProvider, BranchStrategy } from "./SandboxProvider.js";
 import { resolveEnv } from "./EnvResolver.js";
 import { formatErrorMessage } from "./ErrorHandler.js";
-import type { SandboxError } from "./errors.js";
-import {
-  agentStreamEmitterLayer,
-  type AgentStreamEvent,
-} from "./AgentStreamEmitter.js";
+import { agentStreamEmitterLayer } from "./AgentStreamEmitter.js";
+import type { AgentStreamEvent } from "./AgentStreamEmitter.js";
 import type { SandboxHooks } from "./SandboxLifecycle.js";
 import { mergeProviderEnv } from "./mergeProviderEnv.js";
 import { generateTempBranchName, getCurrentBranch } from "./WorktreeManager.js";
 import {
-  type PromptArgs,
   substitutePromptArgs,
   validateNoArgsWithInlinePrompt,
   validateNoBuiltInArgOverride,
   BUILT_IN_PROMPT_ARG_KEYS,
 } from "./PromptArgumentSubstitution.js";
+import type { PromptArgs } from "./PromptArgumentSubstitution.js";
 import type {
   OutputDefinition,
   OutputObjectDefinition,
@@ -48,6 +47,8 @@ import type {
 } from "./Output.js";
 import { StructuredOutputError } from "./Output.js";
 import { extractStructuredOutput } from "./extractStructuredOutput.js";
+import { validateTimeoutOptions } from "./validateTimeouts.js";
+import { buildContextWindowLines } from "./ContextWindow.js";
 
 /**
  * Build the token-efficient feedback prompt sent to the agent when retrying
@@ -56,20 +57,22 @@ import { extractStructuredOutput } from "./extractStructuredOutput.js";
  *
  * @internal
  */
+const describeParserCause = (cause: unknown): string => {
+  if (cause === undefined) {
+    return "(no parser detail)";
+  }
+  if (typeof cause === "string") {
+    return cause;
+  }
+  return JSON.stringify(cause, null, 2);
+};
+
 export const buildStructuredOutputRetryFeedback = (
   error: StructuredOutputError,
   retriesRemaining: number,
 ): string => {
-  const raw =
-    error.rawMatched === undefined
-      ? "(no matching tag was emitted)"
-      : error.rawMatched;
-  const cause =
-    error.cause === undefined
-      ? "(no parser detail)"
-      : typeof error.cause === "string"
-        ? error.cause
-        : JSON.stringify(error.cause, null, 2);
+  const raw = error.rawMatched ?? "(no matching tag was emitted)";
+  const cause = describeParserCause(error.cause);
 
   return `Your previous response did not produce valid structured output.
 
@@ -92,7 +95,7 @@ export const DEFAULT_MAX_ITERATIONS = 1;
 
 /** Replace characters that are invalid or problematic in file paths with dashes. */
 export const sanitizeBranchForFilename = (branch: string): string =>
-  branch.replace(/[/\\:*?"<>|]/g, "-");
+  branch.replaceAll(/[/\\:*?"<>|]/gu, "-");
 
 export interface FileDisplayStartupOptions {
   readonly logPath: string;
@@ -114,7 +117,10 @@ export const printFileDisplayStartup = (
 ): void => {
   const name = options.agentName ?? "Agent";
   const label = styleText("bold", `[${name}]`);
-  const branchPart = options.branch ? ` on branch ${options.branch}` : "";
+  const branchPart =
+    options.branch !== undefined && options.branch !== ""
+      ? ` on branch ${options.branch}`
+      : "";
   const hostRepoDir = options.hostRepoDir ?? process.cwd();
   const displayLogPath =
     hostRepoDir === process.cwd()
@@ -138,8 +144,9 @@ export const buildLogFilename = (
   name?: string,
 ): string => {
   const sanitized = sanitizeBranchForFilename(resolvedBranch);
+  // One dash per UTF-16 unit, as before the `u` flag on the regex below.
   const nameSuffix = name
-    ? `-${name.toLowerCase().replace(/[^a-z0-9_.-]/g, "-")}`
+    ? `-${name.toLowerCase().replaceAll(/[^a-z0-9_.-]/gu, (char) => "-".repeat(char.length))}`
     : "";
   if (targetBranch) {
     return `${sanitizeBranchForFilename(targetBranch)}-${sanitized}${nameSuffix}.log`;
@@ -189,30 +196,7 @@ export const buildCompletionMessage = (
   };
 };
 
-/**
- * Format the context window size from an iteration's usage data.
- * Returns a string like "103k" representing the total input-side tokens
- * (inputTokens + cacheCreationInputTokens + cacheReadInputTokens)
- * rounded up to the nearest 1000.
- */
-export const formatContextWindowSize = (usage: IterationUsage): string => {
-  const total =
-    usage.inputTokens +
-    usage.cacheCreationInputTokens +
-    usage.cacheReadInputTokens;
-  return `${Math.ceil(total / 1000)}k`;
-};
-
-/**
- * Build "Context window: NNNk" lines for iterations that have usage data.
- * Returns an empty array when no iterations carry usage.
- */
-export const buildContextWindowLines = (
-  iterations: readonly Pick<IterationResult, "usage">[],
-): string[] =>
-  iterations
-    .filter((it): it is { usage: IterationUsage } => it.usage !== undefined)
-    .map((it) => `Context window: ${formatContextWindowSize(it.usage)}`);
+export { buildContextWindowLines } from "./ContextWindow.js";
 
 /**
  * Controls where Sandcastle writes iteration progress and agent output.
@@ -273,10 +257,11 @@ export const buildAgentStreamHandler = (
 ): ((event: AgentStreamEvent) => void) | undefined => {
   const userHandler =
     logging.type === "file" ? logging.onAgentStreamEvent : undefined;
-  const verboseSink = logging.verbose
-    ? buildVerboseRawLineSink(logging)
-    : undefined;
-  if (!userHandler && !verboseSink) return undefined;
+  const verboseSink =
+    logging.verbose === true ? buildVerboseRawLineSink(logging) : undefined;
+  if (!userHandler && !verboseSink) {
+    return undefined;
+  }
   return (event) => {
     if (userHandler) {
       try {
@@ -289,6 +274,33 @@ export const buildAgentStreamHandler = (
       verboseSink(event.line);
     }
   };
+};
+
+/**
+ * Whether the file's last byte is something other than a newline. The log file
+ * has two writers: FileDisplay streams agent prose as chunks with no trailing
+ * newline, and the verbose sink appends raw lines. Reading the file's actual
+ * tail lets the sink start each raw line on a fresh line without sharing state
+ * with FileDisplay. A missing or empty file counts as "not mid-line".
+ */
+const fileEndsMidLine = (filePath: string): boolean => {
+  let fd: number | undefined;
+  try {
+    fd = openSync(filePath, "r");
+    const { size } = fstatSync(fd);
+    if (size === 0) {
+      return false;
+    }
+    const lastByte = Buffer.alloc(1);
+    readSync(fd, lastByte, 0, 1, size - 1);
+    return lastByte[0] !== 0x0a;
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) {
+      closeSync(fd);
+    }
+  }
 };
 
 const buildVerboseRawLineSink = (
@@ -306,14 +318,15 @@ const buildVerboseRawLineSink = (
     }
     return (line) => {
       try {
-        appendFileSync(logPath, line + "\n");
+        const prefix = fileEndsMidLine(logPath) ? "\n" : "";
+        appendFileSync(logPath, `${prefix + line}\n`);
       } catch {
         // Swallow — verbose-mode I/O errors must not kill the run.
       }
     };
   }
   return (line) => {
-    process.stdout.write(line + "\n");
+    process.stdout.write(`${line}\n`);
   };
 };
 
@@ -404,7 +417,8 @@ export interface RunOptions<A extends AgentProvider = AgentProvider> {
    * - Phase boundaries (between iterations) also check the signal.
    * - The rejected promise surfaces `signal.reason` via
    *   `signal.throwIfAborted()` — no Sandcastle-specific wrapping.
-   * - The worktree is preserved on disk after abort (error-path behavior).
+   * - The worktree is preserved on disk after abort, even when it has no
+   *   uncommitted changes, and its path is printed to stderr.
    */
   readonly signal?: AbortSignal;
   /** Override default timeouts for built-in lifecycle steps. Unset keys keep their defaults. */
@@ -427,6 +441,7 @@ export interface RunOptions<A extends AgentProvider = AgentProvider> {
 }
 
 export type { IterationResult, IterationUsage } from "./Orchestrator.js";
+export type { ContextWindow } from "./ContextWindow.js";
 
 export type ResumeRunResultOptions = Omit<
   RunOptions,
@@ -455,7 +470,9 @@ export interface RunResult {
   /** Host path to the preserved worktree, set when the run succeeded but the worktree had uncommitted changes. */
   readonly preservedWorktreePath?: string;
   /** Continue the last captured agent session for exactly one iteration.
-   *  Present only when the provider supports resume (`sessionStorage` populated). */
+   *  Present only when the provider supports resume (`sessionStorage` populated).
+   *  `output` and `promptArgs` are not inherited: pass `output` again to get
+   *  structured output from the follow-up (its prompt must contain the tag). */
   readonly resume?: (
     prompt: string,
     options?: ResumeRunResultOptions,
@@ -471,6 +488,8 @@ export interface RunResult {
    * sandbox. Safe concurrent fan-out (`Promise.all([r.fork(a), r.fork(b)])`)
    * requires the caller to give each fork a distinct `branch` — `head` and
    * `merge-to-head` are not safe for concurrent forks. See ADR 0018.
+   *
+   * Like `resume`, `output` and `promptArgs` are not inherited.
    */
   readonly fork?: (
     prompt: string,
@@ -512,6 +531,9 @@ export async function run(
       : { type: "head" });
   const effectiveBranchType = branchStrategy.type;
 
+  // Validate: timeouts must be positive (0 would fire before the agent's first output)
+  validateTimeoutOptions(options);
+
   // Validate: head strategy is not supported with isolated providers
   if (effectiveBranchType === "head" && options.sandbox.tag === "isolated") {
     throw new Error(
@@ -531,8 +553,11 @@ export async function run(
     );
   }
 
+  const isResuming =
+    options.resumeSession !== undefined && options.resumeSession !== "";
+
   // Validate: resumeSession + maxIterations > 1 is not allowed
-  if (options.resumeSession && maxIterations > 1) {
+  if (isResuming && maxIterations > 1) {
     throw new Error(
       "resumeSession cannot be combined with maxIterations > 1. " +
         "Resume applies to iteration 1 only; multi-iteration resume semantics are not supported.",
@@ -541,11 +566,14 @@ export async function run(
 
   // Validate: forkSession only makes sense alongside resumeSession.
   // It is wired internally by RunResult.fork() and never set on its own.
-  if (options.forkSession && !options.resumeSession) {
+  if (options.forkSession === true && !isResuming) {
     throw new Error(
       "forkSession requires resumeSession. " +
         "Use RunResult.fork(prompt) to fork the last captured session.",
     );
+  }
+  if (options.forkSession === true) {
+    assertForkSupported(provider);
   }
 
   // Validate: output requires maxIterations === 1
@@ -571,7 +599,7 @@ export async function run(
     throw new Error(
       `output.maxRetries requires an agent provider that supports session resumption. ` +
         `The "${provider.name}" provider does not. ` +
-        `Use claudeCode, codex, or pi, or set maxRetries to 0.`,
+        `Use an agent provider that supports resume, or set maxRetries to 0.`,
     );
   }
 
@@ -584,7 +612,7 @@ export async function run(
   );
 
   // Validate: resumeSession file must exist on the host
-  if (options.resumeSession) {
+  if (isResuming) {
     await assertResumeSessionExists({
       provider,
       sandboxTag: options.sandbox.tag,
@@ -677,6 +705,10 @@ export async function run(
         hostRepoDir,
         copyToWorktree: options.copyToWorktree,
         name: options.name,
+        // Create the worktree on the temp branch already shown to the user,
+        // rather than letting WorktreeManager generate a second name.
+        tempBranch:
+          effectiveBranchType === "merge-to-head" ? resolvedBranch : undefined,
         sandboxProvider: options.sandbox,
         branchStrategy,
         hooks,
@@ -778,10 +810,7 @@ export async function run(
           Effect.tapError((error) =>
             Effect.gen(function* () {
               const d = yield* Display;
-              yield* d.status(
-                formatErrorMessage(error as SandboxError),
-                "error",
-              );
+              yield* d.status(formatErrorMessage(error), "error");
             }),
           ),
         )
@@ -803,34 +832,48 @@ export async function run(
     logFilePath:
       resolvedLogging.type === "file" ? resolvedLogging.path : undefined,
     resume: async (
-      prompt: string,
+      followUpPrompt: string,
       resumeOptions?: ResumeRunResultOptions,
     ): Promise<RunResult> => {
       const lastIteration = result.iterations.at(-1);
-      if (!lastIteration?.sessionId) {
+      if (
+        lastIteration?.sessionId === undefined ||
+        lastIteration.sessionId === ""
+      ) {
         throw new Error("Cannot resume: no sessionId was captured");
       }
       return run({
         ...options,
+        // The follow-up prompt is inline: drop the template's arguments.
+        promptArgs: undefined,
+        // The follow-up prompt is new: structured output is opt-in per call.
+        output: undefined,
         ...resumeOptions,
-        prompt,
+        prompt: followUpPrompt,
         promptFile: undefined,
         maxIterations: 1,
         resumeSession: lastIteration.sessionId,
       });
     },
     fork: async (
-      prompt: string,
+      followUpPrompt: string,
       forkOptions?: ResumeRunResultOptions,
     ): Promise<RunResult> => {
       const lastIteration = result.iterations.at(-1);
-      if (!lastIteration?.sessionId) {
+      if (
+        lastIteration?.sessionId === undefined ||
+        lastIteration.sessionId === ""
+      ) {
         throw new Error("Cannot fork: no sessionId was captured");
       }
       return run({
         ...options,
+        // The follow-up prompt is inline: drop the template's arguments.
+        promptArgs: undefined,
+        // The follow-up prompt is new: structured output is opt-in per call.
+        output: undefined,
         ...forkOptions,
-        prompt,
+        prompt: followUpPrompt,
         promptFile: undefined,
         maxIterations: 1,
         resumeSession: lastIteration.sessionId,

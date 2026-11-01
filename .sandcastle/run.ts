@@ -15,10 +15,10 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     promptFile: "./.sandcastle/plan-prompt.md",
   });
 
-  const planMatch = plan.stdout.match(/<plan>([\s\S]*?)<\/plan>/);
+  const planMatch = plan.stdout.match(/<plan>([\s\S]*?)<\/plan>/u);
   if (!planMatch) {
     throw new Error(
-      "Orchestrator did not produce a <plan> tag.\n\n" + plan.stdout,
+      `Orchestrator did not produce a <plan> tag.\n\n${plan.stdout}`,
     );
   }
 
@@ -41,7 +41,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // Phase 2: Execute + Review — implement then review each branch, max 4 in parallel
   let running = 0;
   const queue: (() => void)[] = [];
-  const acquire = () =>
+  const acquire = async () =>
     running < MAX_PARALLEL
       ? (running++, Promise.resolve())
       : new Promise<void>((resolve) => queue.push(resolve));
@@ -70,7 +70,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
         });
 
         const result = await sandbox.run({
-          name: "Implementer #" + issue.number,
+          name: `Implementer #${issue.number}`,
           agent: sandcastle.claudeCode("claude-opus-4-8"),
           promptFile: "./.sandcastle/implement-prompt.md",
           promptArgs: {
@@ -82,7 +82,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
 
         if (result.commits.length > 0) {
           await sandbox.run({
-            name: "Reviewer #" + issue.number,
+            name: `Reviewer #${issue.number}`,
             agent: sandcastle.claudeCode("claude-opus-4-8"),
             promptFile: "./.sandcastle/review-prompt.md",
             promptArgs: {

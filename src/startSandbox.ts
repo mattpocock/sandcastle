@@ -4,14 +4,12 @@ import { join, posix } from "node:path";
 import {
   ContainerStartTimeoutError,
   CopyToWorktreeTimeoutError,
-  SyncError,
   SyncInTimeoutError,
   WorktreeError,
   withTimeout,
-  type DockerError,
 } from "./errors.js";
+import type { DockerError, SyncError } from "./errors.js";
 import type {
-  SandboxProvider,
   BindMountSandboxProvider,
   BindMountSandboxHandle,
   IsolatedSandboxProvider,
@@ -19,14 +17,11 @@ import type {
   NoSandboxProvider,
   NoSandboxHandle,
 } from "./SandboxProvider.js";
-import {
-  type SandboxService,
-  type MountEntry,
-  makeSandboxFromHandle,
-  SANDBOX_REPO_DIR,
-} from "./SandboxFactory.js";
+import { makeSandboxFromHandle, SANDBOX_REPO_DIR } from "./SandboxFactory.js";
+import type { SandboxService, MountEntry } from "./SandboxFactory.js";
 import { syncIn } from "./syncIn.js";
 import { normalizeMounts } from "./mountUtils.js";
+import { protectGitControlFiles } from "./protectGitMounts.js";
 
 export interface StartSandboxBindMountOptions {
   provider: BindMountSandboxProvider;
@@ -38,15 +33,25 @@ export interface StartSandboxBindMountOptions {
   copyPaths?: undefined;
 }
 
-export interface StartSandboxIsolatedOptions {
+export type StartSandboxIsolatedOptions = {
   provider: IsolatedSandboxProvider;
+  /** Directory synced into the sandbox via git bundle (usually the worktree). */
   hostRepoDir: string;
   env: Record<string, string>;
   worktreeOrRepoPath?: undefined;
   gitMounts?: undefined;
   repoDir?: undefined;
-  copyPaths?: string[];
-}
+} & (
+  | { copyPaths?: undefined; copySourceDir?: undefined }
+  | {
+      copyPaths: string[] | undefined;
+      /**
+       * Directory `copyPaths` are resolved against: the user's repo, not the
+       * fresh worktree, which never contains gitignored files.
+       */
+      copySourceDir: string;
+    }
+);
 
 export interface StartSandboxNoSandboxOptions {
   provider: NoSandboxProvider;
@@ -70,7 +75,7 @@ export interface StartSandboxResult {
   worktreePath: string;
 }
 
-const CONTAINER_START_TIMEOUT_MS = 120_000;
+export const CONTAINER_START_TIMEOUT_MS = 120_000;
 const SYNC_IN_TIMEOUT_MS = 120_000;
 export const COPY_PATHS_TIMEOUT_MS = 120_000;
 
@@ -103,6 +108,30 @@ export const startSandbox = (
   return startIsolatedSandbox(options as StartSandboxIsolatedOptions);
 };
 
+/**
+ * Run a provider's `create()`. If we stop waiting for it (the start timeout
+ * fires, or the caller is interrupted) the provider still finishes creating
+ * the sandbox, and nobody holds its handle. Close that handle when it
+ * arrives, so a late sandbox never outlives the run.
+ */
+const createClosingIfAbandoned = <H extends { close(): Promise<void> }, E>(
+  create: () => Promise<H>,
+  onError: (e: unknown) => E,
+): Effect.Effect<H, E> =>
+  Effect.suspend(() => {
+    let pending: Promise<H> | undefined;
+    return Effect.tryPromise({
+      try: () => (pending = create()),
+      catch: onError,
+    }).pipe(
+      Effect.onInterrupt(() =>
+        Effect.sync(() => {
+          pending?.then((handle) => handle.close()).catch(() => {});
+        }),
+      ),
+    );
+  });
+
 const startNoSandbox = (
   options: StartSandboxNoSandboxOptions,
 ): Effect.Effect<StartSandboxResult, WorktreeError> =>
@@ -129,37 +158,36 @@ const startBindMountSandbox = (
 ): Effect.Effect<
   StartSandboxResult,
   DockerError | WorktreeError | ContainerStartTimeoutError
-> =>
-  Effect.tryPromise({
-    try: () => {
-      const rawMounts = [
-        {
-          hostPath: options.worktreeOrRepoPath,
-          sandboxPath: options.repoDir,
-        },
-        ...options.gitMounts,
-      ];
-      const mounts = normalizeMounts(
-        rawMounts,
-        options.worktreeOrRepoPath,
-        SANDBOX_REPO_DIR,
-      );
-      const worktreePath =
-        process.platform === "win32"
-          ? options.worktreeOrRepoPath.replace(/\\/g, "/")
-          : options.worktreeOrRepoPath;
-      return options.provider.create({
-        worktreePath,
-        hostRepoPath: options.hostRepoDir,
-        mounts,
-        env: options.env,
-      });
-    },
-    catch: (e) =>
-      new WorktreeError({
-        message: `Provider '${options.provider.name}' create failed: ${e instanceof Error ? e.message : String(e)}`,
-      }),
-  }).pipe(
+> => {
+  const { worktreeOrRepoPath, provider } = options;
+  const rawMounts = [
+    { hostPath: worktreeOrRepoPath, sandboxPath: options.repoDir },
+    ...options.gitMounts,
+  ];
+  // The sandbox may write the repo's objects and refs, but never the git
+  // files that decide what git on the host runs.
+  return protectGitControlFiles(
+    normalizeMounts(rawMounts, worktreeOrRepoPath, SANDBOX_REPO_DIR),
+    worktreeOrRepoPath,
+  ).pipe(
+    Effect.flatMap((mounts) =>
+      createClosingIfAbandoned(
+        () =>
+          provider.create({
+            worktreePath:
+              process.platform === "win32"
+                ? worktreeOrRepoPath.replaceAll("\\", "/")
+                : worktreeOrRepoPath,
+            hostRepoPath: options.hostRepoDir,
+            mounts,
+            env: options.env,
+          }),
+        (e) =>
+          new WorktreeError({
+            message: `Provider '${provider.name}' create failed: ${e instanceof Error ? e.message : String(e)}`,
+          }),
+      ),
+    ),
     Effect.map((handle) => ({
       handle,
       sandbox: makeSandboxFromHandle(handle),
@@ -174,6 +202,7 @@ const startBindMountSandbox = (
         }),
     ),
   );
+};
 
 const startIsolatedSandbox = (
   options: StartSandboxIsolatedOptions,
@@ -187,13 +216,13 @@ const startIsolatedSandbox = (
   | CopyToWorktreeTimeoutError
 > =>
   Effect.gen(function* () {
-    const handle = yield* Effect.tryPromise({
-      try: () => options.provider.create({ env: options.env }),
-      catch: (e) =>
+    const handle = yield* createClosingIfAbandoned(
+      () => options.provider.create({ env: options.env }),
+      (e) =>
         new WorktreeError({
           message: `Isolated provider '${options.provider.name}' setup failed: ${e instanceof Error ? e.message : String(e)}`,
         }),
-    }).pipe(
+    ).pipe(
       withTimeout(
         CONTAINER_START_TIMEOUT_MS,
         () =>
@@ -204,48 +233,59 @@ const startIsolatedSandbox = (
       ),
     );
 
-    yield* syncIn(options.hostRepoDir, handle).pipe(
-      withTimeout(
-        SYNC_IN_TIMEOUT_MS,
-        () =>
-          new SyncInTimeoutError({
-            message: `Sync-in timed out after ${SYNC_IN_TIMEOUT_MS}ms`,
-            timeoutMs: SYNC_IN_TIMEOUT_MS,
-          }),
-      ),
-    );
-
-    if (options.copyPaths && options.copyPaths.length > 0) {
-      const pathsToCopy = options.copyPaths;
-      yield* Effect.gen(function* () {
-        for (const relativePath of pathsToCopy) {
-          const hostPath = join(options.hostRepoDir, relativePath);
-          if (!existsSync(hostPath)) {
-            continue;
-          }
-          // Sandbox-side path: Linux container, must use POSIX separators
-          // regardless of host platform.
-          const sandboxPath = posix.join(handle.worktreePath, relativePath);
-          yield* Effect.tryPromise({
-            try: () => handle.copyIn(hostPath, sandboxPath),
-            catch: (e) =>
-              new WorktreeError({
-                message: `Failed to copy ${relativePath} into sandbox: ${e instanceof Error ? e.message : String(e)}`,
-              }),
-          });
-        }
-      }).pipe(
+    // From here on the sandbox exists, but the caller only gets the handle
+    // (and so can only close it) once this effect succeeds. Close it
+    // ourselves on any failure, timeout or interruption, so a remote sandbox
+    // never outlives a failed setup.
+    yield* Effect.gen(function* () {
+      yield* syncIn(options.hostRepoDir, handle).pipe(
         withTimeout(
-          COPY_PATHS_TIMEOUT_MS,
+          SYNC_IN_TIMEOUT_MS,
           () =>
-            new CopyToWorktreeTimeoutError({
-              message: `Copying paths to worktree timed out after ${COPY_PATHS_TIMEOUT_MS}ms`,
-              timeoutMs: COPY_PATHS_TIMEOUT_MS,
-              paths: pathsToCopy,
+            new SyncInTimeoutError({
+              message: `Sync-in timed out after ${SYNC_IN_TIMEOUT_MS}ms`,
+              timeoutMs: SYNC_IN_TIMEOUT_MS,
             }),
         ),
       );
-    }
+
+      if (options.copyPaths && options.copyPaths.length > 0) {
+        const pathsToCopy = options.copyPaths;
+        const { copySourceDir } = options;
+        yield* Effect.gen(function* () {
+          for (const relativePath of pathsToCopy) {
+            const hostPath = join(copySourceDir, relativePath);
+            if (!existsSync(hostPath)) {
+              continue;
+            }
+            // Sandbox-side path: Linux container, must use POSIX separators
+            // regardless of host platform.
+            const sandboxPath = posix.join(handle.worktreePath, relativePath);
+            yield* Effect.tryPromise({
+              try: () => handle.copyIn(hostPath, sandboxPath),
+              catch: (e) =>
+                new WorktreeError({
+                  message: `Failed to copy ${relativePath} into sandbox: ${e instanceof Error ? e.message : String(e)}`,
+                }),
+            });
+          }
+        }).pipe(
+          withTimeout(
+            COPY_PATHS_TIMEOUT_MS,
+            () =>
+              new CopyToWorktreeTimeoutError({
+                message: `Copying paths to worktree timed out after ${COPY_PATHS_TIMEOUT_MS}ms`,
+                timeoutMs: COPY_PATHS_TIMEOUT_MS,
+                paths: pathsToCopy,
+              }),
+          ),
+        );
+      }
+    }).pipe(
+      Effect.onError(() =>
+        Effect.tryPromise(() => handle.close()).pipe(Effect.ignore),
+      ),
+    );
 
     return {
       handle,

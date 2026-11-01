@@ -8,14 +8,19 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
+import { interactive } from "./interactive.js";
+import { createBindMountSandboxProvider } from "./SandboxProvider.js";
+import type { BindMountSandboxHandle } from "./SandboxProvider.js";
+import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
+import { claudeCode } from "./AgentProvider.js";
 
 const execAsync = promisify(exec);
 
 const mockPatchGitMountsForWindows = vi.fn(
   (
-    gitMounts: Array<{ hostPath: string; sandboxPath: string }>,
+    gitMounts: { hostPath: string; sandboxPath: string }[],
     _worktreePath: string,
     _sandboxRepoDir: string,
   ) => gitMounts,
@@ -26,7 +31,7 @@ vi.mock("./mountUtils.js", async (importOriginal) => {
   return {
     ...actual,
     patchGitMountsForWindows: (
-      gitMounts: Array<{ hostPath: string; sandboxPath: string }>,
+      gitMounts: { hostPath: string; sandboxPath: string }[],
       worktreePath: string,
       sandboxRepoDir: string,
     ) =>
@@ -35,14 +40,6 @@ vi.mock("./mountUtils.js", async (importOriginal) => {
       ),
   };
 });
-
-import { interactive } from "./interactive.js";
-import {
-  createBindMountSandboxProvider,
-  type BindMountSandboxHandle,
-} from "./SandboxProvider.js";
-import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
-import { claudeCode } from "./AgentProvider.js";
 
 /** A bind-mount provider whose handle executes commands on the host worktree. */
 const makeInteractiveProvider = () =>
@@ -104,10 +101,9 @@ describe("interactive() Windows mount patching", () => {
     });
 
     expect(mockPatchGitMountsForWindows).toHaveBeenCalledTimes(1);
-    const call = mockPatchGitMountsForWindows.mock.calls[0]!;
-    const gitMounts = call[0];
-    const worktreePath = call[1];
-    const sandboxRepoDir = call[2];
+    const [call] = mockPatchGitMountsForWindows.mock.calls;
+    assert.isDefined(call);
+    const [gitMounts, worktreePath, sandboxRepoDir] = call;
     expect(Array.isArray(gitMounts)).toBe(true);
     expect(worktreePath).toContain(".sandcastle/worktrees");
     expect(sandboxRepoDir).toBe(SANDBOX_REPO_DIR);
@@ -129,9 +125,9 @@ describe("interactive() Windows mount patching", () => {
     });
 
     expect(mockPatchGitMountsForWindows).toHaveBeenCalledTimes(1);
-    const call = mockPatchGitMountsForWindows.mock.calls[0]!;
-    const worktreePath = call[1];
-    const sandboxRepoDir = call[2];
+    const [call] = mockPatchGitMountsForWindows.mock.calls;
+    assert.isDefined(call);
+    const [, worktreePath, sandboxRepoDir] = call;
     expect(worktreePath).toBe(hostDir);
     expect(sandboxRepoDir).toBe(SANDBOX_REPO_DIR);
   });

@@ -41,7 +41,7 @@ Resume support is a hard requirement for new **agent providers** ([ADR 0012](../
 
 - **Resume-by-session-ID flag.** A flag that takes a previously emitted session ID and continues that session (e.g. `claude --resume <id>`, `codex exec resume <id>`, `pi --session <id>`, `opencode run --session <id>`).
 - **Session-ID round-trip stability.** The session ID emitted in the stream during a fresh run is the same string the resume flag accepts back. If the CLI mints a new ID per invocation but only persists the file/row, resume cannot work — verify the round-trip empirically before starting implementation.
-- **Filesystem-backed session storage.** The agent writes its conversation record to files addressable by session ID (for example JSONL rollout files) so Sandcastle can transfer them between **host** and **sandbox**. Agents whose session state only exists in a local database are not resumable; see [ADR 0016](../adr/0016-resume-requires-filesystem-backed-sessions.md).
+- **Filesystem-backed session storage.** The agent writes its conversation record to files addressable by session ID (for example JSONL rollout files) so Sandcastle can transfer them between **host** and **sandbox**. Agents whose session state only exists in a local database are not resumable ([ADR 0016](../adr/0016-resume-requires-filesystem-backed-sessions.md)), unless the CLI itself can export one session to a file and import it back, as OpenCode's can ([ADR 0022](../adr/0022-opencode-resume-via-export-import.md)).
 
 If any of these is missing, the agent likely cannot be supported until its CLI changes.
 
@@ -50,6 +50,7 @@ If any of these is missing, the agent likely cannot be supported until its CLI c
 These unlock extra Sandcastle features but are not required:
 
 - **Per-iteration token usage.** Token counts (input, output, cache create, cache read) surfaced either in the session log (parsed via `parseSessionUsage`, e.g. Claude Code) or in a stream event (emitted as a `usage` `ParsedStreamEvent`, e.g. Codex's `turn.completed`). Powers the usage display. Stream-sourced usage works even when session capture is off.
+- **Per-call context size.** The input tokens (cache included) of each model call, emitted as one `context_window` `ParsedStreamEvent` per call. The Orchestrator keeps the last one per iteration and prints it as `Context window: NNNk`. Never emit a total summed over a turn or session ([ADR 0023](../adr/0023-context-window-is-the-last-model-call.md)). If the stream has no per-call figure but the session log does, implement `parseSessionContextWindow` instead (e.g. Codex). If neither has one, emit nothing (e.g. Cursor).
 - **Interactive mode.** A separate invocation form for human use (`interactive()`). If the agent has a TUI, expose it via `buildInteractiveArgs`.
 
 ### Scaffold prerequisites
@@ -85,8 +86,9 @@ Field by field:
 - `sessionStorage` — provider-owned object that describes where and how the agent's session record is persisted ([ADR 0012](../adr/0012-agent-provider-owned-session-storage.md)). See [`AgentSessionStorage`](#agentsessionstorage) below. Omit for providers that do not support resume.
 - `buildPrintCommand({ prompt, dangerouslySkipPermissions, resumeSession })` — returns the shell command to run the agent non-interactively. Return `{ command, stdin }` when piping the prompt via stdin (preferred for large prompts). When `resumeSession` is set, append the agent's native resume CLI flag.
 - `buildInteractiveArgs(options)` — optional. Returns the argv array for `interactive()`. Omit if the agent has no TUI.
-- `parseStreamLine(line)` — given one line of stdout, return zero or more `ParsedStreamEvent`s. Event types: `text`, `result`, `tool_call`, `session_id`, `usage`. Return `[]` for lines you can't or don't need to parse. **Emitting `session_id` is required** — without it, Sandcastle cannot capture the session for resume. Emit `usage` if the stream carries token counts (e.g. Codex's `turn.completed`); it feeds the usage display without needing session capture.
+- `parseStreamLine(line)` — given one line of stdout, return zero or more `ParsedStreamEvent`s. Event types: `text`, `context_window`, `result`, `tool_call`, `session_id`, `usage`, `error`. Return `[]` for lines you can't or don't need to parse. **Emitting `session_id` is required** — without it, Sandcastle cannot capture the session for resume. Emit `usage` if the stream carries token counts (e.g. Codex's `turn.completed`); it feeds the usage display without needing session capture. Emit `error` when the agent reports a failure in its own stream (an API rejection, a failed turn): the Orchestrator fails the run with its message even if the agent exits 0.
 - `parseSessionUsage(content)` — optional. Given the session log content, return token usage for the most recent iteration. Currently only Claude Code implements this.
+- `parseSessionContextWindow(content)` — optional. Given the session log content, return the last model call's context window (`{ tokens, limit? }`). Overrides the stream's `context_window` events. Currently only Codex implements this.
 
 ### `AgentSessionStorage`
 

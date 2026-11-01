@@ -12,7 +12,7 @@
  */
 
 /** Escape sequence to show the cursor (DECTCEM). */
-export const SHOW_CURSOR = "\x1b[?25h";
+export const SHOW_CURSOR = "\u001B[?25h";
 
 /**
  * Creates a synchronous exit handler that restores terminal state.
@@ -24,7 +24,7 @@ export const makeTerminalCleanupHandler =
     stdout: { write: (data: string) => boolean },
   ) =>
   (): void => {
-    if (stdin.isTTY && stdin.setRawMode) {
+    if (stdin.isTTY === true && stdin.setRawMode !== undefined) {
       try {
         stdin.setRawMode(false);
       } catch {

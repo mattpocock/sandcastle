@@ -1,1 +1,4 @@
-npx lint-staged
+# No lint-staged backup stash: refs/stash is shared by every worktree, so
+# parallel commits race on it. See scripts/check-no-partially-staged.mjs.
+node scripts/check-no-partially-staged.mjs
+npx lint-staged --no-stash

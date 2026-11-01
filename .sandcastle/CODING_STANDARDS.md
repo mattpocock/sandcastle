@@ -92,9 +92,51 @@ type Example = {
 
 Instead, create a config layer using Effect for that function, then instantiate that differently in tests and in production. This helps keep the code cleaner. Don't make this layer optional - that adds more indirection to all layers of the code.
 
+## The lint ratchet
+
+`npm run lint` runs oxlint (every category but `restriction` and `nursery` as errors, type-aware, `.oxlintrc.json`) and every Effect language service diagnostic (the `tsconfig.json` plugin). `npm run typecheck` (src/ and tests/) passes clean; the compiler errors in the tooling in `.sandcastle/` are ratcheted the same way, in `scripts/typecheck-baseline.json`. Run `npm run build` first: the scripts in `.sandcastle/` and `.factory/` import `@ai-hero/sandcastle`, whose types come from `dist`, and without them type-aware rules report false `no-unsafe-*` violations. Code that broke a rule when the linter landed is counted, per file and rule, in `scripts/lint-baseline.json`. `scripts/lint-ratchet.ts` holds the code to that baseline, and the baseline only ever shrinks:
+
+- A new violation fails — a count going up, or a file or rule the baseline lacks. Fix it. Never raise the baseline.
+- A fixed violation passes. Lowering the baseline in the same PR is optional: after every push to `main`, the `lint-shrink` workflow runs `npm run lint:shrink` (which lowers counts and drops entries at zero but never raises one) and opens or updates a "chore(lint): shrink baseline" PR. Leave `scripts/lint-baseline.json` alone in fix PRs so they don't conflict with each other.
+- A baseline that grew against `origin/main` fails.
+
+No disable comments (`eslint-disable`, `oxlint-disable`, `@ts-ignore`, `@ts-expect-error`, `@effect-diagnostics`) outside the reviewed allowlist in `scripts/lint-ratchet-config.ts`; each one counts as `ratchet/disable-comment`. The same file names the Effect entry points (the only modules that may call `Effect.runPromise` and friends) and the test-only Effect exemptions. `.oxlintrc.json` may not grow a per-file override.
+
+Host-side git goes through `hostGit()` (`src/hostGit.ts`): a raw `git` spawn in any other `src/` file counts as `ratchet/raw-git-spawn`.
+
+To pay down debt, pick a rule or a file from `npm run lint:report` and fix every violation of it. Fix behaviour-neutrally, one rule or one file per PR; `oxlint --fix` sweeps of one rule across the repo are fine.
+
+Tests may not assert a property's absence with `toMatchObject({ k: undefined })`: it passes where `k` is set to `undefined` and fails where `k` is omitted, so it can be green on one platform and red on another. Use `expect(x).not.toHaveProperty("k")`. Each one counts as `ratchet/match-object-undefined`.
+
+### New-file budget
+
+A new file has no baseline, so it meets every cap at zero. The ones a new `src/` file hits first:
+
+- `import/max-dependencies`: 10 imports.
+- `max-lines`: 300 lines, blanks and comments included.
+- `max-lines-per-function`: 50 lines; `max-statements`: 20; `complexity`: 15.
+- `node/no-sync`: no `fs.*Sync` or `execSync` outside tests. Inline disables are not allowed in `src/` either.
+- `effect/asyncFunction`: no `async` functions outside the entry points in `scripts/lint-ratchet-config.ts`. Return an Effect.
+
+Split helpers into their own files before writing, not after the ratchet fails. Check one file with `npx oxlint <file>`.
+
 ---
 
 ## Testing
+
+### Where tests live
+
+New tests go in `tests/` and use only the public API: `@ai-hero/sandcastle` and its `exports` subpaths, imported by package name. dependency-cruiser (`.dependency-cruiser.mjs`) enforces this, and `src/` never imports from `tests/`. The unit tests elsewhere in `src/` are legacy. The test ratchet (`scripts/test-baseline.json`, checked by `npm run lint`) fails on any new test file outside `tests/`, and the legacy count only shrinks. The tests of the repo's own tooling (`scripts/`, `.sandcastle/`) are out of scope.
+
+Tests in `tests/` have no type assertions (`as T`, `<T>x`); `as const` is fine. The test ratchet counts them (`ratchet/test-type-assertion`), from zero. Build a value of the real type, or narrow with `expect` or a type guard. The legacy tests use them freely, so drop them when porting one.
+
+A migration PR may delete a legacy test only when `npm run coverage:gate -- <file>` passes: every line only that file covers must now be covered by `tests/`. Paste its output into the PR body.
+
+The line coverage `tests/` reaches over `src/` only rises: `npm run coverage:floor` (a CI step) fails more than 0.1 points below the floor in `scripts/coverage-baseline.json` (platforms map a few lines differently). New `src/` code therefore needs a test in `tests/`; a legacy test next to it does not count. Never lower the floor; the lint-shrink workflow raises it after each push to main.
+
+Never delete a test to satisfy the test ratchet. When a change trips the ratchet on a legacy test, either port its cases to a public-API test in `tests/` first (the deletion then follows the rule above), or leave the test where it is — it stays in the baseline, which is fine. The ratchet counts files, not cases: deleting a test lowers the count while the behaviour it guarded silently loses coverage, and CI can't tell. Reviewers enforce this; send back any PR that deletes a test without porting its cases.
+
+Never extend or loosen the public API to suit a test. The only test-motivated surface allowed is the test helpers entry point, which a later PR designs. If a test can't reach something through the public API, that code is either dead or missing a real public seam.
 
 ### Core Principle
 

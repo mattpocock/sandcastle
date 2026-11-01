@@ -4,7 +4,7 @@ const DEBOUNCE_MS = 50;
 /**
  * Sentence-boundary pattern: period, exclamation, or question mark followed by a space.
  */
-const SENTENCE_BOUNDARY_RE = /[.!?] $/;
+const SENTENCE_BOUNDARY_RE = /[.!?] $/u;
 
 /**
  * Buffers streaming text deltas and flushes them as readable multi-word chunks.
@@ -25,7 +25,9 @@ export class TextDeltaBuffer {
   }
 
   write(text: string): void {
-    if (text.length === 0) return;
+    if (text.length === 0) {
+      return;
+    }
     this.buffer += text;
     this.clearTimer();
 
@@ -51,14 +53,22 @@ export class TextDeltaBuffer {
   }
 
   private shouldFlush(): boolean {
-    if (this.buffer.includes("\n")) return true;
-    if (SENTENCE_BOUNDARY_RE.test(this.buffer)) return true;
-    if (this.buffer.length >= LENGTH_THRESHOLD) return true;
+    if (this.buffer.includes("\n")) {
+      return true;
+    }
+    if (SENTENCE_BOUNDARY_RE.test(this.buffer)) {
+      return true;
+    }
+    if (this.buffer.length >= LENGTH_THRESHOLD) {
+      return true;
+    }
     return false;
   }
 
   private doFlush(): void {
-    if (this.buffer.length === 0) return;
+    if (this.buffer.length === 0) {
+      return;
+    }
     const text = this.buffer;
     this.buffer = "";
     this.onFlush(text);

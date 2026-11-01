@@ -13,7 +13,9 @@ describe("shutdownRegistry", () => {
     const spy = vi
       .spyOn(process, "exit")
       .mockImplementation((() => undefined) as never);
-    restoreExit = () => spy.mockRestore();
+    restoreExit = () => {
+      spy.mockRestore();
+    };
     return spy;
   };
 
@@ -30,7 +32,9 @@ describe("shutdownRegistry", () => {
     expect(process.listenerCount("SIGTERM")).toBe(sigtermBefore + 1);
     expect(process.listenerCount("exit")).toBe(exitBefore + 1);
 
-    unregisters.forEach((u) => u());
+    unregisters.forEach((u) => {
+      u();
+    });
 
     expect(process.listenerCount("SIGINT")).toBe(sigintBefore);
     expect(process.listenerCount("SIGTERM")).toBe(sigtermBefore);
@@ -40,12 +44,16 @@ describe("shutdownRegistry", () => {
   it("runs every registered teardown then exits once with code 1 on SIGINT", () => {
     const exit = stubExit();
     const calls: string[] = [];
-    const u1 = registerShutdown(() => calls.push("a"));
-    const u2 = registerShutdown(() => calls.push("b"));
+    const u1 = registerShutdown(() => {
+      calls.push("a");
+    });
+    const u2 = registerShutdown(() => {
+      calls.push("b");
+    });
 
     process.emit("SIGINT");
 
-    expect(calls).toEqual(["a", "b"]);
+    expect(calls).toStrictEqual(["a", "b"]);
     expect(exit).toHaveBeenCalledTimes(1);
     expect(exit).toHaveBeenCalledWith(1);
 
@@ -56,21 +64,25 @@ describe("shutdownRegistry", () => {
   it("runs registered teardowns on SIGTERM", () => {
     stubExit();
     const calls: string[] = [];
-    const u1 = registerShutdown(() => calls.push("x"));
+    const u1 = registerShutdown(() => {
+      calls.push("x");
+    });
 
     process.emit("SIGTERM");
 
-    expect(calls).toEqual(["x"]);
+    expect(calls).toStrictEqual(["x"]);
     u1();
   });
 
   it("runs registered teardowns on a plain exit", () => {
     const calls: string[] = [];
-    const u1 = registerShutdown(() => calls.push("e"));
+    const u1 = registerShutdown(() => {
+      calls.push("e");
+    });
 
     process.emit("exit", 0);
 
-    expect(calls).toEqual(["e"]);
+    expect(calls).toStrictEqual(["e"]);
     u1();
   });
 
@@ -92,13 +104,17 @@ describe("shutdownRegistry", () => {
   it("does not run a teardown after it has been unregistered", () => {
     stubExit();
     const calls: string[] = [];
-    const stay = registerShutdown(() => calls.push("stay"));
-    const gone = registerShutdown(() => calls.push("gone"));
+    const stay = registerShutdown(() => {
+      calls.push("stay");
+    });
+    const gone = registerShutdown(() => {
+      calls.push("gone");
+    });
 
     gone();
     process.emit("SIGINT");
 
-    expect(calls).toEqual(["stay"]);
+    expect(calls).toStrictEqual(["stay"]);
     stay();
   });
 
@@ -108,11 +124,13 @@ describe("shutdownRegistry", () => {
     const u1 = registerShutdown(() => {
       throw new Error("boom");
     });
-    const u2 = registerShutdown(() => calls.push("ran"));
+    const u2 = registerShutdown(() => {
+      calls.push("ran");
+    });
 
     process.emit("SIGINT");
 
-    expect(calls).toEqual(["ran"]);
+    expect(calls).toStrictEqual(["ran"]);
     u1();
     u2();
   });

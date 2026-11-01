@@ -1,4 +1,6 @@
-Use `npm run typecheck` for type checking.
+Use `npm run typecheck` for type checking. Before you finish a change, run `npm test`, then the `verify` skill on the agent × sandbox combination it touches.
+
+`tsc` is TypeScript 7 (the `@typescript/native` alias of `typescript@7`). The `typescript` package name is an alias of `@typescript/typescript6`, because TypeScript 7 has no JS API and tsup's declaration build still `require`s one. Don't import `typescript` in our own code, and drop the alias once tsup no longer needs it.
 
 Check [./CONTEXT.md](./CONTEXT.md) for terminology questions.
 

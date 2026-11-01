@@ -161,6 +161,33 @@ export const renderIssues = (issues: readonly BatchIssue[]): string =>
 // ---------------------------------------------------------------------------
 
 /**
+ * Every `duplicate_of` points at another issue in the plan that is not itself
+ * a duplicate, so there are no chains.
+ */
+const assertNoDuplicateChains = (issues: readonly PlanEntry[]): void => {
+  const byNumber = new Map(issues.map((entry) => [entry.number, entry]));
+  for (const entry of issues) {
+    const target = entry.duplicate_of;
+    if (target === null) {
+      continue;
+    }
+    const label = `#${entry.number} duplicate_of #${target}`;
+    if (target === entry.number) {
+      throw new Error(`${label}: an issue cannot duplicate itself`);
+    }
+    const targetEntry = byNumber.get(target);
+    if (!targetEntry) {
+      throw new Error(`${label}: target is not in this batch`);
+    }
+    if (targetEntry.duplicate_of !== null) {
+      throw new Error(
+        `${label}: target is itself a duplicate of #${targetEntry.duplicate_of} — point straight at the oldest issue, no chains`,
+      );
+    }
+  }
+};
+
+/**
  * The final plan, validated as a whole against the batch. This is both the
  * agent's output schema (so a bad plan earns one repair attempt) and the gate
  * `apply.ts` re-runs before touching GitHub.
@@ -192,24 +219,7 @@ export const planSchema = (batch: readonly BatchIssue[]) => {
       "issues",
     );
 
-    const byNumber = new Map(issues.map((entry) => [entry.number, entry]));
-    for (const entry of issues) {
-      const target = entry.duplicate_of;
-      if (target === null) continue;
-      const label = `#${entry.number} duplicate_of #${target}`;
-      if (target === entry.number) {
-        throw new Error(`${label}: an issue cannot duplicate itself`);
-      }
-      const targetEntry = byNumber.get(target);
-      if (!targetEntry) {
-        throw new Error(`${label}: target is not in this batch`);
-      }
-      if (targetEntry.duplicate_of !== null) {
-        throw new Error(
-          `${label}: target is itself a duplicate of #${targetEntry.duplicate_of} — point straight at the oldest issue, no chains`,
-        );
-      }
-    }
+    assertNoDuplicateChains(issues);
 
     return {
       issues,
@@ -225,7 +235,7 @@ export const validate = <T>(
 ): T => {
   const result = schema["~standard"].validate(value);
   if (result instanceof Promise) {
-    throw new Error("Schema validation must be synchronous");
+    throw new TypeError("Schema validation must be synchronous");
   }
   if (result.issues) {
     throw new Error(result.issues.map((issue) => issue.message).join("; "));
@@ -260,7 +270,9 @@ export const planEffects = (plan: Plan): GitHubEffect[] => {
     .filter((entry) => entry.duplicate_of === null)
     .sort((a, b) => a.number - b.number);
   const duplicates = plan.issues
-    .filter((entry) => entry.duplicate_of !== null)
+    .filter(
+      (e): e is PlanEntry & { duplicate_of: number } => e.duplicate_of !== null,
+    )
     .sort((a, b) => a.number - b.number);
 
   const effects: GitHubEffect[] = [];
@@ -280,7 +292,7 @@ export const planEffects = (plan: Plan): GitHubEffect[] => {
       {
         kind: "close-duplicate",
         issue: entry.number,
-        duplicateOf: entry.duplicate_of!,
+        duplicateOf: entry.duplicate_of,
       },
     );
   }

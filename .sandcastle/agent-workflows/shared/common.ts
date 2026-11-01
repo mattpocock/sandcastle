@@ -8,7 +8,7 @@ export const outputDir = (): string => process.env.OUTPUT_DIR ?? "/tmp";
 
 export const required = (name: string): string => {
   const value = process.env[name];
-  if (!value) {
+  if (value === undefined || value === "") {
     console.error(`Missing required env var: ${name}`);
     process.exit(1);
   }
@@ -104,7 +104,7 @@ export const asOptionalString = (value: unknown): string | undefined =>
 
 export const asArray = (value: unknown, label: string): unknown[] => {
   if (!Array.isArray(value)) {
-    throw new Error(`${label} must be an array`);
+    throw new TypeError(`${label} must be an array`);
   }
   return value;
 };

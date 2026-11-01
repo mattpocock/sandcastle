@@ -8,9 +8,8 @@ import {
   planSchema,
   validate,
   VERDICT_LABEL,
-  type GitHubEffect,
-  type Plan,
 } from "./batch";
+import type { GitHubEffect, Plan } from "./batch";
 
 /**
  * Deterministic effects step for batch explore. Validates the agent's whole
@@ -29,7 +28,7 @@ const AGENT_PAT = process.env.AGENT_PAT ?? "";
 
 const summary = (markdown: string): void => {
   const file = process.env.GITHUB_STEP_SUMMARY;
-  if (file) {
+  if (file !== undefined && file !== "") {
     fs.appendFileSync(file, `${markdown}\n`);
   } else {
     console.log(markdown);
@@ -48,36 +47,41 @@ const ghWith = (args: string[], options: { token?: string; input?: string }) =>
     encoding: "utf8",
     input: options.input,
     stdio: ["pipe", "pipe", "pipe"],
-    env: options.token
-      ? { ...process.env, GH_TOKEN: options.token }
-      : undefined,
+    env:
+      options.token !== undefined && options.token !== ""
+        ? { ...process.env, GH_TOKEN: options.token }
+        : undefined,
   });
 
 const outcome = (entry: Plan["issues"][number]): string =>
-  entry.duplicate_of !== null
-    ? `closed as duplicate of #${entry.duplicate_of}`
-    : `\`${EXPLORE_LABEL}\` → \`${VERDICT_LABEL[entry.tag]}\``;
+  entry.duplicate_of === null
+    ? `\`${EXPLORE_LABEL}\` → \`${VERDICT_LABEL[entry.tag]}\``
+    : `closed as duplicate of #${entry.duplicate_of}`;
 
 const describe = (effect: GitHubEffect): string => {
   switch (effect.kind) {
-    case "comment":
+    case "comment": {
       return `#${effect.issue}: comment`;
-    case "swap-label":
+    }
+    case "swap-label": {
       return `#${effect.issue}: swap \`${EXPLORE_LABEL}\` → \`${effect.to}\``;
-    case "close-duplicate":
+    }
+    case "close-duplicate": {
       return `#${effect.issue}: remove \`${EXPLORE_LABEL}\`, close as duplicate of #${effect.duplicateOf}`;
+    }
   }
 };
 
 const apply = (effect: GitHubEffect): void => {
   const issue = String(effect.issue);
   switch (effect.kind) {
-    case "comment":
+    case "comment": {
       ghWith(["issue", "comment", issue, "--body-file", "-"], {
         input: effect.body,
       });
       return;
-    case "swap-label":
+    }
+    case "swap-label": {
       if (effect.to === "agent:implement" && !AGENT_PAT) {
         console.log(
           `::warning::AGENT_PAT is not set; adding agent:implement to #${issue} with GITHUB_TOKEN will not trigger Agent Implement.`,
@@ -98,7 +102,8 @@ const apply = (effect: GitHubEffect): void => {
         { token: effect.to === "agent:implement" ? AGENT_PAT : undefined },
       );
       return;
-    case "close-duplicate":
+    }
+    case "close-duplicate": {
       ghWith(["issue", "edit", issue, "--remove-label", EXPLORE_LABEL], {});
       try {
         ghWith(
@@ -117,7 +122,7 @@ const apply = (effect: GitHubEffect): void => {
       } catch {
         ghWith(["issue", "close", issue, "--reason", "not planned"], {});
       }
-      return;
+    }
   }
 };
 

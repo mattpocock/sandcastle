@@ -19,31 +19,39 @@ export const buildRecoveryMessage = (input: RecoveryInput): string => {
 
   // When --branch is set, commands run inside .sandcastle/worktree,
   // so patch paths need ../../ prefix to reach repo root
-  const cmdPatchDir = branch ? `../../${patchDir}` : patchDir;
+  const hasBranch = branch !== undefined && branch !== "";
+  const cmdPatchDir = hasBranch ? `../../${patchDir}` : patchDir;
 
   // Determine the step number for the failed step
   const steps: { key: FailedStep; label: string; has: boolean }[] = [];
-  if (hasCommits)
+  if (hasCommits) {
     steps.push({ key: "commits", label: "committed changes", has: true });
-  if (hasDiff)
+  }
+  if (hasDiff) {
     steps.push({ key: "diff", label: "uncommitted changes", has: true });
-  if (hasUntracked)
+  }
+  if (hasUntracked) {
     steps.push({ key: "untracked", label: "untracked files", has: true });
+  }
 
   const failedIndex = steps.findIndex((s) => s.key === failedStep);
-  const failedStepInfo = steps[failedIndex]!;
+  const failedStepInfo = steps[failedIndex];
+  if (failedStepInfo === undefined) {
+    throw new Error(
+      `Recovery step "${failedStep}" failed, but it had no changes to apply.`,
+    );
+  }
   const stepNumber = failedIndex + 1;
 
-  const lines: string[] = [];
-  lines.push(
+  const lines: string[] = [
     `Patch application failed at step ${stepNumber} (${failedStepInfo.label}).`,
-  );
-  lines.push("");
+    "",
+  ];
 
   // Add worktree setup preamble for --branch
-  if (branch) {
-    lines.push("Set up worktree, then resolve:");
+  if (hasBranch) {
     lines.push(
+      "Set up worktree, then resolve:",
       formatCommandBlock([
         `git worktree add .sandcastle/worktree ${branch}`,
         `cd .sandcastle/worktree`,
@@ -54,8 +62,7 @@ export const buildRecoveryMessage = (input: RecoveryInput): string => {
 
   if (failedStep === "commits") {
     // git am failure — lean on git's built-in workflow
-    lines.push("Resolve conflicts, then continue with:");
-    lines.push(`  git am --continue`);
+    lines.push("Resolve conflicts, then continue with:", `  git am --continue`);
 
     // Remaining steps after git am resolves
     const remaining = buildRemainingCommands(
@@ -63,8 +70,7 @@ export const buildRecoveryMessage = (input: RecoveryInput): string => {
       steps.slice(failedIndex + 1),
     );
     if (remaining.length > 0) {
-      lines.push("");
-      lines.push("After all commits are applied, run the remaining steps:");
+      lines.push("", "After all commits are applied, run the remaining steps:");
       lines.push(formatCommandBlock(remaining));
     }
   } else {
@@ -74,8 +80,7 @@ export const buildRecoveryMessage = (input: RecoveryInput): string => {
       steps.slice(failedIndex),
     );
     if (remaining.length > 0) {
-      lines.push("Run the remaining steps:");
-      lines.push(formatCommandBlock(remaining));
+      lines.push("Run the remaining steps:", formatCommandBlock(remaining));
     }
   }
 
@@ -88,7 +93,9 @@ const buildRemainingCommands = (
 ): string[] => {
   const commands: string[] = [];
   for (const step of steps) {
-    if (!step.has) continue;
+    if (!step.has) {
+      continue;
+    }
     if (step.key === "commits") {
       commands.push(`git am --3way ${patchDir}/*.patch`);
     } else if (step.key === "diff") {

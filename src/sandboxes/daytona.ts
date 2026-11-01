@@ -6,12 +6,12 @@
  */
 
 import { readdir, stat } from "node:fs/promises";
-import { join, relative } from "node:path";
-import {
-  createIsolatedSandboxProvider,
-  type ExecResult,
-  type IsolatedSandboxHandle,
-  type IsolatedSandboxProvider,
+import { join, posix, relative } from "node:path";
+import { createIsolatedSandboxProvider } from "../SandboxProvider.js";
+import type {
+  ExecResult,
+  IsolatedSandboxHandle,
+  IsolatedSandboxProvider,
 } from "../SandboxProvider.js";
 import { BoundedTail, MAX_TAIL_CHARS } from "../boundedTail.js";
 
@@ -21,6 +21,9 @@ import type {
   CreateSandboxFromImageParams,
   CreateSandboxFromSnapshotParams,
 } from "@daytona/sdk";
+
+const shellEscape = (s: string): string =>
+  `'${s.replaceAll("'", String.raw`'\''`)}'`;
 
 /** Options for the Daytona sandbox provider. */
 export interface DaytonaOptions {
@@ -64,6 +67,25 @@ export interface DaytonaOptions {
   readonly maxOutputTailChars?: number;
 }
 
+/** How often a streamed `exec` checks that its session shell is still alive. */
+const SESSION_WATCH_INTERVAL_MS = 15_000;
+
+/** The Daytona client config: only the connection options that are set. */
+const toDaytonaConfig = (options?: DaytonaOptions): DaytonaConfig => {
+  const { apiKey, apiUrl, target } = options ?? {};
+  const config: DaytonaConfig = {};
+  if (apiKey !== undefined && apiKey !== "") {
+    config.apiKey = apiKey;
+  }
+  if (apiUrl !== undefined && apiUrl !== "") {
+    config.apiUrl = apiUrl;
+  }
+  if (target !== undefined && target !== "") {
+    config.target = target;
+  }
+  return config;
+};
+
 /**
  * Create a Daytona isolated sandbox provider.
  *
@@ -81,23 +103,35 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
   createIsolatedSandboxProvider({
     name: "daytona",
     env: options?.env,
-    create: async (): Promise<IsolatedSandboxHandle> => {
+    create: async (createOptions): Promise<IsolatedSandboxHandle> => {
       const maxOutputTailChars = options?.maxOutputTailChars ?? MAX_TAIL_CHARS;
       const { Daytona } =
         (await import("@daytona/sdk")) as typeof import("@daytona/sdk");
 
-      const config: DaytonaConfig = {};
-      if (options?.apiKey) config.apiKey = options.apiKey;
-      if (options?.apiUrl) config.apiUrl = options.apiUrl;
-      if (options?.target) config.target = options.target;
+      const client: DaytonaClient = new Daytona(toDaytonaConfig(options));
+      // Pass the resolved env (env resolver + provider + agent) to the
+      // sandbox. Explicit `create.envVars` win, as the most specific source.
+      const createParams = options?.create;
+      const envVars = { ...createOptions.env, ...createParams?.envVars };
+      // `client.create` is overloaded per params shape, so call the overload
+      // that matches instead of passing the union.
+      const sandbox =
+        createParams !== undefined && "image" in createParams
+          ? await client.create({ ...createParams, envVars })
+          : await client.create({ ...createParams, envVars });
 
-      const client: DaytonaClient = new Daytona(config);
-      const sandbox = await client.create(options?.create as any);
-
-      const worktreePath =
+      const workDir =
         (await sandbox.getWorkDir()) ??
         (await sandbox.getUserHomeDir()) ??
         "/home/daytona";
+
+      // Use a subdirectory of the work dir, not the work dir itself: sync-in
+      // clones into `${worktreePath}_clone` and then replaces worktreePath,
+      // which needs a parent the sandbox user can write. On the default
+      // snapshot the work dir is the user's home (/home/daytona), and /home
+      // is root-owned.
+      const worktreePath = posix.join(workDir, "workspace");
+      await sandbox.fs.createFolder(worktreePath, "755");
 
       return {
         worktreePath,
@@ -108,30 +142,54 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
             onLine?: (line: string) => void;
             cwd?: string;
             sudo?: boolean;
+            stdin?: string;
           },
         ): Promise<ExecResult> => {
-          const effectiveCommand = opts?.sudo ? `sudo ${command}` : command;
+          // Wrap the whole command in `sh -c`, so sudo elevates all of it
+          // (`a && b`, not just `a`).
+          let effectiveCommand =
+            opts?.sudo === true
+              ? `sudo sh -c ${shellEscape(command)}`
+              : command;
+          if (opts?.stdin !== undefined) {
+            // Daytona's exec APIs have no stdin channel: the command reads
+            // EOF. So write stdin to a file in the sandbox and redirect it in
+            // (a file, not an argument, keeps clear of the per-arg size
+            // limit). The redirect opens the file before the group runs, so
+            // the group can delete it straight away and leave nothing behind.
+            const stdinPath = `/tmp/sandcastle-stdin-${crypto.randomUUID()}`;
+            await sandbox.fs.uploadFile(Buffer.from(opts.stdin), stdinPath);
+            effectiveCommand = `{ rm -f ${stdinPath}; ${effectiveCommand}\n} < ${stdinPath}`;
+          }
           if (opts?.onLine) {
-            const onLine = opts.onLine;
+            const { onLine } = opts;
             const sessionId = `sandcastle-${crypto.randomUUID()}`;
+            const pidPath = `/tmp/${sessionId}.pid`;
             await sandbox.process.createSession(sessionId);
 
             try {
+              // A session runs its commands in one long-lived shell, which
+              // records each command's exit code once it returns. A command
+              // that ends that shell (a top-level `exit`) never gets one, and
+              // its log stream never closes. So run the command in a subshell,
+              // where `exit` ends only the subshell. The newline before `)`
+              // keeps a trailing comment from swallowing it. The session
+              // shell's PID goes to a file, to check it is still alive.
               const execResponse = await sandbox.process.executeSessionCommand(
                 sessionId,
                 {
-                  command: `cd ${opts?.cwd ?? worktreePath} && ${effectiveCommand}`,
+                  command: `echo $$ > ${pidPath}; ( cd ${opts?.cwd ?? worktreePath} && ${effectiveCommand}\n)`,
                   async: true,
                 },
               );
 
-              const cmdId = execResponse.cmdId!;
+              const { cmdId } = execResponse;
 
               const stdoutTail = new BoundedTail(maxOutputTailChars, "\n");
               const stderrTail = new BoundedTail(maxOutputTailChars, "");
               let partial = "";
 
-              await sandbox.process.getSessionCommandLogs(
+              const logsDone = sandbox.process.getSessionCommandLogs(
                 sessionId,
                 cmdId,
                 (chunk: string) => {
@@ -147,6 +205,55 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
                   stderrTail.push(chunk);
                 },
               );
+
+              // Once the race below is lost, a late failure of the stream
+              // must not surface as an unhandled rejection.
+              logsDone.catch(() => {});
+
+              // If the session shell dies anyway (killed, say), the stream
+              // would wait forever. Watch the shell, and once it is gone stop
+              // waiting: fail if the command recorded no exit code. A missing
+              // PID file counts as alive, so it can never fail a command.
+              let watchTimer: ReturnType<typeof setTimeout> | undefined;
+              let watching = true;
+              const sessionGone = new Promise<void>((resolve, reject) => {
+                const check = async () => {
+                  const alive = await sandbox.process
+                    .executeCommand(
+                      `test ! -f ${pidPath} || kill -0 "$(cat ${pidPath})"`,
+                    )
+                    .then((r) => r.exitCode === 0)
+                    .catch(() => true);
+                  const cmd = alive
+                    ? undefined
+                    : await sandbox.process
+                        .getSessionCommand(sessionId, cmdId)
+                        .catch(() => undefined);
+                  if (!watching) {
+                    return;
+                  }
+                  if (alive) {
+                    watchTimer = setTimeout(check, SESSION_WATCH_INTERVAL_MS);
+                    return;
+                  }
+                  if (typeof cmd?.exitCode === "number") {
+                    return resolve();
+                  }
+                  reject(
+                    new Error(
+                      `Daytona session shell exited before the command finished, so its exit code is unknown: ${command}`,
+                    ),
+                  );
+                };
+                watchTimer = setTimeout(check, SESSION_WATCH_INTERVAL_MS);
+              });
+
+              try {
+                await Promise.race([logsDone, sessionGone]);
+              } finally {
+                watching = false;
+                clearTimeout(watchTimer);
+              }
 
               if (partial) {
                 stdoutTail.push(partial);
@@ -165,6 +272,9 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
               };
             } finally {
               await sandbox.process.deleteSession(sessionId).catch(() => {});
+              await sandbox.process
+                .executeCommand(`rm -f ${pidPath}`)
+                .catch(() => {});
             }
           }
 
@@ -172,9 +282,13 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
             effectiveCommand,
             opts?.cwd ?? worktreePath,
           );
+          // `executeCommand` merges stdout and stderr into `result` and has
+          // no separate stderr. On failure, surface that output as stderr
+          // too, so the error says why the command failed, not just its exit
+          // code.
           return {
             stdout: response.result,
-            stderr: "",
+            stderr: response.exitCode === 0 ? "" : response.result,
             exitCode: response.exitCode,
           };
         },

@@ -1,0 +1,146 @@
+{
+  "src/AgentProvider.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/ClackDisplay.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/ContextWindow.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/CopyToWorktree.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/createSandbox-windowsMounts.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/createSandbox.agentEnv.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/createSandbox.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/createWorktree-windowsMounts.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/createWorktree.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/Display.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/DockerLifecycle.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/ErrorHandler.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/errors.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/InitService.sandboxProviders.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/InitService.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/interactive-windowsMounts.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/interactive.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/interactiveArgCollection.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/mergeProviderEnv.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/mountUtils.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/Orchestrator.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/PodmanLifecycle.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/PromptArgumentSubstitution.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/PromptPreprocessor.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/RecoveryMessage.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/resolveCwd.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/resolveGitVolumeMounts.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/run.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/sandboxes/daytona.sudo.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/sandboxes/daytona.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/sandboxes/docker.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/sandboxes/no-sandbox.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/sandboxes/podman.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/sandboxes/test-bind-mount.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/sandboxes/test-isolated.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/sandboxes/vercel.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/SandboxFactory.basebranch.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/SandboxFactory.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/SandboxLifecycle.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/SessionStore.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/SessionStore.windowsPath.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/shutdownRegistry.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/startSandbox.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/syncIn.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/syncOut.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/terminalCleanup.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/windowsGitOverride.cleanup.test.ts": {
+    "ratchet/test-outside-tests": 1
+  },
+  "src/WorktreeManager.test.ts": {
+    "ratchet/test-outside-tests": 1
+  }
+}

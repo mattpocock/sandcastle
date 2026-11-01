@@ -1,5 +1,22 @@
 import type { AgentProvider } from "./AgentProvider.js";
+import { ForkNotSupportedError } from "./errors.js";
 import type { SandboxProvider } from "./SandboxProvider.js";
+
+/**
+ * Fail-fast validation, for a run asked to fork its session, that the agent
+ * provider can fork. One that resumes but has no native fork declares
+ * `sessionStorage.canFork: false` and gets a `ForkNotSupportedError` naming
+ * it. A provider with no `sessionStorage` is left to
+ * `assertResumeSessionExists`, which rejects any resume.
+ */
+export const assertForkSupported = (provider: AgentProvider): void => {
+  if (provider.sessionStorage?.canFork === false) {
+    throw new ForkNotSupportedError({
+      message: `${provider.name} cannot fork a session: its CLI resumes but has no fork. Use resume() to continue the session in place.`,
+      agentProvider: provider.name,
+    });
+  }
+};
 
 /**
  * Fail-fast validation that a resumable agent session exists on the host before
@@ -33,7 +50,7 @@ export const assertResumeSessionExists = async (params: {
 
   if (sandboxTag === "none") {
     const found = await provider.sessionStorage.findByIdOnHost(resumeSession);
-    if (!found.path) {
+    if (found.path === undefined) {
       throw new Error(
         `resumeSession "${resumeSession}" not found under ${found.searchedRoot}`,
       );
@@ -51,9 +68,9 @@ export const assertResumeSessionExists = async (params: {
       resumeSession,
     );
     throw new Error(
-      sessionPath
-        ? `resumeSession "${resumeSession}" not found: expected session file at ${sessionPath}`
-        : `resumeSession "${resumeSession}" not found`,
+      sessionPath === undefined
+        ? `resumeSession "${resumeSession}" not found`
+        : `resumeSession "${resumeSession}" not found: expected session file at ${sessionPath}`,
     );
   }
 };

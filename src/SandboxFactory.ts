@@ -1,4 +1,4 @@
-import { Context, Effect, Exit, Layer } from "effect";
+import { Console, Context, Effect, Exit, Layer } from "effect";
 import { FileSystem } from "@effect/platform";
 import { join, resolve } from "node:path";
 import type { PlatformError } from "@effect/platform/Error";
@@ -9,9 +9,8 @@ import {
   ExecError,
   SyncError,
   WorktreeError,
-  type DockerError,
-  type SandboxError,
 } from "./errors.js";
+import type { DockerError, SandboxError, SyncOutPathError } from "./errors.js";
 import type { Timeouts } from "./run.js";
 import * as WorktreeManager from "./WorktreeManager.js";
 import { copyToWorktree } from "./CopyToWorktree.js";
@@ -19,15 +18,16 @@ import { Display } from "./Display.js";
 import type {
   SandboxProvider,
   BranchStrategy,
-  BindMountSandboxProvider,
   BindMountSandboxHandle,
   IsolatedSandboxHandle,
   NoSandboxHandle,
 } from "./SandboxProvider.js";
-import { runHostHooks, type SandboxHooks } from "./SandboxLifecycle.js";
+import { runHostHooks } from "./SandboxLifecycle.js";
+import type { SandboxHooks } from "./SandboxLifecycle.js";
 import { startSandbox } from "./startSandbox.js";
 import { syncOut } from "./syncOut.js";
-import { patchGitMountsForWindows } from "./mountUtils.js";
+import { patchGitMountsForWindows, removeMountTempDirs } from "./mountUtils.js";
+import { registerShutdown } from "./shutdownRegistry.js";
 
 export interface ExecResult {
   readonly stdout: string;
@@ -65,8 +65,7 @@ const getCopyIn = (
   if ("copyIn" in handle) {
     return (hostPath, sandboxPath) =>
       Effect.tryPromise({
-        try: () =>
-          (handle as IsolatedSandboxHandle).copyIn(hostPath, sandboxPath),
+        try: () => handle.copyIn(hostPath, sandboxPath),
         catch: (e) =>
           new CopyError({
             message: `copyIn failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -76,8 +75,7 @@ const getCopyIn = (
   if ("copyFileIn" in handle) {
     return (hostPath, sandboxPath) =>
       Effect.tryPromise({
-        try: () =>
-          (handle as BindMountSandboxHandle).copyFileIn(hostPath, sandboxPath),
+        try: () => handle.copyFileIn(hostPath, sandboxPath),
         catch: (e) =>
           new CopyError({
             message: `copyFileIn failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -113,10 +111,7 @@ export const makeSandboxFromHandle = (
     "copyFileOut" in handle
       ? (sandboxPath, hostPath) =>
           Effect.tryPromise({
-            try: () =>
-              (
-                handle as IsolatedSandboxHandle | BindMountSandboxHandle
-              ).copyFileOut(sandboxPath, hostPath),
+            try: () => handle.copyFileOut(sandboxPath, hostPath),
             catch: (e) =>
               new CopyError({
                 message: `copyFileOut failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -139,7 +134,10 @@ export interface SandboxInfo {
   /** Absolute path to the worktree inside the sandbox, as reported by the provider. */
   readonly sandboxRepoPath: string;
   /** Sync changes from the sandbox to the host worktree (isolated providers only). */
-  readonly applyToHost?: () => Effect.Effect<void, SyncError>;
+  readonly applyToHost?: () => Effect.Effect<
+    void,
+    SyncError | SyncOutPathError
+  >;
   /** The bind-mount sandbox handle, available when the provider is a bind-mount provider. Used for session capture. */
   readonly bindMountHandle?: BindMountSandboxHandle;
 }
@@ -150,7 +148,9 @@ export interface WithSandboxResult<A> {
   readonly preservedWorktreePath?: string;
 }
 
-export class SandboxFactory extends Context.Tag("SandboxFactory")<
+export class SandboxFactory extends Context.Tag(
+  "@ai-hero/sandcastle/SandboxFactory",
+)<
   SandboxFactory,
   {
     readonly withSandbox: <A, E, R>(
@@ -162,7 +162,30 @@ export class SandboxFactory extends Context.Tag("SandboxFactory")<
   }
 >() {}
 
-export class SandboxConfig extends Context.Tag("SandboxConfig")<
+/**
+ * A SandboxFactory layer that hands every caller the same, already-started
+ * sandbox, instead of creating one per call. Used by the `run()` methods of
+ * `createSandbox` and `createWorktree` handles.
+ */
+export const reuseSandboxFactoryLayer = (
+  info: SandboxInfo,
+  sandbox: SandboxService,
+): Layer.Layer<SandboxFactory> =>
+  Layer.succeed(SandboxFactory, {
+    withSandbox: <A, E, R>(
+      makeEffect: (
+        info: SandboxInfo,
+        sandbox: SandboxService,
+      ) => Effect.Effect<A, E, R>,
+    ): Effect.Effect<WithSandboxResult<A>, E, R> =>
+      makeEffect(info, sandbox).pipe(
+        Effect.map((value) => ({ value, preservedWorktreePath: undefined })),
+      ),
+  });
+
+export class SandboxConfig extends Context.Tag(
+  "@ai-hero/sandcastle/SandboxFactory/SandboxConfig",
+)<
   SandboxConfig,
   {
     readonly env: Record<string, string>;
@@ -171,6 +194,12 @@ export class SandboxConfig extends Context.Tag("SandboxConfig")<
     readonly copyToWorktree?: string[];
     /** When specified, the run name is included in the auto-generated branch and worktree names. */
     readonly name?: string;
+    /**
+     * merge-to-head only: the temp branch name the caller already generated and
+     * showed to the user (log filename, banner, `{{SOURCE_BRANCH}}`). The
+     * worktree is created on exactly this branch instead of a fresh one.
+     */
+    readonly tempBranch?: string;
     /** Sandbox provider — delegates sandbox lifecycle to the provider. */
     readonly sandboxProvider: SandboxProvider;
     /** Branch strategy — controls how the agent's changes relate to branches. */
@@ -197,14 +226,55 @@ const printWorktreePreservedMessage = (
 };
 
 /**
+ * After a merge-to-head worktree is removed, delete its temp branch unless it
+ * holds commits found on no other branch. Those are kept (with a message on
+ * how to merge or discard them) so a failed run never loses an agent's work.
+ */
+const cleanupTempBranch = (
+  hostRepoDir: string,
+  tempBranch: string,
+): Effect.Effect<void> =>
+  WorktreeManager.deleteTempBranchIfUnused(hostRepoDir, tempBranch).pipe(
+    Effect.tap(({ unmergedCommits }) => {
+      if (unmergedCommits === 0) {
+        return Effect.void;
+      }
+      const s = unmergedCommits === 1 ? "" : "s";
+      return Effect.all([
+        Console.error(
+          `\nTemporary branch '${tempBranch}' kept: it has ${unmergedCommits} commit${s} not on any other branch.`,
+        ),
+        Console.error(`  To merge: git merge ${tempBranch}`),
+        Console.error(`  To discard: git branch -D ${tempBranch}`),
+      ]);
+    }),
+    Effect.asVoid,
+    Effect.catchAll(() => Effect.void),
+  );
+
+/**
  * Check for uncommitted changes and either preserve or remove the worktree.
  * Returns the preserved path if preserved, undefined if removed.
+ *
+ * `tempBranch` is set for merge-to-head: once the worktree is removed, the
+ * temp branch is deleted too unless it holds unmerged commits.
  */
 const cleanupWorktree = (
   worktreePath: string,
   exit: Exit.Exit<unknown, unknown>,
-): Effect.Effect<string | undefined, WorktreeError> =>
-  WorktreeManager.hasUncommittedChanges(worktreePath).pipe(
+  signal: AbortSignal | undefined,
+  temp?: { readonly hostRepoDir: string; readonly branch: string },
+): Effect.Effect<string | undefined, WorktreeError> => {
+  // An interrupted run keeps its worktree, clean or dirty, so the caller can
+  // inspect it (ADR-0004). An abort after a successful run is a no-op.
+  if (!Exit.isSuccess(exit) && signal?.aborted === true) {
+    printWorktreePreservedMessage(
+      worktreePath,
+      `Worktree preserved at ${worktreePath}`,
+    );
+    return Effect.succeed(worktreePath);
+  }
+  return WorktreeManager.hasUncommittedChanges(worktreePath).pipe(
     Effect.catchAll(() => Effect.succeed(false)),
     Effect.flatMap((isDirty) => {
       if (isDirty) {
@@ -214,16 +284,21 @@ const cleanupWorktree = (
             ? `Run succeeded but worktree has uncommitted changes at ${worktreePath}`
             : `Worktree preserved at ${worktreePath}`,
         );
-        return Effect.succeed(worktreePath as string | undefined);
+        return Effect.succeed(worktreePath);
       }
-      if (!Exit.isSuccess(exit)) {
-        console.error(`\nWorktree removed (no uncommitted changes)`);
-      }
-      return WorktreeManager.remove(worktreePath).pipe(
+      const announceRemoval = Exit.isSuccess(exit)
+        ? Effect.void
+        : Console.error(`\nWorktree removed (no uncommitted changes)`);
+      return announceRemoval.pipe(
+        Effect.andThen(WorktreeManager.remove(worktreePath)),
+        Effect.andThen(
+          temp ? cleanupTempBranch(temp.hostRepoDir, temp.branch) : Effect.void,
+        ),
         Effect.map(() => undefined as string | undefined),
       );
     }),
   );
+};
 
 /**
  * Attach the preserved worktree path to AgentIdleTimeoutError and AgentError so
@@ -239,21 +314,26 @@ const attachPreservedPath = <E>(
         message: e.message,
         timeoutMs: e.timeoutMs,
         preservedWorktreePath: path,
-      }) as unknown as E | SandboxError;
+      });
     }
     if (e instanceof AgentError) {
       return new AgentError({
         message: e.message,
         preservedWorktreePath: path,
-      }) as unknown as E | SandboxError;
+      });
     }
   }
   return e;
 };
 
+/** A git mount for a bind-mount sandbox. */
 export interface MountEntry {
   readonly hostPath: string;
   readonly sandboxPath: string;
+  /** Mount read-only. */
+  readonly readonly?: boolean;
+  /** A temp dir holding `hostPath`, removed when the sandbox closes. */
+  readonly tempDir?: string;
 }
 
 /**
@@ -272,12 +352,11 @@ export const resolveGitMounts = (
     }
     // Worktree: .git is a file with "gitdir: <path>"
     const content = (yield* fs.readFileString(gitPath)).trim();
-    const match = content.match(/^gitdir:\s*(.+)$/);
-    if (!match) {
+    const gitdirPath = /^gitdir:\s*(.+)$/u.exec(content)?.[1];
+    if (gitdirPath === undefined) {
       // Unrecognized format — fall back to mounting the file as-is
       return [{ hostPath: gitPath, sandboxPath: gitPath }];
     }
-    const gitdirPath = match[1]!;
     // gitdirPath is like /path/to/repo/.git/worktrees/<name>
     // Mount both the .git file and the parent .git directory
     const parentGitDir = resolve(gitdirPath, "..", "..");
@@ -296,6 +375,7 @@ export const WorktreeDockerSandboxFactory = {
         hostRepoDir,
         copyToWorktree: copyPaths,
         name,
+        tempBranch,
         sandboxProvider,
         branchStrategy,
         hooks,
@@ -303,6 +383,7 @@ export const WorktreeDockerSandboxFactory = {
         timeouts,
       } = yield* SandboxConfig;
 
+      const onWorktreeReady = hooks?.host?.onWorktreeReady ?? [];
       const isHeadMode = branchStrategy.type === "head";
       const branch =
         branchStrategy.type === "branch" ? branchStrategy.branch : undefined;
@@ -313,23 +394,59 @@ export const WorktreeDockerSandboxFactory = {
       const fileSystem = yield* FileSystem.FileSystem;
       const display = yield* Display;
 
+      /** merge-to-head only: the temp branch to delete with the worktree. */
+      const tempBranchOf = (worktreeInfo: { readonly branch: string }) =>
+        branch === undefined
+          ? { hostRepoDir, branch: worktreeInfo.branch }
+          : undefined;
+
       /** Prune stale worktrees (best-effort), then create a fresh one. */
       const pruneAndCreate = () =>
         WorktreeManager.pruneStale(hostRepoDir).pipe(
           Effect.catchAll((e) =>
-            Effect.sync(() => {
-              console.error(
-                "[sandcastle] Warning: failed to prune stale worktrees:",
-                e.message,
-              );
-            }),
+            Console.error(
+              "[sandcastle] Warning: failed to prune stale worktrees:",
+              e.message,
+            ),
           ),
           Effect.andThen(
-            branch
+            branch !== undefined && branch !== ""
               ? WorktreeManager.create(hostRepoDir, { branch, baseBranch })
-              : WorktreeManager.create(hostRepoDir, { name }),
+              : WorktreeManager.create(hostRepoDir, { name, tempBranch }),
           ),
           Effect.provideService(FileSystem.FileSystem, fileSystem),
+          // A SIGINT/SIGTERM exits the process before the release below runs,
+          // so the worktree stays on disk. Say where it is, as createSandbox()
+          // does, instead of leaving it behind silently.
+          Effect.map((info) => ({
+            ...info,
+            unregisterShutdown: registerShutdown(() => {
+              printWorktreePreservedMessage(
+                info.path,
+                `Worktree preserved at ${info.path}`,
+              );
+            }),
+          })),
+        );
+
+      /** Release: remove or preserve the worktree (see cleanupWorktree). */
+      const releaseWorktree = (
+        worktreeInfo: {
+          path: string;
+          branch: string;
+          unregisterShutdown: () => void;
+        },
+        exit: Exit.Exit<unknown, unknown>,
+      ) =>
+        Effect.sync(worktreeInfo.unregisterShutdown).pipe(
+          Effect.andThen(
+            cleanupWorktree(
+              worktreeInfo.path,
+              exit,
+              signal,
+              tempBranchOf(worktreeInfo),
+            ),
+          ),
         );
 
       return {
@@ -346,12 +463,8 @@ export const WorktreeDockerSandboxFactory = {
             // Head mode: use hostRepoDir directly, no worktree.
             if (isHeadMode) {
               return (
-                hooks?.host?.onWorktreeReady?.length
-                  ? runHostHooks(
-                      hooks.host.onWorktreeReady,
-                      hostRepoDir,
-                      signal,
-                    )
+                onWorktreeReady.length > 0
+                  ? runHostHooks(onWorktreeReady, hostRepoDir, signal)
                   : Effect.void
               ).pipe(
                 Effect.andThen(
@@ -402,15 +515,11 @@ export const WorktreeDockerSandboxFactory = {
                         timeouts?.copyToWorktreeMs,
                       ),
                     )
-                  : Effect.succeed(undefined)
+                  : Effect.void
                 ).pipe(
                   Effect.andThen(
-                    hooks?.host?.onWorktreeReady?.length
-                      ? runHostHooks(
-                          hooks.host.onWorktreeReady,
-                          worktreeInfo.path,
-                          signal,
-                        )
+                    onWorktreeReady.length > 0
+                      ? runHostHooks(onWorktreeReady, worktreeInfo.path, signal)
                       : Effect.void,
                   ),
                   Effect.andThen(
@@ -438,7 +547,7 @@ export const WorktreeDockerSandboxFactory = {
                   ),
                 ) as Effect.Effect<A, E | SandboxError, R>,
               (worktreeInfo, exit) =>
-                cleanupWorktree(worktreeInfo.path, exit).pipe(
+                releaseWorktree(worktreeInfo, exit).pipe(
                   Effect.tap((p) => {
                     preservedPath = p;
                   }),
@@ -466,12 +575,8 @@ export const WorktreeDockerSandboxFactory = {
             return Effect.acquireUseRelease(
               pruneAndCreate(),
               (worktreeInfo) =>
-                (hooks?.host?.onWorktreeReady?.length
-                  ? runHostHooks(
-                      hooks.host.onWorktreeReady,
-                      worktreeInfo.path,
-                      signal,
-                    )
+                (onWorktreeReady.length > 0
+                  ? runHostHooks(onWorktreeReady, worktreeInfo.path, signal)
                   : Effect.void
                 ).pipe(
                   Effect.andThen(
@@ -481,6 +586,7 @@ export const WorktreeDockerSandboxFactory = {
                         hostRepoDir: worktreeInfo.path,
                         env,
                         copyPaths,
+                        copySourceDir: hostRepoDir,
                       }),
                       ({ sandbox, worktreePath, handle }) =>
                         makeEffect(
@@ -504,7 +610,7 @@ export const WorktreeDockerSandboxFactory = {
                   ),
                 ) as Effect.Effect<A, E | SandboxError, R>,
               (worktreeInfo, exit) =>
-                cleanupWorktree(worktreeInfo.path, exit).pipe(
+                releaseWorktree(worktreeInfo, exit).pipe(
                   Effect.tap((p) => {
                     preservedPath = p;
                   }),
@@ -526,8 +632,8 @@ export const WorktreeDockerSandboxFactory = {
             // Head mode: bind-mount host directory directly, no worktree
             const gitPath = join(hostRepoDir, ".git");
             return (
-              hooks?.host?.onWorktreeReady?.length
-                ? runHostHooks(hooks.host.onWorktreeReady, hostRepoDir, signal)
+              onWorktreeReady.length > 0
+                ? runHostHooks(onWorktreeReady, hostRepoDir, signal)
                 : Effect.void
             ).pipe(
               Effect.andThen(resolveGitMounts(gitPath)),
@@ -535,7 +641,7 @@ export const WorktreeDockerSandboxFactory = {
               Effect.mapError(
                 (e) =>
                   new WorktreeError({
-                    message: `Failed to resolve git mounts: ${e}`,
+                    message: `Failed to resolve git mounts: ${String(e)}`,
                   }) as E | SandboxError,
               ),
               Effect.flatMap((gitMounts) =>
@@ -573,6 +679,7 @@ export const WorktreeDockerSandboxFactory = {
                       catch: () => undefined,
                     }).pipe(Effect.orDie),
                 ).pipe(
+                  Effect.ensuring(removeMountTempDirs(gitMounts)),
                   Effect.map((value) => ({
                     value,
                     preservedWorktreePath: undefined,
@@ -607,15 +714,11 @@ export const WorktreeDockerSandboxFactory = {
                       timeouts?.copyToWorktreeMs,
                     ),
                   )
-                : Effect.succeed(undefined)
+                : Effect.void
               ).pipe(
                 Effect.andThen(
-                  hooks?.host?.onWorktreeReady?.length
-                    ? runHostHooks(
-                        hooks.host.onWorktreeReady,
-                        worktreeInfo.path,
-                        signal,
-                      )
+                  onWorktreeReady.length > 0
+                    ? runHostHooks(onWorktreeReady, worktreeInfo.path, signal)
                     : Effect.void,
                 ),
                 Effect.andThen(
@@ -624,7 +727,7 @@ export const WorktreeDockerSandboxFactory = {
                     Effect.mapError(
                       (e) =>
                         new WorktreeError({
-                          message: `Failed to resolve git mounts: ${e}`,
+                          message: `Failed to resolve git mounts: ${String(e)}`,
                         }),
                     ),
                   ),
@@ -642,7 +745,7 @@ export const WorktreeDockerSandboxFactory = {
                     // sandboxProvider is guaranteed bind-mount here
                     // (isolated providers return early above)
                     startSandbox({
-                      provider: sandboxProvider as BindMountSandboxProvider,
+                      provider: sandboxProvider,
                       hostRepoDir,
                       env,
                       worktreeOrRepoPath: worktreeInfo.path,
@@ -663,12 +766,12 @@ export const WorktreeDockerSandboxFactory = {
                         try: () => handle.close(),
                         catch: () => undefined,
                       }).pipe(Effect.orDie),
-                  ),
+                  ).pipe(Effect.ensuring(removeMountTempDirs(gitMounts))),
                 ),
               ) as Effect.Effect<A, E | SandboxError, R>,
             // Release: remove or preserve the worktree based on dirty state.
             (worktreeInfo, exit) =>
-              cleanupWorktree(worktreeInfo.path, exit).pipe(
+              releaseWorktree(worktreeInfo, exit).pipe(
                 Effect.tap((p) => {
                   preservedWorktreePath = p;
                 }),
