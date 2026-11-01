@@ -19,7 +19,8 @@ export const buildRecoveryMessage = (input: RecoveryInput): string => {
 
   // When --branch is set, commands run inside .sandcastle/worktree,
   // so patch paths need ../../ prefix to reach repo root
-  const cmdPatchDir = branch ? `../../${patchDir}` : patchDir;
+  const hasBranch = branch !== undefined && branch !== "";
+  const cmdPatchDir = hasBranch ? `../../${patchDir}` : patchDir;
 
   // Determine the step number for the failed step
   const steps: { key: FailedStep; label: string; has: boolean }[] = [];
@@ -48,7 +49,7 @@ export const buildRecoveryMessage = (input: RecoveryInput): string => {
   ];
 
   // Add worktree setup preamble for --branch
-  if (branch) {
+  if (hasBranch) {
     lines.push(
       "Set up worktree, then resolve:",
       formatCommandBlock([
