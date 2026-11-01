@@ -132,7 +132,7 @@ Tests in `tests/` have no type assertions (`as T`, `<T>x`); `as const` is fine. 
 
 A migration PR may delete a legacy test only when `npm run coverage:gate -- <file>` passes: every line only that file covers must now be covered by `tests/`. Paste its output into the PR body.
 
-The line coverage `tests/` reaches over `src/` only rises: `npm run coverage:floor` (a CI step) fails below the floor in `scripts/coverage-baseline.json`. New `src/` code therefore needs a test in `tests/`; a legacy test next to it does not count. Never lower the floor; the lint-shrink workflow raises it after each push to main.
+The line coverage `tests/` reaches over `src/` only rises: `npm run coverage:floor` (a CI step) fails more than 0.1 points below the floor in `scripts/coverage-baseline.json` (platforms map a few lines differently). New `src/` code therefore needs a test in `tests/`; a legacy test next to it does not count. Never lower the floor; the lint-shrink workflow raises it after each push to main.
 
 Never delete a test to satisfy the test ratchet. When a change trips the ratchet on a legacy test, either port its cases to a public-API test in `tests/` first (the deletion then follows the rule above), or leave the test where it is — it stays in the baseline, which is fine. The ratchet counts files, not cases: deleting a test lowers the count while the behaviour it guarded silently loses coverage, and CI can't tell. Reviewers enforce this; send back any PR that deletes a test without porting its cases.
 

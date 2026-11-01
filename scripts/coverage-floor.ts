@@ -4,8 +4,9 @@
 // deletion gate (scripts/coverage-gate.ts): the e2e tests' vitest process
 // and the CLI subprocesses they spawn. The windows CI job's is not counted.
 //
-// It fails when coverage falls below the floor, when the floor fell against
-// origin/main (where that ref exists), and when an e2e test fails: CI runs
+// It fails when coverage falls more than FLOOR_TOLERANCE (0.1 points) below
+// the floor, when the floor fell against origin/main (where that ref
+// exists), and when an e2e test fails: CI runs
 // the e2e tests only here, so this is their test step too.
 //
 // Above the floor passes: raising it is optional in a PR, and

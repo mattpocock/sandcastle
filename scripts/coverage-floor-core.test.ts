@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Lines } from "./coverage-gate-core.ts";
 import {
+  FLOOR_TOLERANCE,
   floorOf,
   floorProblems,
   linePercent,
@@ -40,8 +41,9 @@ describe("floorOf and raise", () => {
     expect(floorOf(34.66)).toBe(34.66);
   });
 
-  it("raises the floor but never lowers it", () => {
-    expect(raise(40.129, 34.66)).toBe(40.12);
+  it("raises the floor, rounded down to one decimal, but never lowers it", () => {
+    expect(raise(40.129, 34.66)).toBe(40.1);
+    expect(raise(53.81, 34.66)).toBe(53.8);
     expect(raise(30, 34.66)).toBe(34.66);
   });
 });
@@ -53,11 +55,21 @@ describe("floorProblems", () => {
     ).toStrictEqual([]);
   });
 
-  it("fails below the floor", () => {
+  it("passes within the tolerance below the floor", () => {
+    expect(FLOOR_TOLERANCE).toBe(0.1);
     expect(
-      floorProblems({ found: 34.65, floor: 34.66, baseFloor: undefined }),
+      floorProblems({ found: 53.7, floor: 53.8, baseFloor: 53.8 }),
+    ).toStrictEqual([]);
+    expect(
+      floorProblems({ found: 53.75, floor: 53.8, baseFloor: undefined }),
+    ).toStrictEqual([]);
+  });
+
+  it("fails more than the tolerance below the floor", () => {
+    expect(
+      floorProblems({ found: 34.55, floor: 34.66, baseFloor: undefined }),
     ).toStrictEqual([
-      "e2e line coverage fell to 34.65%, below the floor of 34.66%. Cover the new or changed code from tests/ (through the public API); never lower the floor.",
+      "e2e line coverage fell to 34.55%, more than 0.1 points below the floor of 34.66%. Cover the new or changed code from tests/ (through the public API); never lower the floor.",
     ]);
   });
 

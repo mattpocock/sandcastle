@@ -22,9 +22,21 @@ export const linePercent = (covered: Lines, coverable: Lines): number => {
 export const floorOf = (percent: number): number =>
   Math.floor(percent * 100 + 1e-9) / 100;
 
-/** The floor raised to `found`. Never lowers it. */
+/**
+ * How far below the floor coverage may measure and still pass, in percentage
+ * points. The same commit measures slightly differently per platform (53.81%
+ * on CI's Linux, 53.80% locally) because V8 and the source maps map a few
+ * lines differently, so a floor raised on one machine must not fail another.
+ */
+export const FLOOR_TOLERANCE = 0.1;
+
+/** `percent` rounded down to one decimal: the floor `--raise` stores. */
+const raisedFloorOf = (percent: number): number =>
+  Math.floor(percent * 10 + 1e-9) / 10;
+
+/** The floor raised to `found`, rounded down to one decimal. Never lowers it. */
 export const raise = (found: number, floor: number): number =>
-  Math.max(floor, floorOf(found));
+  Math.max(floor, raisedFloorOf(found));
 
 /** Rounded down, like the floor, so a value just under it never prints equal. */
 export const pct = (n: number): string => `${floorOf(n).toFixed(2)}%`;
@@ -45,9 +57,9 @@ export const floorProblems = ({
   floor,
   baseFloor,
 }: FloorInput): string[] => [
-  ...(found < floor
+  ...(found + FLOOR_TOLERANCE < floor - 1e-9
     ? [
-        `e2e line coverage fell to ${pct(found)}, below the floor of ${pct(floor)}. Cover the new or changed code from tests/ (through the public API); never lower the floor.`,
+        `e2e line coverage fell to ${pct(found)}, more than ${FLOOR_TOLERANCE.toFixed(1)} points below the floor of ${pct(floor)}. Cover the new or changed code from tests/ (through the public API); never lower the floor.`,
       ]
     : []),
   ...(baseFloor !== undefined && floor < baseFloor
