@@ -35,7 +35,8 @@ import type { ExecResult, SandboxService } from "./SandboxFactory.js";
 import type { IsolatedSandboxHandle } from "./SandboxProvider.js";
 import { buildRecoveryMessage } from "./RecoveryMessage.js";
 import type { FailedStep } from "./RecoveryMessage.js";
-import { SyncError, type SyncOutPathError } from "./errors.js";
+import { SyncError } from "./errors.js";
+import type { SyncOutPathError } from "./errors.js";
 import { hostGit } from "./hostGit.js";
 import {
   checkPatchFileSymlinks,
