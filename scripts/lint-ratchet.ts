@@ -12,6 +12,7 @@
 // only the public API; the legacy tests elsewhere only ever leave:
 // - a test file outside tests/ and the tooling tests  rule: `ratchet/test-outside-tests`
 // - dependency-cruiser (.dependency-cruiser.mjs)      rule: `depcruise/<name>`
+// - a type assertion in tests/, except `as const`     rule: `ratchet/test-type-assertion`
 //
 // Each fails when a count rises or a new file × rule appears. A count that
 // falls below the baseline passes: lowering the baseline is optional in a PR,
@@ -50,6 +51,7 @@ import {
   collectMatchObjectUndefined,
   collectOxlint,
   collectRawGitSpawns,
+  collectTestTypeAssertions,
   run,
 } from "./lint-ratchet-sources.ts";
 
@@ -78,9 +80,9 @@ const RATCHETS: readonly Ratchet[] = [
   {
     name: "test ratchet",
     baselinePath: "scripts/test-baseline.json",
-    sources: [collectLegacyTests, collectDepcruise],
+    sources: [collectLegacyTests, collectDepcruise, collectTestTypeAssertions],
     grownTitle:
-      "New test files outside tests/ or import-boundary violations (file: rule baseline -> found). Write new tests in tests/, importing only @ai-hero/sandcastle and its subpaths; `npx depcruise src tests` shows where:",
+      "New test files outside tests/, import-boundary violations or type assertions in tests/ (file: rule baseline -> found). Write new tests in tests/, importing only @ai-hero/sandcastle and its subpaths; `npx depcruise src tests` shows where. For `ratchet/test-type-assertion`, drop the `as T` / `<T>x`: build a value of the real type, or narrow with `expect` or a type guard (`as const` is fine):",
   },
 ];
 
