@@ -6,23 +6,19 @@
  *   await run({ agent: claudeCode("claude-opus-4-8"), sandbox: docker() });
  */
 
-import {
-  execFile,
-  execFileSync,
-  spawn,
-  type StdioOptions,
-} from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
+import type { StdioOptions } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import { Effect } from "effect";
 import { startContainer, removeContainer } from "../DockerLifecycle.js";
-import {
-  createBindMountSandboxProvider,
-  type SandboxProvider,
-  type BindMountCreateOptions,
-  type BindMountSandboxHandle,
-  type ExecResult,
-  type InteractiveExecOptions,
+import { createBindMountSandboxProvider } from "../SandboxProvider.js";
+import type {
+  SandboxProvider,
+  BindMountCreateOptions,
+  BindMountSandboxHandle,
+  ExecResult,
+  InteractiveExecOptions,
 } from "../SandboxProvider.js";
 import type { MountConfig } from "../MountConfig.js";
 import type { SelinuxLabel } from "../mountUtils.js";
