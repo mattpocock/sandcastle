@@ -30,6 +30,10 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
+      # Biome's format check, right after install so unformatted code fails
+      # fast, before Bubblewrap, the build or the tests run.
+      # Fix locally with `npm run format`.
+      - run: npm run format:check
       # bwrap() is proven here under real Bubblewrap (#1272): the containment
       # suite fails, rather than skips, when CI is set and bwrap can't run.
       # Ubuntu 24.04's AppArmor blocks the unprivileged user namespaces bwrap
