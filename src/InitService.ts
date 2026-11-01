@@ -912,11 +912,11 @@ const rewriteMainTs = (
     // Replace factory function name in imports (e.g. claudeCode → pi)
     // and all factory calls with the correct model.
     // Templates always use claudeCode as the placeholder factory.
-    content = content.replaceAll(/\bclaudeCode\b/g, agent.factoryImport);
+    content = content.replaceAll(/\bclaudeCode\b/gu, agent.factoryImport);
     // Replace model strings in factory calls: factoryImport("any-model")
     const factoryCallRe = new RegExp(
       `${agent.factoryImport}\\(["']([^"']+)["']\\)`,
-      "g",
+      "gu",
     );
     content = content.replaceAll(
       factoryCallRe,
@@ -929,14 +929,14 @@ const rewriteMainTs = (
     // case-sensitive word-boundary replace therefore rewrites the named import,
     // the import subpath, and every factory call site — and is a no-op when
     // docker is selected.
-    content = content.replaceAll(/\bdocker\b/g, sandboxProvider.name);
+    content = content.replaceAll(/\bdocker\b/gu, sandboxProvider.name);
 
     // A custom image name (init --image-name) must reach every sandbox factory
     // call, or the scaffolded run starts the default-named image instead of
     // the one init built.
     if (imageName !== undefined) {
       content = content.replaceAll(
-        new RegExp(`\\b${sandboxProvider.name}\\(\\)`, "g"),
+        new RegExp(`\\b${sandboxProvider.name}\\(\\)`, "gu"),
         `${sandboxProvider.name}({ imageName: ${JSON.stringify(imageName)} })`,
       );
     }
@@ -980,7 +980,7 @@ const applyIssueTrackerSandboxOptions = (
     const provider = sandboxProvider.name;
     const importRe = new RegExp(
       `^import \\{ ${provider} \\} from "@ai-hero/sandcastle/sandboxes/${provider}";$`,
-      "m",
+      "mu",
     );
     if (!importRe.test(content)) {
       return yield* new InitError({
@@ -991,7 +991,7 @@ const applyIssueTrackerSandboxOptions = (
     const updated = content
       .replace(importRe, (line) => `${line}\n\n${issueTracker.sandboxOptions}`)
       .replaceAll(
-        new RegExp(`\\b${provider}\\(\\)`, "g"),
+        new RegExp(`\\b${provider}\\(\\)`, "gu"),
         `${provider}(sandboxOptions)`,
       );
 
@@ -1089,7 +1089,7 @@ const substituteTemplateArgs = (
             issueTracker.templateArgs,
           )) {
             content = content.replaceAll(
-              new RegExp(`\\{\\{${key}\\}\\}`, "g"),
+              new RegExp(`\\{\\{${key}\\}\\}`, "gu"),
               value,
             );
           }
