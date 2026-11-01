@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { daytona } from "./daytona.js";
 
 // A fake @daytona/sdk modelling the default snapshot: the work dir is the
 // `daytona` user's home, /home/daytona, whose parent (/home) it can't write.
@@ -37,11 +38,14 @@ vi.mock("@daytona/sdk", async () => {
       stdio: ["ignore", "pipe", "pipe", "pipe"],
       encoding: "utf8",
     });
-    const recorded = r.output[3];
+    const recorded = r.output.at(3);
     return {
       stdout: r.stdout,
       stderr: r.stderr,
-      exitCode: recorded ? Number(recorded) : undefined,
+      exitCode:
+        typeof recorded === "string" && recorded !== ""
+          ? Number(recorded)
+          : undefined,
     };
   };
   const sessionCommands = new Map<string, ReturnType<typeof sessionSh>>();
@@ -113,8 +117,6 @@ vi.mock("@daytona/sdk", async () => {
   }
   return { Daytona };
 });
-
-import { daytona } from "./daytona.js";
 
 beforeEach(() => {
   sdk.createParams.length = 0;
@@ -244,18 +246,12 @@ describe("daytona()", () => {
           cwd,
           onLine: () => {},
         });
-        let settled = false;
-        outcome.then(
-          () => (settled = true),
-          () => (settled = true),
-        );
-        for (let i = 0; i < 20 && !settled; i++) {
-          await vi.advanceTimersByTimeAsync(5000);
-        }
-
-        await expect(outcome).rejects.toThrow(
-          /session shell exited before the command finished/,
-        );
+        await Promise.all([
+          expect(outcome).rejects.toThrow(
+            /session shell exited before the command finished/u,
+          ),
+          vi.advanceTimersByTimeAsync(100_000),
+        ]);
       } finally {
         vi.useRealTimers();
       }

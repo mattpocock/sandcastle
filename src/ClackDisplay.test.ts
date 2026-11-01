@@ -1,5 +1,7 @@
+import { stripVTControlCharacters } from "node:util";
 import { Effect } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Display as DisplayService } from "./Display.js";
 
 const calls: [string, string][] = vi.hoisted(() => []);
 
@@ -23,14 +25,10 @@ vi.mock("@clack/prompts", () => {
 
 const { ClackDisplay, Display } = await import("./Display.js");
 
-const strip = (s: string) => s.replaceAll(/\u001B\[[0-9;]*m/gu, "");
+const strip = (s: string) => stripVTControlCharacters(s);
 
-const runWith = async (
-  program: Effect.Effect<void, never, InstanceType<typeof Display>>,
-) =>
-  Effect.runPromise(
-    program.pipe(Effect.provide(ClackDisplay.layer)) as Effect.Effect<void>,
-  );
+const runWith = async (program: Effect.Effect<void, never, DisplayService>) =>
+  Effect.runPromise(program.pipe(Effect.provide(ClackDisplay.layer)));
 
 describe("ClackDisplay - textChunk", () => {
   beforeEach(() => {

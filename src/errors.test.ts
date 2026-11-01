@@ -6,7 +6,6 @@ import {
   DockerError,
   ExecError,
   ExecHostError,
-  InitError,
   PromptError,
   SyncError,
   WorktreeError,
