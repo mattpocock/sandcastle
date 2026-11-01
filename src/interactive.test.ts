@@ -626,16 +626,15 @@ describe("interactive()", () => {
   // --- Hooks tests ---
 
   it("runs onSandboxReady hooks before interactive session", async () => {
-    const executionOrder: string[] = [];
+    const interactiveRuns: { hookFileExists: boolean }[] = [];
 
     const provider = makeTestProvider(async (_args, opts) => {
       // Check if the hook file exists (created by the hook)
       const { cwd } = opts;
       assert.isDefined(cwd);
-      const hookFileExists = existsSync(join(cwd, "hook-ran.txt"));
-      executionOrder.push(
-        hookFileExists ? "interactive-after-hook" : "interactive-no-hook",
-      );
+      interactiveRuns.push({
+        hookFileExists: existsSync(join(cwd, "hook-ran.txt")),
+      });
       return { exitCode: 0 };
     });
 
@@ -650,7 +649,7 @@ describe("interactive()", () => {
       },
     });
 
-    expect(executionOrder).toStrictEqual(["interactive-after-hook"]);
+    expect(interactiveRuns).toStrictEqual([{ hookFileExists: true }]);
   });
 
   it("removes the worktree when sandbox start fails (no orphan)", async () => {
