@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { NodeFileSystem } from "@effect/platform-node";
 import { Effect, Layer, Ref } from "effect";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   Display,
   FileDisplay,
@@ -72,10 +72,12 @@ describe("SilentDisplay", () => {
         }).pipe(Effect.provide(layer)),
       );
 
-      expect(entries).toHaveLength(4);
-      expect(
-        entries.map((e) => (e as { severity: string }).severity),
-      ).toStrictEqual(["info", "success", "warn", "error"]);
+      expect(entries).toStrictEqual([
+        { _tag: "status", message: "info msg", severity: "info" },
+        { _tag: "status", message: "success msg", severity: "success" },
+        { _tag: "status", message: "warn msg", severity: "warn" },
+        { _tag: "status", message: "error msg", severity: "error" },
+      ]);
     });
   });
 
@@ -505,7 +507,7 @@ describe("FileDisplay", () => {
 
     const log = readLog(logPath);
     expect(log).toMatch(
-      /--- Run started: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z ---/u,
+      /--- Run started: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z ---/u,
     );
   });
 
