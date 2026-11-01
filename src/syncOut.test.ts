@@ -3,7 +3,6 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { Effect } from "effect";
 import { assert, describe, expect, it } from "vitest";
 import { makeSandboxFromHandle } from "./SandboxFactory.js";
@@ -11,7 +10,17 @@ import { testIsolated } from "./sandboxes/test-isolated.js";
 import { syncIn } from "./syncIn.js";
 import { countCommitsToSync, syncOut } from "./syncOut.js";
 
-const execAsync = promisify(exec);
+/** Runs a shell command; rejects on a non-zero exit, as `promisify(exec)` does. */
+const execAsync = (command: string, options: { cwd: string }) =>
+  new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+    exec(command, options, (error, stdout, stderr) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+  });
 
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });

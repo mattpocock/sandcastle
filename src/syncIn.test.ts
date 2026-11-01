@@ -2,14 +2,23 @@ import { exec } from "node:child_process";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { testIsolated } from "./sandboxes/test-isolated.js";
 import type { IsolatedSandboxHandle } from "./SandboxProvider.js";
 import { syncIn } from "./syncIn.js";
 
-const execAsync = promisify(exec);
+/** Runs a shell command; rejects on a non-zero exit, as `promisify(exec)` does. */
+const execAsync = (command: string, options: { cwd: string }) =>
+  new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+    exec(command, options, (error, stdout, stderr) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+  });
 
 /** A command's trimmed stdout inside the sandbox. */
 const sandboxStdout = async (
