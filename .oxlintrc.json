@@ -308,6 +308,17 @@
         // by where it is passed, so it is off for src/.
         "typescript/promise-function-async": "off"
       }
+    },
+    {
+      // The init templates: scripts users scaffold and run. Keep in sync with
+      // TEMPLATE_FILES in scripts/lint-ratchet-config.ts (it checks).
+      "files": ["src/templates/**"],
+      "rules": {
+        // The awaits in their loops run steps in sequence on purpose: each
+        // iteration builds on what the last one committed. Work that can run
+        // in parallel already goes through Promise.allSettled.
+        "eslint/no-await-in-loop": "off"
+      }
     }
   ]
 }

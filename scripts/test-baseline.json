@@ -134,9 +134,6 @@
   "src/syncOut.test.ts": {
     "ratchet/test-outside-tests": 1
   },
-  "src/terminalCleanup.test.ts": {
-    "ratchet/test-outside-tests": 1
-  },
   "src/windowsGitOverride.cleanup.test.ts": {
     "ratchet/test-outside-tests": 1
   },

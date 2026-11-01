@@ -9,31 +9,54 @@ export interface RecoveryInput {
   readonly branch?: string;
 }
 
+interface RecoveryStep {
+  readonly key: FailedStep;
+  readonly label: string;
+  readonly has: boolean;
+}
+
+/** The steps that had changes, in the order they are applied. */
+const stepsWithChanges = (input: RecoveryInput): RecoveryStep[] => {
+  const steps: RecoveryStep[] = [
+    { key: "commits", label: "committed changes", has: input.hasCommits },
+    { key: "diff", label: "uncommitted changes", has: input.hasDiff },
+    { key: "untracked", label: "untracked files", has: input.hasUntracked },
+  ];
+  return steps.filter((step) => step.has);
+};
+
+/** git am failure — lean on git's built-in workflow, then the rest. */
+const gitAmResolution = (remaining: string[]): string[] => [
+  "Resolve conflicts, then continue with:",
+  `  git am --continue`,
+  ...(remaining.length > 0
+    ? [
+        "",
+        "After all commits are applied, run the remaining steps:",
+        formatCommandBlock(remaining),
+      ]
+    : []),
+];
+
+/** diff or untracked failure — the commands from the failed step onward. */
+const applyResolution = (remaining: string[]): string[] =>
+  remaining.length > 0
+    ? ["Run the remaining steps:", formatCommandBlock(remaining)]
+    : [];
+
 /**
  * Build copy-pastable recovery commands for a failed sync-out.
  * Pure function: takes failure state, returns formatted terminal output.
  */
 export const buildRecoveryMessage = (input: RecoveryInput): string => {
-  const { patchDir, failedStep, hasCommits, hasDiff, hasUntracked, branch } =
-    input;
+  const { patchDir, failedStep, branch } = input;
 
   // When --branch is set, commands run inside .sandcastle/worktree,
   // so patch paths need ../../ prefix to reach repo root
   const hasBranch = branch !== undefined && branch !== "";
   const cmdPatchDir = hasBranch ? `../../${patchDir}` : patchDir;
 
-  // Determine the step number for the failed step
-  const steps: { key: FailedStep; label: string; has: boolean }[] = [];
-  if (hasCommits) {
-    steps.push({ key: "commits", label: "committed changes", has: true });
-  }
-  if (hasDiff) {
-    steps.push({ key: "diff", label: "uncommitted changes", has: true });
-  }
-  if (hasUntracked) {
-    steps.push({ key: "untracked", label: "untracked files", has: true });
-  }
-
+  const steps = stepsWithChanges(input);
   const failedIndex = steps.findIndex((s) => s.key === failedStep);
   const failedStepInfo = steps[failedIndex];
   if (failedStepInfo === undefined) {
@@ -41,50 +64,35 @@ export const buildRecoveryMessage = (input: RecoveryInput): string => {
       `Recovery step "${failedStep}" failed, but it had no changes to apply.`,
     );
   }
-  const stepNumber = failedIndex + 1;
 
-  const lines: string[] = [
-    `Patch application failed at step ${stepNumber} (${failedStepInfo.label}).`,
+  // Worktree setup preamble for --branch
+  const preamble = hasBranch
+    ? [
+        "Set up worktree, then resolve:",
+        formatCommandBlock([
+          `git worktree add .sandcastle/worktree ${branch}`,
+          `cd .sandcastle/worktree`,
+        ]),
+        "",
+      ]
+    : [];
+
+  // git am resumes the failed step itself, so only the later steps remain.
+  const resolution =
+    failedStep === "commits"
+      ? gitAmResolution(
+          buildRemainingCommands(cmdPatchDir, steps.slice(failedIndex + 1)),
+        )
+      : applyResolution(
+          buildRemainingCommands(cmdPatchDir, steps.slice(failedIndex)),
+        );
+
+  return [
+    `Patch application failed at step ${failedIndex + 1} (${failedStepInfo.label}).`,
     "",
-  ];
-
-  // Add worktree setup preamble for --branch
-  if (hasBranch) {
-    lines.push(
-      "Set up worktree, then resolve:",
-      formatCommandBlock([
-        `git worktree add .sandcastle/worktree ${branch}`,
-        `cd .sandcastle/worktree`,
-      ]),
-    );
-    lines.push("");
-  }
-
-  if (failedStep === "commits") {
-    // git am failure — lean on git's built-in workflow
-    lines.push("Resolve conflicts, then continue with:", `  git am --continue`);
-
-    // Remaining steps after git am resolves
-    const remaining = buildRemainingCommands(
-      cmdPatchDir,
-      steps.slice(failedIndex + 1),
-    );
-    if (remaining.length > 0) {
-      lines.push("", "After all commits are applied, run the remaining steps:");
-      lines.push(formatCommandBlock(remaining));
-    }
-  } else {
-    // diff or untracked failure — print remaining commands from failed step onward
-    const remaining = buildRemainingCommands(
-      cmdPatchDir,
-      steps.slice(failedIndex),
-    );
-    if (remaining.length > 0) {
-      lines.push("Run the remaining steps:", formatCommandBlock(remaining));
-    }
-  }
-
-  return lines.join("\n");
+    ...preamble,
+    ...resolution,
+  ].join("\n");
 };
 
 const buildRemainingCommands = (

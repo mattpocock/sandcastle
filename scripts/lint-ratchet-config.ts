@@ -35,6 +35,9 @@ export const TOOLING_SCRIPTS: readonly string[] = [
 /** Mirrors the fourth override in .oxlintrc.json: the package source. */
 export const SOURCE_FILES: readonly string[] = ["src/**"];
 
+/** Mirrors the fifth override in .oxlintrc.json: the init templates. */
+export const TEMPLATE_FILES: readonly string[] = ["src/templates/**"];
+
 /**
  * The end-to-end tests: the only place a new test may go. Mirrors the `e2e`
  * project in vitest.config.ts. A test file anywhere else, outside
