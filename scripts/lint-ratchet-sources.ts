@@ -73,7 +73,11 @@ const isExempt = (
   exemptions: readonly Exemption[],
   { file, rule }: Violation,
 ): boolean =>
-  exemptions.some((e) => e.rules.includes(rule) && matchesAny(e.files, file));
+  exemptions.some(
+    (e) =>
+      (e.rules.includes(rule) || e.rules.includes("*")) &&
+      matchesAny(e.files, file),
+  );
 
 const OxlintOutput = z.object({
   diagnostics: z.array(
