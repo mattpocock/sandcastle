@@ -960,7 +960,10 @@ const applyIssueTrackerSandboxOptions = (
   mainFilename: string,
 ): Effect.Effect<void, InitError, FileSystem.FileSystem> =>
   Effect.gen(function* () {
-    if (!issueTracker.sandboxOptions) {
+    if (
+      issueTracker.sandboxOptions === undefined ||
+      issueTracker.sandboxOptions === ""
+    ) {
       return;
     }
     const fs = yield* FileSystem.FileSystem;
