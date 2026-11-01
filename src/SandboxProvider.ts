@@ -25,6 +25,15 @@ export interface BindMountSandboxHandle {
   /** Absolute path to the worktree inside the sandbox. */
   readonly worktreePath: string;
   /**
+   * The id a supervisor outside this process can use to address the sandbox
+   * with the runtime's own tools, e.g. `docker()` and `podman()` set it to the
+   * container name (`docker rm -f <sandboxId>`). Surfaced as
+   * `Sandbox.sandboxId`. Omit it when there is nothing outside the process to
+   * address, as for the native `bwrap()` and `seatbelt()` sandboxes, whose
+   * sandbox is a child process of this one.
+   */
+  readonly sandboxId?: string;
+  /**
    * Absolute path to the agent's home directory, as commands running inside
    * the sandbox see it. Sandcastle runs commands there to find and place agent
    * session files. Omit when it is `/home/agent`, as in the Docker image.
@@ -112,6 +121,13 @@ export interface BindMountSandboxProviderConfig {
 export interface IsolatedSandboxHandle {
   /** Absolute path to the worktree inside the sandbox. */
   readonly worktreePath: string;
+  /**
+   * The vendor's id for the sandbox, so a supervisor outside this process can
+   * address it with the vendor's own CLI or API, e.g. `vercel()` and
+   * `daytona()` set it to the Vercel and Daytona sandbox ids. Surfaced as
+   * `Sandbox.sandboxId`. Omit it when the provider has no such id.
+   */
+  readonly sandboxId?: string;
   /**
    * Execute a command in the sandbox.
    *

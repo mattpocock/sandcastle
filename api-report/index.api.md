@@ -88,6 +88,7 @@ export interface BindMountSandboxHandle {
         exitCode: number;
     }>;
     readonly sandboxHomedir?: string;
+    readonly sandboxId?: string;
     readonly sandboxTmpdir?: string;
     readonly worktreePath: string;
 }
@@ -345,6 +346,7 @@ export interface IsolatedSandboxHandle {
     interactiveExec?(args: string[], options: InteractiveExecOptions): Promise<{
         exitCode: number;
     }>;
+    readonly sandboxId?: string;
     readonly worktreePath: string;
 }
 
@@ -625,6 +627,7 @@ export interface Sandbox {
     exec(command: string, options?: SandboxExecOptions): Promise<ExecResult>;
     interactive(options: SandboxInteractiveOptions): Promise<SandboxInteractiveResult>;
     run(options: SandboxRunOptions): Promise<SandboxRunResult>;
+    readonly sandboxId?: string;
     readonly worktreePath: string;
 }
 
