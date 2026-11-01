@@ -90,19 +90,29 @@ export const trustedPath = (
 ): Effect.Effect<string> =>
   Effect.gen(function* () {
     const rootForms = (yield* Effect.all(roots.map((r) => formsOf(r)))).flat();
-    const kept: string[] = [];
-    for (const entry of pathValue.split(delimiter)) {
-      if (entry !== "" && isAbsolute(entry)) {
-        const forms = yield* formsOf(entry);
-        const inside = forms.some((form) =>
-          rootForms.some((root) => isWithin(form, root)),
-        );
-        if (!inside) {
-          kept.push(entry);
-        }
-      }
-    }
-    return kept.join(delimiter);
+    const entries = pathValue
+      .split(delimiter)
+      .filter((entry) => entry !== "" && isAbsolute(entry));
+    // Resolved concurrently: this runs before every host git call, and one
+    // `realpath` per entry in turn adds up on slow filesystems (a WSL `PATH`
+    // carries dozens of `/mnt/c` entries: ~100ms per git call).
+    const checked = yield* Effect.all(
+      entries.map((entry) =>
+        formsOf(entry).pipe(
+          Effect.map((forms) => ({
+            entry,
+            inside: forms.some((form) =>
+              rootForms.some((root) => isWithin(form, root)),
+            ),
+          })),
+        ),
+      ),
+      { concurrency: "unbounded" },
+    );
+    return checked
+      .filter(({ inside }) => !inside)
+      .map(({ entry }) => entry)
+      .join(delimiter);
   });
 
 const isExecutableFile = (p: string): Effect.Effect<boolean> =>
