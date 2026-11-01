@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile, mkdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Exit } from "effect";
+import { Cause, Chunk, Effect, Exit } from "effect";
 import { assert, describe, expect, it, vi } from "vitest";
 import { copyToWorktree, getCopyOnWriteFlags } from "./CopyToWorktree.js";
 import { CopyToWorktreeError, CopyToWorktreeTimeoutError } from "./errors.js";
@@ -194,16 +194,17 @@ describe("copyToWorktree", () => {
       await vi.advanceTimersByTimeAsync(customTimeout + 100);
 
       const exit = await exitPromise;
-      // The copy may succeed before the timeout fires on fast systems,
-      // but if it times out, the error should carry the custom timeout value
-      if (Exit.isFailure(exit) && exit.cause._tag === "Fail") {
-        const { error } = exit.cause;
+      // The copy may succeed before the timeout fires on fast systems
+      // (no failures), but if it times out, the error should carry the
+      // custom timeout value
+      const failures = Exit.match(exit, {
+        onSuccess: () => [],
+        onFailure: (cause) => Chunk.toArray(Cause.failures(cause)),
+      });
+      for (const error of failures) {
         expect(error).toBeInstanceOf(CopyToWorktreeTimeoutError);
-        if (error instanceof CopyToWorktreeTimeoutError) {
-          expect(error.timeoutMs).toBe(customTimeout);
-        }
+        expect(error).toHaveProperty("timeoutMs", customTimeout);
       }
-      // If it succeeds, that's also fine — the timeout just didn't fire
     } finally {
       vi.useRealTimers();
       await rm(hostDir, { recursive: true, force: true });

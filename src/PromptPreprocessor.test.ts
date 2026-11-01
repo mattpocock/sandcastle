@@ -97,13 +97,12 @@ describe("PromptPreprocessor", () => {
           events.push(`start:${command}`);
           yield* Effect.yieldNow();
           events.push(`end:${command}`);
-          if (command === "echo hello") {
-            return { stdout: "hello\n", stderr: "", exitCode: 0 };
-          }
-          if (command === "echo world") {
-            return { stdout: "world\n", stderr: "", exitCode: 0 };
-          }
-          return { stdout: "", stderr: "", exitCode: 0 };
+          // Only `echo hello` and `echo world` run here: echo their argument
+          return {
+            stdout: `${command.slice("echo ".length)}\n`,
+            stderr: "",
+            exitCode: 0,
+          };
         }),
       copyIn: () => Effect.void,
       copyFileOut: () => Effect.void,
