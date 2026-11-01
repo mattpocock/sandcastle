@@ -57,6 +57,99 @@ const execOk = (
     ),
   );
 
+/** Copy the host bundle into a fresh sandbox temp dir; returns both paths. */
+const copyBundleIn = (
+  handle: IsolatedSandboxHandle,
+  bundleHostPath: string,
+): Effect.Effect<
+  { sandboxTmpDir: string; bundleSandboxPath: string },
+  SyncError
+> =>
+  Effect.gen(function* () {
+    const mkTempResult = yield* execOk(
+      handle,
+      "mktemp -d -t sandcastle-XXXXXX",
+    );
+    const sandboxTmpDir = mkTempResult.stdout.trim();
+    const bundleSandboxPath = `${sandboxTmpDir}/repo.bundle`;
+
+    yield* Effect.tryPromise({
+      try: () => handle.copyIn(bundleHostPath, bundleSandboxPath),
+      catch: (e) =>
+        new SyncError({
+          message: `Failed to copy bundle into sandbox: ${e instanceof Error ? e.message : String(e)}`,
+        }),
+    });
+
+    return { sandboxTmpDir, bundleSandboxPath };
+  });
+
+/** Fail with SyncError unless the sandbox worktree HEAD matches the host's. */
+const verifyHeadsMatch = (
+  hostRepoDir: string,
+  handle: IsolatedSandboxHandle,
+): Effect.Effect<void, SyncError> =>
+  Effect.gen(function* () {
+    const hostHead = (yield* execHostGit(
+      ["rev-parse", "HEAD"],
+      hostRepoDir,
+    )).trim();
+    const sandboxHead = (yield* execOk(handle, "git rev-parse HEAD", {
+      cwd: handle.worktreePath,
+    })).stdout.trim();
+
+    return yield* hostHead === sandboxHead
+      ? Effect.void
+      : new SyncError({
+          message: `HEAD mismatch after sync-in: host=${hostHead} sandbox=${sandboxHead}`,
+        });
+  });
+
+/** Bundle the host repo, clone it into the sandbox worktree, check out `branch`. */
+const cloneViaBundle = (
+  hostRepoDir: string,
+  handle: IsolatedSandboxHandle,
+  { bundleHostPath, branch }: { bundleHostPath: string; branch: string },
+): Effect.Effect<void, SyncError> =>
+  Effect.gen(function* () {
+    yield* execHostGit(
+      ["bundle", "create", bundleHostPath, "--all"],
+      hostRepoDir,
+    );
+
+    const { sandboxTmpDir, bundleSandboxPath } = yield* copyBundleIn(
+      handle,
+      bundleHostPath,
+    );
+
+    // Clone from bundle into the worktree
+    const { worktreePath } = handle;
+    yield* execOk(
+      handle,
+      `git clone "${bundleSandboxPath}" "${worktreePath}_clone"`,
+    );
+
+    // Move contents from clone into worktree (git clone requires empty target)
+    yield* execOk(
+      handle,
+      `rm -rf "${worktreePath}" && mv "${worktreePath}_clone" "${worktreePath}"`,
+    );
+
+    // Checkout the correct branch
+    yield* execOk(handle, `git checkout "${branch}"`, {
+      cwd: worktreePath,
+    });
+
+    // Clean up sandbox temp files
+    yield* Effect.tryPromise({
+      try: () => handle.exec(`rm -rf "${sandboxTmpDir}"`),
+      catch: () =>
+        new SyncError({ message: "Failed to clean up sandbox temp dir" }),
+    });
+
+    yield* verifyHeadsMatch(hostRepoDir, handle);
+  });
+
 /**
  * Sync a host git repo into an isolated sandbox.
  *
@@ -86,70 +179,11 @@ export const syncIn = (
           message: `Failed to create temp dir: ${e instanceof Error ? e.message : String(e)}`,
         }),
     });
-    const bundleHostPath = join(bundleDir, "repo.bundle");
 
     yield* Effect.ensuring(
-      Effect.gen(function* () {
-        yield* execHostGit(
-          ["bundle", "create", bundleHostPath, "--all"],
-          hostRepoDir,
-        );
-
-        // Create temp dir in sandbox and copy bundle in
-        const mkTempResult = yield* execOk(
-          handle,
-          "mktemp -d -t sandcastle-XXXXXX",
-        );
-        const sandboxTmpDir = mkTempResult.stdout.trim();
-        const bundleSandboxPath = `${sandboxTmpDir}/repo.bundle`;
-
-        yield* Effect.tryPromise({
-          try: () => handle.copyIn(bundleHostPath, bundleSandboxPath),
-          catch: (e) =>
-            new SyncError({
-              message: `Failed to copy bundle into sandbox: ${e instanceof Error ? e.message : String(e)}`,
-            }),
-        });
-
-        // Clone from bundle into the worktree
-        const { worktreePath } = handle;
-        yield* execOk(
-          handle,
-          `git clone "${bundleSandboxPath}" "${worktreePath}_clone"`,
-        );
-
-        // Move contents from clone into worktree (git clone requires empty target)
-        yield* execOk(
-          handle,
-          `rm -rf "${worktreePath}" && mv "${worktreePath}_clone" "${worktreePath}"`,
-        );
-
-        // Checkout the correct branch
-        yield* execOk(handle, `git checkout "${branch}"`, {
-          cwd: worktreePath,
-        });
-
-        // Clean up sandbox temp files
-        yield* Effect.tryPromise({
-          try: () => handle.exec(`rm -rf "${sandboxTmpDir}"`),
-          catch: () =>
-            new SyncError({ message: "Failed to clean up sandbox temp dir" }),
-        });
-
-        // Verify sync succeeded
-        const hostHead = (yield* execHostGit(
-          ["rev-parse", "HEAD"],
-          hostRepoDir,
-        )).trim();
-        const sandboxHead = (yield* execOk(handle, "git rev-parse HEAD", {
-          cwd: worktreePath,
-        })).stdout.trim();
-
-        return yield* hostHead === sandboxHead
-          ? Effect.void
-          : new SyncError({
-              message: `HEAD mismatch after sync-in: host=${hostHead} sandbox=${sandboxHead}`,
-            });
+      cloneViaBundle(hostRepoDir, handle, {
+        bundleHostPath: join(bundleDir, "repo.bundle"),
+        branch,
       }),
       // Clean up host-side bundle temp dir (runs regardless of success/failure)
       Effect.promise(() => rm(bundleDir, { recursive: true, force: true })),
