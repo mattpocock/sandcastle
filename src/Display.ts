@@ -187,7 +187,7 @@ export const FileDisplay = {
           intro: () => Effect.void,
 
           status: (message, _severity) =>
-            appendToLog(message.replace(/^\[[^\]]+\] /, "")),
+            appendToLog(message.replace(/^\[[^\]]+\] /u, "")),
 
           spinner: (message, effect) =>
             Effect.gen(function* () {
@@ -256,7 +256,7 @@ export const terminalStyle = {
 
 /** Prints a text chunk via clack, dropping leading/trailing blank lines. */
 const printClackText = (text: string) => {
-  const trimmed = text.replaceAll(/^\n+|\n+$/g, "");
+  const trimmed = text.replaceAll(/^\n+|\n+$/gu, "");
   if (trimmed.trim().length > 0) {
     clack.log.message(trimmed);
   }

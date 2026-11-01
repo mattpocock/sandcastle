@@ -101,13 +101,8 @@ describe("tagged errors", () => {
     );
     const copyFail = Effect.fail(new CopyError({ message: "copy failed" }));
 
-    // Both errors compose into a single chain
-    const program = Effect.gen(function* () {
-      if (Math.random() > 2) {
-        return yield* execFail;
-      }
-      return yield* copyFail;
-    });
+    // Both errors compose into a single chain; copyFail short-circuits it
+    const program = copyFail.pipe(Effect.zipRight(execFail));
 
     const error = await Effect.runPromise(program.pipe(Effect.flip));
     expect(error._tag).toBe("CopyError");

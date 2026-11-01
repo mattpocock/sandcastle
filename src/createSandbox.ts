@@ -326,7 +326,7 @@ const withAgentEnv = (
   });
   const invalid = entries
     .map(([key]) => key)
-    .filter((key) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key));
+    .filter((key) => !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(key));
   if (invalid.length > 0) {
     throw new Error(
       `Invalid agent provider env key(s): ${invalid.join(", ")}. Keys must match [A-Za-z_][A-Za-z0-9_]*.`,
@@ -388,8 +388,12 @@ const buildSandboxHandle = (
 
       validateTimeoutOptions(runOptions);
 
+      const isResuming =
+        runOptions.resumeSession !== undefined &&
+        runOptions.resumeSession !== "";
+
       // Validate: resumeSession + maxIterations > 1 is not allowed.
-      if (runOptions.resumeSession && maxIterations > 1) {
+      if (isResuming && maxIterations > 1) {
         throw new Error(
           "resumeSession cannot be combined with maxIterations > 1. " +
             "Resume applies to iteration 1 only; multi-iteration resume semantics are not supported.",
@@ -397,7 +401,7 @@ const buildSandboxHandle = (
       }
 
       // Validate: forkSession only makes sense alongside resumeSession.
-      if (runOptions.forkSession && !runOptions.resumeSession) {
+      if (runOptions.forkSession === true && !isResuming) {
         throw new Error(
           "forkSession requires resumeSession. " +
             "Use sandboxRunResult.fork(prompt) to fork the most recent captured session.",
@@ -408,7 +412,7 @@ const buildSandboxHandle = (
       }
 
       // Validate: resumeSession file must exist on the host before launching.
-      if (runOptions.resumeSession) {
+      if (isResuming) {
         await assertResumeSessionExists({
           provider,
           sandboxTag: ctx.providerTag,
@@ -559,7 +563,11 @@ const buildSandboxHandle = (
       // The functions re-enter the same long-lived sandbox by calling
       // sandboxHandle.run() — container and worktree stay warm.
       const lastIteration = result.iterations.at(-1);
-      if (provider.sessionStorage && lastIteration?.sessionId) {
+      if (
+        provider.sessionStorage &&
+        lastIteration?.sessionId !== undefined &&
+        lastIteration.sessionId !== ""
+      ) {
         const capturedSessionId = lastIteration.sessionId;
         return {
           ...baseResult,
@@ -606,7 +614,9 @@ const buildSandboxHandle = (
 
       const { agent: provider, prompt, promptFile } = interactiveOptions;
 
-      if (!provider.buildInteractiveArgs) {
+      const buildInteractiveArgs =
+        provider.buildInteractiveArgs?.bind(provider);
+      if (!buildInteractiveArgs) {
         throw new Error(
           `Agent provider "${provider.name}" does not support buildInteractiveArgs, required for interactive sessions.`,
         );
@@ -675,7 +685,7 @@ const buildSandboxHandle = (
                         ctx.sandboxRepoDir,
                       );
 
-                  const interactiveArgs = provider.buildInteractiveArgs!({
+                  const interactiveArgs = buildInteractiveArgs({
                     prompt: fullPrompt,
                     dangerouslySkipPermissions: true,
                   });
@@ -800,7 +810,7 @@ export const createSandboxFromWorktree = async (
   const mountsToClean: MountEntry[] = [];
 
   if (isTestMode) {
-    sandbox = options._test.buildSandbox!(worktreePath);
+    sandbox = options._test.buildSandbox(worktreePath);
     sandboxRepoDir = worktreePath;
     providerHandle = options._test.bindMountHandle;
   } else {
@@ -867,7 +877,7 @@ export const createSandboxFromWorktree = async (
   const sandboxOnReady = options.hooks?.sandbox?.onSandboxReady;
   const hostOnReady = options.hooks?.host?.onSandboxReady;
 
-  if (sandboxOnReady?.length || hostOnReady?.length) {
+  if ((sandboxOnReady?.length ?? 0) > 0 || (hostOnReady?.length ?? 0) > 0) {
     await Effect.runPromise(
       Effect.gen(function* () {
         yield* sandbox.exec(
@@ -881,7 +891,7 @@ export const createSandboxFromWorktree = async (
         );
         const allEffects = [
           ...sandboxEffects,
-          ...(hostOnReady?.length
+          ...(hostOnReady !== undefined && hostOnReady.length > 0
             ? [runHostHooks(hostOnReady, worktreePath)]
             : []),
         ];
@@ -987,11 +997,9 @@ export const createSandbox = async (
           }
 
           // Run host.onWorktreeReady hooks (after copy, before sandbox creation).
-          if (options.hooks?.host?.onWorktreeReady?.length) {
-            yield* runHostHooks(
-              options.hooks.host.onWorktreeReady,
-              worktreePath,
-            );
+          const onWorktreeReady = options.hooks?.host?.onWorktreeReady;
+          if (onWorktreeReady !== undefined && onWorktreeReady.length > 0) {
+            yield* runHostHooks(onWorktreeReady, worktreePath);
           }
 
           // Start the sandbox via the test layer or the shared startSandbox helper.
@@ -1004,7 +1012,7 @@ export const createSandbox = async (
           let sandboxRepoDir: string;
 
           if (isTestMode) {
-            sandbox = options._test.buildSandbox!(worktreePath);
+            sandbox = options._test.buildSandbox(worktreePath);
             sandboxRepoDir = worktreePath;
             providerHandle = options._test.bindMountHandle;
           } else {
@@ -1072,7 +1080,10 @@ export const createSandbox = async (
           const sandboxOnReady = options.hooks?.sandbox?.onSandboxReady;
           const hostOnReady = options.hooks?.host?.onSandboxReady;
 
-          if (sandboxOnReady?.length || hostOnReady?.length) {
+          if (
+            (sandboxOnReady?.length ?? 0) > 0 ||
+            (hostOnReady?.length ?? 0) > 0
+          ) {
             yield* Effect.gen(function* () {
               yield* sandbox.exec(
                 `git config --global --add safe.directory "${sandboxRepoDir}"`,
@@ -1085,7 +1096,7 @@ export const createSandbox = async (
               );
               const allEffects = [
                 ...sandboxEffects,
-                ...(hostOnReady?.length
+                ...(hostOnReady !== undefined && hostOnReady.length > 0
                   ? [runHostHooks(hostOnReady, worktreePath)]
                   : []),
               ];

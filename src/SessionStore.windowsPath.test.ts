@@ -22,7 +22,7 @@ describe("claudeSandboxSessionPath on Windows-style hosts", () => {
       "/home/agent/.claude/projects",
     );
 
-    expect(path).not.toMatch(/\\/);
+    expect(path).not.toMatch(/\\/u);
     expect(path).toBe(
       "/home/agent/.claude/projects/-home-agent-workspace/abc.jsonl",
     );

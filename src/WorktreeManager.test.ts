@@ -128,7 +128,7 @@ describe("sanitizeName", () => {
 describe("generateTempBranchName", () => {
   it("returns a string in sandcastle/<YYYYMMDD-HHMMSS>-<random> format", () => {
     const name = generateTempBranchName();
-    expect(name).toMatch(/^sandcastle\/\d{8}-\d{6}-[0-9a-f]{6}$/);
+    expect(name).toMatch(/^sandcastle\/\d{8}-\d{6}-[0-9a-f]{6}$/u);
   });
 
   it("returns different names when called at different times", async () => {
@@ -148,12 +148,12 @@ describe("generateTempBranchName", () => {
 
   it("includes sanitized name when provided", () => {
     const name = generateTempBranchName("my-run");
-    expect(name).toMatch(/^sandcastle\/my-run\/\d{8}-\d{6}-[0-9a-f]{6}$/);
+    expect(name).toMatch(/^sandcastle\/my-run\/\d{8}-\d{6}-[0-9a-f]{6}$/u);
   });
 
   it("sanitizes the name in the branch", () => {
     const name = generateTempBranchName("My Run!");
-    expect(name).toMatch(/^sandcastle\/my-run-\/\d{8}-\d{6}-[0-9a-f]{6}$/);
+    expect(name).toMatch(/^sandcastle\/my-run-\/\d{8}-\d{6}-[0-9a-f]{6}$/u);
   });
 });
 
@@ -180,19 +180,19 @@ describe("WorktreeManager.create", () => {
   it("creates a sandcastle/<timestamp>-<random> branch when no branch is specified", async () => {
     const repoDir = await setupRepo();
     const { branch } = await run(create(repoDir));
-    expect(branch).toMatch(/^sandcastle\/\d{8}-\d{6}-[0-9a-f]{6}$/);
+    expect(branch).toMatch(/^sandcastle\/\d{8}-\d{6}-[0-9a-f]{6}$/u);
   });
 
   it("includes name in branch when name is specified", async () => {
     const repoDir = await setupRepo();
     const { branch } = await run(create(repoDir, { name: "my-run" }));
-    expect(branch).toMatch(/^sandcastle\/my-run\/\d{8}-\d{6}-[0-9a-f]{6}$/);
+    expect(branch).toMatch(/^sandcastle\/my-run\/\d{8}-\d{6}-[0-9a-f]{6}$/u);
   });
 
   it("includes name in worktree directory when name is specified", async () => {
     const repoDir = await setupRepo();
     const { path } = await run(create(repoDir, { name: "my-run" }));
-    expect(path).toMatch(/sandcastle-my-run-\d{8}-\d{6}-[0-9a-f]{6}$/);
+    expect(path).toMatch(/sandcastle-my-run-\d{8}-\d{6}-[0-9a-f]{6}$/u);
   });
 
   it("checks out the specified branch when branch is given", async () => {
@@ -216,7 +216,7 @@ describe("WorktreeManager.create", () => {
     const { stdout } = await execAsync("git rev-parse --abbrev-ref HEAD", {
       cwd: path,
     });
-    expect(stdout.trim()).toMatch(/^sandcastle\//);
+    expect(stdout.trim()).toMatch(/^sandcastle\//u);
   });
 
   it("reuses existing clean worktree for the same branch", async () => {
@@ -676,13 +676,13 @@ describe("WorktreeManager.create", () => {
     const repoDir = await setupRepo();
     // "main" is the currently checked-out branch in the main working tree
     const err = await runFail(create(repoDir, { branch: "main" }));
-    expect(err.message).toMatch(/already checked out/i);
+    expect(err.message).toMatch(/already checked out/iu);
     // The error should explain why this happens (sandcastle uses worktrees,
     // git forbids the same branch in two worktrees) and what to do about it,
     // not propose smart recovery.
-    expect(err.message).toMatch(/worktree/i);
-    expect(err.message).toMatch(/branch.*merge-to-head/i);
-    expect(err.message).toMatch(/different branch/i);
+    expect(err.message).toMatch(/worktree/iu);
+    expect(err.message).toMatch(/branch.*merge-to-head/iu);
+    expect(err.message).toMatch(/different branch/iu);
   });
 
   it("does not write upstream tracking config even when autoSetupMerge is enabled", async () => {

@@ -183,7 +183,9 @@ describe("daytona()", () => {
       const result = await handle.exec("cat", {
         cwd,
         stdin: prompt,
-        onLine: (line) => lines.push(line),
+        onLine: (line) => {
+          lines.push(line);
+        },
       });
 
       expect(result.exitCode).toBe(0);
@@ -210,7 +212,9 @@ describe("daytona()", () => {
 
       const result = await handle.exec("echo before; exit 3", {
         cwd,
-        onLine: (line) => lines.push(line),
+        onLine: (line) => {
+          lines.push(line);
+        },
       });
 
       expect(result.exitCode).toBe(3);

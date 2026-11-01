@@ -70,6 +70,22 @@ export interface DaytonaOptions {
 /** How often a streamed `exec` checks that its session shell is still alive. */
 const SESSION_WATCH_INTERVAL_MS = 15_000;
 
+/** The Daytona client config: only the connection options that are set. */
+const toDaytonaConfig = (options?: DaytonaOptions): DaytonaConfig => {
+  const { apiKey, apiUrl, target } = options ?? {};
+  const config: DaytonaConfig = {};
+  if (apiKey !== undefined && apiKey !== "") {
+    config.apiKey = apiKey;
+  }
+  if (apiUrl !== undefined && apiUrl !== "") {
+    config.apiUrl = apiUrl;
+  }
+  if (target !== undefined && target !== "") {
+    config.target = target;
+  }
+  return config;
+};
+
 /**
  * Create a Daytona isolated sandbox provider.
  *
@@ -92,18 +108,7 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
       const { Daytona } =
         (await import("@daytona/sdk")) as typeof import("@daytona/sdk");
 
-      const config: DaytonaConfig = {};
-      if (options?.apiKey) {
-        config.apiKey = options.apiKey;
-      }
-      if (options?.apiUrl) {
-        config.apiUrl = options.apiUrl;
-      }
-      if (options?.target) {
-        config.target = options.target;
-      }
-
-      const client: DaytonaClient = new Daytona(config);
+      const client: DaytonaClient = new Daytona(toDaytonaConfig(options));
       // Pass the resolved env (env resolver + provider + agent) to the
       // sandbox. Explicit `create.envVars` win, as the most specific source.
       const createParams = options?.create;
@@ -142,9 +147,10 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
         ): Promise<ExecResult> => {
           // Wrap the whole command in `sh -c`, so sudo elevates all of it
           // (`a && b`, not just `a`).
-          let effectiveCommand = opts?.sudo
-            ? `sudo sh -c ${shellEscape(command)}`
-            : command;
+          let effectiveCommand =
+            opts?.sudo === true
+              ? `sudo sh -c ${shellEscape(command)}`
+              : command;
           if (opts?.stdin !== undefined) {
             // Daytona's exec APIs have no stdin channel: the command reads
             // EOF. So write stdin to a file in the sandbox and redirect it in

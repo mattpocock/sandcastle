@@ -24,6 +24,21 @@ import {
 
 const execAsync = promisify(exec);
 
+type CopyIn = (hostPath: string, sandboxPath: string) => Promise<void>;
+
+/**
+ * A `copyIn` that passes syncIn's repo bundle copies through to the real
+ * handle and sends every other copy to `otherwise`.
+ */
+const copyBundlesOnly =
+  (handle: { copyIn: CopyIn }, otherwise: () => Promise<void>): CopyIn =>
+  async (hostPath, sandboxPath) => {
+    if (sandboxPath.includes("repo.bundle")) {
+      return handle.copyIn(hostPath, sandboxPath);
+    }
+    return otherwise();
+  };
+
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });
   await execAsync('git config user.email "test@test.com"', { cwd: dir });
@@ -188,14 +203,11 @@ describe("startSandbox", () => {
           const handle = await realProvider.create(options);
           return {
             ...handle,
-            copyIn: async (hostPath: string, sandboxPath: string) => {
-              // Allow syncIn's copyIn calls (bundle files) to succeed,
-              // but hang on everything else
-              if (sandboxPath.includes("repo.bundle")) {
-                return handle.copyIn(hostPath, sandboxPath);
-              }
-              return new Promise<void>(() => {}); // never resolves
-            },
+            // Allow syncIn's copyIn calls (bundle files) to succeed,
+            // but hang on everything else
+            copyIn: copyBundlesOnly(handle, async () => {
+              await new Promise<void>(() => {}); // never resolves
+            }),
           };
         },
       });
@@ -283,12 +295,9 @@ describe("startSandbox", () => {
           const handle = await realProvider.create(options);
           return {
             ...handle,
-            copyIn: async (hostPath: string, sandboxPath: string) => {
-              if (sandboxPath.includes("repo.bundle")) {
-                return handle.copyIn(hostPath, sandboxPath);
-              }
+            copyIn: copyBundlesOnly(handle, async () => {
               throw new Error("copy failed");
-            },
+            }),
             close: async () => {
               closeCalls++;
               await handle.close();

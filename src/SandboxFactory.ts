@@ -18,7 +18,6 @@ import { Display } from "./Display.js";
 import type {
   SandboxProvider,
   BranchStrategy,
-  BindMountSandboxProvider,
   BindMountSandboxHandle,
   IsolatedSandboxHandle,
   NoSandboxHandle,
@@ -66,8 +65,7 @@ const getCopyIn = (
   if ("copyIn" in handle) {
     return (hostPath, sandboxPath) =>
       Effect.tryPromise({
-        try: () =>
-          (handle as IsolatedSandboxHandle).copyIn(hostPath, sandboxPath),
+        try: () => handle.copyIn(hostPath, sandboxPath),
         catch: (e) =>
           new CopyError({
             message: `copyIn failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -77,8 +75,7 @@ const getCopyIn = (
   if ("copyFileIn" in handle) {
     return (hostPath, sandboxPath) =>
       Effect.tryPromise({
-        try: () =>
-          (handle as BindMountSandboxHandle).copyFileIn(hostPath, sandboxPath),
+        try: () => handle.copyFileIn(hostPath, sandboxPath),
         catch: (e) =>
           new CopyError({
             message: `copyFileIn failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -114,10 +111,7 @@ export const makeSandboxFromHandle = (
     "copyFileOut" in handle
       ? (sandboxPath, hostPath) =>
           Effect.tryPromise({
-            try: () =>
-              (
-                handle as IsolatedSandboxHandle | BindMountSandboxHandle
-              ).copyFileOut(sandboxPath, hostPath),
+            try: () => handle.copyFileOut(sandboxPath, hostPath),
             catch: (e) =>
               new CopyError({
                 message: `copyFileOut failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -273,7 +267,7 @@ const cleanupWorktree = (
 ): Effect.Effect<string | undefined, WorktreeError> => {
   // An interrupted run keeps its worktree, clean or dirty, so the caller can
   // inspect it (ADR-0004). An abort after a successful run is a no-op.
-  if (!Exit.isSuccess(exit) && signal?.aborted) {
+  if (!Exit.isSuccess(exit) && signal?.aborted === true) {
     printWorktreePreservedMessage(
       worktreePath,
       `Worktree preserved at ${worktreePath}`,
@@ -290,7 +284,7 @@ const cleanupWorktree = (
             ? `Run succeeded but worktree has uncommitted changes at ${worktreePath}`
             : `Worktree preserved at ${worktreePath}`,
         );
-        return Effect.succeed(worktreePath as string | undefined);
+        return Effect.succeed(worktreePath);
       }
       const announceRemoval = Exit.isSuccess(exit)
         ? Effect.void
@@ -358,7 +352,7 @@ export const resolveGitMounts = (
     }
     // Worktree: .git is a file with "gitdir: <path>"
     const content = (yield* fs.readFileString(gitPath)).trim();
-    const gitdirPath = /^gitdir:\s*(.+)$/.exec(content)?.[1];
+    const gitdirPath = /^gitdir:\s*(.+)$/u.exec(content)?.[1];
     if (gitdirPath === undefined) {
       // Unrecognized format — fall back to mounting the file as-is
       return [{ hostPath: gitPath, sandboxPath: gitPath }];
@@ -389,6 +383,7 @@ export const WorktreeDockerSandboxFactory = {
         timeouts,
       } = yield* SandboxConfig;
 
+      const onWorktreeReady = hooks?.host?.onWorktreeReady ?? [];
       const isHeadMode = branchStrategy.type === "head";
       const branch =
         branchStrategy.type === "branch" ? branchStrategy.branch : undefined;
@@ -415,7 +410,7 @@ export const WorktreeDockerSandboxFactory = {
             ),
           ),
           Effect.andThen(
-            branch
+            branch !== undefined && branch !== ""
               ? WorktreeManager.create(hostRepoDir, { branch, baseBranch })
               : WorktreeManager.create(hostRepoDir, { name, tempBranch }),
           ),
@@ -468,12 +463,8 @@ export const WorktreeDockerSandboxFactory = {
             // Head mode: use hostRepoDir directly, no worktree.
             if (isHeadMode) {
               return (
-                hooks?.host?.onWorktreeReady?.length
-                  ? runHostHooks(
-                      hooks.host.onWorktreeReady,
-                      hostRepoDir,
-                      signal,
-                    )
+                onWorktreeReady.length > 0
+                  ? runHostHooks(onWorktreeReady, hostRepoDir, signal)
                   : Effect.void
               ).pipe(
                 Effect.andThen(
@@ -527,12 +518,8 @@ export const WorktreeDockerSandboxFactory = {
                   : Effect.void
                 ).pipe(
                   Effect.andThen(
-                    hooks?.host?.onWorktreeReady?.length
-                      ? runHostHooks(
-                          hooks.host.onWorktreeReady,
-                          worktreeInfo.path,
-                          signal,
-                        )
+                    onWorktreeReady.length > 0
+                      ? runHostHooks(onWorktreeReady, worktreeInfo.path, signal)
                       : Effect.void,
                   ),
                   Effect.andThen(
@@ -588,12 +575,8 @@ export const WorktreeDockerSandboxFactory = {
             return Effect.acquireUseRelease(
               pruneAndCreate(),
               (worktreeInfo) =>
-                (hooks?.host?.onWorktreeReady?.length
-                  ? runHostHooks(
-                      hooks.host.onWorktreeReady,
-                      worktreeInfo.path,
-                      signal,
-                    )
+                (onWorktreeReady.length > 0
+                  ? runHostHooks(onWorktreeReady, worktreeInfo.path, signal)
                   : Effect.void
                 ).pipe(
                   Effect.andThen(
@@ -649,8 +632,8 @@ export const WorktreeDockerSandboxFactory = {
             // Head mode: bind-mount host directory directly, no worktree
             const gitPath = join(hostRepoDir, ".git");
             return (
-              hooks?.host?.onWorktreeReady?.length
-                ? runHostHooks(hooks.host.onWorktreeReady, hostRepoDir, signal)
+              onWorktreeReady.length > 0
+                ? runHostHooks(onWorktreeReady, hostRepoDir, signal)
                 : Effect.void
             ).pipe(
               Effect.andThen(resolveGitMounts(gitPath)),
@@ -734,12 +717,8 @@ export const WorktreeDockerSandboxFactory = {
                 : Effect.void
               ).pipe(
                 Effect.andThen(
-                  hooks?.host?.onWorktreeReady?.length
-                    ? runHostHooks(
-                        hooks.host.onWorktreeReady,
-                        worktreeInfo.path,
-                        signal,
-                      )
+                  onWorktreeReady.length > 0
+                    ? runHostHooks(onWorktreeReady, worktreeInfo.path, signal)
                     : Effect.void,
                 ),
                 Effect.andThen(
@@ -766,7 +745,7 @@ export const WorktreeDockerSandboxFactory = {
                     // sandboxProvider is guaranteed bind-mount here
                     // (isolated providers return early above)
                     startSandbox({
-                      provider: sandboxProvider as BindMountSandboxProvider,
+                      provider: sandboxProvider,
                       hostRepoDir,
                       env,
                       worktreeOrRepoPath: worktreeInfo.path,

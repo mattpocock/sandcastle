@@ -6,23 +6,19 @@
  *   await run({ agent: claudeCode("claude-opus-4-8"), sandbox: docker() });
  */
 
-import {
-  execFile,
-  execFileSync,
-  spawn,
-  type StdioOptions,
-} from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
+import type { StdioOptions } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import { Effect } from "effect";
 import { startContainer, removeContainer } from "../DockerLifecycle.js";
-import {
-  createBindMountSandboxProvider,
-  type SandboxProvider,
-  type BindMountCreateOptions,
-  type BindMountSandboxHandle,
-  type ExecResult,
-  type InteractiveExecOptions,
+import { createBindMountSandboxProvider } from "../SandboxProvider.js";
+import type {
+  SandboxProvider,
+  BindMountCreateOptions,
+  BindMountSandboxHandle,
+  ExecResult,
+  InteractiveExecOptions,
 } from "../SandboxProvider.js";
 import type { MountConfig } from "../MountConfig.js";
 import type { SelinuxLabel } from "../mountUtils.js";
@@ -260,13 +256,13 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
           // Elevate by running as root through the engine, not a `sudo`
           // prefix: the image needs no sudo binary, and the whole command
           // (`a && b`, not just `a`) runs as root.
-          if (opts?.sudo) {
+          if (opts?.sudo === true) {
             args.push("--user", "0:0");
           }
           if (opts?.stdin !== undefined) {
             args.push("-i");
           }
-          if (opts?.cwd) {
+          if (opts?.cwd !== undefined && opts.cwd !== "") {
             args.push("-w", opts.cwd);
           }
           args.push(containerName, "sh", "-c", command);
@@ -337,13 +333,13 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
             // Allocate a pseudo-terminal when stdin looks like a TTY
             if (
               "isTTY" in opts.stdin &&
-              (opts.stdin as { isTTY?: boolean }).isTTY
+              (opts.stdin as { isTTY?: boolean }).isTTY === true
             ) {
               dockerArgs.push("-it");
             } else {
               dockerArgs.push("-i");
             }
-            if (opts.cwd) {
+            if (opts.cwd !== undefined && opts.cwd !== "") {
               dockerArgs.push("-w", opts.cwd);
             }
             dockerArgs.push(containerName, ...args);

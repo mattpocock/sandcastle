@@ -17,7 +17,7 @@ export const SHELL_BLOCK_MARKER = "\u0001";
 
 const MARKED_SHELL_BLOCK_PATTERN = new RegExp(
   `!${SHELL_BLOCK_MARKER}\`([^\`]+)\``,
-  "g",
+  "gu",
 );
 
 export const preprocessPrompt = (

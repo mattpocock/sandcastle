@@ -4,7 +4,7 @@ const DEBOUNCE_MS = 50;
 /**
  * Sentence-boundary pattern: period, exclamation, or question mark followed by a space.
  */
-const SENTENCE_BOUNDARY_RE = /[.!?] $/;
+const SENTENCE_BOUNDARY_RE = /[.!?] $/u;
 
 /**
  * Buffers streaming text deltas and flushes them as readable multi-word chunks.

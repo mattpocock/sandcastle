@@ -28,7 +28,6 @@ import {
 import type { SandboxProvider, BranchStrategy } from "./SandboxProvider.js";
 import { resolveEnv } from "./EnvResolver.js";
 import { formatErrorMessage } from "./ErrorHandler.js";
-import type { SandboxError } from "./errors.js";
 import { agentStreamEmitterLayer } from "./AgentStreamEmitter.js";
 import type { AgentStreamEvent } from "./AgentStreamEmitter.js";
 import type { SandboxHooks } from "./SandboxLifecycle.js";
@@ -96,7 +95,7 @@ export const DEFAULT_MAX_ITERATIONS = 1;
 
 /** Replace characters that are invalid or problematic in file paths with dashes. */
 export const sanitizeBranchForFilename = (branch: string): string =>
-  branch.replaceAll(/[/\\:*?"<>|]/g, "-");
+  branch.replaceAll(/[/\\:*?"<>|]/gu, "-");
 
 export interface FileDisplayStartupOptions {
   readonly logPath: string;
@@ -118,7 +117,10 @@ export const printFileDisplayStartup = (
 ): void => {
   const name = options.agentName ?? "Agent";
   const label = styleText("bold", `[${name}]`);
-  const branchPart = options.branch ? ` on branch ${options.branch}` : "";
+  const branchPart =
+    options.branch !== undefined && options.branch !== ""
+      ? ` on branch ${options.branch}`
+      : "";
   const hostRepoDir = options.hostRepoDir ?? process.cwd();
   const displayLogPath =
     hostRepoDir === process.cwd()
@@ -142,8 +144,9 @@ export const buildLogFilename = (
   name?: string,
 ): string => {
   const sanitized = sanitizeBranchForFilename(resolvedBranch);
+  // One dash per UTF-16 unit, as before the `u` flag on the regex below.
   const nameSuffix = name
-    ? `-${name.toLowerCase().replaceAll(/[^a-z0-9_.-]/g, "-")}`
+    ? `-${name.toLowerCase().replaceAll(/[^a-z0-9_.-]/gu, (char) => "-".repeat(char.length))}`
     : "";
   if (targetBranch) {
     return `${sanitizeBranchForFilename(targetBranch)}-${sanitized}${nameSuffix}.log`;
@@ -254,9 +257,8 @@ export const buildAgentStreamHandler = (
 ): ((event: AgentStreamEvent) => void) | undefined => {
   const userHandler =
     logging.type === "file" ? logging.onAgentStreamEvent : undefined;
-  const verboseSink = logging.verbose
-    ? buildVerboseRawLineSink(logging)
-    : undefined;
+  const verboseSink =
+    logging.verbose === true ? buildVerboseRawLineSink(logging) : undefined;
   if (!userHandler && !verboseSink) {
     return undefined;
   }
@@ -551,8 +553,11 @@ export async function run(
     );
   }
 
+  const isResuming =
+    options.resumeSession !== undefined && options.resumeSession !== "";
+
   // Validate: resumeSession + maxIterations > 1 is not allowed
-  if (options.resumeSession && maxIterations > 1) {
+  if (isResuming && maxIterations > 1) {
     throw new Error(
       "resumeSession cannot be combined with maxIterations > 1. " +
         "Resume applies to iteration 1 only; multi-iteration resume semantics are not supported.",
@@ -561,7 +566,7 @@ export async function run(
 
   // Validate: forkSession only makes sense alongside resumeSession.
   // It is wired internally by RunResult.fork() and never set on its own.
-  if (options.forkSession && !options.resumeSession) {
+  if (options.forkSession === true && !isResuming) {
     throw new Error(
       "forkSession requires resumeSession. " +
         "Use RunResult.fork(prompt) to fork the last captured session.",
@@ -607,7 +612,7 @@ export async function run(
   );
 
   // Validate: resumeSession file must exist on the host
-  if (options.resumeSession) {
+  if (isResuming) {
     await assertResumeSessionExists({
       provider,
       sandboxTag: options.sandbox.tag,
@@ -805,10 +810,7 @@ export async function run(
           Effect.tapError((error) =>
             Effect.gen(function* () {
               const d = yield* Display;
-              yield* d.status(
-                formatErrorMessage(error as SandboxError),
-                "error",
-              );
+              yield* d.status(formatErrorMessage(error), "error");
             }),
           ),
         )
@@ -834,7 +836,10 @@ export async function run(
       resumeOptions?: ResumeRunResultOptions,
     ): Promise<RunResult> => {
       const lastIteration = result.iterations.at(-1);
-      if (!lastIteration?.sessionId) {
+      if (
+        lastIteration?.sessionId === undefined ||
+        lastIteration.sessionId === ""
+      ) {
         throw new Error("Cannot resume: no sessionId was captured");
       }
       return run({
@@ -855,7 +860,10 @@ export async function run(
       forkOptions?: ResumeRunResultOptions,
     ): Promise<RunResult> => {
       const lastIteration = result.iterations.at(-1);
-      if (!lastIteration?.sessionId) {
+      if (
+        lastIteration?.sessionId === undefined ||
+        lastIteration.sessionId === ""
+      ) {
         throw new Error("Cannot fork: no sessionId was captured");
       }
       return run({

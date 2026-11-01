@@ -422,7 +422,7 @@ describe("syncOut", () => {
 
       const timestampDirs = await readdir(patchesDir);
       expect(timestampDirs).toHaveLength(1);
-      expect(timestampDirs[0]).toMatch(/^\d{8}-\d{6}/);
+      expect(timestampDirs[0]).toMatch(/^\d{8}-\d{6}/u);
 
       const [timestampDir] = timestampDirs;
 
