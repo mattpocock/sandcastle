@@ -5,6 +5,7 @@
 // - oxlint (.oxlintrc.json, type-aware)               rule: `eslint(curly)`
 // - Effect's language service (tsconfig.json plugin)  rule: `effect/<name>`
 // - inline disable comments outside the allowlist     rule: `ratchet/disable-comment`
+// - `toMatchObject({ k: undefined })` in a test        rule: `ratchet/match-object-undefined`
 //
 // The test ratchet, scripts/test-baseline.json. New tests go in tests/ and use
 // only the public API; the legacy tests elsewhere only ever leave:
@@ -45,6 +46,7 @@ import {
   collectDirectives,
   collectEffect,
   collectLegacyTests,
+  collectMatchObjectUndefined,
   collectOxlint,
   run,
 } from "./lint-ratchet-sources.ts";
@@ -61,7 +63,12 @@ const RATCHETS: readonly Ratchet[] = [
   {
     name: "lint ratchet",
     baselinePath: "scripts/lint-baseline.json",
-    sources: [collectOxlint, collectEffect, collectDirectives],
+    sources: [
+      collectOxlint,
+      collectEffect,
+      collectDirectives,
+      collectMatchObjectUndefined,
+    ],
     grownTitle:
       "New violations (file: rule baseline -> found). Fix them; never add a disable comment or raise the baseline. `npx oxlint <file>` shows where:",
   },

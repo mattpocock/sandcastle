@@ -104,6 +104,20 @@ No disable comments (`eslint-disable`, `oxlint-disable`, `@ts-ignore`, `@ts-expe
 
 To pay down debt, pick a rule or a file from `npm run lint:report` and fix every violation of it. Fix behaviour-neutrally, one rule or one file per PR; `oxlint --fix` sweeps of one rule across the repo are fine.
 
+Tests may not assert a property's absence with `toMatchObject({ k: undefined })`: it passes where `k` is set to `undefined` and fails where `k` is omitted, so it can be green on one platform and red on another. Use `expect(x).not.toHaveProperty("k")`. Each one counts as `ratchet/match-object-undefined`.
+
+### New-file budget
+
+A new file has no baseline, so it meets every cap at zero. The ones a new `src/` file hits first:
+
+- `import/max-dependencies`: 10 imports.
+- `max-lines`: 300 lines, blanks and comments included.
+- `max-lines-per-function`: 50 lines; `max-statements`: 20; `complexity`: 15.
+- `node/no-sync`: no `fs.*Sync` or `execSync` outside tests. Inline disables are not allowed in `src/` either.
+- `effect/asyncFunction`: no `async` functions outside the entry points in `scripts/lint-ratchet-config.ts`. Return an Effect.
+
+Split helpers into their own files before writing, not after the ratchet fails. Check one file with `npx oxlint <file>`.
+
 ---
 
 ## Testing

@@ -1,7 +1,8 @@
 // The sources of violations the ratchets count. Each resolves to a flat list
 // of file × rule; scripts/lint-ratchet.ts tallies them.
 //
-// - lint ratchet: oxlint, Effect diagnostics, disable comments
+// - lint ratchet: oxlint, Effect diagnostics, disable comments,
+//   `toMatchObject({ k: undefined })` in tests
 // - test ratchet: test files outside tests/, dependency-cruiser violations
 
 import { execFile } from "node:child_process";
@@ -14,9 +15,11 @@ import {
   ALLOWED_DIRECTIVES,
   E2E_TESTS,
   EFFECT_EXEMPTIONS,
+  TEST_FILES,
   TOOLING_TESTS,
 } from "./lint-ratchet-config.ts";
 import type { Violation } from "./lint-ratchet-core.ts";
+import { matchObjectUndefinedCount } from "./lint-ratchet-core.ts";
 
 export const ROOT = path.resolve(import.meta.dirname, "..");
 const BIN = path.join(ROOT, "node_modules", ".bin");
@@ -146,6 +149,30 @@ export const collectDirectives = async (): Promise<Violation[]> => {
   const files = listed.filter((f) => SCANNED_EXTENSIONS.has(path.extname(f)));
   const perFile = await Promise.all(
     files.map(async (file) => directivesIn(file)),
+  );
+  return perFile.flat();
+};
+
+const matchObjectUndefinedIn = async (file: string): Promise<Violation[]> => {
+  const source = await readFile(path.join(ROOT, file), "utf8");
+  return Array.from({ length: matchObjectUndefinedCount(source) }, () => ({
+    file,
+    rule: "ratchet/match-object-undefined",
+  }));
+};
+
+/**
+ * `toMatchObject({ k: undefined })` in a test. It passes where `k` is set to
+ * `undefined` and fails where `k` is omitted, so it is green on one platform
+ * and red on another (c6c70c3).
+ */
+export const collectMatchObjectUndefined = async (): Promise<Violation[]> => {
+  const listed = await listFiles();
+  const tests = listed.filter((f) =>
+    matchesAny([...TEST_FILES, ...TOOLING_TESTS], f),
+  );
+  const perFile = await Promise.all(
+    tests.map(async (file) => matchObjectUndefinedIn(file)),
   );
   return perFile.flat();
 };
