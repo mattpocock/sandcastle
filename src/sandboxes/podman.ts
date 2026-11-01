@@ -301,6 +301,7 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
       const unregisterShutdown = registerShutdown(removeContainerSync);
 
       const handle: BindMountSandboxHandle = {
+        containerName,
         worktreePath,
 
         exec: async (

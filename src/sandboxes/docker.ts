@@ -245,6 +245,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
       const unregisterShutdown = registerShutdown(removeContainerSync);
 
       const handle: BindMountSandboxHandle = {
+        containerName,
         worktreePath,
 
         exec: async (
