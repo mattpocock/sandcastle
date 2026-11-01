@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, describe, expect, it, vi } from "vitest";
 
 vi.mock("node:child_process", async () => {
   const actual =
@@ -715,8 +715,8 @@ describe("podman()", () => {
         args[0] === "cp" &&
         args[1] === "/host/file.txt",
     );
-    expect(cpCall).toBeDefined();
-    const cpArgs = cpCall![1] as string[];
+    assert(cpCall);
+    const cpArgs = cpCall[1] as string[];
     expect(cpArgs[0]).toBe("cp");
     expect(cpArgs[1]).toBe("/host/file.txt");
     expect(cpArgs[2]).toMatch(/^sandcastle-.*:\/sandbox\/file\.txt$/);
@@ -751,8 +751,8 @@ describe("podman()", () => {
         args[0] === "cp" &&
         args[2] === "/host/output.txt",
     );
-    expect(cpCall).toBeDefined();
-    const cpArgs = cpCall![1] as string[];
+    assert(cpCall);
+    const cpArgs = cpCall[1] as string[];
     expect(cpArgs[0]).toBe("cp");
     expect(cpArgs[1]).toMatch(/^sandcastle-.*:\/sandbox\/output\.txt$/);
     expect(cpArgs[2]).toBe("/host/output.txt");
@@ -825,14 +825,14 @@ describe("podman()", () => {
             typeof a === "string" && a.includes("mkdir") && a.includes("chown"),
         ),
     );
-    expect(mkdirCall).toBeDefined();
-    const mkdirArgs = mkdirCall![1] as string[];
+    assert(mkdirCall);
+    const mkdirArgs = mkdirCall[1] as string[];
     // Should run as root
     expect(mkdirArgs).toContain("--user");
     expect(mkdirArgs[mkdirArgs.indexOf("--user") + 1]).toBe("0:0");
     // Script body is fixed; the dir and uid:gid are passed as argv after `sh`
     const shCmdIdx = mkdirArgs.indexOf("-c");
-    const shCmd = mkdirArgs[shCmdIdx + 1]!;
+    const shCmd = mkdirArgs[shCmdIdx + 1];
     expect(shCmd).toContain("mkdir -p");
     expect(shCmd).toContain("chown");
     expect(mkdirArgs).toContain("/home/agent/.codex");
@@ -909,15 +909,16 @@ describe("podman()", () => {
     // Trigger a registered exit handler
     const exitListeners = process.listeners("exit");
     const sandcastleListener = exitListeners.at(-1);
-    sandcastleListener!(0);
+    assert(sandcastleListener);
+    sandcastleListener(0);
 
     // Check that execFileSync was called with timeout option
     const rmCall = mockExecFileSync.mock.calls.find(
       ([cmd, args]) =>
         cmd === "podman" && Array.isArray(args) && args[0] === "rm",
     );
-    expect(rmCall).toBeDefined();
-    expect(rmCall![2]).toMatchObject({ timeout: 5000 });
+    assert(rmCall);
+    expect(rmCall[2]).toMatchObject({ timeout: 5000 });
 
     await handle.close();
   });
@@ -943,14 +944,16 @@ describe("podman()", () => {
     });
 
     const exitListeners = process.listeners("exit");
-    exitListeners.at(-1)!(0);
+    const sandcastleListener = exitListeners.at(-1);
+    assert(sandcastleListener);
+    sandcastleListener(0);
 
     const rmCall = mockExecFileSync.mock.calls.find(
       ([cmd, args]) =>
         cmd === "podman" && Array.isArray(args) && args[0] === "rm",
     );
-    expect(rmCall).toBeDefined();
-    expect(rmCall![1]).toEqual(
+    assert(rmCall);
+    expect(rmCall[1]).toEqual(
       expect.arrayContaining(["rm", "-f", "--time", "0"]),
     );
 
@@ -981,8 +984,8 @@ describe("podman()", () => {
       ([cmd, args]) =>
         cmd === "podman" && Array.isArray(args) && args[0] === "rm",
     );
-    expect(rmCall).toBeDefined();
-    expect(rmCall![1]).toEqual(
+    assert(rmCall);
+    expect(rmCall[1]).toEqual(
       expect.arrayContaining(["rm", "-f", "--time", "0"]),
     );
   });
@@ -1088,7 +1091,11 @@ describe("podman() exec with sudo", () => {
 
     await handle.exec("id -u > /tmp/x && id -u >> /tmp/x", { sudo: true });
 
-    const [cmd, args] = vi.mocked(spawn).mock.calls.at(-1)!;
+    const lastSpawn = vi.mocked(spawn).mock.calls.at(-1);
+
+    assert(lastSpawn);
+
+    const [cmd, args] = lastSpawn;
     expect(cmd).toBe("podman");
     const execArgs = args as string[];
     expect(execArgs[0]).toBe("exec");
@@ -1107,7 +1114,11 @@ describe("podman() exec with sudo", () => {
 
     await handle.exec("id -u");
 
-    const execArgs = vi.mocked(spawn).mock.calls.at(-1)![1] as string[];
+    const lastSpawn = vi.mocked(spawn).mock.calls.at(-1);
+
+    assert(lastSpawn);
+
+    const execArgs = lastSpawn[1] as string[];
     expect(execArgs).not.toContain("--user");
     expect(execArgs.slice(-2)).toEqual(["-c", "id -u"]);
 
