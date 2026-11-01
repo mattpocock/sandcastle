@@ -1,7 +1,7 @@
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
 import { NativeSandboxUnavailableError } from "@ai-hero/sandcastle";
 import { bwrap } from "@ai-hero/sandcastle/sandboxes/bwrap";
 
@@ -47,13 +47,11 @@ describe.skipIf(process.platform !== "linux")(
     it("throws NativeSandboxUnavailableError whose fixCommand installs bubblewrap", () => {
       const error = thrownBy(() => bwrap());
 
-      expect(error).toBeInstanceOf(NativeSandboxUnavailableError);
+      assert.instanceOf(error, NativeSandboxUnavailableError);
       expect(error).toBeInstanceOf(Error);
-      expect(error).toMatchObject({
-        fixCommand: expect.stringMatching(
-          /^sudo (?:apt|dnf|pacman|apk|zypper) .*bubblewrap$/u,
-        ) as unknown,
-      });
+      expect(error.fixCommand).toMatch(
+        /^sudo (?:apt|dnf|pacman|apk|zypper) .*bubblewrap$/u,
+      );
     });
 
     it("leaves no temp dir behind", () => {
