@@ -230,6 +230,8 @@ export interface Sandbox {
   readonly branch: string;
   /** Host path to the worktree. */
   readonly worktreePath: string;
+  /** Name of the container backing the sandbox, when the provider has one. */
+  readonly containerName?: string;
   /** Invoke an agent inside the existing sandbox. */
   run(options: SandboxRunOptions): Promise<SandboxRunResult>;
   /** Launch an interactive agent session inside the existing sandbox. */
@@ -376,6 +378,10 @@ const buildSandboxHandle = (
   const sandboxHandle: Sandbox = {
     branch,
     worktreePath,
+    containerName:
+      providerHandle && "containerName" in providerHandle
+        ? providerHandle.containerName
+        : undefined,
 
     run: async (runOptions: SandboxRunOptions): Promise<SandboxRunResult> => {
       // If signal is already aborted, reject immediately without any setup

@@ -140,6 +140,34 @@ describe("docker()", () => {
     expect(provider.tag).toBe("bind-mount");
   });
 
+  it("exposes the generated container name on the handle", async () => {
+    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+      const callback = rest.at(-1);
+      callback(null, "", "");
+      return undefined as any;
+    });
+
+    const provider = docker();
+    const handle = (await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    })) as BindMountSandboxHandle;
+
+    const runArgs = mockExecFile.mock.calls.find(
+      ([, args]) => Array.isArray(args) && args[0] === "run",
+    )?.[1] as string[];
+    const nameArg = runArgs[runArgs.indexOf("--name") + 1];
+
+    expect(handle.containerName).toMatch(/^sandcastle-/);
+    expect(handle.containerName).toBe(nameArg);
+
+    await handle.close();
+  });
+
   it("passes --group-add flags to docker run, stringifying numeric GIDs", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
       const callback = rest.at(-1);

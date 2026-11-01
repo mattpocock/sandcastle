@@ -343,6 +343,36 @@ describe("createSandbox", () => {
     }
   });
 
+  it("exposes the provider handle's containerName on the sandbox", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const sandbox = await createSandbox({
+      branch: "container-name-branch",
+      sandbox: testSandbox,
+      cwd: hostDir,
+      _test: {
+        buildSandbox: (sandboxDir) => makeLocalSandbox(sandboxDir),
+        bindMountHandle: {
+          containerName: "sandcastle-test-container",
+          worktreePath: "/home/agent/workspace",
+          exec: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
+          copyFileIn: async () => {},
+          copyFileOut: async () => {},
+          close: async () => {},
+        },
+      },
+    });
+
+    try {
+      expect(sandbox.containerName).toBe("sandcastle-test-container");
+    } finally {
+      await sandbox.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
   it("sandbox.run() invokes agent and returns SandboxRunResult", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
