@@ -1,5 +1,7 @@
 import { existsSync } from "node:fs";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Writable } from "node:stream";
 import {
   afterEach,
@@ -424,5 +426,51 @@ describe("vercel() exec", () => {
 
     expect(result.stdout).toBe("ok\n");
     expect(sdk.writtenPaths).toHaveLength(0);
+  });
+});
+
+describe("vercel() copyIn", () => {
+  beforeEach(() => {
+    vi.stubEnv("VERCEL_TOKEN", undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("copies a directory tree into the sandbox", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "vercel-copyin-host-"));
+    await mkdir(join(hostDir, "nested"));
+    await writeFile(join(hostDir, "a.txt"), "top");
+    await writeFile(join(hostDir, "nested", "b.txt"), "deep");
+    const sandboxDir = join(
+      await mkdtemp(join(tmpdir(), "vercel-copyin-sandbox-")),
+      "dest",
+    );
+    const handle = await vercel().create({ env: {} });
+
+    await handle.copyIn(hostDir, sandboxDir);
+
+    await expect(readFile(join(sandboxDir, "a.txt"), "utf8")).resolves.toBe(
+      "top",
+    );
+    await expect(
+      readFile(join(sandboxDir, "nested", "b.txt"), "utf8"),
+    ).resolves.toBe("deep");
+  });
+
+  it("copies a single file into the sandbox", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "vercel-copyin-host-"));
+    const hostFile = join(hostDir, "one.txt");
+    await writeFile(hostFile, "single");
+    const sandboxFile = join(
+      await mkdtemp(join(tmpdir(), "vercel-copyin-sandbox-")),
+      "one.txt",
+    );
+    const handle = await vercel().create({ env: {} });
+
+    await handle.copyIn(hostFile, sandboxFile);
+
+    await expect(readFile(sandboxFile, "utf8")).resolves.toBe("single");
   });
 });
