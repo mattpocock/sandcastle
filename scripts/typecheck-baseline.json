@@ -1,0 +1,15 @@
+{
+  ".sandcastle/run.ts": {
+    "tsc/TS2345": 1,
+    "tsc/TS2532": 2
+  },
+  ".sandcastle/verify/lib.ts": {
+    "tsc/TS2345": 1
+  },
+  ".sandcastle/verify/verify.ts": {
+    "tsc/TS2345": 1
+  },
+  ".sandcastle/verify/world.ts": {
+    "tsc/TS18048": 1
+  }
+}

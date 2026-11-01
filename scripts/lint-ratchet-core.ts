@@ -140,3 +140,16 @@ export const matchObjectUndefinedCount = (source: string): number =>
       source.slice(start, argumentEnd(source, start)),
     );
   }).length;
+
+/** `file(line,col): error TS1234: …`, the first line of each tsc error. */
+const TSC_ERROR = /^(?<file>[^\s(][^(]*)\(\d+,\d+\): error (?<code>TS\d+):/gmu;
+
+/**
+ * The errors in `tsc --pretty false` output, one per error: its file and
+ * `tsc/<code>`. The indented lines that elaborate an error are skipped.
+ */
+export const tscErrors = (out: string): Violation[] =>
+  [...out.matchAll(TSC_ERROR)].map((m) => ({
+    file: m.groups?.["file"] ?? "",
+    rule: `tsc/${m.groups?.["code"] ?? ""}`,
+  }));

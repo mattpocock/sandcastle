@@ -4,6 +4,7 @@
 // - lint ratchet: oxlint, Effect diagnostics, disable comments,
 //   `toMatchObject({ k: undefined })` in tests
 // - test ratchet: test files outside tests/, dependency-cruiser violations
+// - typecheck ratchet: compiler errors in .sandcastle/
 
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
@@ -20,7 +21,7 @@ import {
   TOOLING_TESTS,
 } from "./lint-ratchet-config.ts";
 import type { Violation } from "./lint-ratchet-core.ts";
-import { matchObjectUndefinedCount } from "./lint-ratchet-core.ts";
+import { matchObjectUndefinedCount, tscErrors } from "./lint-ratchet-core.ts";
 
 export const ROOT = path.resolve(import.meta.dirname, "..");
 const BIN = path.join(ROOT, "node_modules", ".bin");
@@ -233,4 +234,20 @@ export const collectRawGitSpawns = async (): Promise<Violation[]> => {
       }),
   );
   return perFile.flat();
+};
+
+/**
+ * Compiler errors in the repo's own tooling (.sandcastle/tsconfig.typecheck.json).
+ * Its scripts run through tsx, which never type-checks, and no other tsconfig
+ * includes them.
+ */
+export const collectSandcastleTypes = async (): Promise<Violation[]> => {
+  const out = await run(path.join(BIN, "tsc"), [
+    "--noEmit",
+    "--pretty",
+    "false",
+    "-p",
+    path.join(ROOT, ".sandcastle", "tsconfig.typecheck.json"),
+  ]);
+  return tscErrors(out).filter((v) => v.file.startsWith(".sandcastle/"));
 };
