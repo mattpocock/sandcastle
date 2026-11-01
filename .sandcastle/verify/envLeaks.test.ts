@@ -42,6 +42,6 @@ describe("classifyEnv", () => {
   it("flags the canary wherever it appears", () => {
     expect(
       classifyEnv([["CLAUDE_CODE_OAUTH_TOKEN", "canary-abc"]], ctx)[0]?.reason,
-    ).toMatch(/canary/);
+    ).toMatch(/canary/u);
   });
 });

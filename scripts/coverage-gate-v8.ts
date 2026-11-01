@@ -1,6 +1,12 @@
-// Raw V8 coverage (NODE_V8_COVERAGE) from a process running the built
-// package, mapped back to src/ lines through dist's source maps. Used by
-// scripts/coverage-gate.ts to count the CLI subprocesses e2e tests spawn.
+// Raw V8 coverage (NODE_V8_COVERAGE) from a CLI process, mapped back to src/
+// lines. Used by scripts/coverage-gate.ts to count the CLI subprocesses e2e
+// tests spawn. A process runs the CLI one of two ways:
+//
+// - built: `node dist/main.js`. Mapped through dist's source maps on disk.
+// - tsx:   `tsx src/main.ts`, as e2e tests do so the windows job can run
+//          them. tsx compiles each src/ file in memory, so there is no file
+//          to read; Node puts its source map and line lengths in the
+//          report's `source-map-cache` instead.
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,6 +36,19 @@ const SourceMapJson = z.object({
   sources: z.array(z.string()),
   sourceRoot: z.string().optional(),
   mappings: z.string(),
+});
+
+/** Node's record of a script's source map, keyed by the script's URL. */
+const SourceMapCache = z.record(
+  z.string(),
+  z.object({
+    lineLengths: z.array(z.number()),
+    data: SourceMapJson.nullable(),
+  }),
+);
+
+const V8ReportWithCache = V8Report.extend({
+  "source-map-cache": SourceMapCache.optional(),
 });
 
 const BASE64 =
@@ -63,14 +82,11 @@ interface Mapping {
   readonly line: number;
 }
 
-/** Every mapping in `mappings`, located by offset into `script`. */
-const decodeMappings = (script: string, mappings: string): Mapping[] => {
-  const lineStarts = [0];
-  for (let i = 0; i < script.length; i++) {
-    if (script[i] === "\n") {
-      lineStarts.push(i + 1);
-    }
-  }
+/** Every mapping in `mappings`, located by offset via each line's start. */
+const decodeMappings = (
+  lineStarts: readonly number[],
+  mappings: string,
+): Mapping[] => {
   const out: Mapping[] = [];
   let source = 0;
   let line = 0;
@@ -112,35 +128,48 @@ const countsByOffset = (length: number, functions: Ranges): Float64Array => {
 };
 
 interface Script {
-  /** Absolute path of the built script. */
+  /** Absolute path of the script that ran. */
   readonly file: string;
-  readonly text: string;
-  readonly sourceMap: string;
+  /** Offset of each line's first character; the last is the script's length. */
+  readonly lineStarts: readonly number[];
+  readonly map: z.infer<typeof SourceMapJson>;
   readonly functions: Ranges;
+  /** Whether a mapping at this offset counts; see `builtScript`. */
+  readonly mapsCode: (offset: number) => boolean;
 }
 
-/** Adds the src/ lines one built script ran to `lines`. */
+const toPath = (url: string): string =>
+  url.startsWith("file:") ? fileURLToPath(url) : url;
+
+/** Adds the src/ lines one script ran to `lines`. */
 const addScriptLines = (lines: Lines, script: Script, root: string): void => {
-  const map = SourceMapJson.parse(JSON.parse(script.sourceMap));
+  const { map } = script;
   const sources = map.sources.map((source) =>
     path
       .relative(
         root,
-        path.resolve(path.dirname(script.file), map.sourceRoot ?? "", source),
+        source.startsWith("file:")
+          ? fileURLToPath(source)
+          : path.resolve(
+              path.dirname(script.file),
+              map.sourceRoot ?? "",
+              source,
+            ),
       )
       .replaceAll("\\", "/"),
   );
-  const counts = countsByOffset(script.text.length, script.functions);
+  const counts = countsByOffset(
+    script.lineStarts.at(-1) ?? 0,
+    script.functions,
+  );
   for (const { offset, source, line } of decodeMappings(
-    script.text,
+    script.lineStarts,
     map.mappings,
   )) {
     const file = sources[source];
-    // A mapping on whitespace (a line's indentation) carries on the source
-    // line above, and would count it from the next line's block.
     if (
       file?.startsWith("src/") === true &&
-      /\S/u.test(script.text[offset] ?? "") &&
+      script.mapsCode(offset) &&
       (counts[offset] ?? 0) > 0
     ) {
       lines.set(file, (lines.get(file) ?? new Set()).add(line));
@@ -148,11 +177,55 @@ const addScriptLines = (lines: Lines, script: Script, root: string): void => {
   }
 };
 
+/** Offsets of each line start in `text`, then its length. */
+const lineStartsOf = (text: string): number[] => {
+  const starts = [0];
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "\n") {
+      starts.push(i + 1);
+    }
+  }
+  starts.push(text.length);
+  return starts;
+};
+
+/** A built dist/ script, from its text and the source map beside it. */
+const builtScript = (
+  text: string,
+  sourceMap: string,
+): Omit<Script, "file" | "functions"> => ({
+  lineStarts: lineStartsOf(text),
+  map: SourceMapJson.parse(JSON.parse(sourceMap)),
+  // A mapping on whitespace (a line's indentation) carries on the source
+  // line above, and would count it from the next line's block.
+  mapsCode: (offset) => /\S/u.test(text[offset] ?? ""),
+});
+
+/**
+ * A src/ file tsx compiled in memory, from Node's `source-map-cache` entry.
+ * Line lengths stand in for the text: each line ends in one "\n". tsx
+ * minifies whitespace, so no line opens with indentation to skip.
+ */
+const tsxScript = (
+  lineLengths: readonly number[],
+  map: z.infer<typeof SourceMapJson>,
+): Omit<Script, "file" | "functions"> => {
+  const lineStarts = [0];
+  for (const length of lineLengths) {
+    lineStarts.push((lineStarts.at(-1) ?? 0) + length + 1);
+  }
+  return { lineStarts, map, mapsCode: () => true };
+};
+
 /**
  * Covered src/ lines from one raw `NODE_V8_COVERAGE` report (one process).
- * Only scripts under `<root>/dist/` count: the built package, mapped back to
- * src/ through its source maps (`<script>.map`). `read` returns a file's
- * text, or undefined when it is missing.
+ * Two kinds of script count:
+ *
+ * - under `<root>/dist/`: the built package, mapped back to src/ through its
+ *   source maps (`<script>.map`). `read` returns a file's text, or undefined
+ *   when it is missing.
+ * - under `<root>/src/` with a `source-map-cache` entry: a file tsx compiled
+ *   in memory, mapped back through the source map Node kept for it.
  */
 export const linesFromV8 = (
   json: unknown,
@@ -160,13 +233,32 @@ export const linesFromV8 = (
   read: (file: string) => string | undefined,
 ): Lines => {
   const dist = path.join(root, "dist") + path.sep;
+  const src = path.join(root, "src") + path.sep;
+  const report = V8ReportWithCache.parse(json);
+  const cache = report["source-map-cache"] ?? {};
   const lines: Lines = new Map();
-  for (const { url, functions } of V8Report.parse(json).result) {
-    const file = url.startsWith("file:") ? fileURLToPath(url) : url;
-    const text = file.startsWith(dist) ? read(file) : undefined;
-    const sourceMap = text === undefined ? undefined : read(`${file}.map`);
-    if (text !== undefined && sourceMap !== undefined) {
-      addScriptLines(lines, { file, text, sourceMap, functions }, root);
+  for (const { url, functions } of report.result) {
+    const file = toPath(url);
+    if (file.startsWith(dist)) {
+      const text = read(file);
+      const sourceMap = text === undefined ? undefined : read(`${file}.map`);
+      if (text !== undefined && sourceMap !== undefined) {
+        addScriptLines(
+          lines,
+          { file, functions, ...builtScript(text, sourceMap) },
+          root,
+        );
+      }
+    } else if (file.startsWith(src)) {
+      const cached = cache[url];
+      const map = cached?.data;
+      if (cached !== undefined && map !== null && map !== undefined) {
+        addScriptLines(
+          lines,
+          { file, functions, ...tsxScript(cached.lineLengths, map) },
+          root,
+        );
+      }
     }
   }
   return lines;

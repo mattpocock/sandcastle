@@ -94,7 +94,7 @@ Instead, create a config layer using Effect for that function, then instantiate 
 
 ## The lint ratchet
 
-`npm run lint` runs oxlint (every category but `restriction` and `nursery` as errors, type-aware, `.oxlintrc.json`) and every Effect language service diagnostic (the `tsconfig.json` plugin). The compiler itself is not ratcheted: `npm run typecheck` passes clean. Run `npm run build` first: the scripts in `.sandcastle/` and `.factory/` import `@ai-hero/sandcastle`, whose types come from `dist`, and without them type-aware rules report false `no-unsafe-*` violations. Code that broke a rule when the linter landed is counted, per file and rule, in `scripts/lint-baseline.json`. `scripts/lint-ratchet.ts` holds the code to that baseline, and the baseline only ever shrinks:
+`npm run lint` runs oxlint (every category but `restriction` and `nursery` as errors, type-aware, `.oxlintrc.json`) and every Effect language service diagnostic (the `tsconfig.json` plugin). `npm run typecheck` (src/ and tests/) passes clean; the compiler errors in the tooling in `.sandcastle/` are ratcheted the same way, in `scripts/typecheck-baseline.json`. Run `npm run build` first: the scripts in `.sandcastle/` and `.factory/` import `@ai-hero/sandcastle`, whose types come from `dist`, and without them type-aware rules report false `no-unsafe-*` violations. Code that broke a rule when the linter landed is counted, per file and rule, in `scripts/lint-baseline.json`. `scripts/lint-ratchet.ts` holds the code to that baseline, and the baseline only ever shrinks:
 
 - A new violation fails — a count going up, or a file or rule the baseline lacks. Fix it. Never raise the baseline.
 - A fixed violation passes. Lowering the baseline in the same PR is optional: after every push to `main`, the `lint-shrink` workflow runs `npm run lint:shrink` (which lowers counts and drops entries at zero but never raises one) and opens or updates a "chore(lint): shrink baseline" PR. Leave `scripts/lint-baseline.json` alone in fix PRs so they don't conflict with each other.
@@ -128,7 +128,11 @@ Split helpers into their own files before writing, not after the ratchet fails. 
 
 New tests go in `tests/` and use only the public API: `@ai-hero/sandcastle` and its `exports` subpaths, imported by package name. dependency-cruiser (`.dependency-cruiser.mjs`) enforces this, and `src/` never imports from `tests/`. The unit tests elsewhere in `src/` are legacy. The test ratchet (`scripts/test-baseline.json`, checked by `npm run lint`) fails on any new test file outside `tests/`, and the legacy count only shrinks. The tests of the repo's own tooling (`scripts/`, `.sandcastle/`) are out of scope.
 
+Tests in `tests/` have no type assertions (`as T`, `<T>x`); `as const` is fine. The test ratchet counts them (`ratchet/test-type-assertion`), from zero. Build a value of the real type, or narrow with `expect` or a type guard. The legacy tests use them freely, so drop them when porting one.
+
 A migration PR may delete a legacy test only when `npm run coverage:gate -- <file>` passes: every line only that file covers must now be covered by `tests/`. Paste its output into the PR body.
+
+The line coverage `tests/` reaches over `src/` only rises: `npm run coverage:floor` (a CI step) fails more than 0.1 points below the floor in `scripts/coverage-baseline.json` (platforms map a few lines differently). New `src/` code therefore needs a test in `tests/`; a legacy test next to it does not count. Never lower the floor; the lint-shrink workflow raises it after each push to main.
 
 Never delete a test to satisfy the test ratchet. When a change trips the ratchet on a legacy test, either port its cases to a public-API test in `tests/` first (the deletion then follows the rule above), or leave the test where it is — it stays in the baseline, which is fine. The ratchet counts files, not cases: deleting a test lowers the count while the behaviour it guarded silently loses coverage, and CI can't tell. Reviewers enforce this; send back any PR that deletes a test without porting its cases.
 

@@ -5,7 +5,6 @@
   },
   ".sandcastle/agent-workflows/explore/apply.ts": {
     "eslint(max-lines-per-function)": 1,
-    "node(no-sync)": 3,
     "typescript(no-unsafe-type-assertion)": 1,
     "unicorn(no-array-sort)": 1
   },
@@ -14,17 +13,7 @@
     "typescript(no-unsafe-type-assertion)": 2,
     "unicorn(no-array-sort)": 3
   },
-  ".sandcastle/agent-workflows/explore/explore.ts": {
-    "node(no-sync)": 2
-  },
-  ".sandcastle/agent-workflows/implement-pr/implement-pr.ts": {
-    "node(no-sync)": 1
-  },
-  ".sandcastle/agent-workflows/review/review.ts": {
-    "node(no-sync)": 1
-  },
   ".sandcastle/agent-workflows/shared/common.ts": {
-    "node(no-sync)": 8,
     "typescript(no-unsafe-type-assertion)": 1
   },
   ".sandcastle/agent-workflows/shared/diff-lines.ts": {
@@ -45,10 +34,6 @@
   ".sandcastle/agent-workflows/shared/run-with-extraction.ts": {
     "eslint(func-style)": 1
   },
-  ".sandcastle/agent-workflows/update-branch/update-branch.ts": {
-    "eslint(func-style)": 1,
-    "node(no-sync)": 3
-  },
   ".sandcastle/run.ts": {
     "eslint(no-await-in-loop)": 3,
     "eslint(no-promise-executor-return)": 1,
@@ -67,21 +52,16 @@
     "eslint(prefer-named-capture-group)": 6,
     "unicorn(no-useless-collection-argument)": 1
   },
-  ".sandcastle/verify/envLeaks.test.ts": {
-    "eslint(require-unicode-regexp)": 1
-  },
   ".sandcastle/verify/ledger.ts": {
     "eslint(curly)": 27,
     "eslint(max-lines-per-function)": 1,
     "eslint(max-lines)": 1,
     "eslint(prefer-named-capture-group)": 1,
-    "node(no-sync)": 15,
     "typescript(no-confusing-void-expression)": 1,
     "typescript(no-unsafe-type-assertion)": 2
   },
   ".sandcastle/verify/lib.ts": {
     "eslint(prefer-named-capture-group)": 4,
-    "node(no-sync)": 4,
     "typescript(no-unsafe-type-assertion)": 1,
     "unicorn(prefer-import-meta-properties)": 1
   },
@@ -90,7 +70,6 @@
     "eslint(curly)": 11,
     "eslint(max-lines-per-function)": 2,
     "eslint(max-statements)": 3,
-    "node(no-sync)": 2,
     "promise(catch-or-return)": 1,
     "promise(prefer-catch)": 1,
     "typescript(no-non-null-assertion)": 1,
@@ -106,7 +85,6 @@
     "eslint(max-params)": 2,
     "eslint(max-statements)": 1,
     "eslint(prefer-named-capture-group)": 2,
-    "node(no-sync)": 27,
     "promise(avoid-new)": 1,
     "typescript(no-unsafe-type-assertion)": 4,
     "typescript(strict-boolean-expressions)": 1,
@@ -124,7 +102,6 @@
     "typescript(no-unsafe-return)": 1
   },
   "scripts/check-no-partially-staged.mjs": {
-    "node(no-sync)": 1,
     "typescript(no-unsafe-assignment)": 1
   },
   "scripts/check-public-types-effect-free.mjs": {
@@ -157,7 +134,6 @@
     "typescript(no-unsafe-assignment)": 38,
     "typescript(no-unsafe-member-access)": 108,
     "typescript(no-unsafe-type-assertion)": 8,
-    "typescript(promise-function-async)": 4,
     "typescript(strict-boolean-expressions)": 21
   },
   "src/ClackDisplay.test.ts": {
@@ -166,18 +142,13 @@
     "typescript(no-unsafe-type-assertion)": 1,
     "vitest(prefer-import-in-mock)": 1
   },
-  "src/cli.test.ts": {
-    "eslint(max-params)": 1,
-    "typescript(strict-void-return)": 1
-  },
   "src/cli.ts": {
     "eslint(complexity)": 1,
     "eslint(max-lines-per-function)": 2,
     "eslint(max-lines)": 1,
     "eslint(max-statements)": 1,
     "import(max-dependencies)": 1,
-    "node(no-sync)": 2,
-    "typescript(promise-function-async)": 2
+    "node(no-sync)": 2
   },
   "src/ContextWindow.test.ts": {
     "typescript(unbound-method)": 1
@@ -191,8 +162,7 @@
     "eslint(max-lines-per-function)": 2,
     "eslint(max-params)": 1,
     "node(no-sync)": 2,
-    "typescript(no-invalid-void-type)": 1,
-    "typescript(promise-function-async)": 1
+    "typescript(no-invalid-void-type)": 1
   },
   "src/createSandbox-windowsMounts.test.ts": {
     "eslint(max-params)": 1,
@@ -237,8 +207,7 @@
     "eslint(prefer-destructuring)": 2,
     "import(max-dependencies)": 1,
     "typescript(method-signature-style)": 5,
-    "typescript(no-unsafe-type-assertion)": 4,
-    "typescript(promise-function-async)": 5
+    "typescript(no-unsafe-type-assertion)": 4
   },
   "src/createWorktree-windowsMounts.test.ts": {
     "eslint(max-params)": 1,
@@ -303,13 +272,6 @@
     "eslint(curly)": 3,
     "eslint(prefer-named-capture-group)": 1
   },
-  "src/ErrorHandler.test.ts": {
-    "ratchet/disable-comment": 2,
-    "typescript(no-unsafe-argument)": 1,
-    "typescript(no-unsafe-call)": 1,
-    "typescript(no-unsafe-member-access)": 1,
-    "typescript(no-unsafe-type-assertion)": 1
-  },
   "src/ErrorHandler.ts": {
     "effect/lazyPromiseInEffectSync": 1,
     "effect/unsafeEffectTypeAssertion": 1,
@@ -324,10 +286,7 @@
   },
   "src/hostShell.ts": {
     "effect/newPromise": 1,
-    "eslint(max-lines-per-function)": 2,
-    "promise(avoid-new)": 1,
-    "typescript(promise-function-async)": 1,
-    "typescript(strict-void-return)": 2
+    "promise(avoid-new)": 1
   },
   "src/index.ts": {
     "typescript(no-deprecated)": 1
@@ -382,9 +341,6 @@
     "typescript(no-unsafe-type-assertion)": 1,
     "vitest(prefer-import-in-mock)": 1
   },
-  "src/main.ts": {
-    "typescript(strict-void-return)": 1
-  },
   "src/mountUtils.test.ts": {
     "typescript(consistent-type-imports)": 1,
     "vitest(prefer-import-in-mock)": 2,
@@ -399,8 +355,7 @@
     "eslint(prefer-named-capture-group)": 1,
     "import(no-cycle)": 1,
     "node(no-sync)": 1,
-    "typescript(method-signature-style)": 1,
-    "typescript(promise-function-async)": 4
+    "typescript(method-signature-style)": 1
   },
   "src/Orchestrator.test.ts": {
     "eslint(max-params)": 1,
@@ -431,8 +386,7 @@
     "eslint(max-params)": 1,
     "eslint(max-statements)": 3,
     "eslint(prefer-destructuring)": 2,
-    "import(max-dependencies)": 1,
-    "typescript(promise-function-async)": 3
+    "import(max-dependencies)": 1
   },
   "src/Output.ts": {
     "effect/extendsNativeError": 1
@@ -442,8 +396,7 @@
   },
   "src/PromptArgumentSubstitution.test.ts": {
     "eslint(require-unicode-regexp)": 1,
-    "typescript(no-unsafe-type-assertion)": 4,
-    "typescript(promise-function-async)": 1
+    "typescript(no-unsafe-type-assertion)": 4
   },
   "src/PromptArgumentSubstitution.ts": {
     "eslint(max-lines-per-function)": 1,
@@ -545,8 +498,7 @@
   "src/sandboxes/no-sandbox.ts": {
     "eslint(max-lines-per-function)": 4,
     "promise(avoid-new)": 2,
-    "typescript(no-unsafe-type-assertion)": 1,
-    "typescript(require-await)": 1
+    "typescript(no-unsafe-type-assertion)": 1
   },
   "src/sandboxes/podman.test.ts": {
     "eslint(no-await-in-loop)": 2,
@@ -579,8 +531,7 @@
   "src/sandboxes/test-shared.ts": {
     "eslint(max-lines-per-function)": 2,
     "eslint(no-empty-function)": 2,
-    "promise(avoid-new)": 2,
-    "typescript(require-await)": 3
+    "promise(avoid-new)": 2
   },
   "src/sandboxes/vercel.test.ts": {
     "vitest(prefer-import-in-mock)": 1
@@ -609,7 +560,6 @@
     "typescript(no-unsafe-member-access)": 6,
     "typescript(no-unsafe-return)": 2,
     "typescript(no-unsafe-type-assertion)": 4,
-    "typescript(promise-function-async)": 6,
     "typescript(strict-void-return)": 1,
     "unicorn(no-object-as-default-parameter)": 2
   },
@@ -624,8 +574,7 @@
     "import(max-dependencies)": 1,
     "import(no-cycle)": 2,
     "typescript(consistent-type-imports)": 1,
-    "typescript(no-unsafe-type-assertion)": 3,
-    "typescript(promise-function-async)": 9
+    "typescript(no-unsafe-type-assertion)": 3
   },
   "src/SandboxLifecycle.test.ts": {
     "eslint(max-params)": 1,
@@ -649,7 +598,6 @@
     "eslint(max-params)": 1,
     "eslint(max-statements)": 2,
     "node(no-sync)": 1,
-    "typescript(promise-function-async)": 2,
     "unicorn(prefer-number-coercion)": 1
   },
   "src/SandboxProvider.ts": {
@@ -690,16 +638,11 @@
     "import(no-cycle)": 2,
     "node(no-sync)": 1,
     "typescript(method-signature-style)": 1,
-    "typescript(no-unsafe-type-assertion)": 3,
-    "typescript(promise-function-async)": 7
+    "typescript(no-unsafe-type-assertion)": 3
   },
   "src/syncIn.test.ts": {
     "eslint(max-params)": 1,
     "typescript(strict-void-return)": 1
-  },
-  "src/syncIn.ts": {
-    "eslint(max-lines-per-function)": 3,
-    "typescript(promise-function-async)": 5
   },
   "src/syncOut.test.ts": {
     "eslint(max-params)": 1,
@@ -714,11 +657,9 @@
     "eslint(max-statements)": 1,
     "eslint(no-await-in-loop)": 3,
     "node(no-sync)": 1,
-    "typescript(promise-function-async)": 4,
     "unicorn(prefer-number-coercion)": 1
   },
   "src/templates/parallel-planner-with-review/main.mts": {
-    "effect/asyncFunction": 1,
     "eslint(no-await-in-loop)": 3,
     "eslint(prefer-destructuring)": 1,
     "typescript(no-non-null-assertion)": 3
@@ -726,11 +667,9 @@
   "src/templates/parallel-planner/main.mts": {
     "eslint(no-await-in-loop)": 3,
     "eslint(prefer-destructuring)": 1,
-    "typescript(no-non-null-assertion)": 3,
-    "typescript(promise-function-async)": 1
+    "typescript(no-non-null-assertion)": 3
   },
   "src/templates/sequential-reviewer/main.mts": {
-    "effect/globalDate": 1,
     "eslint(no-await-in-loop)": 4,
     "unicorn(explicit-length-check)": 1
   },
@@ -739,17 +678,8 @@
     "eslint(prefer-named-capture-group)": 1,
     "node(no-sync)": 3
   },
-  "src/testSandbox.ts": {
-    "typescript(restrict-template-expressions)": 2
-  },
   "src/TextDeltaBuffer.ts": {
     "effect/globalTimers": 1
-  },
-  "src/validateTimeouts.ts": {
-    "typescript(no-base-to-string)": 1
-  },
-  "src/vercel-sandbox.d.ts": {
-    "typescript(method-signature-style)": 7
   },
   "src/WorktreeManager.test.ts": {
     "eslint(max-params)": 2,

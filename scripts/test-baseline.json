@@ -5,9 +5,6 @@
   "src/ClackDisplay.test.ts": {
     "ratchet/test-outside-tests": 1
   },
-  "src/cli.test.ts": {
-    "ratchet/test-outside-tests": 1
-  },
   "src/ContextWindow.test.ts": {
     "ratchet/test-outside-tests": 1
   },
@@ -35,19 +32,10 @@
   "src/DockerLifecycle.test.ts": {
     "ratchet/test-outside-tests": 1
   },
-  "src/EnvResolver.test.ts": {
-    "ratchet/test-outside-tests": 1
-  },
   "src/ErrorHandler.test.ts": {
     "ratchet/test-outside-tests": 1
   },
   "src/errors.test.ts": {
-    "ratchet/test-outside-tests": 1
-  },
-  "src/InitService.agents.test.ts": {
-    "ratchet/test-outside-tests": 1
-  },
-  "src/InitService.packageManager.test.ts": {
     "ratchet/test-outside-tests": 1
   },
   "src/InitService.sandboxProviders.test.ts": {

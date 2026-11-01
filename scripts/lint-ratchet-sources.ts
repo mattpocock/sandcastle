@@ -3,7 +3,9 @@
 //
 // - lint ratchet: oxlint, Effect diagnostics, disable comments,
 //   `toMatchObject({ k: undefined })` in tests
-// - test ratchet: test files outside tests/, dependency-cruiser violations
+// - test ratchet: test files outside tests/, dependency-cruiser violations,
+//   type assertions in tests/
+// - typecheck ratchet: compiler errors in .sandcastle/
 
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
@@ -11,6 +13,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { isRawGitScanned, spawnsGitDirectly } from "./lint-ratchet-raw-git.ts";
+import { typeAssertionCount } from "./lint-ratchet-test-casts.ts";
 import type { Exemption } from "./lint-ratchet-config.ts";
 import {
   ALLOWED_DIRECTIVES,
@@ -20,7 +23,7 @@ import {
   TOOLING_TESTS,
 } from "./lint-ratchet-config.ts";
 import type { Violation } from "./lint-ratchet-core.ts";
-import { matchObjectUndefinedCount } from "./lint-ratchet-core.ts";
+import { matchObjectUndefinedCount, tscErrors } from "./lint-ratchet-core.ts";
 
 export const ROOT = path.resolve(import.meta.dirname, "..");
 const BIN = path.join(ROOT, "node_modules", ".bin");
@@ -70,7 +73,11 @@ const isExempt = (
   exemptions: readonly Exemption[],
   { file, rule }: Violation,
 ): boolean =>
-  exemptions.some((e) => e.rules.includes(rule) && matchesAny(e.files, file));
+  exemptions.some(
+    (e) =>
+      (e.rules.includes(rule) || e.rules.includes("*")) &&
+      matchesAny(e.files, file),
+  );
 
 const OxlintOutput = z.object({
   diagnostics: z.array(
@@ -233,4 +240,42 @@ export const collectRawGitSpawns = async (): Promise<Violation[]> => {
       }),
   );
   return perFile.flat();
+};
+
+const E2E_DIR_FILE = /^tests\/.*\.[cm]?ts$/u;
+
+/**
+ * A type assertion other than `as const` in tests/, each counted. The rule
+ * is in scripts/lint-ratchet-test-casts.ts.
+ */
+export const collectTestTypeAssertions = async (): Promise<Violation[]> => {
+  const listed = await listFiles();
+  const perFile = await Promise.all(
+    listed
+      .filter((f) => E2E_DIR_FILE.test(f))
+      .map(async (file) => {
+        const source = await readFile(path.join(ROOT, file), "utf8");
+        return Array.from({ length: typeAssertionCount(source, file) }, () => ({
+          file,
+          rule: "ratchet/test-type-assertion",
+        }));
+      }),
+  );
+  return perFile.flat();
+};
+
+/**
+ * Compiler errors in the repo's own tooling (.sandcastle/tsconfig.typecheck.json).
+ * Its scripts run through tsx, which never type-checks, and no other tsconfig
+ * includes them.
+ */
+export const collectSandcastleTypes = async (): Promise<Violation[]> => {
+  const out = await run(path.join(BIN, "tsc"), [
+    "--noEmit",
+    "--pretty",
+    "false",
+    "-p",
+    path.join(ROOT, ".sandcastle", "tsconfig.typecheck.json"),
+  ]);
+  return tscErrors(out).filter((v) => v.file.startsWith(".sandcastle/"));
 };

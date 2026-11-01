@@ -142,7 +142,7 @@ describe("run() timeout validation", () => {
       ["idleTimeoutSeconds", "30"],
     ]);
     await expect(runWith(untyped)).rejects.toThrow(
-      "idleTimeoutSeconds must be a positive number of seconds",
+      "idleTimeoutSeconds must be a positive number of seconds. Received: '30'",
     );
   });
 
