@@ -58,15 +58,56 @@ export const pathExists = async (path: string): Promise<boolean> => {
 // Claude Code session paths and transfer
 // ---------------------------------------------------------------------------
 
+/** Longest project directory name Claude Code writes before it truncates. */
+const MAX_PROJECT_DIR_LENGTH = 200;
+
+/** Claude Code's 32-bit string hash, in base 36, for truncated names. */
+const claudePathHash = (value: string): string => {
+  // Over UTF-16 code units, wrapping to a signed 32-bit int as Claude Code
+  // does; Math.imul does the wrap.
+  const hash = value
+    .split("")
+    .reduce((acc, unit) => Math.imul(31, acc) + (unit.codePointAt(0) ?? 0), 0);
+  return Math.abs(Math.imul(hash, 1)).toString(36);
+};
+
 /**
- * Encode a cwd into the Claude Code `~/.claude/projects/<encoded>/` layout.
- * Replaces path separators with hyphens, matching Claude Code's convention.
+ * Encode a cwd into the Claude Code `~/.claude/projects/<encoded>/` layout,
+ * matching Claude Code's own naming: every character that isn't an ASCII
+ * letter or digit becomes a hyphen (so `/`, `\`, `:` and `.` all do), and a
+ * name longer than 200 characters is cut to 200 and suffixed with a hash of
+ * the full path. A trailing path separator is ignored.
  */
 export const encodeProjectPath = (cwd: string): string => {
   const isRoot = cwd === "/" || /^[A-Za-z]:[\\/]?$/u.test(cwd);
   const normalized = isRoot ? cwd : cwd.replace(/[\\/]+$/u, "");
-  return normalized.replace(/^([A-Za-z]):/u, "$1").replaceAll(/[\\/]/gu, "-");
+  const encoded = normalized.replaceAll(/[^A-Za-z0-9]/gu, "-");
+  if (encoded.length <= MAX_PROJECT_DIR_LENGTH) {
+    return encoded;
+  }
+  return `${encoded.slice(0, MAX_PROJECT_DIR_LENGTH)}-${claudePathHash(normalized)}`;
 };
+
+/**
+ * The agent's home and temp dir inside a sandbox, as commands running there
+ * see them. Commands Sandcastle runs inside the sandbox build their paths
+ * from these, never from a literal `/home/agent` or `/tmp`.
+ */
+export interface SandboxDirs {
+  readonly home: string;
+  readonly tmp: string;
+}
+
+/** The Docker image layout, for a handle that doesn't report its dirs. */
+const DEFAULT_SANDBOX_DIRS: SandboxDirs = { home: "/home/agent", tmp: "/tmp" };
+
+/** The home and temp dir a sandbox handle reports, or the image defaults. */
+export const sandboxDirsOf = (
+  handle: Pick<BindMountSandboxHandle, "sandboxHomedir" | "sandboxTmpdir">,
+): SandboxDirs => ({
+  home: handle.sandboxHomedir ?? DEFAULT_SANDBOX_DIRS.home,
+  tmp: handle.sandboxTmpdir ?? DEFAULT_SANDBOX_DIRS.tmp,
+});
 
 /** Absolute host path to a Claude session JSONL file. */
 export const claudeHostSessionPath = (
@@ -532,8 +573,11 @@ export interface SessionFileLayout {
     id: string,
     hostRootSubdirs: readonly string[],
   ) => readonly string[];
-  /** Sandbox path of the session file for a cwd (POSIX separators). */
-  readonly sandboxPath: (cwd: string, id: string) => string;
+  /**
+   * Sandbox path of the session file for a cwd (POSIX separators), under the
+   * sandbox's own home or temp dir.
+   */
+  readonly sandboxPath: (cwd: string, id: string, dirs: SandboxDirs) => string;
   /**
    * For an agent whose sessions live in its own database: the sandbox command
    * that writes session `id` to `sandboxPath` before capture, run in the
@@ -568,7 +612,11 @@ const captureSessionFile =
   (layout: SessionFileLayout) =>
   async (transfer: SessionTransfer): Promise<void> => {
     const { hostCwd, sandboxCwd, sessionId, handle } = transfer;
-    const source = layout.sandboxPath(sandboxCwd, sessionId);
+    const source = layout.sandboxPath(
+      sandboxCwd,
+      sessionId,
+      sandboxDirsOf(handle),
+    );
     if (layout.sandboxExport !== undefined) {
       const command = layout.sandboxExport(sessionId, source);
       const result = await handle.exec(command, { cwd: sandboxCwd });
@@ -591,7 +639,11 @@ const resumeSessionFile =
   async (transfer: SessionTransfer): Promise<void> => {
     const { hostCwd, sandboxCwd, sessionId, handle } = transfer;
     const source = layout.hostPath(hostCwd, sessionId);
-    const target = layout.sandboxPath(sandboxCwd, sessionId);
+    const target = layout.sandboxPath(
+      sandboxCwd,
+      sessionId,
+      sandboxDirsOf(handle),
+    );
     const dir = JSON.stringify(posix.dirname(target));
     if (layout.rewrite === undefined) {
       await handle.exec(`mkdir -p ${dir}`);

@@ -200,7 +200,7 @@ const main = async (): Promise<number> => {
         : runInWorld(world, "sh", args[0], args.slice(1));
     }
     case "ledger": {
-      const { text, leaks, file } = runLedger(loadWorld(rest[0]));
+      const { text, leaks, file } = await runLedger(loadWorld(rest[0]));
       console.log(text);
       console.error(`[verify] ledger written to ${file}`);
       return leaks === 0 ? 0 : 1;

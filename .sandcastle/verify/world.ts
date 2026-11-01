@@ -19,6 +19,7 @@ import type { WorldSpan } from "./attribution.ts";
 import { classifyEnv } from "./envLeaks.ts";
 import type { EnvLeak } from "./envLeaks.ts";
 import { redact, REPO_ROOT, secretsIn, sh } from "./lib.ts";
+import { observeWorldBwraps } from "./nativeSandboxes.ts";
 
 export const WORLDS_ROOT = join(tmpdir(), "sandcastle-verify");
 const REAL_HOME = homedir();
@@ -372,11 +373,57 @@ export const worldContainer = (world: World, engine: Engine, name: string) => {
   return info;
 };
 
+/** Append an observation to observed.jsonl and print its verdict. */
+const recordObservation = (world: World, obs: Observation): void => {
+  appendFileSync(join(world.dir, "observed.jsonl"), `${JSON.stringify(obs)}\n`);
+  const verdict =
+    obs.leaks.length === 0
+      ? "env ok"
+      : `ENV LEAK: ${obs.leaks.map((l) => l.name).join(", ")}`;
+  process.stderr.write(
+    `[verify] observed ${obs.container} (${obs.image}): ${verdict}\n`,
+  );
+};
+
+/** Observes the world's new bwraps (see nativeSandboxes.ts), one tick at a time. */
+const bwrapObserver = (
+  world: World,
+  hostSecrets: ReadonlyMap<string, string>,
+  seen: Set<string>,
+): (() => Promise<void>) => {
+  let inFlight = false;
+  return async () => {
+    if (inFlight) {
+      return;
+    }
+    inFlight = true;
+    try {
+      const found = await observeWorldBwraps(
+        world.dir,
+        { declared: declaredKeys(world), hostSecrets, canary: world.canary },
+        seen,
+      );
+      for (const o of found) {
+        recordObservation(world, {
+          at: new Date().toISOString(),
+          container: o.key,
+          image: `host toolchain, ${o.command}`,
+          envNames: o.envNames,
+          leaks: o.leaks,
+        });
+      }
+    } finally {
+      inFlight = false;
+    }
+  };
+};
+
 /**
  * Run a command inside the world: cwd is the project, env is the world's.
  * Output streams through, redacted, and is logged under logs/. While it runs,
- * every sandcastle-* container that mounts the world is inspected once and its
- * env checked for leaks, into observed.jsonl (names only, never values).
+ * every sandcastle-* container that mounts the world, and every bwrap that
+ * names a path in it, is inspected once and its env checked for leaks, into
+ * observed.jsonl (names only, never values).
  */
 export const runInWorld = async (
   world: World,
@@ -393,6 +440,7 @@ export const runInWorld = async (
   const seen = new Set<string>(world.baseline.containers);
   const engines = ENGINES.filter(engineUp);
   const hostSecrets = secretsIn(process.env);
+  const observeBwraps = bwrapObserver(world, hostSecrets, seen);
   const observe = () => {
     for (const engine of engines) {
       const names = sh(engine, [
@@ -414,7 +462,7 @@ export const runInWorld = async (
           continue;
         }
         seen.add(key);
-        const obs: Observation = {
+        recordObservation(world, {
           at: new Date().toISOString(),
           container: key,
           image: info.image,
@@ -424,20 +472,11 @@ export const runInWorld = async (
             hostSecrets,
             canary: world.canary,
           }),
-        };
-        appendFileSync(
-          join(world.dir, "observed.jsonl"),
-          `${JSON.stringify(obs)}\n`,
-        );
-        const verdict =
-          obs.leaks.length === 0
-            ? "env ok"
-            : `ENV LEAK: ${obs.leaks.map((l) => l.name).join(", ")}`;
-        process.stderr.write(
-          `[verify] observed ${key} (${info.image}): ${verdict}\n`,
-        );
+        });
       }
     }
+    // Native sandboxes: no container, so read the sandboxed process's env.
+    void observeBwraps();
   };
 
   const child = spawn(command, args, {
