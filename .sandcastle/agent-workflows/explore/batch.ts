@@ -1,5 +1,10 @@
-import type { StandardSchemaV1 } from "@standard-schema/spec";
-import { asArray, asRecord, asString, standardSchema } from "../shared/common";
+import {
+  asArray,
+  asRecord,
+  asString,
+  standardSchema,
+  textOr,
+} from "../shared/common";
 
 /**
  * Pure model of one batch explore run: the issues it covers, the agent's
@@ -75,10 +80,11 @@ const asIssueNumber = (value: unknown, label: string): number => {
 };
 
 const asTag = (value: unknown, label: string): Tag => {
-  if (!TAGS.includes(value as Tag)) {
+  const tag = TAGS.find((candidate) => candidate === value);
+  if (tag === undefined) {
     throw new Error(`${label} must be one of ${TAGS.join(" | ")}`);
   }
-  return value as Tag;
+  return tag;
 };
 
 /** Throws unless `numbers` contains every batch issue exactly once and nothing else. */
@@ -117,18 +123,18 @@ export const parseBatch = (raw: unknown): BatchIssue[] =>
       const author = asRecord(record.author ?? {}, "issue author");
       return {
         number: asIssueNumber(record.number, "issue number"),
-        title: String(record.title ?? ""),
-        body: String(record.body ?? ""),
-        author: String(author.login ?? "unknown"),
-        createdAt: String(record.createdAt ?? ""),
-        url: String(record.url ?? ""),
+        title: textOr(record.title, ""),
+        body: textOr(record.body, ""),
+        author: textOr(author.login, "unknown"),
+        createdAt: textOr(record.createdAt, ""),
+        url: textOr(record.url, ""),
         comments: asArray(record.comments ?? [], "issue comments").map(
           (comment) => {
             const c = asRecord(comment, "issue comment");
             const commentAuthor = asRecord(c.author ?? {}, "comment author");
             return {
-              author: String(commentAuthor.login ?? "unknown"),
-              body: String(c.body ?? ""),
+              author: textOr(commentAuthor.login, "unknown"),
+              body: textOr(c.body, ""),
             };
           },
         ),
@@ -226,21 +232,6 @@ export const planSchema = (batch: readonly BatchIssue[]) => {
       patterns: typeof record.patterns === "string" ? record.patterns : "",
     };
   });
-};
-
-/** Run a schema built by `standardSchema` synchronously, throwing on failure. */
-export const validate = <T>(
-  schema: StandardSchemaV1<unknown, T>,
-  value: unknown,
-): T => {
-  const result = schema["~standard"].validate(value);
-  if (result instanceof Promise) {
-    throw new TypeError("Schema validation must be synchronous");
-  }
-  if (result.issues) {
-    throw new Error(result.issues.map((issue) => issue.message).join("; "));
-  }
-  return result.value;
 };
 
 // ---------------------------------------------------------------------------

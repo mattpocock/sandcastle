@@ -1,12 +1,19 @@
 import * as fs from "node:fs";
 import { execFileSync } from "node:child_process";
-import { fail, gh, required, writeJson } from "../shared/common";
+import {
+  asArray,
+  asRecord,
+  fail,
+  gh,
+  required,
+  validate,
+  writeJson,
+} from "../shared/common";
 import {
   EXPLORE_LABEL,
   parseBatch,
   planEffects,
   planSchema,
-  validate,
   VERDICT_LABEL,
 } from "./batch";
 import type { GitHubEffect, Plan } from "./batch";
@@ -72,6 +79,28 @@ const describe = (effect: GitHubEffect): string => {
   }
 };
 
+/** Drop `agent:explore` and close as a duplicate (falling back to "not planned"). */
+const closeAsDuplicate = (issue: string): void => {
+  ghWith(["issue", "edit", issue, "--remove-label", EXPLORE_LABEL], {});
+  try {
+    ghWith(
+      [
+        "api",
+        "--method",
+        "PATCH",
+        `repos/${GH_REPO}/issues/${issue}`,
+        "-f",
+        "state=closed",
+        "-f",
+        "state_reason=duplicate",
+      ],
+      {},
+    );
+  } catch {
+    ghWith(["issue", "close", issue, "--reason", "not planned"], {});
+  }
+};
+
 const apply = (effect: GitHubEffect): void => {
   const issue = String(effect.issue);
   switch (effect.kind) {
@@ -104,24 +133,7 @@ const apply = (effect: GitHubEffect): void => {
       return;
     }
     case "close-duplicate": {
-      ghWith(["issue", "edit", issue, "--remove-label", EXPLORE_LABEL], {});
-      try {
-        ghWith(
-          [
-            "api",
-            "--method",
-            "PATCH",
-            `repos/${GH_REPO}/issues/${issue}`,
-            "-f",
-            "state=closed",
-            "-f",
-            "state_reason=duplicate",
-          ],
-          {},
-        );
-      } catch {
-        ghWith(["issue", "close", issue, "--reason", "not planned"], {});
-      }
+      closeAsDuplicate(issue);
     }
   }
 };
@@ -150,7 +162,7 @@ try {
 // Every issue must still be open and still carry agent:explore — if a human
 // moved one on mid-run, don't overwrite their decision.
 const live = new Set(
-  (
+  asArray(
     JSON.parse(
       gh([
         "issue",
@@ -164,8 +176,9 @@ const live = new Set(
         "--json",
         "number",
       ]),
-    ) as { number: number }[]
-  ).map((issue) => issue.number),
+    ),
+    "open explore issues",
+  ).map((issue) => asRecord(issue, "open explore issue").number),
 );
 const stale = plan.issues.filter((entry) => !live.has(entry.number));
 if (stale.length > 0) {
