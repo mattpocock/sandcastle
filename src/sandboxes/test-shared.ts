@@ -7,6 +7,7 @@
  */
 
 import { execFile, spawn } from "node:child_process";
+import { once } from "node:events";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -32,6 +33,70 @@ export interface TempSandbox {
   readonly close: () => Promise<void>;
 }
 
+type ExecOptions = NonNullable<Parameters<TempSandbox["exec"]>[1]>;
+
+const errorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+/** Run `command`, streaming stdout lines to `onLine`; keeps a bounded tail. */
+const streamExec = async (
+  command: string,
+  cwd: string,
+  onLine: (line: string) => void,
+): Promise<ExecResult> => {
+  const proc = spawn("sh", ["-c", command], {
+    cwd,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  const stdoutTail = new BoundedTail(MAX_TAIL_CHARS, "\n");
+  const stderrTail = new BoundedTail(MAX_TAIL_CHARS, "");
+
+  const rl = createInterface({ input: proc.stdout });
+  rl.on("line", (line) => {
+    stdoutTail.push(line);
+    onLine(line);
+  });
+
+  proc.stderr.on("data", (chunk: Buffer) => {
+    stderrTail.push(chunk.toString());
+  });
+
+  // `once` rejects if the process emits "error" (e.g. spawn failure) first.
+  const closeArgs: unknown[] = await once(proc, "close").catch(
+    (error: unknown) => {
+      throw new Error(`exec failed: ${errorMessage(error)}`, { cause: error });
+    },
+  );
+  const [code] = closeArgs;
+  return {
+    stdout: stdoutTail.toString(),
+    stderr: stderrTail.toString(),
+    exitCode: typeof code === "number" ? code : 0,
+  };
+};
+
+/** Run `command` to completion and return its whole output. */
+const bufferedExec = (command: string, cwd: string): Promise<ExecResult> =>
+  new Promise((resolve, reject) => {
+    execFile(
+      "sh",
+      ["-c", command],
+      { cwd, maxBuffer: 10 * 1024 * 1024 },
+      (error, stdout, stderr) => {
+        if (error && error.code === undefined) {
+          reject(new Error(`exec failed: ${error.message}`));
+        } else {
+          resolve({
+            stdout,
+            stderr,
+            exitCode: typeof error?.code === "number" ? error.code : 0,
+          });
+        }
+      },
+    );
+  });
+
 export const createTempSandbox = async (
   prefix: string,
 ): Promise<TempSandbox> => {
@@ -41,68 +106,12 @@ export const createTempSandbox = async (
 
   const exec = async (
     command: string,
-    options?: {
-      onLine?: (line: string) => void;
-      cwd?: string;
-      sudo?: boolean;
-    },
+    options?: ExecOptions,
   ): Promise<ExecResult> => {
-    if (options?.onLine) {
-      const { onLine } = options;
-      return new Promise((resolve, reject) => {
-        const proc = spawn("sh", ["-c", command], {
-          cwd: options?.cwd ?? worktreePath,
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-
-        const stdoutTail = new BoundedTail(MAX_TAIL_CHARS, "\n");
-        const stderrTail = new BoundedTail(MAX_TAIL_CHARS, "");
-
-        const rl = createInterface({ input: proc.stdout });
-        rl.on("line", (line) => {
-          stdoutTail.push(line);
-          onLine(line);
-        });
-
-        proc.stderr.on("data", (chunk: Buffer) => {
-          stderrTail.push(chunk.toString());
-        });
-
-        proc.on("error", (error) => {
-          reject(new Error(`exec failed: ${error.message}`));
-        });
-
-        proc.on("close", (code) => {
-          resolve({
-            stdout: stdoutTail.toString(),
-            stderr: stderrTail.toString(),
-            exitCode: code ?? 0,
-          });
-        });
-      });
-    }
-
-    return new Promise((resolve, reject) => {
-      execFile(
-        "sh",
-        ["-c", command],
-        {
-          cwd: options?.cwd ?? worktreePath,
-          maxBuffer: 10 * 1024 * 1024,
-        },
-        (error, stdout, stderr) => {
-          if (error && error.code === undefined) {
-            reject(new Error(`exec failed: ${error.message}`));
-          } else {
-            resolve({
-              stdout,
-              stderr,
-              exitCode: typeof error?.code === "number" ? error.code : 0,
-            });
-          }
-        },
-      );
-    });
+    const cwd = options?.cwd ?? worktreePath;
+    return options?.onLine
+      ? streamExec(command, cwd, options.onLine)
+      : bufferedExec(command, cwd);
   };
 
   return {
@@ -134,8 +143,8 @@ export const testStubProvider = (
       const handle: BindMountSandboxHandle = {
         worktreePath: options.worktreePath ?? "/home/agent/workspace",
         exec: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
-        copyFileIn: async () => {},
-        copyFileOut: async () => {},
+        copyFileIn: () => Promise.resolve(),
+        copyFileOut: () => Promise.resolve(),
         close: async () => {
           closeCalls.count++;
         },
