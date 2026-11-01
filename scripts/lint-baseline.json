@@ -93,13 +93,7 @@
     "unicorn(no-array-sort)": 1
   },
   "lint-staged.config.mjs": {
-    "import(no-anonymous-default-export)": 1,
-    "node(no-sync)": 1,
-    "typescript(no-unsafe-argument)": 1,
-    "typescript(no-unsafe-assignment)": 1,
-    "typescript(no-unsafe-call)": 3,
-    "typescript(no-unsafe-member-access)": 4,
-    "typescript(no-unsafe-return)": 1
+    "import(no-anonymous-default-export)": 1
   },
   "scripts/check-no-partially-staged.mjs": {
     "typescript(no-unsafe-assignment)": 1
