@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { linesFromIstanbul, merge, report } from "./coverage-gate-core.ts";
+import {
+  coverableLinesFromIstanbul,
+  linesFromIstanbul,
+  merge,
+  report,
+} from "./coverage-gate-core.ts";
 import { linesFromV8 } from "./coverage-gate-v8.ts";
 
 const ROOT = "/repo";
@@ -40,6 +45,20 @@ describe("linesFromIstanbul", () => {
         ROOT,
       ),
     ).toStrictEqual(new Map([["src/mountUtils.ts", new Set([242])]]));
+  });
+});
+
+describe("coverableLinesFromIstanbul", () => {
+  it("keeps the start line of every statement, run or not", () => {
+    expect(
+      coverableLinesFromIstanbul(
+        istanbul("/repo/src/a.ts", [
+          [3, 1],
+          [4, 0],
+        ]),
+        ROOT,
+      ),
+    ).toStrictEqual(new Map([["src/a.ts", new Set([3, 4])]]));
   });
 });
 

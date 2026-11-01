@@ -35,20 +35,37 @@ const repoPath = (file: string, root: string): string => {
   return src === -1 ? normal : normal.slice(src + 1);
 };
 
-/** Covered lines from a vitest/istanbul `coverage-final.json`. */
-export const linesFromIstanbul = (json: unknown, root: string): Lines => {
+/** The start lines of the statements whose hit count passes `keep`. */
+const statementLines = (
+  json: unknown,
+  root: string,
+  keep: (count: number) => boolean,
+): Lines => {
   const lines: Lines = new Map();
   for (const [file, data] of Object.entries(Istanbul.parse(json))) {
-    const hit = new Set(
+    const kept = new Set(
       Object.entries(data.s)
-        .filter(([, count]) => count > 0)
+        .filter(([, count]) => keep(count))
         .map(([id]) => data.statementMap[id]?.start.line ?? 0)
         .filter((line) => line > 0),
     );
-    lines.set(repoPath(file, root), hit);
+    lines.set(repoPath(file, root), kept);
   }
   return lines;
 };
+
+/** Covered lines from a vitest/istanbul `coverage-final.json`. */
+export const linesFromIstanbul = (json: unknown, root: string): Lines =>
+  statementLines(json, root, (count) => count > 0);
+
+/**
+ * Every line with a statement, covered or not, from the same JSON: the
+ * denominator of line coverage. Matches vitest's own line totals.
+ */
+export const coverableLinesFromIstanbul = (
+  json: unknown,
+  root: string,
+): Lines => statementLines(json, root, () => true);
 
 /** Every line any of `sources` covers. */
 export const merge = (...sources: readonly Lines[]): Lines => {
