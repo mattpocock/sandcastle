@@ -614,7 +614,9 @@ const buildSandboxHandle = (
 
       const { agent: provider, prompt, promptFile } = interactiveOptions;
 
-      if (!provider.buildInteractiveArgs) {
+      const buildInteractiveArgs =
+        provider.buildInteractiveArgs?.bind(provider);
+      if (!buildInteractiveArgs) {
         throw new Error(
           `Agent provider "${provider.name}" does not support buildInteractiveArgs, required for interactive sessions.`,
         );
@@ -683,7 +685,7 @@ const buildSandboxHandle = (
                         ctx.sandboxRepoDir,
                       );
 
-                  const interactiveArgs = provider.buildInteractiveArgs!({
+                  const interactiveArgs = buildInteractiveArgs({
                     prompt: fullPrompt,
                     dangerouslySkipPermissions: true,
                   });
