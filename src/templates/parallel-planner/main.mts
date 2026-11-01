@@ -16,6 +16,9 @@
 // Or add to package.json:
 //   "scripts": { "sandcastle": "npx tsx .sandcastle/main.mts" }
 
+import { execFile as execFileCb } from "node:child_process";
+import { promisify } from "node:util";
+
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { z } from "zod";
@@ -29,6 +32,28 @@ const planSchema = z.object({
     z.object({ id: z.string(), title: z.string(), branch: z.string() }),
   ),
 });
+
+const execFile = promisify(execFileCb);
+
+// True if `branch` has commits not yet on `main`. We ask git directly rather
+// than relying on the implementer's `commits.length` from this iteration —
+// a branch may already be ahead from a previous iteration whose merger
+// never picked it up, in which case the next iteration's implementer finds
+// the fix already in place, produces zero new commits, and (without this
+// check) the branch silently drops out of the merger's input forever.
+async function branchIsAheadOfMain(branch: string): Promise<boolean> {
+  try {
+    const { stdout } = await execFile("git", [
+      "rev-list",
+      "--count",
+      `main..${branch}`,
+    ]);
+    return parseInt(stdout.trim(), 10) > 0;
+  } catch (err) {
+    console.warn(`  ⚠ couldn't check ${branch} ahead-of-main: ${err}`);
+    return false;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -140,36 +165,35 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     }
   }
 
-  // Only pass branches that actually produced commits to the merge phase.
-  // An agent that ran successfully but made no commits has nothing to merge.
-  const completedIssues = settled
+  // Only pass branches whose tip is ahead of `main` to the merge phase. We
+  // ask git directly rather than gating on `commits.length` from this
+  // iteration's implementer — a branch may have been advanced by a previous
+  // iteration whose merger never landed it, in which case the implementer
+  // re-runs, finds the fix already in place, produces zero new commits, and
+  // (without this check) the branch silently disappears from the merger's
+  // input set forever.
+  const fulfilledIssues = settled
     .map((outcome, i) => ({ outcome, issue: issues[i]! }))
-    .filter(
-      (
-        entry,
-      ): entry is {
-        outcome: PromiseFulfilledResult<
-          Awaited<ReturnType<typeof sandcastle.run>>
-        >;
-        issue: (typeof issues)[number];
-      } =>
-        entry.outcome.status === "fulfilled" &&
-        entry.outcome.value.commits.length > 0,
-    )
+    .filter((entry) => entry.outcome.status === "fulfilled")
     .map((entry) => entry.issue);
 
+  const aheadFlags = await Promise.all(
+    fulfilledIssues.map((issue) => branchIsAheadOfMain(issue.branch)),
+  );
+  const completedIssues = fulfilledIssues.filter((_, i) => aheadFlags[i]!);
   const completedBranches = completedIssues.map((i) => i.branch);
 
   console.log(
-    `\nExecution complete. ${completedBranches.length} branch(es) with commits:`,
+    `\nExecution complete. ${completedBranches.length} branch(es) ahead of main:`,
   );
   for (const branch of completedBranches) {
     console.log(`  ${branch}`);
   }
 
   if (completedBranches.length === 0) {
-    // All agents ran but none made commits — nothing to merge this cycle.
-    console.log("No commits produced. Nothing to merge.");
+    // Nothing ahead of main — either all agents were no-ops this cycle or
+    // their work has already been merged in a prior cycle.
+    console.log("No branches ahead of main. Nothing to merge.");
     continue;
   }
 
