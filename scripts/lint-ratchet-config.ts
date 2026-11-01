@@ -26,6 +26,9 @@ export const TEST_FILES: readonly string[] = [
   "src/testSandbox.ts",
 ];
 
+/** Mirrors the third override in .oxlintrc.json: the package source. */
+export const SOURCE_FILES: readonly string[] = ["src/**"];
+
 /**
  * The end-to-end tests: the only place a new test may go. Mirrors the `e2e`
  * project in vitest.config.ts. A test file anywhere else, outside

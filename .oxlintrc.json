@@ -282,6 +282,19 @@
         // wants them async, this wants an await, and no fix satisfies both.
         "typescript/require-await": "off"
       }
+    },
+    {
+      // The package source. Keep in sync with SOURCE_FILES in
+      // scripts/lint-ratchet-config.ts (it checks).
+      "files": ["src/**"],
+      "rules": {
+        // Most hits here are Effect thunks (`Effect.tryPromise({ try: () =>
+        // ... })`, `Effect.promise(() => ...)`). Making one `async` trades it
+        // for `effect/asyncFunction`, and Effect already turns a throw in the
+        // thunk into a failure. The rule has no option to exempt a callback
+        // by where it is passed, so it is off for src/.
+        "typescript/promise-function-async": "off"
+      }
     }
   ]
 }
