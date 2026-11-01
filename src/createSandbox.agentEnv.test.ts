@@ -89,7 +89,9 @@ const shellProvider = (
             stdout += `${line}\n`;
             execOpts?.onLine?.(line);
           });
-          proc.stderr.on("data", (c: Buffer) => (stderr += c.toString()));
+          proc.stderr.on("data", (c: Buffer) => {
+            stderr += c.toString();
+          });
           proc.on("error", reject);
           proc.on("close", (code) => {
             resolve({ stdout, stderr, exitCode: code ?? 0 });
@@ -177,7 +179,7 @@ describe("agent-factory env under long-lived sandboxes", () => {
           prompt: "go",
           logging: { type: "file", path: join(root, "run.log") },
         }),
-      ).rejects.toThrow(/Overlapping env keys/);
+      ).rejects.toThrow(/Overlapping env keys/u);
     } finally {
       await sb.close();
       await rm(root, { recursive: true, force: true });

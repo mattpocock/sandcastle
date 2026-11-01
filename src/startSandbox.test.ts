@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { exec } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
 import {
   createBindMountSandboxProvider,
@@ -228,9 +229,7 @@ describe("startSandbox", () => {
         );
         // Yield to allow real async operations (create, syncIn) to complete
         yield* Effect.yieldNow();
-        yield* Effect.promise(
-          async () => new Promise((r) => setTimeout(r, 2000)),
-        );
+        yield* Effect.promise(async () => sleep(2000));
         yield* Effect.yieldNow();
         // Now advance past the copyPaths timeout
         yield* TestClock.adjust(Duration.millis(COPY_PATHS_TIMEOUT_MS + 1));
@@ -379,7 +378,9 @@ describe("startSandbox", () => {
      */
     const makeSlowCreate = () => {
       let resolveCreate!: () => void;
-      const released = new Promise<void>((r) => (resolveCreate = r));
+      const released = new Promise<void>((resolve) => {
+        resolveCreate = resolve;
+      });
       let markStarted = (): void => undefined;
       const started = new Promise<void>((resolve) => {
         markStarted = () => {
@@ -424,7 +425,7 @@ describe("startSandbox", () => {
       );
       // The provider finishes creating the sandbox after we gave up on it.
       slow.resolveCreate();
-      await new Promise((r) => setTimeout(r, 10));
+      await sleep(10);
       return exit;
     };
 
