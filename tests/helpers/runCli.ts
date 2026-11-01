@@ -24,6 +24,20 @@ const TSX_LOADER = pathToFileURL(
   createRequire(import.meta.url).resolve("tsx"),
 ).href;
 
+/** `env` with its `PATH` replaced by `path`, when one is given. */
+const withPath = (
+  env: NodeJS.ProcessEnv,
+  path: string | undefined,
+): NodeJS.ProcessEnv => {
+  if (path === undefined) {
+    return env;
+  }
+  const rest = Object.fromEntries(
+    Object.entries(env).filter(([key]) => key.toUpperCase() !== "PATH"),
+  );
+  return { ...rest, PATH: path };
+};
+
 /** What a CLI run left behind. */
 export interface CliResult {
   readonly exitCode: number;
@@ -38,7 +52,11 @@ export interface CliResult {
  */
 export const runCli = async (
   args: readonly string[],
-  options: { readonly cwd: string },
+  options: {
+    readonly cwd: string;
+    /** Replaces the inherited `PATH` (whatever its case on Windows). */
+    readonly path?: string;
+  },
 ): Promise<CliResult> =>
   new Promise((resolve, reject) => {
     const child = spawn(
@@ -46,6 +64,7 @@ export const runCli = async (
       ["--import", TSX_LOADER, CLI_ENTRY, ...args],
       {
         cwd: options.cwd,
+        env: withPath(process.env, options.path),
         stdio: ["pipe", "pipe", "pipe"],
       },
     );
