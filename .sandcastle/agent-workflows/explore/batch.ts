@@ -161,6 +161,33 @@ export const renderIssues = (issues: readonly BatchIssue[]): string =>
 // ---------------------------------------------------------------------------
 
 /**
+ * Every `duplicate_of` points at another issue in the plan that is not itself
+ * a duplicate, so there are no chains.
+ */
+const assertNoDuplicateChains = (issues: readonly PlanEntry[]): void => {
+  const byNumber = new Map(issues.map((entry) => [entry.number, entry]));
+  for (const entry of issues) {
+    const target = entry.duplicate_of;
+    if (target === null) {
+      continue;
+    }
+    const label = `#${entry.number} duplicate_of #${target}`;
+    if (target === entry.number) {
+      throw new Error(`${label}: an issue cannot duplicate itself`);
+    }
+    const targetEntry = byNumber.get(target);
+    if (!targetEntry) {
+      throw new Error(`${label}: target is not in this batch`);
+    }
+    if (targetEntry.duplicate_of !== null) {
+      throw new Error(
+        `${label}: target is itself a duplicate of #${targetEntry.duplicate_of} — point straight at the oldest issue, no chains`,
+      );
+    }
+  }
+};
+
+/**
  * The final plan, validated as a whole against the batch. This is both the
  * agent's output schema (so a bad plan earns one repair attempt) and the gate
  * `apply.ts` re-runs before touching GitHub.
@@ -192,24 +219,7 @@ export const planSchema = (batch: readonly BatchIssue[]) => {
       "issues",
     );
 
-    const byNumber = new Map(issues.map((entry) => [entry.number, entry]));
-    for (const entry of issues) {
-      const target = entry.duplicate_of;
-      if (target === null) continue;
-      const label = `#${entry.number} duplicate_of #${target}`;
-      if (target === entry.number) {
-        throw new Error(`${label}: an issue cannot duplicate itself`);
-      }
-      const targetEntry = byNumber.get(target);
-      if (!targetEntry) {
-        throw new Error(`${label}: target is not in this batch`);
-      }
-      if (targetEntry.duplicate_of !== null) {
-        throw new Error(
-          `${label}: target is itself a duplicate of #${targetEntry.duplicate_of} — point straight at the oldest issue, no chains`,
-        );
-      }
-    }
+    assertNoDuplicateChains(issues);
 
     return {
       issues,
