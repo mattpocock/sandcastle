@@ -41,7 +41,11 @@ jobs:
       # in the PR as a report diff, which CODEOWNERS routes to Matt.
       - run: npm run api:report -- --check
       - run: npm run lint
-      - run: npm test
+      # `npm test`, split so the e2e tests run once: the floor runs them with
+      # coverage, fails on a failing test, and holds their line coverage to
+      # scripts/coverage-baseline.json (see scripts/coverage-floor.ts).
+      - run: npx vitest run --project tooling --project legacy
+      - run: npm run coverage:floor
 
   # Everything that runs on a real Windows host, in one job: real cmd.exe and
   # Windows argv rules for noSandbox (#940), plus the end-to-end tests

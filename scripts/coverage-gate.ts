@@ -25,14 +25,12 @@
 //   npm run coverage:gate -- src/boundedTail.test.ts [--coverage-from <dir>]
 //
 // The decisions live in scripts/coverage-gate-core.ts and
-// scripts/coverage-gate-v8.ts.
+// scripts/coverage-gate-v8.ts; running vitest, in scripts/coverage-e2e.ts.
 // See .sandcastle/CODING_STANDARDS.md, "Where tests live".
 
-import { execFile } from "node:child_process";
-import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { parseArgs, promisify } from "node:util";
+import { parseArgs } from "node:util";
 import {
   linesFromIstanbul,
   merge,
@@ -42,131 +40,9 @@ import {
   total,
 } from "./coverage-gate-core.ts";
 import type { Lines } from "./coverage-gate-core.ts";
-import { linesFromV8 } from "./coverage-gate-v8.ts";
+import { ROOT, coverage, e2eCoverage, ensureBuild } from "./coverage-e2e.ts";
 
-const ROOT = path.resolve(import.meta.dirname, "..");
-const BIN = path.join(ROOT, "node_modules", ".bin");
-const MAX_BUFFER = 256 * 1024 * 1024;
 const WINDOWS_ARTIFACT = "e2e-coverage-windows";
-
-interface Run {
-  readonly label: string;
-  readonly args: readonly string[];
-  readonly env?: NodeJS.ProcessEnv;
-}
-
-interface Command {
-  /** A binary in node_modules/.bin. */
-  readonly bin: string;
-  readonly args: readonly string[];
-  /** Added to this process's environment. */
-  readonly env: NodeJS.ProcessEnv;
-}
-
-/** Runs a command; resolves whether it exited 0. */
-const run: (command: Command) => Promise<boolean> = promisify(
-  (
-    { bin, args, env }: Command,
-    callback: (error: Error | null, passed: boolean) => void,
-  ): void => {
-    execFile(
-      path.join(BIN, bin),
-      args,
-      { cwd: ROOT, maxBuffer: MAX_BUFFER, env: { ...process.env, ...env } },
-      (error) => {
-        callback(null, error === null);
-      },
-    );
-  },
-);
-
-/** Runs vitest with coverage; resolves the covered lines, failing or not. */
-const coveredLines = async ({ label, args, env = {} }: Run): Promise<Lines> => {
-  const dir = await mkdtemp(path.join(tmpdir(), "coverage-gate-"));
-  try {
-    const passed = await run({
-      bin: "vitest",
-      args: [
-        "run",
-        ...args,
-        "--coverage.enabled",
-        "--coverage.reporter=json",
-        "--coverage.reportOnFailure",
-        `--coverage.reportsDirectory=${dir}`,
-      ],
-      env,
-    });
-    if (!passed) {
-      process.stderr.write(
-        `coverage-gate: ${label} had failing tests; its coverage still counts.\n`,
-      );
-    }
-    const source = await readFile(
-      path.join(dir, "coverage-final.json"),
-      "utf8",
-    );
-    return linesFromIstanbul(JSON.parse(source), ROOT);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-};
-
-/** Every built script and source map in dist/, by absolute path. */
-const readDist = async (): Promise<Map<string, string>> => {
-  const dist = path.join(ROOT, "dist");
-  const entries = await readdir(dist, { recursive: true });
-  const names = entries.filter(
-    (name) => name.endsWith(".js") || name.endsWith(".js.map"),
-  );
-  return new Map(
-    await Promise.all(
-      names.map(
-        async (name): Promise<[string, string]> => [
-          path.join(dist, name),
-          await readFile(path.join(dist, name), "utf8"),
-        ],
-      ),
-    ),
-  );
-};
-
-/** Covered src/ lines per process that wrote a report into `dir`. */
-const subprocessLines = async (dir: string): Promise<Lines[]> => {
-  const dist = await readDist();
-  const reports = await readdir(dir);
-  const perProcess = await Promise.all(
-    reports.map(async (name) => {
-      const json: unknown = JSON.parse(
-        await readFile(path.join(dir, name), "utf8"),
-      );
-      return linesFromV8(json, ROOT, (file) => dist.get(file));
-    }),
-  );
-  return perProcess.filter((lines) => lines.size > 0);
-};
-
-/** The e2e run, plus the CLI subprocesses its tests spawned. */
-const e2eLines = async (): Promise<{ lines: Lines; sources: string[] }> => {
-  const v8 = await mkdtemp(path.join(tmpdir(), "coverage-gate-v8-"));
-  try {
-    const inProcess = await coveredLines({
-      label: "the e2e tests",
-      args: ["--project", "e2e"],
-      env: { NODE_V8_COVERAGE: v8 },
-    });
-    const processes = await subprocessLines(v8);
-    const subprocess = merge(...processes);
-    return {
-      lines: merge(inProcess, subprocess),
-      sources: [
-        `e2e tests in vitest (this machine): ${String(total(inProcess))} lines`,
-        `CLI subprocesses spawned by e2e tests (built dist/, source-mapped to src/): ${String(processes.length)} processes, ${String(total(subprocess))} lines`,
-      ],
-    };
-  } finally {
-    await rm(v8, { recursive: true, force: true });
-  }
-};
 
 /** Coverage from another machine: a coverage-final.json, or a folder with one. */
 const extraLines = async (input: string): Promise<Lines> => {
@@ -223,25 +99,21 @@ const main = async (): Promise<void> => {
   const { file, coverageFrom } = parseCli();
   // Subprocess coverage maps dist/ back to src/, so dist/ must be current.
   // Some legacy tests need it too.
-  if (
-    !(await run({ bin: "tsx", args: ["scripts/ensure-build.ts"], env: {} }))
-  ) {
-    throw new Error("coverage-gate: `npm run build` failed");
-  }
+  await ensureBuild();
   // One after another: the legacy suite has timing-sensitive tests.
-  const alone = await coveredLines({
+  const alone = await coverage({
     label: "the file alone",
     args: ["--project", "legacy", file],
   });
-  const others = await coveredLines({
+  const others = await coverage({
     label: "the other legacy tests",
     args: ["--project", "legacy", "--exclude", file],
   });
-  const local = await e2eLines();
+  const local = await e2eCoverage();
   const extra = await extraSources(coverageFrom);
   const input = {
     file,
-    only: minus(alone, others),
+    only: minus(alone.lines, others.lines),
     e2e: merge(local.lines, ...extra.lines),
     sources: [...local.sources, ...extra.sources],
   };
