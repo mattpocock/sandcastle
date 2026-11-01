@@ -1,5 +1,41 @@
 # Prompts
 
+> **Prompt**: The instruction text passed to the **agent** at the start of each **iteration**.
+
+> **Inline prompt**: A **prompt** provided as a string via the `prompt` option. Passed through to the **agent** as-is — no **prompt argument substitution**, no **prompt expansion**.
+
+> **Prompt template**: A **prompt** sourced from a file via the `promptFile` option. May contain `{{KEY}}` placeholders and `` !`command` `` **shell expressions**, which are resolved via **prompt argument substitution** and **prompt expansion** before being passed to the **agent**.
+
+> **Prompt argument**: A runtime **template argument** passed via `promptArgs` in `run()` that substitutes a `{{KEY}}` placeholder in a **prompt**.
+
+> **Prompt expansion**: The preprocessing step that evaluates **shell expressions** in a **prompt**, replacing them with their stdout.
+
+> **Shell expression**: A `` !`command` `` marker in a **prompt** that evaluates a shell command inside the **sandbox**. A marker inside an HTML comment (`<!-- … -->`) is not a shell expression and never runs.
+
+> **Built-in prompt argument**: A **prompt argument** that Sandcastle injects automatically -- not provided by the user via `promptArgs`.
+
+A prompt template in `.sandcastle/prompt.md`, with a prompt argument, a built-in prompt argument and a shell expression:
+
+```markdown
+Work on issue #{{ISSUE_NUMBER}}. You are on {{SOURCE_BRANCH}}.
+
+!`gh issue view {{ISSUE_NUMBER}} --json body -q .body`
+```
+
+And the `run()` call that fills it in:
+
+```typescript
+import { run, claudeCode } from "@ai-hero/sandcastle";
+import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+
+await run({
+  agent: claudeCode("claude-opus-4-8"),
+  sandbox: docker(),
+  promptFile: ".sandcastle/prompt.md",
+  promptArgs: { ISSUE_NUMBER: 42 },
+});
+```
+
 Sandcastle uses a flexible prompt system. You write the prompt, and the engine executes it — no opinions about workflow, task management, or context sources are imposed.
 
 ## Prompt resolution
@@ -83,123 +119,10 @@ You are working on {{SOURCE_BRANCH}}. When diffing, compare against {{TARGET_BRA
 
 Passing `SOURCE_BRANCH` or `TARGET_BRANCH` in `promptArgs` is an error — built-in prompt arguments cannot be overridden.
 
-## Early termination with `<promise>COMPLETE</promise>`
+## Related terms
 
-When the agent outputs `<promise>COMPLETE</promise>`, the orchestrator stops the iteration loop early. This is a convention you document in your prompt for the agent to follow — the engine never injects it.
-
-This is useful for task-based workflows where the agent should stop once it has finished, rather than running all remaining iterations.
-
-You can override the default signal by passing `completionSignal` to `run()`. It accepts a single string or an array of strings:
-
-```ts
-await run({
-  // ...
-  completionSignal: "DONE",
-});
-
-// Or pass multiple signals — the loop stops on the first match:
-await run({
-  // ...
-  completionSignal: ["TASK_COMPLETE", "TASK_ABORTED"],
-});
-```
-
-Tell the agent to output your chosen string(s) in the prompt, and the orchestrator will stop when it detects any of them. The matched signal is returned as `result.completionSignal`.
-
-### Hanging processes after the completion signal
-
-The agent process is expected to exit shortly after emitting the completion signal. When a child it spawned — a `gh`/git subprocess, a long-lived MCP server, etc. — inherits the agent's stdout pipe and keeps it open, the parent process can linger long past its logical end. Sandcastle would otherwise wait for the full `idleTimeoutSeconds` and fail with `AgentIdleTimeoutError`, throwing away the commits the agent already made.
-
-Instead, once the completion signal is observed in the output buffer, Sandcastle swaps in a short **completion timeout** (default 60 s). When it expires, the run resolves successfully with a warning that the process was hanging; `result.commits` and `result.completionSignal` are populated as if the process had exited cleanly. The timer resets on every subsequent output line, so trailing data emitted after the signal — token-usage events, terminal `result` events, a structured-output `<tag>` — is still captured.
-
-A clean process exit always wins the race, so healthy runs gain zero added latency. The completion timeout only matters when the process hangs.
-
-Tune the window with `completionTimeoutSeconds`:
-
-```ts
-await run({
-  // ...
-  completionTimeoutSeconds: 30, // shorter grace window
-});
-```
-
-This is independent of `idleTimeoutSeconds`. They cover different phases: `idleTimeoutSeconds` runs **before** any signal is seen (genuinely stuck agent → fail); `completionTimeoutSeconds` runs **after** the signal is seen (hanging process → succeed with warning). See [ADR 0019](../adr/0019-completion-timeout-for-hanging-process.md).
-
-## Structured output
-
-Use `Output.object()` to extract a typed, schema-validated JSON payload from the agent's stdout. The agent emits its answer inside an XML tag you specify, and Sandcastle parses, validates, and returns it on `result.output`. The schema can be any [Standard Schema](https://standardschema.dev) validator — the examples below use [Zod](https://zod.dev), but Valibot, ArkType, and others work identically. See [ADR 0010](../adr/0010-structured-output.md) for design rationale.
-
-```ts
-import { run, Output, claudeCode } from "@ai-hero/sandcastle";
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
-import { z } from "zod";
-
-const result = await run({
-  agent: claudeCode("claude-opus-4-8"),
-  sandbox: docker(),
-  prompt: `Analyze the code, and output the result as JSON inside <result> tags.
-    The result must match this schema:
-    { summary: string; score: string }
-  `,
-  output: Output.object({
-    tag: "result",
-    schema: z.object({ summary: z.string(), score: z.number() }),
-  }),
-});
-
-console.log(result.output.summary); // typed as string
-console.log(result.output.score); // typed as number
-```
-
-`Output.string({ tag })` extracts the tag contents as a plain string (trimmed, no JSON parsing). Both helpers require `maxIterations` to be `1` (the default). The resolved prompt must contain the configured opening tag literal.
-
-When extraction or validation fails, `run()` throws a `StructuredOutputError`. Alongside `tag`, `rawMatched`, `cause`, `commits`, `branch`, and `preservedWorktreePath`, the error carries the `sessionId` (and `sessionFilePath`, when the session was captured) of the run that produced the bad output.
-
-Pass `maxRetries` to have Sandcastle handle the retry loop for you. Each retry resumes the same agent session and feeds back a token-efficient description of the error, so the agent can re-emit a corrected tag without redoing the work. Retries require an agent provider that supports session resumption (`claudeCode`, `codex`, `pi`, `copilot`, `cursor`, `opencode`) — every built-in agent provider resumes. Calling `run()` with `maxRetries > 0` against a custom provider without `sessionStorage` throws immediately.
-
-```ts
-const result = await run({
-  agent: claudeCode("claude-opus-4-8"),
-  sandbox: docker(),
-  prompt: "Analyze the code and emit JSON inside <result> tags.",
-  output: Output.object({
-    tag: "result",
-    schema: z.object({ summary: z.string(), score: z.number() }),
-    maxRetries: 2, // 2 retries on top of the initial attempt
-  }),
-});
-```
-
-If you need to drive the retry loop manually — for example, to customise the feedback prompt or rotate models on each attempt — leave `maxRetries` at its default of `0` and resume the failed session yourself:
-
-```ts
-import { run, Output, StructuredOutputError } from "@ai-hero/sandcastle";
-
-try {
-  return await run({ ...opts, output });
-} catch (e) {
-  if (e instanceof StructuredOutputError && e.sessionId) {
-    return await run({
-      ...opts,
-      output,
-      resumeSession: e.sessionId,
-      prompt: `Your previous output failed: ${e.message}. Re-emit it inside <${e.tag}> tags.`,
-    });
-  }
-  throw e;
-}
-```
-
-## Templates
-
-`sandcastle init` prompts you to choose a sandbox provider (your OS's native sandbox, Docker or Podman), an issue tracker (GitHub Issues, Beads, or Custom), and a template, which scaffolds a ready-to-use prompt and `main.mts` suited to a specific workflow. If your project's `package.json` has `"type": "module"`, the file will be named `main.ts` instead. Choosing **Custom** scaffolds the project in a deliberately broken-until-configured state plus a `.sandcastle/SETUP_ISSUE_TRACKER.md` prompt you feed to your coding agent, which wires up your own tracker by editing the scaffolded files in place. Five templates are available:
-
-| Template                       | Description                                                               |
-| ------------------------------ | ------------------------------------------------------------------------- |
-| `blank`                        | Bare scaffold — write your own prompt and orchestration                   |
-| `simple-loop`                  | Picks issues one by one and closes them                                   |
-| `sequential-reviewer`          | Implements issues one by one, with a code review step after each          |
-| `parallel-planner`             | Plans parallelizable issues, executes on separate branches, then merges   |
-| `parallel-planner-with-review` | Plans parallelizable issues, executes with per-branch review, then merges |
-
-Select a template during `sandcastle init` when prompted, or re-run init in a fresh repo to try a different one.
+- [Iterations](./iterations.md): the prompt is passed at the start of each iteration, and can tell the agent to emit the completion signal
+- [Structured output](./structured-output.md): the prompt must contain the output tag
+- [Hooks](./hooks.md): shell expressions run after `sandbox.onSandboxReady` hooks
+- [Branch strategies](./branch-strategies.md#source-and-target-branches): the source and target branches
+- [Init](./init.md): template arguments, which init fills in once, and the scaffolded `prompt.md`

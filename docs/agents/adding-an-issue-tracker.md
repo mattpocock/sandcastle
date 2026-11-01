@@ -7,7 +7,7 @@ This document is for contributors adding support for a new **issue tracker** (e.
 3. [Scaffold integration](#scaffold-integration) — how the entry plugs into `sandcastle init`.
 4. [Implementation checklist](#implementation-checklist) — every file to touch.
 
-For terminology (**issue tracker**, **task**, **template argument**, etc.), see [`CONTEXT.md`](../../CONTEXT.md).
+For terminology (**issue tracker**, **task**, **template argument**, etc.), see [`GLOSSARY.md`](../../GLOSSARY.md).
 
 ## What an issue tracker integration actually is
 

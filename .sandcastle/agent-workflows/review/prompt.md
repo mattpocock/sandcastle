@@ -34,7 +34,7 @@ You are an expert code reviewer. Your job is not just to comment. Actively impro
    - Decline: do not change code, reply with why
    - Defer: no reply, only for stale/context-only comments
 
-Read `CONTEXT.md`, relevant ADRs, and `.sandcastle/CODING_STANDARDS.md`.
+Read `GLOSSARY.md`, relevant ADRs, and `.sandcastle/CODING_STANDARDS.md`.
 
 Run `npm run typecheck` before committing. Run focused tests where relevant.
 

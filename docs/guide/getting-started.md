@@ -19,7 +19,7 @@ Sandcastle is provider-agnostic. It ships with native sandboxes that use your OS
     - `seatbelt()` on macOS 14 or later: nothing to install
   - [Docker Desktop](https://www.docker.com/) or [Podman](https://podman.io/): image-based, with a VM boundary on macOS and Windows
   - [Vercel](https://vercel.com/): cloud-based Firecracker microVMs via `@vercel/sandbox`
-  - Or [create your own](./custom-sandbox-providers.md) using `createBindMountSandboxProvider` or `createIsolatedSandboxProvider`
+  - Or [create your own](./sandbox-providers.md#custom-sandbox-providers) using `createBindMountSandboxProvider` or `createIsolatedSandboxProvider`
 
 ## Quick start
 
