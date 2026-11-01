@@ -300,7 +300,8 @@ export const createWorktree = async (
     const resolvedSandbox = opts.sandbox ?? noSandbox();
 
     // Validate buildInteractiveArgs is available
-    if (!provider.buildInteractiveArgs) {
+    const buildInteractiveArgs = provider.buildInteractiveArgs?.bind(provider);
+    if (!buildInteractiveArgs) {
       throw new Error(
         `Agent provider "${provider.name}" does not support buildInteractiveArgs, required for interactive sessions.`,
       );
@@ -450,7 +451,7 @@ export const createWorktree = async (
                       ctx.sandboxRepoDir,
                     );
 
-              const interactiveArgs = provider.buildInteractiveArgs!({
+              const interactiveArgs = buildInteractiveArgs({
                 prompt: fullPrompt,
                 dangerouslySkipPermissions: resolvedSandbox.tag !== "none",
               });
