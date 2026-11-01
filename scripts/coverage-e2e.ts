@@ -164,7 +164,7 @@ export const e2eCoverage = async (): Promise<E2eCoverage> => {
       lines: merge(inProcess.lines, subprocess),
       sources: [
         `e2e tests in vitest (this machine): ${String(total(inProcess.lines))} lines`,
-        `CLI subprocesses spawned by e2e tests (built dist/, source-mapped to src/): ${String(processes.length)} processes, ${String(total(subprocess))} lines`,
+        `CLI subprocesses spawned by e2e tests (built dist/ or src/ through tsx, source-mapped to src/): ${String(processes.length)} processes, ${String(total(subprocess))} lines`,
       ],
     };
   } finally {

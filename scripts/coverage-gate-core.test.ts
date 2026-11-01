@@ -238,6 +238,56 @@ describe("linesFromV8", () => {
       linesFromV8(v8Report("file:///repo/node_modules/x/a.js"), ROOT, read),
     ).toStrictEqual(new Map());
   });
+
+  // A real NODE_V8_COVERAGE report from `tsx src/a.ts` (SRC_A above). tsx
+  // compiles in memory, so the report's source-map-cache carries the map
+  // and line lengths; there is no file to read.
+  const tsxReport = (cache: boolean) => ({
+    result: [
+      {
+        url: "file:///repo/src/a.ts",
+        functions: [
+          { ranges: [{ startOffset: 0, endOffset: 696, count: 1 }] },
+          { ranges: [{ startOffset: 47, endOffset: 113, count: 1 }] },
+          {
+            ranges: [
+              { startOffset: 132, endOffset: 171, count: 1 },
+              { startOffset: 160, endOffset: 170, count: 0 },
+            ],
+          },
+        ],
+      },
+    ],
+    ...(cache && {
+      "source-map-cache": {
+        "file:///repo/src/a.ts": {
+          url: "file:///repo/src/a.ts",
+          lineLengths: [204, 0, 490],
+          data: {
+            version: 3,
+            sources: ["file:///repo/src/a.ts"],
+            sourcesContent: [SRC_A],
+            names: [],
+            mappings:
+              "kHAAO,MAAM,KAAO,OAAC,MAA0B,CAC7C,GAAI,KAAM,CACR,MAAO,KACT,CACA,MAAO,IACT,EALoB,QAMpB,KAAK,IAAI",
+          },
+        },
+      },
+    }),
+  });
+  const noFiles = (): undefined => undefined;
+
+  it("maps a src/ file run through tsx back to its lines", () => {
+    expect(linesFromV8(tsxReport(true), ROOT, noFiles)).toStrictEqual(
+      new Map([["src/a.ts", new Set([1, 2, 3, 4, 6, 7])]]),
+    );
+  });
+
+  it("ignores a src/ script with no source map in the report", () => {
+    expect(linesFromV8(tsxReport(false), ROOT, noFiles)).toStrictEqual(
+      new Map(),
+    );
+  });
 });
 
 describe("report", () => {
