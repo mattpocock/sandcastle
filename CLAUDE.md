@@ -16,7 +16,7 @@ The user docs are the markdown pages in `docs/guide/`. [aihero.dev/sandcastle](h
 - `docs/guide/toc.json` orders and groups the pages for the sidebar. `start` is the page a new reader opens first. `groups` lists every other page as `{ "title": "...", "pages": ["slug", ...] }`, in sidebar order.
 - To add a page, write `docs/guide/<slug>.md`, add its slug to a group in `toc.json`, and link it from the Documentation list in `README.md`. Renaming or removing a page touches the same three places.
 - Link between pages with relative paths (`./prompts.md#structured-output`), and to other repo files relative to the page (`../adr/0010-structured-output.md`).
-- `docs/guide/toc.test.ts` fails when the three drift apart: a page missing from `toc.json` or `README.md`, a listed page with no file, a page without its `# Title`, or a relative link to a file that does not exist.
+- `tests/docs-guide.test.ts` fails when the three drift apart: a page missing from `toc.json` or `README.md`, a listed page with no file, a page without its `# Title`, or a relative link to a file or a guide heading that does not exist.
 
 ## Agent skills
 

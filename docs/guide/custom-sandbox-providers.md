@@ -9,14 +9,16 @@ Sandcastle ships with built-in providers for Docker, Podman, and Vercel, but you
 
 Both provider types return a **sandbox handle** from their `create()` function. The handle exposes:
 
-| Method         | Required   | Description                                                                  |
-| -------------- | ---------- | ---------------------------------------------------------------------------- |
-| `exec`         | Both       | Run a command, optionally streaming stdout line-by-line via `options.onLine` |
-| `close`        | Both       | Tear down the sandbox                                                        |
-| `copyFileIn`   | Bind-mount | Copy a single file from the host into the sandbox                            |
-| `copyFileOut`  | Both       | Copy a single file from the sandbox to the host                              |
-| `copyIn`       | Isolated   | Copy a file or directory from the host into the sandbox                      |
-| `worktreePath` | Both       | Absolute path to the repo directory inside the sandbox                       |
+| Method           | Required             | Description                                                                       |
+| ---------------- | -------------------- | --------------------------------------------------------------------------------- |
+| `exec`           | Both                 | Run a command, optionally streaming stdout line-by-line via `options.onLine`      |
+| `close`          | Both                 | Tear down the sandbox                                                             |
+| `copyFileIn`     | Bind-mount           | Copy a single file from the host into the sandbox                                 |
+| `copyFileOut`    | Both                 | Copy a single file from the sandbox to the host                                   |
+| `copyIn`         | Isolated             | Copy a file or directory from the host into the sandbox                           |
+| `worktreePath`   | Both                 | Absolute path to the repo directory inside the sandbox                            |
+| `sandboxHomedir` | Bind-mount, optional | The agent's home as commands inside the sandbox see it. Defaults to `/home/agent` |
+| `sandboxTmpdir`  | Bind-mount, optional | A writable temp dir as commands inside the sandbox see it. Defaults to `/tmp`     |
 
 ## `ExecResult`
 
