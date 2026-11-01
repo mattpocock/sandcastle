@@ -82,6 +82,21 @@ export const standardSchema = <T>(
   },
 });
 
+/** Run a schema built by `standardSchema` synchronously, throwing on failure. */
+export const validate = <T>(
+  schema: StandardSchemaV1<unknown, T>,
+  value: unknown,
+): T => {
+  const result = schema["~standard"].validate(value);
+  if (result instanceof Promise) {
+    throw new TypeError("Schema validation must be synchronous");
+  }
+  if (result.issues) {
+    throw new Error(result.issues.map((issue) => issue.message).join("; "));
+  }
+  return result.value;
+};
+
 export const asRecord = (
   value: unknown,
   label: string,
@@ -101,6 +116,10 @@ export const asString = (value: unknown, label: string): string => {
 
 export const asOptionalString = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim().length > 0 ? value : undefined;
+
+/** A JSON text field: the string itself, or `fallback` for anything else. */
+export const textOr = (value: unknown, fallback: string): string =>
+  typeof value === "string" ? value : fallback;
 
 export const asArray = (value: unknown, label: string): unknown[] => {
   if (!Array.isArray(value)) {

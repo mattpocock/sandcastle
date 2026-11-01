@@ -1,12 +1,11 @@
 import * as fs from "node:fs";
 import { execFileSync } from "node:child_process";
-import { fail, gh, required, writeJson } from "../shared/common";
+import { fail, gh, required, validate, writeJson } from "../shared/common";
 import {
   EXPLORE_LABEL,
   parseBatch,
   planEffects,
   planSchema,
-  validate,
   VERDICT_LABEL,
 } from "./batch";
 import type { GitHubEffect, Plan } from "./batch";
