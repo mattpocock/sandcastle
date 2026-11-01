@@ -5,6 +5,7 @@ import {
   countViolations,
   matchObjectUndefinedCount,
   shrink,
+  tscErrors,
 } from "./lint-ratchet-core.ts";
 
 const v = (file: string, rule: string) => ({ file, rule });
@@ -79,5 +80,24 @@ describe("lint ratchet", () => {
       `const e = { k: ${absent} };`,
     ].join("\n");
     expect(matchObjectUndefinedCount(source)).toBe(2);
+  });
+});
+
+describe("tscErrors", () => {
+  it("reads each error's file and code, skipping elaboration lines", () => {
+    const out = [
+      ".sandcastle/run.ts(3,7): error TS2345: Argument of type 'x' is not assignable.",
+      "  Type 'undefined' is not assignable to type 'string'.",
+      ".sandcastle/verify/lib.ts(10,1): error TS7006: Parameter 'a' implicitly has an 'any' type.",
+      "",
+    ].join("\n");
+    expect(tscErrors(out)).toStrictEqual([
+      v(".sandcastle/run.ts", "tsc/TS2345"),
+      v(".sandcastle/verify/lib.ts", "tsc/TS7006"),
+    ]);
+  });
+
+  it("finds nothing in clean output", () => {
+    expect(tscErrors("")).toStrictEqual([]);
   });
 });
