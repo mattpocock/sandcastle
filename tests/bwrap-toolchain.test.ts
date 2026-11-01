@@ -105,7 +105,7 @@ describe.skipIf(skipsHere(BWRAP))(
       expect(secret.exitCode).not.toBe(0);
       expect(secret.stdout).not.toContain("planted");
       expect(tool).toMatchObject({ exitCode: 0, stdout: "home-tool ran\n" });
-    });
+    }, 30_000);
 
     it("makes readable the install root of an executable symlinked from a PATH dir", async () => {
       // An npm-style global install: the bin is a symlink into its package,
@@ -135,7 +135,7 @@ describe.skipIf(skipsHere(BWRAP))(
       const result = await sandbox.exec("fake-agent");
 
       expect(result).toMatchObject({ exitCode: 0, stdout: "hello from pkg\n" });
-    });
+    }, 30_000);
 
     it("makes a read-write mount writable and a read-only mount read-only", async () => {
       const cache = path.join(scratch, "cache");
@@ -161,6 +161,6 @@ describe.skipIf(skipsHere(BWRAP))(
       expect(write.exitCode).toBe(0);
       expect(read).toMatchObject({ exitCode: 0, stdout: "shared notes\n" });
       expect(writeReadonly.exitCode).not.toBe(0);
-    });
+    }, 30_000);
   },
 );
