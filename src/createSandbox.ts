@@ -326,7 +326,7 @@ const withAgentEnv = (
   });
   const invalid = entries
     .map(([key]) => key)
-    .filter((key) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key));
+    .filter((key) => !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(key));
   if (invalid.length > 0) {
     throw new Error(
       `Invalid agent provider env key(s): ${invalid.join(", ")}. Keys must match [A-Za-z_][A-Za-z0-9_]*.`,
