@@ -84,9 +84,36 @@ const killGroup = (proc: ChildProcess): void => {
 };
 
 /**
+ * A host shell, outside the sandbox, holding the read end of a pipe from
+ * this Node process. If the pipe ends without `exit` (this process died,
+ * however it died: nothing in it runs on SIGKILL), it SIGKILLs process
+ * group `$1`.
+ */
+const WATCHDOG = 'read -r reply || kill -9 -- "-$1" 2>/dev/null';
+
+/**
+ * Starts the watchdog for one exec's process group. Detached, so it leads
+ * its own session: whatever kills this process's group or terminal can't
+ * take it too, and the sandbox can't signal it. Returns how to stand it down
+ * once the exec has ended and its group is killed.
+ */
+const startWatchdog = (pgid: number): (() => void) => {
+  const watchdog = spawn("/bin/sh", ["-c", WATCHDOG, "sh", String(pgid)], {
+    detached: true,
+    stdio: ["pipe", "ignore", "ignore"],
+  });
+  watchdog.on("error", () => undefined);
+  watchdog.stdin.on("error", () => undefined);
+  return () => {
+    watchdog.stdin.end("exit\n");
+  };
+};
+
+/**
  * Runs `sh -c command` under `sandbox-exec` and resolves when it exits. The
  * child leads its own process group: Seatbelt has no PID namespace, so the
- * group is how everything it started gets killed, when it exits and on close.
+ * group is how everything it started gets killed: when it exits, on close,
+ * and, through a watchdog, when this Node process is hard-killed.
  */
 const runInSeatbelt = async (
   command: string,
@@ -104,10 +131,15 @@ const runInSeatbelt = async (
     detached: true,
     stdio: ["pipe", "pipe", "pipe"],
   });
+  // Started in the same tick as the exec, so there's no moment when a hard
+  // kill of this process would leave the group unwatched.
+  const standDown =
+    proc.pid === undefined ? (): void => undefined : startWatchdog(proc.pid);
   live.add(proc);
   // Like a fresh bwrap per exec: nothing it started outlives it.
   proc.on("exit", () => {
     killGroup(proc);
+    standDown();
   });
   const output = collectOutput(proc, opts.onLine, maxTailChars);
   proc.stdin.on("error", () => undefined);
@@ -199,7 +231,8 @@ const createHandle = async (
  * The private home is exposed to Sandcastle as `/home/agent`: copies to and
  * from paths under it land in the private dir. Both private dirs are removed
  * on close, and every process an `exec` started is killed when it exits, on
- * close and on shutdown. The toolchain comes from the host `PATH`: each `PATH`
+ * close, on shutdown and when this Node process is hard-killed (a detached
+ * host watchdog per `exec` does that). The toolchain comes from the host `PATH`: each `PATH`
  * dir (never the home dir or an ancestor of it) and the install root of each
  * executable symlinked from one. Add other paths with `mounts`. The network is
  * open, including the host's localhost. It has no root: `exec` with

@@ -18,7 +18,13 @@ import { BwrapError } from "./errors.js";
 export { assertBwrapUsable } from "./bwrapPreflight.js";
 export type { IdentityMount, MountConfig } from "./identityMounts.js";
 /** Tracking and killing each exec's processes, from their own module. */
-export { INFO_FD, killSandboxProcess, parseChildPid } from "./bwrapProcess.js";
+export {
+  INFO_FD,
+  WATCH_FD,
+  killSandboxProcess,
+  parseChildPid,
+  watchedCommand,
+} from "./bwrapProcess.js";
 export type { SandboxProcess } from "./bwrapProcess.js";
 /** Output collection and file copies, shared by the native sandbox providers. */
 export { collectOutput, copyCreatingParents } from "./nativeSandboxIo.js";

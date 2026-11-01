@@ -30,6 +30,7 @@ import {
   sandboxArgs,
   parseChildPid,
   toHostPath,
+  watchedCommand,
 } from "../bwrapSandbox.js";
 import type {
   IdentityMount,
@@ -99,7 +100,9 @@ const runInBwrap = async (
 ): Promise<ExecResult> => {
   const { live, maxTailChars } = sandbox;
   const proc = spawn("bwrap", ["--info-fd", String(INFO_FD), ...args], {
-    stdio: ["pipe", "pipe", "pipe", "pipe"],
+    // fd 3 is INFO_FD; fd 4 is the watcher's WATCH_FD, which is never
+    // written and ends only when this process does.
+    stdio: ["pipe", "pipe", "pipe", "pipe", "pipe"],
   });
   const tracked = trackSandboxProcess(proc);
   live.add(tracked);
@@ -160,7 +163,7 @@ const createHandle = async (
         throw new Error("bwrap() sandbox is closed");
       }
       const cwd = opts?.cwd ?? options.worktreePath;
-      const args = [...baseArgs, "--chdir", cwd, "sh", "-c", command];
+      const args = [...baseArgs, "--chdir", cwd, ...watchedCommand(command)];
       return runInBwrap(args, opts, { live, maxTailChars });
     },
     copyFileIn: async (hostPath, sandboxFile) =>

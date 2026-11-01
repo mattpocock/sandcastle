@@ -22,6 +22,35 @@ export interface SandboxProcess {
   readonly reported: Promise<void>;
 }
 
+/**
+ * The fd each sandbox's watcher reads (see {@link watchedCommand}). Its
+ * other end is held only by this Node process, so it reads end-of-file
+ * exactly when this process dies, however it dies.
+ */
+export const WATCH_FD = 4;
+
+/**
+ * Runs `command` in the sandbox under a watcher: a background shell blocked
+ * on {@link WATCH_FD}, which SIGKILLs every process in the sandbox's PID
+ * namespace (`kill -1` spares only PID 1, which then exits) once this Node
+ * process dies.
+ *
+ * `--die-with-parent` alone isn't enough: bwrap arms it in the sandbox's PID 1
+ * only once setup is done, so a host process SIGKILLed during an exec's first
+ * milliseconds leaves the sandbox running. The watcher starts after setup and
+ * sees the end-of-file even if the host died first. The command itself runs
+ * without the watcher's fd.
+ */
+export const watchedCommand = (command: string): string[] => [
+  "sh",
+  "-c",
+  `{ read -r _ || :; kill -9 -1; } <&${WATCH_FD} >/dev/null 2>&1 &
+exec ${WATCH_FD}<&-
+exec sh -c "$1"`,
+  "sh",
+  command,
+];
+
 const CHILD_PID = /"child-pid"\s*:\s*(?<pid>\d+)/u;
 
 /** The `child-pid` in bwrap's `--info-fd` JSON, if it has one. */
