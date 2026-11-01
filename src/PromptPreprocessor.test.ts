@@ -25,9 +25,15 @@ describe("PromptPreprocessor", () => {
   // (which marks template-authored shell blocks), then through preprocessPrompt.
   const run = async (
     prompt: string,
-    sandbox: SandboxService,
-    displayLayer: Layer.Layer<Display>,
-    cwd: string,
+    {
+      sandbox,
+      displayLayer,
+      sandboxDir: cwd,
+    }: {
+      readonly sandbox: SandboxService;
+      readonly displayLayer: Layer.Layer<Display>;
+      readonly sandboxDir: string;
+    },
   ) => {
     const marked = await Effect.runPromise(
       substitutePromptArgs(prompt, {}).pipe(Effect.provide(displayLayer)),
@@ -40,21 +46,21 @@ describe("PromptPreprocessor", () => {
   it("passes through prompts with no !`command` expressions unchanged", async () => {
     const { sandboxDir, sandbox, displayLayer } = await setup();
     const prompt = "This is a plain prompt with no commands.\n\nJust text.";
-    const result = await run(prompt, sandbox, displayLayer, sandboxDir);
+    const result = await run(prompt, { sandbox, displayLayer, sandboxDir });
     expect(result).toBe(prompt);
   });
 
   it("replaces a single !`command` with its stdout", async () => {
     const { sandboxDir, sandbox, displayLayer } = await setup();
     const prompt = "Here is the date: !`echo 2026-03-24`";
-    const result = await run(prompt, sandbox, displayLayer, sandboxDir);
+    const result = await run(prompt, { sandbox, displayLayer, sandboxDir });
     expect(result).toBe("Here is the date: 2026-03-24");
   });
 
   it("replaces multiple !`command` expressions", async () => {
     const { sandboxDir, sandbox, displayLayer } = await setup();
     const prompt = "First: !`echo hello`\nSecond: !`echo world`";
-    const result = await run(prompt, sandbox, displayLayer, sandboxDir);
+    const result = await run(prompt, { sandbox, displayLayer, sandboxDir });
     expect(result).toBe("First: hello\nSecond: world");
   });
 
@@ -81,7 +87,7 @@ describe("PromptPreprocessor", () => {
   it("runs commands with the provided cwd", async () => {
     const { sandboxDir, sandbox, displayLayer } = await setup();
     const prompt = "Dir: !`pwd`";
-    const result = await run(prompt, sandbox, displayLayer, sandboxDir);
+    const result = await run(prompt, { sandbox, displayLayer, sandboxDir });
     expect(result).toBe(`Dir: ${sandboxDir}`);
   });
 
@@ -136,7 +142,7 @@ describe("PromptPreprocessor", () => {
   it("logs per-command token counts after shell expressions resolve", async () => {
     const { sandboxDir, sandbox, displayLayer, displayRef } = await setup();
     const prompt = "First: !`echo hello`\nSecond: !`echo world`";
-    await run(prompt, sandbox, displayLayer, sandboxDir);
+    await run(prompt, { sandbox, displayLayer, sandboxDir });
     const entries = await Effect.runPromise(Ref.get(displayRef));
     const taskLogEntry = entries.find((e) => e._tag === "taskLog");
     assert.isDefined(taskLogEntry);
@@ -208,7 +214,7 @@ describe("PromptPreprocessor", () => {
       "  !`exit 5` -->",
       "Live: !`echo live`",
     ].join("\n");
-    const result = await run(prompt, sandbox, displayLayer, sandboxDir);
+    const result = await run(prompt, { sandbox, displayLayer, sandboxDir });
     expect(result).toBe(
       [
         "<!-- Use !`command` to pull in dynamic context. -->",
@@ -222,7 +228,7 @@ describe("PromptPreprocessor", () => {
   it("treats an unclosed HTML comment as running to the end of the prompt", async () => {
     const { sandboxDir, sandbox, displayLayer } = await setup();
     const prompt = "Live: !`echo live`\n<!-- unclosed !`exit 4`";
-    const result = await run(prompt, sandbox, displayLayer, sandboxDir);
+    const result = await run(prompt, { sandbox, displayLayer, sandboxDir });
     expect(result).toBe("Live: live\n<!-- unclosed !`exit 4`");
   });
 
@@ -285,7 +291,7 @@ describe("PromptPreprocessor", () => {
   it("does not show taskLog when prompt has no commands", async () => {
     const { sandboxDir, sandbox, displayLayer, displayRef } = await setup();
     const prompt = "Just a plain prompt with no commands.";
-    await run(prompt, sandbox, displayLayer, sandboxDir);
+    await run(prompt, { sandbox, displayLayer, sandboxDir });
     const entries = await Effect.runPromise(Ref.get(displayRef));
     expect(entries.filter((e) => e._tag === "taskLog")).toHaveLength(0);
   });
