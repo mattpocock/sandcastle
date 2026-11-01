@@ -51,7 +51,7 @@ export const parseEngineTime = (raw: string): number | undefined => {
 
 const liveAt = (w: WorldSpan, t: number, now: number): boolean =>
   Date.parse(w.createdAt) <= t &&
-  t <= (w.cleanedAt ? Date.parse(w.cleanedAt) : now);
+  t <= (w.cleanedAt === undefined ? now : Date.parse(w.cleanedAt));
 
 /**
  * Attribute an image that is new since `self` was created. `others` are the
@@ -80,7 +80,8 @@ export const attributeImage = (
     };
   }
   const nowT = Date.parse(now);
-  const t = image.created ? parseEngineTime(image.created) : undefined;
+  const t =
+    image.created === undefined ? undefined : parseEngineTime(image.created);
   if (t !== undefined && t < Date.parse(self.createdAt)) {
     return {
       kind: "unrelated",

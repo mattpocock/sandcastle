@@ -57,8 +57,8 @@ const doctor = (world?: World): number => {
   };
   if (world) {
     ok(
-      !world.cleanedAt,
-      `world ${world.runId} at ${world.dir}${world.cleanedAt ? " was cleaned up" : ""}`,
+      world.cleanedAt === undefined,
+      `world ${world.runId} at ${world.dir}${world.cleanedAt === undefined ? "" : " was cleaned up"}`,
     );
     const head = sh("git", ["rev-parse", "HEAD"], {
       cwd: REPO_ROOT,
@@ -175,7 +175,7 @@ const main = async (): Promise<number> => {
     case "tsx":
     case "sh": {
       const world = loadWorld(rest[0]);
-      if (world.cleanedAt)
+      if (world.cleanedAt !== undefined)
         throw new Error(`world ${world.runId} was cleaned up; make a new one`);
       const args = rest.slice(1);
       if (verb === "sandcastle") {
