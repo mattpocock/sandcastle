@@ -38,7 +38,7 @@ export const fetchPullRequestContext = (
   };
 
   const issueMatch = (prView.body ?? "").match(
-    /(?:closes|fixes|resolves)\s+#(\d+)/i,
+    /(?:closes|fixes|resolves)\s+#(\d+)/iu,
   );
   const issueNumber = issueMatch?.[1] ?? "";
   const issueTitle = issueNumber

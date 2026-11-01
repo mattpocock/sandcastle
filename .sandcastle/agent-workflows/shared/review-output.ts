@@ -34,7 +34,7 @@ const parseLine = (value: unknown, record: Record<string, unknown>): number => {
     return value;
   }
   const lineRange = asOptionalString(record.lineRange);
-  const firstLine = lineRange?.match(/\d+/)?.[0];
+  const firstLine = lineRange?.match(/\d+/u)?.[0];
   if (firstLine) {
     return Number(firstLine);
   }
