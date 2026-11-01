@@ -14,7 +14,7 @@ All three **branch strategies** remain supported with `noSandbox()`: **head** (a
 
 Rejected alternatives:
 
-- **Keep the type-level guard, add `noSandbox({ allowAfk: true })` as an explicit unlock.** The issue (#507) proposed this. Rejected because the `noSandbox()` import is already the opt-in — the user has to reach for a provider that the README and CONTEXT.md both describe as host-execution-only. A second flag on top adds ceremony without preventing the mistake it claims to prevent: anyone wiring `noSandbox()` into `run()` will pass the flag the type error tells them to pass.
+- **Keep the type-level guard, add `noSandbox({ allowAfk: true })` as an explicit unlock.** The issue (#507) proposed this. Rejected because the `noSandbox()` import is already the opt-in — the user has to reach for a provider that the README and GLOSSARY.md both describe as host-execution-only. A second flag on top adds ceremony without preventing the mistake it claims to prevent: anyone wiring `noSandbox()` into `run()` will pass the flag the type error tells them to pass.
 - **Reject `head` strategy with `noSandbox()` in `run()`, force a worktree.** Rejected because worktree-as-isolation-boundary is a partial protection at best — the agent already has full host access via `noSandbox()`. Forcing a worktree adds a copy step without changing the trust model. Callers who want a worktree pass `branchStrategy: { type: "merge-to-head" }` explicitly.
 
 ## Consequences
