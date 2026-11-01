@@ -79,6 +79,28 @@ const localSandboxWithAgent = (
   };
 };
 
+/**
+ * A bind-mount `exec` that runs each command on the host, in the given cwd or
+ * else `worktreePath`.
+ */
+const hostExec =
+  (worktreePath: string): BindMountSandboxHandle["exec"] =>
+  async (cmd, execOpts) => {
+    const result = await execAsync(cmd, { cwd: execOpts?.cwd ?? worktreePath });
+    return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
+  };
+
+/** Like {@link hostExec}, and replays stdout to `onLine` once it finishes. */
+const streamingHostExec =
+  (worktreePath: string): BindMountSandboxHandle["exec"] =>
+  async (cmd, execOpts) => {
+    const result = await hostExec(worktreePath)(cmd, execOpts);
+    for (const line of result.stdout.split("\n")) {
+      execOpts?.onLine?.(line);
+    }
+    return result;
+  };
+
 /** The first iteration of a run, failing the test if there is none. */
 const firstIteration = <T>(result: {
   readonly iterations: readonly T[];
@@ -1967,20 +1989,7 @@ describe("createSandbox", () => {
       name: "test-interactive",
       create: async (opts) => ({
         worktreePath: opts.worktreePath,
-        exec: async (cmd, execOpts) => {
-          const cwd = execOpts?.cwd ?? opts.worktreePath;
-          const result = await execAsync(cmd, { cwd });
-          if (execOpts?.onLine) {
-            for (const line of result.stdout.split("\n")) {
-              execOpts.onLine(line);
-            }
-          }
-          return {
-            stdout: result.stdout,
-            stderr: result.stderr,
-            exitCode: 0,
-          };
-        },
+        exec: streamingHostExec(opts.worktreePath),
         interactiveExec: async (args, _opts) => {
           receivedArgs.push(...args);
           return { exitCode: 0 };
@@ -2025,15 +2034,7 @@ describe("createSandbox", () => {
         createCallCount++;
         return {
           worktreePath: opts.worktreePath,
-          exec: async (cmd, execOpts) => {
-            const cwd = execOpts?.cwd ?? opts.worktreePath;
-            const result = await execAsync(cmd, { cwd });
-            return {
-              stdout: result.stdout,
-              stderr: result.stderr,
-              exitCode: 0,
-            };
-          },
+          exec: hostExec(opts.worktreePath),
           interactiveExec: async () => ({ exitCode: 0 }),
           copyFileIn: async () => {},
           copyFileOut: async () => {},
@@ -2075,15 +2076,7 @@ describe("createSandbox", () => {
       name: "test-interactive-commits",
       create: async (opts) => ({
         worktreePath: opts.worktreePath,
-        exec: async (cmd, execOpts) => {
-          const cwd = execOpts?.cwd ?? opts.worktreePath;
-          const result = await execAsync(cmd, { cwd });
-          return {
-            stdout: result.stdout,
-            stderr: result.stderr,
-            exitCode: 0,
-          };
-        },
+        exec: hostExec(opts.worktreePath),
         interactiveExec: async (_args, opts) => {
           // Simulate agent making a commit
           const { cwd } = opts;
@@ -2132,15 +2125,7 @@ describe("createSandbox", () => {
       name: "test-no-interactive",
       create: async (opts) => ({
         worktreePath: opts.worktreePath,
-        exec: async (cmd, execOpts) => {
-          const cwd = execOpts?.cwd ?? opts.worktreePath;
-          const result = await execAsync(cmd, { cwd });
-          return {
-            stdout: result.stdout,
-            stderr: result.stderr,
-            exitCode: 0,
-          };
-        },
+        exec: hostExec(opts.worktreePath),
         copyFileIn: async () => {},
         copyFileOut: async () => {},
         close: async () => {},
@@ -2177,15 +2162,7 @@ describe("createSandbox", () => {
       name: "test-interactive-args",
       create: async (opts) => ({
         worktreePath: opts.worktreePath,
-        exec: async (cmd, execOpts) => {
-          const cwd = execOpts?.cwd ?? opts.worktreePath;
-          const result = await execAsync(cmd, { cwd });
-          return {
-            stdout: result.stdout,
-            stderr: result.stderr,
-            exitCode: 0,
-          };
-        },
+        exec: hostExec(opts.worktreePath),
         interactiveExec: async (args, _opts) => {
           receivedArgs.push(...args);
           return { exitCode: 0 };
@@ -2364,15 +2341,7 @@ describe("createSandbox", () => {
       name: "test-interactive-signal",
       create: async (opts) => ({
         worktreePath: opts.worktreePath,
-        exec: async (cmd, execOpts) => {
-          const cwd = execOpts?.cwd ?? opts.worktreePath;
-          const result = await execAsync(cmd, { cwd });
-          return {
-            stdout: result.stdout,
-            stderr: result.stderr,
-            exitCode: 0,
-          };
-        },
+        exec: hostExec(opts.worktreePath),
         interactiveExec: async () => ({ exitCode: 0 }),
         copyFileIn: async () => {},
         copyFileOut: async () => {},
@@ -2408,15 +2377,7 @@ describe("createSandbox", () => {
       name: "test-interactive-preabort",
       create: async (opts) => ({
         worktreePath: opts.worktreePath,
-        exec: async (cmd, execOpts) => {
-          const cwd = execOpts?.cwd ?? opts.worktreePath;
-          const result = await execAsync(cmd, { cwd });
-          return {
-            stdout: result.stdout,
-            stderr: result.stderr,
-            exitCode: 0,
-          };
-        },
+        exec: hostExec(opts.worktreePath),
         interactiveExec: async () => ({ exitCode: 0 }),
         copyFileIn: async () => {},
         copyFileOut: async () => {},
