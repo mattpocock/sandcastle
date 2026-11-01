@@ -24,7 +24,7 @@
 // and .github/workflows/lint-shrink.yml opens a "shrink baseline" PR after
 // each push to main. It also fails if a baseline grew against origin/main
 // (where that ref exists), and if .oxlintrc.json gains an override beyond
-// the three reviewed ones in scripts/lint-ratchet-config.ts.
+// the four reviewed ones in scripts/lint-ratchet-config.ts.
 //
 //   npm run lint          both ratchets
 //   npm run lint:shrink   lower the baselines to what is found (never raises
@@ -40,6 +40,7 @@ import path from "node:path";
 import { z } from "zod";
 import {
   ENTRY_POINTS,
+  SOURCE_FILES,
   TEST_FILES,
   TOOLING_SCRIPTS,
 } from "./lint-ratchet-config.ts";
@@ -141,7 +142,7 @@ const OxlintConfig = z.object({
 const sameList = (a: readonly string[], b: readonly string[]): boolean =>
   a.length === b.length && a.every((item, i) => item === b[i]);
 
-/** .oxlintrc.json may only loosen rules for the entry points, tests and tooling. */
+/** .oxlintrc.json may only loosen rules for the entry points, tests, tooling and src/. */
 const checkOverrides = async (): Promise<string[]> => {
   const source = await readFile(path.join(ROOT, ".oxlintrc.json"), "utf8");
   const config = OxlintConfig.parse(
@@ -150,13 +151,13 @@ const checkOverrides = async (): Promise<string[]> => {
   return config.overrides
     .filter(
       (o) =>
-        ![ENTRY_POINTS, TEST_FILES, TOOLING_SCRIPTS].some((reviewed) =>
-          sameList(o.files, reviewed),
+        ![ENTRY_POINTS, TEST_FILES, TOOLING_SCRIPTS, SOURCE_FILES].some(
+          (reviewed) => sameList(o.files, reviewed),
         ),
     )
     .map(
       (o) =>
-        `.oxlintrc.json: the override for ${o.files.join(", ")} is not one of the three reviewed ones (entry points, tests, tooling scripts). Lower the baseline instead of turning a rule off.`,
+        `.oxlintrc.json: the override for ${o.files.join(", ")} is not one of the four reviewed ones (entry points, tests, tooling scripts, source). Lower the baseline instead of turning a rule off.`,
     );
 };
 
