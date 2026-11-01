@@ -28,6 +28,24 @@ const buildInteractiveArgs = (
 };
 
 /** Parses session usage, failing the test if the provider cannot. */
+/** How a console argument reads: an Error's message, anything else stringified. */
+const consoleText = (value: unknown): string =>
+  value instanceof Error ? value.message : String(value);
+
+/** Decorates `base` so copying out any path ending in `suffix` fails. */
+const failingCopyFileOut = (
+  base: BindMountSandboxHandle,
+  suffix: string,
+): BindMountSandboxHandle => ({
+  ...base,
+  copyFileOut: async (sandboxPath, destPath) => {
+    if (sandboxPath.endsWith(suffix)) {
+      throw new Error("simulated copyFileOut failure");
+    }
+    return base.copyFileOut(sandboxPath, destPath);
+  },
+});
+
 const parseSessionUsage = (provider: AgentProvider, content: string) => {
   assert(
     provider.parseSessionUsage !== undefined,
@@ -2734,25 +2752,13 @@ describe("sessionStorage", () => {
       const errors: string[] = [];
       const originalError = console.error;
       console.error = (msg: unknown, ...rest: unknown[]) => {
-        errors.push(
-          [msg, ...rest]
-            .map((v) => (v instanceof Error ? v.message : String(v)))
-            .join(" "),
-        );
+        errors.push([msg, ...rest].map((v) => consoleText(v)).join(" "));
       };
 
       try {
         // Decorate the fs handle: make copyFileOut fail for the bad subagent.
         const base = fsBindMountHandle();
-        const handle: BindMountSandboxHandle = {
-          ...base,
-          copyFileOut: async (sandboxPath, destPath) => {
-            if (sandboxPath.endsWith("agent-bad.jsonl")) {
-              throw new Error("simulated copyFileOut failure");
-            }
-            return base.copyFileOut(sandboxPath, destPath);
-          },
-        };
+        const handle = failingCopyFileOut(base, "agent-bad.jsonl");
 
         // Main capture must succeed; the bad subagent must not abort the run.
         const provider = claudeCode("claude-opus-4-8", {

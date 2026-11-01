@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { exec } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
 import {
   createBindMountSandboxProvider,
@@ -23,6 +24,21 @@ import {
 } from "./errors.js";
 
 const execAsync = promisify(exec);
+
+type CopyIn = (hostPath: string, sandboxPath: string) => Promise<void>;
+
+/**
+ * A `copyIn` that passes syncIn's repo bundle copies through to the real
+ * handle and sends every other copy to `otherwise`.
+ */
+const copyBundlesOnly =
+  (handle: { copyIn: CopyIn }, otherwise: () => Promise<void>): CopyIn =>
+  async (hostPath, sandboxPath) => {
+    if (sandboxPath.includes("repo.bundle")) {
+      return handle.copyIn(hostPath, sandboxPath);
+    }
+    return otherwise();
+  };
 
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });
@@ -188,14 +204,11 @@ describe("startSandbox", () => {
           const handle = await realProvider.create(options);
           return {
             ...handle,
-            copyIn: async (hostPath: string, sandboxPath: string) => {
-              // Allow syncIn's copyIn calls (bundle files) to succeed,
-              // but hang on everything else
-              if (sandboxPath.includes("repo.bundle")) {
-                return handle.copyIn(hostPath, sandboxPath);
-              }
-              return new Promise<void>(() => {}); // never resolves
-            },
+            // Allow syncIn's copyIn calls (bundle files) to succeed,
+            // but hang on everything else
+            copyIn: copyBundlesOnly(handle, async () => {
+              await new Promise<void>(() => {}); // never resolves
+            }),
           };
         },
       });
@@ -216,9 +229,7 @@ describe("startSandbox", () => {
         );
         // Yield to allow real async operations (create, syncIn) to complete
         yield* Effect.yieldNow();
-        yield* Effect.promise(
-          async () => new Promise((r) => setTimeout(r, 2000)),
-        );
+        yield* Effect.promise(async () => sleep(2000));
         yield* Effect.yieldNow();
         // Now advance past the copyPaths timeout
         yield* TestClock.adjust(Duration.millis(COPY_PATHS_TIMEOUT_MS + 1));
@@ -283,12 +294,9 @@ describe("startSandbox", () => {
           const handle = await realProvider.create(options);
           return {
             ...handle,
-            copyIn: async (hostPath: string, sandboxPath: string) => {
-              if (sandboxPath.includes("repo.bundle")) {
-                return handle.copyIn(hostPath, sandboxPath);
-              }
+            copyIn: copyBundlesOnly(handle, async () => {
               throw new Error("copy failed");
-            },
+            }),
             close: async () => {
               closeCalls++;
               await handle.close();
@@ -370,7 +378,9 @@ describe("startSandbox", () => {
      */
     const makeSlowCreate = () => {
       let resolveCreate!: () => void;
-      const released = new Promise<void>((r) => (resolveCreate = r));
+      const released = new Promise<void>((resolve) => {
+        resolveCreate = resolve;
+      });
       let markStarted = (): void => undefined;
       const started = new Promise<void>((resolve) => {
         markStarted = () => {
@@ -415,7 +425,7 @@ describe("startSandbox", () => {
       );
       // The provider finishes creating the sandbox after we gave up on it.
       slow.resolveCreate();
-      await new Promise((r) => setTimeout(r, 10));
+      await sleep(10);
       return exit;
     };
 

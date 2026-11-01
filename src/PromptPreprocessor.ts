@@ -17,8 +17,66 @@ export const SHELL_BLOCK_MARKER = "\u0001";
 
 const MARKED_SHELL_BLOCK_PATTERN = new RegExp(
   `!${SHELL_BLOCK_MARKER}\`([^\`]+)\``,
-  "g",
+  "gu",
 );
+
+interface ShellBlock {
+  readonly text: string;
+  readonly command: string;
+  readonly index: number;
+}
+
+/** Runs one block's command in the sandbox and returns its trimmed stdout. */
+const expandBlock = (
+  block: ShellBlock,
+  sandbox: SandboxService,
+  cwd: string,
+): Effect.Effect<
+  ShellBlock & { readonly output: string },
+  ExecError | PromptError | PromptExpansionTimeoutError
+> =>
+  Effect.gen(function* () {
+    const { command } = block;
+    const start = yield* Clock.currentTimeMillis;
+    const maybeResult = yield* sandbox
+      .exec(command, { cwd })
+      .pipe(Effect.timeoutOption(Duration.millis(PROMPT_EXPANSION_TIMEOUT_MS)));
+    if (Option.isNone(maybeResult)) {
+      const elapsedMs = (yield* Clock.currentTimeMillis) - start;
+      return yield* new PromptExpansionTimeoutError({
+        message: `Shell expression \`${command}\` timed out after ${elapsedMs}ms`,
+        timeoutMs: PROMPT_EXPANSION_TIMEOUT_MS,
+        expression: command,
+        elapsedMs,
+      });
+    }
+    const execResult = maybeResult.value;
+    if (execResult.exitCode !== 0) {
+      return yield* new PromptError({
+        message: `Command \`${command}\` exited with code ${execResult.exitCode}: ${execResult.stderr}`,
+        exitCode: execResult.exitCode,
+      });
+    }
+    return { ...block, output: execResult.stdout.trimEnd() };
+  });
+
+/**
+ * Splices each output in place of its block. Blocks are in prompt order and
+ * don't overlap, so one forward pass over `prompt` works.
+ */
+const spliceOutputs = (
+  prompt: string,
+  expanded: readonly (ShellBlock & { readonly output: string })[],
+): string => {
+  let result = "";
+  let cursor = 0;
+  for (const { index, text, output } of expanded) {
+    result += prompt.slice(cursor, index) + output;
+    cursor = index + text.length;
+  }
+  result += prompt.slice(cursor);
+  return result.replaceAll(SHELL_BLOCK_MARKER, "");
+};
 
 export const preprocessPrompt = (
   prompt: string,
@@ -31,7 +89,7 @@ export const preprocessPrompt = (
 > => {
   // The capture group is required, so the `?? ""` fallback never applies.
   const blocks = [...prompt.matchAll(MARKED_SHELL_BLOCK_PATTERN)].map(
-    (match) => ({
+    (match): ShellBlock => ({
       text: match[0],
       command: match[1] ?? "",
       index: match.index,
@@ -48,36 +106,7 @@ export const preprocessPrompt = (
       Effect.gen(function* () {
         // Execute all commands in parallel
         const expanded = yield* Effect.all(
-          blocks.map((block) => {
-            const { command } = block;
-            return Effect.gen(function* () {
-              const start = yield* Clock.currentTimeMillis;
-              const maybeResult = yield* sandbox
-                .exec(command, { cwd })
-                .pipe(
-                  Effect.timeoutOption(
-                    Duration.millis(PROMPT_EXPANSION_TIMEOUT_MS),
-                  ),
-                );
-              if (Option.isNone(maybeResult)) {
-                const elapsedMs = (yield* Clock.currentTimeMillis) - start;
-                return yield* new PromptExpansionTimeoutError({
-                  message: `Shell expression \`${command}\` timed out after ${elapsedMs}ms`,
-                  timeoutMs: PROMPT_EXPANSION_TIMEOUT_MS,
-                  expression: command,
-                  elapsedMs,
-                });
-              }
-              const execResult = maybeResult.value;
-              if (execResult.exitCode !== 0) {
-                return yield* new PromptError({
-                  message: `Command \`${command}\` exited with code ${execResult.exitCode}: ${execResult.stderr}`,
-                  exitCode: execResult.exitCode,
-                });
-              }
-              return { ...block, output: execResult.stdout.trimEnd() };
-            });
-          }),
+          blocks.map((block) => expandBlock(block, sandbox, cwd)),
           { concurrency: "unbounded" },
         );
 
@@ -87,16 +116,7 @@ export const preprocessPrompt = (
           message(`${command} → ~${tokens} tokens`);
         }
 
-        // Splice each output in place of its block. Blocks are in prompt
-        // order and don't overlap, so one forward pass over `prompt` works.
-        let result = "";
-        let cursor = 0;
-        for (const { index, text, output } of expanded) {
-          result += prompt.slice(cursor, index) + output;
-          cursor = index + text.length;
-        }
-        result += prompt.slice(cursor);
-        return result.replaceAll(SHELL_BLOCK_MARKER, "");
+        return spliceOutputs(prompt, expanded);
       }),
     );
   });

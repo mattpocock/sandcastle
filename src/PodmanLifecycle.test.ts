@@ -1,6 +1,8 @@
 import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import type * as ChildProcessModule from "node:child_process";
+import { ChildProcess, execFile } from "node:child_process";
+import { buildImage, removeImage } from "./PodmanLifecycle.js";
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof ChildProcessModule>();
@@ -10,9 +12,6 @@ vi.mock("node:child_process", async (importOriginal) => {
     execFileSync: vi.fn<typeof actual.execFileSync>(),
   };
 });
-
-import { ChildProcess, execFile } from "node:child_process";
-import { buildImage, removeImage } from "./PodmanLifecycle.js";
 
 const mockExecFile = vi.mocked(execFile);
 

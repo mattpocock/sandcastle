@@ -21,6 +21,7 @@ import {
   sharedTmpEntryIsWorlds,
 } from "./attribution.ts";
 import { REPO_ROOT, sh } from "./lib.ts";
+import { leftoverBwrap } from "./nativeSandboxes.ts";
 import {
   allWorldSpans,
   checkoutStatus,
@@ -45,7 +46,7 @@ const git = (world: World, ...args: string[]): string =>
   sh("git", args, { cwd: world.project }).stdout.trim();
 
 /** Branch names Sandcastle generates for temp branches: <ts>-<6hex>. */
-const TEMP_BRANCH = /^sandcastle\/(.+\/)?\d{8}-\d{6}-[0-9a-f]{6}$/;
+const TEMP_BRANCH = /^sandcastle\/(.+\/)?\d{8}-\d{6}-[0-9a-f]{6}$/u;
 
 const gitState = (world: World): Section => {
   const leaks: string[] = [];
@@ -131,7 +132,7 @@ const containersAndImages = (world: World): Section => {
       leaks.push(`container ${c} still exists`);
     else notes.push(`container ${c} is not this world's (no mount inside it)`);
   }
-  notes.push(`containers this world started: ${observed.size}`);
+  notes.push(`sandboxes observed (containers and bwraps): ${observed.size}`);
   const others = allWorldSpans();
   const now = new Date().toISOString();
   for (const img of listImages()) {
@@ -150,7 +151,11 @@ const containersAndImages = (world: World): Section => {
       notes.push(`image ${img}: other world (${a.detail})`);
     else notes.push(`image ${img}: ${a.detail}`);
   }
-  return { title: "(c) Leftover containers and images", leaks, notes };
+  return {
+    title: "(c) Leftover containers, images and native sandboxes",
+    leaks,
+    notes,
+  };
 };
 
 /** The first 64 KB of up to 20 files at `path` (a file, or a dir two levels deep). */
@@ -282,19 +287,25 @@ const envLeaks = (world: World): Section => {
   }
   if (obs.length === 0)
     notes.push(
-      "no container observed, so this section proves nothing for this world (remote sandboxes are not observable)",
+      "no sandbox observed, so this section proves nothing for this world (remote sandboxes are not observable)",
     );
   return { title: "(e) Env vars and keys in the sandbox", leaks, notes };
 };
 
 /** Run the ledger for `world`, write a new LEDGER-<n>.md, return the number of leaks. */
-export const runLedger = (
+export const runLedger = async (
   world: World,
-): { text: string; leaks: number; file: string } => {
+): Promise<{ text: string; leaks: number; file: string }> => {
+  const containers = containersAndImages(world);
+  const native = await leftoverBwrap(world.dir, worldTmp(world));
   const sections = [
     gitState(world),
     worktrees(world),
-    containersAndImages(world),
+    {
+      ...containers,
+      leaks: [...containers.leaks, ...native.leaks],
+      notes: [...containers.notes, ...native.notes],
+    },
     hostFiles(world),
     envLeaks(world),
   ];

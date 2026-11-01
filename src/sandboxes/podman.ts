@@ -6,21 +6,17 @@
  *   await run({ agent: claudeCode("claude-opus-4-8"), sandbox: podman() });
  */
 
-import {
-  execFile,
-  execFileSync,
-  spawn,
-  type StdioOptions,
-} from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
+import type { StdioOptions } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
-import {
-  createBindMountSandboxProvider,
-  type SandboxProvider,
-  type BindMountCreateOptions,
-  type BindMountSandboxHandle,
-  type ExecResult,
-  type InteractiveExecOptions,
+import { createBindMountSandboxProvider } from "../SandboxProvider.js";
+import type {
+  SandboxProvider,
+  BindMountCreateOptions,
+  BindMountSandboxHandle,
+  ExecResult,
+  InteractiveExecOptions,
 } from "../SandboxProvider.js";
 import type { MountConfig } from "../MountConfig.js";
 import type { SelinuxLabel } from "../mountUtils.js";
@@ -198,11 +194,14 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
         `${key}=${value}`,
       ]);
       const volumeArgs = volumeMounts.flatMap((v) => ["-v", v]);
-      const usernsArgs = userns
-        ? [`--userns=keep-id:uid=${containerUid},gid=${containerGid}`]
-        : [];
+      const usernsArgs =
+        userns === false
+          ? []
+          : [`--userns=keep-id:uid=${containerUid},gid=${containerGid}`];
       const userArgs = ["--user", `${containerUid}:${containerGid}`];
-      const networks = options?.network ? [options.network].flat() : [];
+      const network = options?.network;
+      const networks =
+        network === undefined || network === "" ? [] : [network].flat();
       const networkArgs = networks.flatMap((n) => ["--network", n]);
       const groupArgs = (options?.groups ?? []).flatMap((g) => [
         "--group-add",
@@ -316,13 +315,13 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
           // Elevate by running as root through the engine, not a `sudo`
           // prefix: the image needs no sudo binary, and the whole command
           // (`a && b`, not just `a`) runs as root.
-          if (opts?.sudo) {
+          if (opts?.sudo === true) {
             args.push("--user", "0:0");
           }
           if (opts?.stdin !== undefined) {
             args.push("-i");
           }
-          if (opts?.cwd) {
+          if (opts?.cwd !== undefined && opts.cwd !== "") {
             args.push("-w", opts.cwd);
           }
           args.push(containerName, "sh", "-c", command);
@@ -393,13 +392,13 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
             // Allocate a pseudo-terminal when stdin looks like a TTY
             if (
               "isTTY" in opts.stdin &&
-              (opts.stdin as { isTTY?: boolean }).isTTY
+              (opts.stdin as { isTTY?: boolean }).isTTY === true
             ) {
               podmanArgs.push("-it");
             } else {
               podmanArgs.push("-i");
             }
-            if (opts.cwd) {
+            if (opts.cwd !== undefined && opts.cwd !== "") {
               podmanArgs.push("-w", opts.cwd);
             }
             podmanArgs.push(containerName, ...args);

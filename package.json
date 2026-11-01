@@ -29,6 +29,14 @@
     "./sandboxes/no-sandbox": {
       "import": "./dist/sandboxes/no-sandbox.js",
       "types": "./dist/sandboxes/no-sandbox.d.ts"
+    },
+    "./sandboxes/bwrap": {
+      "import": "./dist/sandboxes/bwrap.js",
+      "types": "./dist/sandboxes/bwrap.d.ts"
+    },
+    "./sandboxes/seatbelt": {
+      "import": "./dist/sandboxes/seatbelt.js",
+      "types": "./dist/sandboxes/seatbelt.d.ts"
     }
   },
   "bin": {
@@ -56,6 +64,7 @@
     "verify": "tsx .sandcastle/verify/verify.ts",
     "verify:world": "npm run build >/dev/null && tsx .sandcastle/verify/verify.ts world",
     "coverage:gate": "tsx scripts/coverage-gate.ts",
+    "coverage:floor": "tsx scripts/coverage-floor.ts",
     "api:report": "tsx scripts/api-report.ts"
   },
   "keywords": [

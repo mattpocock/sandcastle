@@ -34,8 +34,9 @@ export const AGENTS: readonly Agent[] = [
 
 /** Sandboxes a world may run. noSandbox is left out on purpose: it runs the
  *  agent on this host with the host's full env, and its unit tests cover it. */
-export type Sandbox = "docker" | "podman" | "vercel" | "daytona";
+export type Sandbox = "bwrap" | "docker" | "podman" | "vercel" | "daytona";
 export const SANDBOXES: readonly Sandbox[] = [
+  "bwrap",
   "docker",
   "podman",
   "vercel",
@@ -67,16 +68,19 @@ const CHEAP_MODEL_OPTIONS: Partial<Record<Agent, string>> = {
   pi: '{ thinking: "off" }',
 };
 
+/** Whether an env var is set to a non-empty value. */
+const isEnvSet = (name: string): boolean => (process.env[name] ?? "") !== "";
+
 export const cheapModel = (agent: Agent): string =>
-  process.env.VERIFY_MODEL || CHEAP_MODELS[agent];
+  (process.env.VERIFY_MODEL ?? "") || CHEAP_MODELS[agent];
 
 /** The agent factory call to put in the world's main file, e.g.
  *  `pi("anthropic/claude-haiku-5-5", { thinking: "off" })`. */
 export const cheapAgentCall = (agent: Agent): string => {
-  const options = process.env.VERIFY_MODEL
+  const options = isEnvSet("VERIFY_MODEL")
     ? undefined
     : CHEAP_MODEL_OPTIONS[agent];
-  return `${agent}(${JSON.stringify(cheapModel(agent))}${options ? `, ${options}` : ""})`;
+  return `${agent}(${JSON.stringify(cheapModel(agent))}${options === undefined ? "" : `, ${options}`})`;
 };
 
 /** The `sandcastle init --agent` value for each factory. */
@@ -105,6 +109,9 @@ export const SANDBOX_NEEDS: Record<
   Sandbox,
   { keys: readonly (readonly string[])[]; command?: readonly string[] }
 > = {
+  // The trivial probe: fails off Linux, without bwrap, or when the kernel
+  // blocks unprivileged user namespaces.
+  bwrap: { keys: [], command: ["bwrap", "--ro-bind", "/", "/", "true"] },
   docker: { keys: [], command: ["docker", "info"] },
   podman: { keys: [], command: ["podman", "info"] },
   vercel: { keys: [["VERCEL_TOKEN", "VERCEL_OIDC_TOKEN"]] },
@@ -114,7 +121,7 @@ export const SANDBOX_NEEDS: Record<
 /** The keys groups that are missing from the environment, by first name. */
 export const missingKeys = (groups: readonly (readonly string[])[]): string[] =>
   groups
-    .filter((alts) => !alts.some((k) => process.env[k]))
+    .filter((alts) => !alts.some((k) => isEnvSet(k)))
     .map((alts) => alts.join("|"));
 
 // --- Keys -------------------------------------------------------------------
@@ -126,7 +133,9 @@ export const missingKeys = (groups: readonly (readonly string[])[]): string[] =>
  */
 export const keysFile = (): string | undefined => {
   const own = join(REPO_ROOT, ".sandcastle", ".env");
-  if (existsSync(own)) return own;
+  if (existsSync(own)) {
+    return own;
+  }
   const common = sh(
     "git",
     ["rev-parse", "--path-format=absolute", "--git-common-dir"],
@@ -141,19 +150,25 @@ export const keysFile = (): string | undefined => {
 /** Load the keys file into process.env (shell values win). Never prints. */
 export const loadKeys = (): void => {
   const file = keysFile();
-  if (!file) return;
+  if (file === undefined) {
+    return;
+  }
   for (const line of readFileSync(file, "utf8").split("\n")) {
-    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line);
-    if (!m) continue;
+    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/u.exec(line);
+    if (!m) {
+      continue;
+    }
     const [, key, raw] = m as unknown as [string, string, string];
-    const value = raw.replace(/^(['"])(.*)\1$/, "$2");
-    if (value && !process.env[key]) process.env[key] = value;
+    const value = raw.replace(/^(['"])(.*)\1$/u, "$2");
+    if (value && !isEnvSet(key)) {
+      process.env[key] = value;
+    }
   }
 };
 
 // --- Secret redaction -----------------------------------------------------------
 
-export const SECRET_NAME = /TOKEN|KEY|SECRET|PASSWORD|CREDENTIAL/i;
+export const SECRET_NAME = /TOKEN|KEY|SECRET|PASSWORD|CREDENTIAL/iu;
 
 /** Every secret-looking variable in `env`, as name → value. */
 export const secretsIn = (
@@ -161,7 +176,9 @@ export const secretsIn = (
 ): Map<string, string> => {
   const out = new Map<string, string>();
   for (const [k, v] of Object.entries(env)) {
-    if (v && v.length >= 8 && SECRET_NAME.test(k)) out.set(k, v);
+    if (v !== undefined && v.length >= 8 && SECRET_NAME.test(k)) {
+      out.set(k, v);
+    }
   }
   return out;
 };
@@ -169,8 +186,9 @@ export const secretsIn = (
 /** Replace the value of every secret-looking env var with `<NAME>`. */
 export const redact = (text: string): string => {
   let out = text;
-  for (const [key, value] of secretsIn())
+  for (const [key, value] of secretsIn()) {
     out = out.split(value).join(`<${key}>`);
+  }
   return out;
 };
 

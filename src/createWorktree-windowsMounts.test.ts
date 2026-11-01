@@ -10,6 +10,11 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
+import { createWorktree } from "./createWorktree.js";
+import { createBindMountSandboxProvider } from "./SandboxProvider.js";
+import type { BindMountSandboxHandle, ExecResult } from "./SandboxProvider.js";
+import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
+import { claudeCode } from "./AgentProvider.js";
 
 const execAsync = promisify(exec);
 
@@ -35,15 +40,6 @@ vi.mock("./mountUtils.js", async (importOriginal) => {
       ),
   };
 });
-
-import { createWorktree } from "./createWorktree.js";
-import {
-  createBindMountSandboxProvider,
-  type BindMountSandboxHandle,
-  type ExecResult,
-} from "./SandboxProvider.js";
-import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
-import { claudeCode } from "./AgentProvider.js";
 
 /** Format a minimal stream-json response so the orchestrator parses agent output. */
 const toStreamJson = (output: string): string => {
@@ -156,9 +152,7 @@ describe("createWorktree() Windows mount patching", () => {
       expect(mockPatchGitMountsForWindows).toHaveBeenCalledTimes(1);
       const [call] = mockPatchGitMountsForWindows.mock.calls;
       assert.isDefined(call);
-      const gitMounts = call[0];
-      const worktreePath = call[1];
-      const sandboxRepoDir = call[2];
+      const [gitMounts, worktreePath, sandboxRepoDir] = call;
       expect(Array.isArray(gitMounts)).toBe(true);
       expect(worktreePath).toBe(ws.worktreePath);
       expect(sandboxRepoDir).toBe(SANDBOX_REPO_DIR);
@@ -190,9 +184,7 @@ describe("createWorktree() Windows mount patching", () => {
       expect(mockPatchGitMountsForWindows).toHaveBeenCalledTimes(1);
       const [call] = mockPatchGitMountsForWindows.mock.calls;
       assert.isDefined(call);
-      const gitMounts = call[0];
-      const worktreePath = call[1];
-      const sandboxRepoDir = call[2];
+      const [gitMounts, worktreePath, sandboxRepoDir] = call;
       expect(Array.isArray(gitMounts)).toBe(true);
       expect(worktreePath).toBe(ws.worktreePath);
       expect(sandboxRepoDir).toBe(SANDBOX_REPO_DIR);

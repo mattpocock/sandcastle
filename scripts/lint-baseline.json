@@ -5,67 +5,39 @@
   },
   ".sandcastle/agent-workflows/explore/apply.ts": {
     "eslint(max-lines-per-function)": 1,
-    "eslint(no-useless-return)": 1,
-    "node(no-sync)": 3,
     "typescript(no-unsafe-type-assertion)": 1,
-    "typescript(strict-boolean-expressions)": 2,
-    "unicorn(no-array-sort)": 1,
-    "unicorn(switch-case-braces)": 6
+    "unicorn(no-array-sort)": 1
   },
   ".sandcastle/agent-workflows/explore/batch.ts": {
-    "eslint(curly)": 1,
     "typescript(no-base-to-string)": 7,
-    "typescript(no-non-null-assertion)": 1,
     "typescript(no-unsafe-type-assertion)": 2,
     "unicorn(no-array-sort)": 3
   },
-  ".sandcastle/agent-workflows/explore/explore.ts": {
-    "node(no-sync)": 2
-  },
-  ".sandcastle/agent-workflows/implement-pr/implement-pr.ts": {
-    "node(no-sync)": 1
-  },
-  ".sandcastle/agent-workflows/review/review.ts": {
-    "node(no-sync)": 1
-  },
   ".sandcastle/agent-workflows/shared/common.ts": {
-    "node(no-sync)": 8,
-    "typescript(no-unsafe-type-assertion)": 1,
-    "typescript(strict-boolean-expressions)": 1
+    "typescript(no-unsafe-type-assertion)": 1
   },
   ".sandcastle/agent-workflows/shared/diff-lines.ts": {
     "eslint(max-statements)": 1,
     "eslint(prefer-named-capture-group)": 1,
-    "eslint(require-unicode-regexp)": 1,
-    "typescript(prefer-regexp-exec)": 1,
-    "typescript(strict-boolean-expressions)": 1
+    "typescript(prefer-regexp-exec)": 1
   },
   ".sandcastle/agent-workflows/shared/review-context.ts": {
     "eslint(max-lines-per-function)": 1,
     "eslint(prefer-named-capture-group)": 1,
-    "eslint(require-unicode-regexp)": 1,
     "typescript(no-unsafe-type-assertion)": 3,
-    "typescript(prefer-regexp-exec)": 1,
-    "typescript(strict-boolean-expressions)": 2
+    "typescript(prefer-regexp-exec)": 1
   },
   ".sandcastle/agent-workflows/shared/review-output.ts": {
-    "eslint(require-unicode-regexp)": 1,
     "typescript(strict-boolean-expressions)": 1,
     "unicorn(no-array-callback-reference)": 4
   },
   ".sandcastle/agent-workflows/shared/run-with-extraction.ts": {
-    "eslint(func-style)": 1,
-    "typescript(strict-boolean-expressions)": 2
-  },
-  ".sandcastle/agent-workflows/update-branch/update-branch.ts": {
-    "eslint(func-style)": 1,
-    "node(no-sync)": 3
+    "eslint(func-style)": 1
   },
   ".sandcastle/run.ts": {
     "eslint(no-await-in-loop)": 3,
     "eslint(no-promise-executor-return)": 1,
     "eslint(prefer-named-capture-group)": 1,
-    "eslint(require-unicode-regexp)": 1,
     "node(callback-return)": 1,
     "promise(avoid-new)": 1,
     "typescript(no-unsafe-type-assertion)": 1,
@@ -78,30 +50,19 @@
   ".sandcastle/verify/attribution.ts": {
     "eslint(max-params)": 1,
     "eslint(prefer-named-capture-group)": 6,
-    "eslint(require-unicode-regexp)": 5,
-    "typescript(strict-boolean-expressions)": 2,
     "unicorn(no-useless-collection-argument)": 1
-  },
-  ".sandcastle/verify/envLeaks.test.ts": {
-    "eslint(require-unicode-regexp)": 1
   },
   ".sandcastle/verify/ledger.ts": {
     "eslint(curly)": 27,
     "eslint(max-lines-per-function)": 1,
     "eslint(max-lines)": 1,
     "eslint(prefer-named-capture-group)": 1,
-    "eslint(require-unicode-regexp)": 1,
-    "node(no-sync)": 15,
     "typescript(no-confusing-void-expression)": 1,
     "typescript(no-unsafe-type-assertion)": 2
   },
   ".sandcastle/verify/lib.ts": {
-    "eslint(curly)": 6,
     "eslint(prefer-named-capture-group)": 4,
-    "eslint(require-unicode-regexp)": 3,
-    "node(no-sync)": 4,
     "typescript(no-unsafe-type-assertion)": 1,
-    "typescript(strict-boolean-expressions)": 7,
     "unicorn(prefer-import-meta-properties)": 1
   },
   ".sandcastle/verify/verify.ts": {
@@ -109,12 +70,10 @@
     "eslint(curly)": 11,
     "eslint(max-lines-per-function)": 2,
     "eslint(max-statements)": 3,
-    "node(no-sync)": 2,
     "promise(catch-or-return)": 1,
     "promise(prefer-catch)": 1,
     "typescript(no-non-null-assertion)": 1,
     "typescript(no-unsafe-type-assertion)": 1,
-    "typescript(strict-boolean-expressions)": 3,
     "unicorn(catch-error-name)": 1,
     "unicorn(no-array-callback-reference)": 1,
     "unicorn(no-lonely-if)": 1,
@@ -126,12 +85,9 @@
     "eslint(max-params)": 2,
     "eslint(max-statements)": 1,
     "eslint(prefer-named-capture-group)": 2,
-    "eslint(require-unicode-regexp)": 4,
-    "node(no-sync)": 27,
     "promise(avoid-new)": 1,
-    "typescript(no-non-null-assertion)": 2,
     "typescript(no-unsafe-type-assertion)": 4,
-    "typescript(strict-boolean-expressions)": 2,
+    "typescript(strict-boolean-expressions)": 1,
     "unicorn(consistent-function-scoping)": 1,
     "unicorn(no-array-callback-reference)": 3,
     "unicorn(no-array-sort)": 1
@@ -146,13 +102,11 @@
     "typescript(no-unsafe-return)": 1
   },
   "scripts/check-no-partially-staged.mjs": {
-    "node(no-sync)": 1,
     "typescript(no-unsafe-assignment)": 1
   },
   "scripts/check-public-types-effect-free.mjs": {
     "eslint(func-style)": 1,
     "eslint(prefer-named-capture-group)": 1,
-    "eslint(require-unicode-regexp)": 1,
     "typescript(no-unsafe-argument)": 4,
     "unicorn(prefer-import-meta-properties)": 1
   },
@@ -160,45 +114,33 @@
     "eslint(require-unicode-regexp)": 2,
     "typescript(no-unnecessary-type-conversion)": 2,
     "typescript(unbound-method)": 4,
-    "vitest(no-conditional-in-test)": 2,
     "vitest(prefer-strict-equal)": 3
   },
   "src/AgentProvider.ts": {
-    "effect/asyncFunction": 15,
+    "effect/asyncFunction": 14,
     "effect/globalConsole": 1,
     "effect/globalDate": 2,
     "effect/globalRandom": 2,
-    "effect/processEnv": 1,
     "eslint(complexity)": 4,
-    "eslint(curly)": 39,
+    "eslint(curly)": 38,
     "eslint(max-lines-per-function)": 8,
     "eslint(max-lines)": 1,
     "eslint(max-params)": 1,
     "eslint(max-statements)": 3,
     "eslint(no-await-in-loop)": 1,
     "eslint(no-empty-function)": 2,
-    "eslint(require-unicode-regexp)": 1,
     "typescript(method-signature-style)": 11,
-    "typescript(no-non-null-assertion)": 3,
+    "typescript(no-non-null-assertion)": 2,
     "typescript(no-unsafe-assignment)": 38,
     "typescript(no-unsafe-member-access)": 108,
     "typescript(no-unsafe-type-assertion)": 8,
-    "typescript(promise-function-async)": 4,
-    "typescript(strict-boolean-expressions)": 22
-  },
-  "src/boundedTail.test.ts": {
-    "unicorn(prefer-single-call)": 5
+    "typescript(strict-boolean-expressions)": 21
   },
   "src/ClackDisplay.test.ts": {
     "effect/anyUnknownInErrorContext": 1,
     "eslint(no-control-regex)": 1,
-    "eslint(require-unicode-regexp)": 1,
     "typescript(no-unsafe-type-assertion)": 1,
     "vitest(prefer-import-in-mock)": 1
-  },
-  "src/cli.test.ts": {
-    "eslint(max-params)": 1,
-    "typescript(strict-void-return)": 1
   },
   "src/cli.ts": {
     "eslint(complexity)": 1,
@@ -206,34 +148,24 @@
     "eslint(max-lines)": 1,
     "eslint(max-statements)": 1,
     "import(max-dependencies)": 1,
-    "node(no-sync)": 2,
-    "typescript(no-non-null-assertion)": 3,
-    "typescript(promise-function-async)": 2
+    "node(no-sync)": 2
   },
   "src/ContextWindow.test.ts": {
-    "typescript(no-non-null-assertion)": 1,
     "typescript(unbound-method)": 1
   },
   "src/CopyToWorktree.test.ts": {
-    "eslint(no-await-in-loop)": 1,
     "eslint(no-promise-executor-return)": 1,
     "promise(param-names)": 1,
-    "typescript(strict-void-return)": 1,
-    "vitest(no-conditional-expect)": 2,
-    "vitest(no-conditional-in-test)": 4
+    "typescript(strict-void-return)": 1
   },
   "src/CopyToWorktree.ts": {
     "eslint(max-lines-per-function)": 2,
     "eslint(max-params)": 1,
-    "import(consistent-type-specifier-style)": 1,
     "node(no-sync)": 2,
-    "typescript(no-invalid-void-type)": 1,
-    "typescript(promise-function-async)": 1
+    "typescript(no-invalid-void-type)": 1
   },
   "src/createSandbox-windowsMounts.test.ts": {
     "eslint(max-params)": 1,
-    "eslint(prefer-destructuring)": 6,
-    "import(first)": 3,
     "typescript(no-unsafe-type-assertion)": 1,
     "typescript(strict-void-return)": 1,
     "unicorn(filename-case)": 1,
@@ -241,10 +173,8 @@
     "vitest(require-mock-type-parameters)": 1
   },
   "src/createSandbox.agentEnv.test.ts": {
-    "eslint(require-unicode-regexp)": 1,
     "import(max-dependencies)": 1,
-    "typescript(no-non-null-assertion)": 3,
-    "typescript(strict-void-return)": 2
+    "typescript(strict-void-return)": 1
   },
   "src/createSandbox.test.ts": {
     "eslint(max-params)": 1,
@@ -255,7 +185,6 @@
     "eslint(require-yield)": 3,
     "import(max-dependencies)": 1,
     "typescript(no-explicit-any)": 1,
-    "typescript(no-non-null-assertion)": 1,
     "typescript(no-unsafe-argument)": 3,
     "typescript(no-unsafe-assignment)": 2,
     "typescript(no-unsafe-call)": 1,
@@ -263,7 +192,7 @@
     "typescript(strict-boolean-expressions)": 1,
     "typescript(strict-void-return)": 1,
     "unicorn(no-immediate-mutation)": 2,
-    "vitest(no-conditional-in-test)": 35
+    "vitest(no-conditional-in-test)": 14
   },
   "src/createSandbox.ts": {
     "effect/globalConsole": 3,
@@ -275,20 +204,12 @@
     "eslint(no-implicit-coercion)": 2,
     "eslint(no-shadow)": 6,
     "eslint(prefer-destructuring)": 2,
-    "eslint(require-unicode-regexp)": 1,
     "import(max-dependencies)": 1,
     "typescript(method-signature-style)": 5,
-    "typescript(no-non-null-assertion)": 3,
-    "typescript(no-unnecessary-type-assertion)": 2,
-    "typescript(no-unsafe-type-assertion)": 4,
-    "typescript(promise-function-async)": 5,
-    "typescript(strict-boolean-expressions)": 12
+    "typescript(no-unsafe-type-assertion)": 4
   },
   "src/createWorktree-windowsMounts.test.ts": {
     "eslint(max-params)": 1,
-    "eslint(prefer-destructuring)": 6,
-    "import(consistent-type-specifier-style)": 2,
-    "import(first)": 4,
     "import(max-dependencies)": 1,
     "typescript(no-unsafe-type-assertion)": 1,
     "typescript(strict-void-return)": 1,
@@ -304,7 +225,6 @@
     "eslint(require-unicode-regexp)": 3,
     "import(max-dependencies)": 1,
     "typescript(no-explicit-any)": 1,
-    "typescript(no-non-null-assertion)": 1,
     "typescript(no-unsafe-assignment)": 3,
     "typescript(no-unsafe-call)": 2,
     "typescript(no-unsafe-member-access)": 5,
@@ -313,7 +233,6 @@
     "unicorn(no-await-expression-member)": 1,
     "unicorn(no-immediate-mutation)": 1,
     "vitest(expect-expect)": 6,
-    "vitest(no-conditional-in-test)": 7,
     "vitest(prefer-strict-boolean-matchers)": 1
   },
   "src/createWorktree.ts": {
@@ -324,79 +243,47 @@
     "eslint(prefer-destructuring)": 5,
     "import(max-dependencies)": 1,
     "oxc(branches-sharing-code)": 1,
-    "typescript(consistent-type-imports)": 1,
     "typescript(method-signature-style)": 5,
-    "typescript(no-non-null-assertion)": 1,
-    "typescript(no-unsafe-type-assertion)": 3,
-    "typescript(strict-boolean-expressions)": 3
+    "typescript(no-unsafe-type-assertion)": 3
   },
   "src/Display.test.ts": {
     "eslint(no-unused-vars)": 1,
     "eslint(prefer-named-capture-group)": 1,
-    "eslint(require-unicode-regexp)": 6,
     "typescript(no-unsafe-type-assertion)": 1
   },
   "src/Display.ts": {
     "eslint(max-lines-per-function)": 4,
     "eslint(max-lines)": 1,
-    "eslint(require-unicode-regexp)": 2,
     "typescript(strict-void-return)": 1
   },
   "src/DockerLifecycle.test.ts": {
-    "eslint(max-params)": 22,
     "import(first)": 2,
     "typescript(consistent-type-imports)": 1,
-    "typescript(no-explicit-any)": 44,
-    "typescript(no-unsafe-call)": 22,
-    "typescript(no-unsafe-return)": 22,
-    "typescript(no-unsafe-type-assertion)": 22,
-    "vitest(prefer-import-in-mock)": 1,
-    "vitest(require-mock-type-parameters)": 2
+    "vitest(prefer-import-in-mock)": 1
   },
   "src/DockerLifecycle.ts": {
     "eslint(complexity)": 1,
     "eslint(max-lines-per-function)": 2,
-    "eslint(max-params)": 1,
-    "typescript(strict-boolean-expressions)": 4
+    "eslint(max-params)": 1
   },
   "src/EnvResolver.ts": {
-    "effect/processEnvInEffect": 1,
-    "eslint(curly)": 3,
-    "eslint(prefer-named-capture-group)": 1,
-    "eslint(require-unicode-regexp)": 1,
-    "typescript(strict-boolean-expressions)": 2
-  },
-  "src/ErrorHandler.test.ts": {
-    "ratchet/disable-comment": 2,
-    "typescript(no-unsafe-argument)": 1,
-    "typescript(no-unsafe-call)": 1,
-    "typescript(no-unsafe-member-access)": 1,
-    "typescript(no-unsafe-type-assertion)": 1
+    "effect/processEnvInEffect": 1
   },
   "src/ErrorHandler.ts": {
     "effect/lazyPromiseInEffectSync": 1,
     "effect/unsafeEffectTypeAssertion": 1,
-    "typescript(no-unsafe-type-assertion)": 1,
-    "unicorn(switch-case-braces)": 12
+    "typescript(no-unsafe-type-assertion)": 1
   },
   "src/errors.test.ts": {
-    "eslint(no-unused-vars)": 1,
-    "vitest(no-conditional-in-test)": 1
-  },
-  "src/extractStructuredOutput.test.ts": {
-    "typescript(no-unsafe-type-assertion)": 2
+    "eslint(no-unused-vars)": 1
   },
   "src/extractStructuredOutput.ts": {
     "effect/asyncFunction": 2,
-    "eslint(prefer-named-capture-group)": 1,
-    "eslint(require-unicode-regexp)": 1
+    "eslint(prefer-named-capture-group)": 1
   },
   "src/hostShell.ts": {
     "effect/newPromise": 1,
-    "eslint(max-lines-per-function)": 2,
-    "promise(avoid-new)": 1,
-    "typescript(promise-function-async)": 1,
-    "typescript(strict-void-return)": 2
+    "promise(avoid-new)": 1
   },
   "src/index.ts": {
     "typescript(no-deprecated)": 1
@@ -406,14 +293,11 @@
     "eslint(no-await-in-loop)": 6,
     "eslint(no-template-curly-in-string)": 2,
     "eslint(no-unused-vars)": 2,
-    "eslint(prefer-named-capture-group)": 2,
-    "eslint(require-unicode-regexp)": 20,
+    "eslint(prefer-named-capture-group)": 1,
+    "eslint(require-unicode-regexp)": 15,
     "node(callback-return)": 27,
-    "typescript(no-non-null-assertion)": 49,
     "typescript(prefer-regexp-exec)": 1,
-    "vitest(no-conditional-expect)": 10,
-    "vitest(no-conditional-in-test)": 15,
-    "vitest(prefer-each)": 3,
+    "vitest(prefer-each)": 2,
     "vitest(prefer-strict-equal)": 2,
     "vitest(require-to-throw-message)": 5,
     "vitest(valid-expect)": 1
@@ -423,17 +307,12 @@
     "eslint(max-lines-per-function)": 6,
     "eslint(max-lines)": 1,
     "eslint(max-params)": 3,
-    "eslint(max-statements)": 2,
+    "eslint(max-statements)": 1,
     "eslint(prefer-destructuring)": 1,
-    "eslint(require-unicode-regexp)": 7,
-    "typescript(strict-boolean-expressions)": 1,
     "unicorn(prefer-import-meta-properties)": 2
   },
   "src/interactive-windowsMounts.test.ts": {
     "eslint(max-params)": 1,
-    "eslint(prefer-destructuring)": 5,
-    "import(consistent-type-specifier-style)": 1,
-    "import(first)": 4,
     "import(max-dependencies)": 1,
     "typescript(no-unsafe-type-assertion)": 1,
     "typescript(strict-void-return)": 1,
@@ -443,32 +322,23 @@
   },
   "src/interactive.test.ts": {
     "eslint(require-unicode-regexp)": 3,
-    "unicorn(prefer-at)": 2,
-    "vitest(no-conditional-in-test)": 1
+    "unicorn(prefer-at)": 2
   },
   "src/interactive.ts": {
     "effect/globalErrorInEffectFailure": 1,
-    "eslint(complexity)": 2,
+    "eslint(complexity)": 1,
     "eslint(max-lines-per-function)": 4,
     "eslint(max-lines)": 1,
     "eslint(max-statements)": 2,
     "eslint(no-empty-function)": 1,
     "import(max-dependencies)": 1,
-    "typescript(no-unsafe-type-assertion)": 1,
-    "typescript(strict-boolean-expressions)": 6
+    "typescript(no-unsafe-type-assertion)": 1
   },
   "src/interactiveArgCollection.test.ts": {
     "typescript(no-unsafe-type-assertion)": 1,
     "vitest(prefer-import-in-mock)": 1
   },
-  "src/main.ts": {
-    "typescript(strict-void-return)": 1
-  },
-  "src/mergeProviderEnv.test.ts": {
-    "eslint(require-unicode-regexp)": 1
-  },
   "src/mountUtils.test.ts": {
-    "eslint(require-unicode-regexp)": 5,
     "typescript(consistent-type-imports)": 1,
     "vitest(prefer-import-in-mock)": 2,
     "vitest(prefer-strict-boolean-matchers)": 1
@@ -480,12 +350,9 @@
     "eslint(max-params)": 2,
     "eslint(max-statements)": 1,
     "eslint(prefer-named-capture-group)": 1,
-    "eslint(require-unicode-regexp)": 6,
     "import(no-cycle)": 1,
     "node(no-sync)": 1,
-    "typescript(method-signature-style)": 1,
-    "typescript(promise-function-async)": 4,
-    "typescript(strict-boolean-expressions)": 3
+    "typescript(method-signature-style)": 1
   },
   "src/Orchestrator.test.ts": {
     "eslint(max-params)": 1,
@@ -498,7 +365,6 @@
     "import(max-dependencies)": 1,
     "promise(param-names)": 2,
     "typescript(consistent-type-imports)": 8,
-    "typescript(no-non-null-assertion)": 32,
     "typescript(no-unsafe-type-assertion)": 9,
     "typescript(strict-boolean-expressions)": 1,
     "typescript(strict-void-return)": 4,
@@ -517,64 +383,35 @@
     "eslint(max-params)": 1,
     "eslint(max-statements)": 3,
     "eslint(prefer-destructuring)": 2,
-    "import(max-dependencies)": 1,
-    "typescript(promise-function-async)": 3,
-    "typescript(strict-boolean-expressions)": 6
+    "import(max-dependencies)": 1
   },
   "src/Output.ts": {
     "effect/extendsNativeError": 1
   },
   "src/PodmanLifecycle.test.ts": {
-    "import(first)": 2,
     "vitest(prefer-import-in-mock)": 1
-  },
-  "src/PodmanLifecycle.ts": {
-    "typescript(strict-boolean-expressions)": 1
   },
   "src/PromptArgumentSubstitution.test.ts": {
     "eslint(require-unicode-regexp)": 1,
-    "typescript(consistent-type-imports)": 2,
-    "typescript(no-unsafe-type-assertion)": 4,
-    "typescript(promise-function-async)": 1
+    "typescript(no-unsafe-type-assertion)": 4
   },
   "src/PromptArgumentSubstitution.ts": {
     "eslint(max-lines-per-function)": 1,
-    "eslint(prefer-named-capture-group)": 2,
-    "eslint(require-unicode-regexp)": 3,
-    "typescript(strict-boolean-expressions)": 1
+    "eslint(prefer-named-capture-group)": 2
   },
   "src/PromptPreprocessor.test.ts": {
     "eslint(max-params)": 1,
-    "import(max-dependencies)": 1,
-    "vitest(no-conditional-in-test)": 2
-  },
-  "src/PromptPreprocessor.ts": {
-    "eslint(max-lines-per-function)": 4,
-    "eslint(require-unicode-regexp)": 1
-  },
-  "src/RecoveryMessage.test.ts": {
-    "eslint(require-unicode-regexp)": 2
-  },
-  "src/RecoveryMessage.ts": {
-    "eslint(max-lines-per-function)": 1,
-    "eslint(max-statements)": 1,
-    "typescript(strict-boolean-expressions)": 2,
-    "unicorn(prefer-single-call)": 2
-  },
-  "src/resolveCwd.test.ts": {
-    "eslint(require-unicode-regexp)": 2
+    "import(max-dependencies)": 1
   },
   "src/resumePrecheck.ts": {
-    "effect/asyncFunction": 1,
-    "typescript(strict-boolean-expressions)": 2
+    "effect/asyncFunction": 1
   },
   "src/run.test.ts": {
     "eslint(prefer-named-capture-group)": 2,
-    "eslint(require-unicode-regexp)": 9,
+    "eslint(require-unicode-regexp)": 8,
     "import(max-dependencies)": 1,
     "typescript(no-unsafe-type-assertion)": 1,
     "vitest(expect-expect)": 2,
-    "vitest(no-conditional-in-test)": 1,
     "vitest(prefer-called-with)": 1,
     "vitest(require-to-throw-message)": 1
   },
@@ -584,14 +421,10 @@
     "eslint(max-lines-per-function)": 2,
     "eslint(max-lines)": 1,
     "eslint(max-statements)": 1,
-    "eslint(require-unicode-regexp)": 2,
     "import(max-dependencies)": 1,
-    "node(no-sync)": 6,
-    "typescript(no-unnecessary-type-assertion)": 1,
-    "typescript(strict-boolean-expressions)": 10
+    "node(no-sync)": 6
   },
   "src/sandboxes/daytona.sudo.test.ts": {
-    "import(first)": 1,
     "vitest(prefer-import-in-mock)": 1
   },
   "src/sandboxes/daytona.test.ts": {
@@ -604,7 +437,6 @@
     "promise(catch-or-return)": 1,
     "promise(prefer-catch)": 1,
     "typescript(strict-boolean-expressions)": 1,
-    "typescript(strict-void-return)": 2,
     "vitest(no-conditional-in-test)": 1,
     "vitest(prefer-import-in-mock)": 1
   },
@@ -620,7 +452,6 @@
     "typescript(no-confusing-void-expression)": 1,
     "typescript(no-misused-promises)": 2,
     "typescript(no-unnecessary-type-assertion)": 1,
-    "typescript(strict-boolean-expressions)": 4,
     "typescript(strict-void-return)": 2
   },
   "src/sandboxes/docker.test.ts": {
@@ -630,7 +461,6 @@
     "node(callback-return)": 9,
     "typescript(consistent-type-imports)": 1,
     "typescript(no-explicit-any)": 45,
-    "typescript(no-non-null-assertion)": 11,
     "typescript(no-unsafe-assignment)": 22,
     "typescript(no-unsafe-call)": 27,
     "typescript(no-unsafe-return)": 23,
@@ -647,19 +477,16 @@
     "eslint(max-lines-per-function)": 4,
     "eslint(max-lines)": 1,
     "eslint(no-await-in-loop)": 1,
-    "import(consistent-type-specifier-style)": 6,
     "node(no-sync)": 1,
     "promise(avoid-new)": 6,
     "typescript(no-unsafe-type-assertion)": 2,
-    "typescript(strict-boolean-expressions)": 4,
     "unicorn(prefer-number-coercion)": 1,
     "unicorn(prefer-number-properties)": 1
   },
   "src/sandboxes/no-sandbox.ts": {
     "eslint(max-lines-per-function)": 4,
     "promise(avoid-new)": 2,
-    "typescript(no-unsafe-type-assertion)": 1,
-    "typescript(require-await)": 1
+    "typescript(no-unsafe-type-assertion)": 1
   },
   "src/sandboxes/podman.test.ts": {
     "eslint(no-await-in-loop)": 2,
@@ -668,7 +495,6 @@
     "node(callback-return)": 2,
     "typescript(consistent-type-imports)": 1,
     "typescript(no-explicit-any)": 61,
-    "typescript(no-non-null-assertion)": 11,
     "typescript(no-unsafe-assignment)": 28,
     "typescript(no-unsafe-call)": 31,
     "typescript(no-unsafe-return)": 31,
@@ -686,36 +512,25 @@
     "eslint(max-lines)": 1,
     "eslint(max-statements)": 1,
     "eslint(no-await-in-loop)": 1,
-    "import(consistent-type-specifier-style)": 6,
     "node(no-sync)": 1,
     "promise(avoid-new)": 9,
-    "typescript(no-unsafe-type-assertion)": 2,
-    "typescript(strict-boolean-expressions)": 6
-  },
-  "src/sandboxes/test-isolated.test.ts": {
-    "typescript(strict-void-return)": 1,
-    "vitest(prefer-strict-equal)": 1
+    "typescript(no-unsafe-type-assertion)": 2
   },
   "src/sandboxes/test-shared.ts": {
     "eslint(max-lines-per-function)": 2,
     "eslint(no-empty-function)": 2,
-    "promise(avoid-new)": 2,
-    "typescript(no-unnecessary-type-conversion)": 2,
-    "typescript(require-await)": 3
+    "promise(avoid-new)": 2
   },
   "src/sandboxes/vercel.test.ts": {
-    "eslint(require-unicode-regexp)": 1,
     "vitest(prefer-import-in-mock)": 1
   },
   "src/sandboxes/vercel.ts": {
     "effect/globalDate": 2,
-    "eslint(complexity)": 2,
-    "eslint(curly)": 6,
+    "eslint(complexity)": 1,
     "eslint(max-lines-per-function)": 3,
     "eslint(max-lines)": 1,
     "eslint(no-empty-function)": 1,
-    "node(no-sync)": 1,
-    "typescript(strict-boolean-expressions)": 15
+    "node(no-sync)": 1
   },
   "src/SandboxFactory.basebranch.test.ts": {
     "eslint(max-params)": 1,
@@ -733,10 +548,8 @@
     "typescript(no-unsafe-member-access)": 6,
     "typescript(no-unsafe-return)": 2,
     "typescript(no-unsafe-type-assertion)": 4,
-    "typescript(promise-function-async)": 6,
     "typescript(strict-void-return)": 1,
-    "unicorn(no-object-as-default-parameter)": 2,
-    "vitest(no-conditional-in-test)": 1
+    "unicorn(no-object-as-default-parameter)": 2
   },
   "src/SandboxFactory.ts": {
     "effect/effectMapVoid": 1,
@@ -744,42 +557,25 @@
     "eslint(max-lines-per-function)": 3,
     "eslint(max-lines)": 1,
     "eslint(max-params)": 1,
-    "eslint(no-unused-vars)": 1,
     "eslint(prefer-named-capture-group)": 1,
-    "eslint(require-unicode-regexp)": 1,
     "import(max-dependencies)": 1,
     "import(no-cycle)": 2,
-    "typescript(consistent-type-imports)": 1,
-    "typescript(no-unnecessary-type-assertion)": 5,
-    "typescript(no-unsafe-type-assertion)": 3,
-    "typescript(promise-function-async)": 9,
-    "typescript(strict-boolean-expressions)": 7
+    "typescript(no-unsafe-type-assertion)": 3
   },
   "src/SandboxLifecycle.test.ts": {
-    "eslint(max-params)": 1,
     "eslint(no-await-in-loop)": 1,
-    "eslint(no-promise-executor-return)": 1,
-    "eslint(no-unused-vars)": 6,
-    "eslint(require-unicode-regexp)": 19,
-    "eslint(require-yield)": 1,
     "import(max-dependencies)": 1,
-    "promise(param-names)": 1,
-    "typescript(no-confusing-void-expression)": 2,
-    "typescript(strict-void-return)": 2,
+    "typescript(strict-void-return)": 1,
     "typescript(use-unknown-in-catch-callback-variable)": 1,
-    "unicorn(catch-error-name)": 1,
-    "unicorn(no-await-expression-member)": 2,
-    "vitest(no-conditional-in-test)": 10
+    "unicorn(catch-error-name)": 1
   },
   "src/SandboxLifecycle.ts": {
-    "eslint(complexity)": 2,
+    "eslint(complexity)": 1,
     "eslint(max-lines-per-function)": 4,
     "eslint(max-lines)": 1,
     "eslint(max-params)": 1,
     "eslint(max-statements)": 2,
     "node(no-sync)": 1,
-    "typescript(promise-function-async)": 2,
-    "typescript(strict-boolean-expressions)": 5,
     "unicorn(prefer-number-coercion)": 1
   },
   "src/SandboxProvider.ts": {
@@ -787,62 +583,41 @@
     "typescript(method-signature-style)": 13
   },
   "src/SessionStore.test.ts": {
-    "typescript(no-unnecessary-type-conversion)": 2,
     "unicorn(no-array-sort)": 2
   },
   "src/SessionStore.ts": {
     "effect/asyncFunction": 12,
-    "effect/processEnv": 8,
+    "effect/processEnv": 1,
     "eslint(max-lines)": 1,
     "eslint(max-params)": 1,
-    "eslint(no-await-in-loop)": 3,
-    "eslint(prefer-destructuring)": 2,
-    "eslint(prefer-named-capture-group)": 1,
-    "eslint(require-unicode-regexp)": 6,
-    "typescript(strict-boolean-expressions)": 5
+    "eslint(no-await-in-loop)": 2
   },
   "src/SessionStore.windowsPath.test.ts": {
-    "eslint(require-unicode-regexp)": 1,
     "import(first)": 1,
     "typescript(consistent-type-imports)": 1,
     "vitest(prefer-import-in-mock)": 1
   },
   "src/shutdownRegistry.test.ts": {
     "typescript(no-unsafe-type-assertion)": 1,
-    "typescript(strict-void-return)": 7,
     "unicorn(no-array-for-each)": 1
   },
   "src/startSandbox.test.ts": {
     "effect/anyUnknownInErrorContext": 1,
     "eslint(max-params)": 1,
-    "eslint(no-promise-executor-return)": 3,
     "import(max-dependencies)": 1,
-    "promise(param-names)": 3,
-    "typescript(strict-void-return)": 4,
-    "vitest(no-conditional-in-test)": 2
+    "typescript(strict-void-return)": 1
   },
   "src/startSandbox.ts": {
     "eslint(max-lines-per-function)": 2,
-    "eslint(no-empty-function)": 1,
     "import(no-cycle)": 2,
-    "node(no-sync)": 1,
-    "typescript(consistent-type-imports)": 1,
-    "typescript(method-signature-style)": 1,
-    "typescript(no-unsafe-type-assertion)": 3,
-    "typescript(promise-function-async)": 7
+    "node(no-sync)": 1
   },
   "src/syncIn.test.ts": {
     "eslint(max-params)": 1,
-    "typescript(strict-void-return)": 1,
-    "unicorn(no-await-expression-member)": 11
-  },
-  "src/syncIn.ts": {
-    "eslint(max-lines-per-function)": 3,
-    "typescript(promise-function-async)": 5
+    "typescript(strict-void-return)": 1
   },
   "src/syncOut.test.ts": {
     "eslint(max-params)": 1,
-    "eslint(require-unicode-regexp)": 1,
     "import(max-dependencies)": 1,
     "typescript(strict-void-return)": 1
   },
@@ -853,58 +628,29 @@
     "eslint(max-lines)": 1,
     "eslint(max-statements)": 1,
     "eslint(no-await-in-loop)": 3,
-    "import(consistent-type-specifier-style)": 1,
     "node(no-sync)": 1,
-    "typescript(promise-function-async)": 4,
     "unicorn(prefer-number-coercion)": 1
   },
   "src/templates/parallel-planner-with-review/main.mts": {
-    "effect/asyncFunction": 1,
-    "eslint(no-await-in-loop)": 3,
-    "eslint(prefer-destructuring)": 1,
-    "typescript(no-non-null-assertion)": 3
+    "eslint(prefer-destructuring)": 1
   },
   "src/templates/parallel-planner/main.mts": {
-    "eslint(no-await-in-loop)": 3,
-    "eslint(prefer-destructuring)": 1,
-    "typescript(no-non-null-assertion)": 3,
-    "typescript(promise-function-async)": 1
+    "eslint(prefer-destructuring)": 1
   },
   "src/templates/sequential-reviewer/main.mts": {
-    "effect/globalDate": 1,
-    "eslint(no-await-in-loop)": 4,
     "unicorn(explicit-length-check)": 1
-  },
-  "src/terminalCleanup.ts": {
-    "typescript(strict-boolean-expressions)": 1
   },
   "src/testGlobalSetup.ts": {
     "effect/processEnv": 4,
-    "eslint(prefer-named-capture-group)": 1,
-    "eslint(require-unicode-regexp)": 1,
     "node(no-sync)": 3
   },
-  "src/testSandbox.ts": {
-    "typescript(restrict-template-expressions)": 2
-  },
   "src/TextDeltaBuffer.ts": {
-    "effect/globalTimers": 1,
-    "eslint(require-unicode-regexp)": 1
-  },
-  "src/validateTimeouts.test.ts": {
-    "typescript(no-unsafe-type-assertion)": 1
-  },
-  "src/validateTimeouts.ts": {
-    "typescript(no-base-to-string)": 1
-  },
-  "src/vercel-sandbox.d.ts": {
-    "typescript(method-signature-style)": 7
+    "effect/globalTimers": 1
   },
   "src/WorktreeManager.test.ts": {
     "eslint(max-params)": 2,
     "eslint(no-promise-executor-return)": 1,
     "eslint(no-unused-vars)": 1,
-    "eslint(require-unicode-regexp)": 11,
     "typescript(strict-void-return)": 2,
     "unicorn(no-await-expression-member)": 1
   },
@@ -913,10 +659,7 @@
     "eslint(max-lines-per-function)": 6,
     "eslint(max-lines)": 1,
     "eslint(max-statements)": 1,
-    "eslint(prefer-destructuring)": 1,
-    "eslint(require-unicode-regexp)": 1,
     "oxc(branches-sharing-code)": 1,
-    "typescript(strict-boolean-expressions)": 3,
     "unicorn(prefer-number-coercion)": 1
   },
   "tsup.config.ts": {

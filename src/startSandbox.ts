@@ -4,12 +4,11 @@ import { join, posix } from "node:path";
 import {
   ContainerStartTimeoutError,
   CopyToWorktreeTimeoutError,
-  SyncError,
   SyncInTimeoutError,
   WorktreeError,
   withTimeout,
 } from "./errors.js";
-import type { DockerError } from "./errors.js";
+import type { DockerError, SyncError } from "./errors.js";
 import type {
   BindMountSandboxProvider,
   BindMountSandboxHandle,
@@ -80,6 +79,24 @@ export const CONTAINER_START_TIMEOUT_MS = 120_000;
 const SYNC_IN_TIMEOUT_MS = 120_000;
 export const COPY_PATHS_TIMEOUT_MS = 120_000;
 
+const toResult = (
+  handle: StartSandboxResult["handle"],
+): StartSandboxResult => ({
+  handle,
+  sandbox: makeSandboxFromHandle(handle),
+  worktreePath: handle.worktreePath,
+});
+
+// `provider.tag` is nested, so checking it doesn't narrow `options`.
+const isBindMountOptions = (
+  options: StartSandboxOptions,
+): options is StartSandboxBindMountOptions =>
+  options.provider.tag === "bind-mount";
+
+const isNoSandboxOptions = (
+  options: StartSandboxOptions,
+): options is StartSandboxNoSandboxOptions => options.provider.tag === "none";
+
 /**
  * Start a sandbox by dispatching on `provider.tag`.
  *
@@ -100,13 +117,13 @@ export const startSandbox = (
   | SyncInTimeoutError
   | CopyToWorktreeTimeoutError
 > => {
-  if (options.provider.tag === "bind-mount") {
-    return startBindMountSandbox(options as StartSandboxBindMountOptions);
+  if (isBindMountOptions(options)) {
+    return startBindMountSandbox(options);
   }
-  if (options.provider.tag === "none") {
-    return startNoSandbox(options as StartSandboxNoSandboxOptions);
+  if (isNoSandboxOptions(options)) {
+    return startNoSandbox(options);
   }
-  return startIsolatedSandbox(options as StartSandboxIsolatedOptions);
+  return startIsolatedSandbox(options);
 };
 
 /**
@@ -115,7 +132,7 @@ export const startSandbox = (
  * the sandbox, and nobody holds its handle. Close that handle when it
  * arrives, so a late sandbox never outlives the run.
  */
-const createClosingIfAbandoned = <H extends { close(): Promise<void> }, E>(
+const createClosingIfAbandoned = <H extends { close: () => Promise<void> }, E>(
   create: () => Promise<H>,
   onError: (e: unknown) => E,
 ): Effect.Effect<H, E> =>
@@ -127,7 +144,8 @@ const createClosingIfAbandoned = <H extends { close(): Promise<void> }, E>(
     }).pipe(
       Effect.onInterrupt(() =>
         Effect.sync(() => {
-          pending?.then((handle) => handle.close()).catch(() => {});
+          // A late close that fails has no one left to report to.
+          pending?.then((handle) => handle.close()).catch(() => undefined);
         }),
       ),
     );
@@ -146,13 +164,7 @@ const startNoSandbox = (
       new WorktreeError({
         message: `Provider '${options.provider.name}' create failed: ${e instanceof Error ? e.message : String(e)}`,
       }),
-  }).pipe(
-    Effect.map((handle) => ({
-      handle,
-      sandbox: makeSandboxFromHandle(handle),
-      worktreePath: handle.worktreePath,
-    })),
-  );
+  }).pipe(Effect.map((handle) => toResult(handle)));
 
 const startBindMountSandbox = (
   options: StartSandboxBindMountOptions,
@@ -189,11 +201,7 @@ const startBindMountSandbox = (
           }),
       ),
     ),
-    Effect.map((handle) => ({
-      handle,
-      sandbox: makeSandboxFromHandle(handle),
-      worktreePath: handle.worktreePath,
-    })),
+    Effect.map((handle) => toResult(handle)),
     withTimeout(
       CONTAINER_START_TIMEOUT_MS,
       () =>
@@ -288,9 +296,5 @@ const startIsolatedSandbox = (
       ),
     );
 
-    return {
-      handle,
-      sandbox: makeSandboxFromHandle(handle),
-      worktreePath: handle.worktreePath,
-    };
+    return toResult(handle);
   });

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, describe, expect, it, vi } from "vitest";
 
 vi.mock("node:child_process", async () => {
   const actual =
@@ -440,7 +440,8 @@ describe("docker()", () => {
     const runCall = mockExecFile.mock.calls.find(
       ([, args]) => Array.isArray(args) && args[0] === "run",
     );
-    const runArgs = runCall![1] as string[];
+    assert(runCall);
+    const runArgs = runCall[1] as string[];
     const userIdx = runArgs.indexOf("--user");
     expect(userIdx).toBeGreaterThan(-1);
     const hostUid = process.getuid?.() ?? 1000;
@@ -470,7 +471,8 @@ describe("docker()", () => {
     const runCall = mockExecFile.mock.calls.find(
       ([, args]) => Array.isArray(args) && args[0] === "run",
     );
-    const runArgs = runCall![1] as string[];
+    assert(runCall);
+    const runArgs = runCall[1] as string[];
     const userIdx = runArgs.indexOf("--user");
     expect(userIdx).toBeGreaterThan(-1);
     expect(runArgs[userIdx + 1]).toBe("500:500");
@@ -505,8 +507,8 @@ describe("docker()", () => {
         args[0] === "cp" &&
         args[1] === "/host/file.txt",
     );
-    expect(cpCall).toBeDefined();
-    const cpArgs = cpCall![1] as string[];
+    assert(cpCall);
+    const cpArgs = cpCall[1] as string[];
     expect(cpArgs[0]).toBe("cp");
     expect(cpArgs[1]).toBe("/host/file.txt");
     expect(cpArgs[2]).toMatch(/^sandcastle-.*:\/sandbox\/file\.txt$/);
@@ -541,8 +543,8 @@ describe("docker()", () => {
         args[0] === "cp" &&
         args[2] === "/host/output.txt",
     );
-    expect(cpCall).toBeDefined();
-    const cpArgs = cpCall![1] as string[];
+    assert(cpCall);
+    const cpArgs = cpCall[1] as string[];
     expect(cpArgs[0]).toBe("cp");
     expect(cpArgs[1]).toMatch(/^sandcastle-.*:\/sandbox\/output\.txt$/);
     expect(cpArgs[2]).toBe("/host/output.txt");
@@ -570,7 +572,8 @@ describe("docker()", () => {
     const runCall = mockExecFile.mock.calls.find(
       ([, args]) => Array.isArray(args) && args[0] === "run",
     );
-    const runArgs = runCall![1] as string[];
+    assert(runCall);
+    const runArgs = runCall[1] as string[];
     const vIdx = runArgs.indexOf("-v");
     expect(vIdx).toBeGreaterThan(-1);
     expect(runArgs[vIdx + 1]).toMatch(/:z$/);
@@ -598,7 +601,8 @@ describe("docker()", () => {
     const runCall = mockExecFile.mock.calls.find(
       ([, args]) => Array.isArray(args) && args[0] === "run",
     );
-    const runArgs = runCall![1] as string[];
+    assert(runCall);
+    const runArgs = runCall[1] as string[];
     const vIdx = runArgs.indexOf("-v");
     expect(runArgs[vIdx + 1]).toMatch(/:Z$/);
 
@@ -625,7 +629,8 @@ describe("docker()", () => {
     const runCall = mockExecFile.mock.calls.find(
       ([, args]) => Array.isArray(args) && args[0] === "run",
     );
-    const runArgs = runCall![1] as string[];
+    assert(runCall);
+    const runArgs = runCall[1] as string[];
     const vIdx = runArgs.indexOf("-v");
     expect(runArgs[vIdx + 1]).toBe("/tmp/worktree:/home/agent/workspace");
 
@@ -668,14 +673,14 @@ describe("docker()", () => {
             typeof a === "string" && a.includes("mkdir") && a.includes("chown"),
         ),
     );
-    expect(mkdirCall).toBeDefined();
-    const mkdirArgs = mkdirCall![1] as string[];
+    assert(mkdirCall);
+    const mkdirArgs = mkdirCall[1] as string[];
     // Should run as root
     expect(mkdirArgs).toContain("--user");
     expect(mkdirArgs[mkdirArgs.indexOf("--user") + 1]).toBe("0:0");
     // Script body is fixed; the dir and uid:gid are passed as argv after `sh`
     const shCmdIdx = mkdirArgs.indexOf("-c");
-    const shCmd = mkdirArgs[shCmdIdx + 1]!;
+    const shCmd = mkdirArgs[shCmdIdx + 1];
     expect(shCmd).toContain("mkdir -p");
     expect(shCmd).toContain("chown");
     expect(mkdirArgs).toContain("/home/agent/.codex");
@@ -842,7 +847,11 @@ describe("docker() exec with sudo", () => {
 
     await handle.exec("id -u > /tmp/x && id -u >> /tmp/x", { sudo: true });
 
-    const [cmd, args] = vi.mocked(spawn).mock.calls.at(-1)!;
+    const lastSpawn = vi.mocked(spawn).mock.calls.at(-1);
+
+    assert(lastSpawn);
+
+    const [cmd, args] = lastSpawn;
     expect(cmd).toBe("docker");
     const execArgs = args as string[];
     expect(execArgs[0]).toBe("exec");
@@ -861,7 +870,11 @@ describe("docker() exec with sudo", () => {
 
     await handle.exec("id -u");
 
-    const execArgs = vi.mocked(spawn).mock.calls.at(-1)![1] as string[];
+    const lastSpawn = vi.mocked(spawn).mock.calls.at(-1);
+
+    assert(lastSpawn);
+
+    const execArgs = lastSpawn[1] as string[];
     expect(execArgs).not.toContain("--user");
     expect(execArgs.slice(-2)).toEqual(["-c", "id -u"]);
 

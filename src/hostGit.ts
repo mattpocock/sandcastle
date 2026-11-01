@@ -6,7 +6,7 @@
  * `.git` pointer. Several config keys name a program for git to run, so an
  * unguarded host-side `git status` would run whatever the agent put there,
  * outside the sandbox. Every host-side git call in `src/` goes through
- * `hostGit()` (`hostGit.guard.test.ts` fails otherwise), which:
+ * `hostGit()` (`npm run lint` fails otherwise: `ratchet/raw-git-spawn`), which:
  *
  * 1. Checks the working directory's `.git` before running anything: a linked
  *    worktree's `.git` file must lead to `<common dir>/worktrees/<name>`, its

@@ -46,9 +46,11 @@ export const buildImage = (
     const buildArgFlags = Object.entries(options?.buildArgs ?? {}).flatMap(
       ([k, v]) => ["--build-arg", `${k}=${v}`],
     );
-    const buildContext = options?.dockerfile
-      ? ["-f", resolve(options.dockerfile), process.cwd()]
-      : [resolve(dockerfileDir)];
+    const dockerfile = options?.dockerfile;
+    const buildContext =
+      dockerfile !== undefined && dockerfile !== ""
+        ? ["-f", resolve(dockerfile), process.cwd()]
+        : [resolve(dockerfileDir)];
     yield* dockerExec([
       "build",
       "-t",
@@ -124,9 +126,14 @@ export const startContainer = (
       formatVolumeMount(mount, selinuxLabel),
     ]);
 
-    const workdirFlags = options?.workdir ? ["-w", options.workdir] : [];
-    const userFlags = options?.user ? ["--user", options.user] : [];
-    const networks = options?.network ? [options.network].flat() : [];
+    const workdir = options?.workdir;
+    const workdirFlags =
+      workdir !== undefined && workdir !== "" ? ["-w", workdir] : [];
+    const user = options?.user;
+    const userFlags = user !== undefined && user !== "" ? ["--user", user] : [];
+    const network = options?.network;
+    const networks =
+      network === undefined || network === "" ? [] : [network].flat();
     const networkFlags = networks.flatMap((n) => ["--network", n]);
     const groupAddFlags = (options?.groups ?? []).flatMap((g) => [
       "--group-add",

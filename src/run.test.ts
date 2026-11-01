@@ -43,6 +43,24 @@ import { testStubProvider } from "./sandboxes/test-shared.js";
 
 const testSandbox = testStubProvider({ name: "test" }).provider;
 
+interface StreamingExecOptions {
+  onLine?: (line: string) => void;
+  stdin?: string;
+}
+
+/**
+ * A fake sandbox exec that hands the agent run (the only exec that streams
+ * lines) to `onAgentRun` and succeeds silently for every other command.
+ */
+const execStreamingTo =
+  (onAgentRun: (onLine: (line: string) => void, stdin?: string) => void) =>
+  async (_command: string, options?: StreamingExecOptions) => {
+    if (options?.onLine) {
+      onAgentRun(options.onLine, options.stdin);
+    }
+    return { stdout: "", stderr: "", exitCode: 0 };
+  };
+
 /** An agent provider with no session storage, so it cannot resume. */
 const noResumeAgent: AgentProvider = {
   name: "no-resume-agent",
@@ -1562,19 +1580,13 @@ describe("resume/fork after a promptFile + promptArgs run", () => {
       name: "resume-args",
       create: async () => ({
         worktreePath: process.cwd(),
-        exec: async (
-          _command: string,
-          options?: { onLine?: (line: string) => void; stdin?: string },
-        ) => {
-          if (options?.onLine) {
-            agentStdin.push(options.stdin);
-            options.onLine(
-              `{"type":"system","subtype":"init","session_id":"${sessionId}"}`,
-            );
-            options.onLine('{"type":"result","result":"ok"}');
-          }
-          return { stdout: "", stderr: "", exitCode: 0 };
-        },
+        exec: execStreamingTo((onLine, stdin) => {
+          agentStdin.push(stdin);
+          onLine(
+            `{"type":"system","subtype":"init","session_id":"${sessionId}"}`,
+          );
+          onLine('{"type":"result","result":"ok"}');
+        }),
         copyFileIn: async () => {},
         copyFileOut: async () => {},
         close: async () => {},

@@ -379,7 +379,9 @@ export const orchestrate = (
     }
 
     const label = (msg: string): string =>
-      options.name ? `[${options.name}] ${msg}` : msg;
+      options.name !== undefined && options.name !== ""
+        ? `[${options.name}] ${msg}`
+        : msg;
 
     const allCommits: { sha: string }[] = [];
     const allIterations: IterationResult[] = [];
@@ -390,7 +392,9 @@ export const orchestrate = (
     // Helper: check abort signal and bail via defect so run() can
     // re-throw the signal's reason verbatim (no Sandcastle wrapping).
     const checkAbort = (): Effect.Effect<void> =>
-      options.signal?.aborted ? Effect.die(options.signal.reason) : Effect.void;
+      options.signal?.aborted === true
+        ? Effect.die(options.signal.reason)
+        : Effect.void;
 
     for (let i = 1; i <= iterations; i++) {
       yield* checkAbort();
@@ -423,7 +427,8 @@ export const orchestrate = (
                   const iterationForkSession =
                     i === 1 ? options.forkSession : undefined;
                   if (
-                    iterationResumeSession &&
+                    iterationResumeSession !== undefined &&
+                    iterationResumeSession !== "" &&
                     bindMountHandle &&
                     sessionStorage
                   ) {
@@ -446,13 +451,14 @@ export const orchestrate = (
 
                   // Preprocess prompt (run !`command` expressions inside sandbox).
                   // Inline prompts pass through literally — skip expansion.
-                  const fullPrompt = options.skipPromptExpansion
-                    ? prompt
-                    : yield* preprocessPrompt(
-                        prompt,
-                        ctx.sandbox,
-                        ctx.sandboxRepoDir,
-                      );
+                  const fullPrompt =
+                    options.skipPromptExpansion === true
+                      ? prompt
+                      : yield* preprocessPrompt(
+                          prompt,
+                          ctx.sandbox,
+                          ctx.sandboxRepoDir,
+                        );
 
                   yield* display.status(label("Agent started"), "success");
 
@@ -555,7 +561,8 @@ export const orchestrate = (
                   if (
                     provider.captureSessions &&
                     sessionStorage &&
-                    sessionId &&
+                    sessionId !== undefined &&
+                    sessionId !== "" &&
                     bindMountHandle
                   ) {
                     yield* display.status(label("Capturing session"), "info");
@@ -589,7 +596,7 @@ export const orchestrate = (
                           .readHostSession(hostRepoDir, sessionId)
                           .catch(() => undefined as string | undefined),
                       );
-                      if (content) {
+                      if (content !== undefined && content !== "") {
                         const parsedUsage =
                           provider.parseSessionUsage?.(content);
                         if (parsedUsage) {

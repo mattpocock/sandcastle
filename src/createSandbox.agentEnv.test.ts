@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { promisify } from "node:util";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import { claudeCode } from "./AgentProvider.js";
 import { createSandbox } from "./createSandbox.js";
 import { createWorktree } from "./createWorktree.js";
@@ -79,15 +79,19 @@ const shellProvider = (
             ],
           });
           if (execOpts?.stdin !== undefined) {
-            proc.stdin!.end(execOpts.stdin);
+            assert(proc.stdin, "stdin is piped");
+            proc.stdin.end(execOpts.stdin);
           }
           let stdout = "";
           let stderr = "";
-          createInterface({ input: proc.stdout! }).on("line", (line) => {
+          assert(proc.stdout && proc.stderr, "stdout and stderr are piped");
+          createInterface({ input: proc.stdout }).on("line", (line) => {
             stdout += `${line}\n`;
             execOpts?.onLine?.(line);
           });
-          proc.stderr!.on("data", (c: Buffer) => (stderr += c.toString()));
+          proc.stderr.on("data", (c: Buffer) => {
+            stderr += c.toString();
+          });
           proc.on("error", reject);
           proc.on("close", (code) => {
             resolve({ stdout, stderr, exitCode: code ?? 0 });
@@ -175,7 +179,7 @@ describe("agent-factory env under long-lived sandboxes", () => {
           prompt: "go",
           logging: { type: "file", path: join(root, "run.log") },
         }),
-      ).rejects.toThrow(/Overlapping env keys/);
+      ).rejects.toThrow(/Overlapping env keys/u);
     } finally {
       await sb.close();
       await rm(root, { recursive: true, force: true });

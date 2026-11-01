@@ -32,6 +32,10 @@ _Avoid_: "backend", "runtime", "sandbox factory"
 A **sandbox provider** where the **host** filesystem is mounted directly into the environment.
 _Avoid_: "local provider", "mount provider"
 
+**Native sandbox provider**:
+A **bind-mount sandbox provider** that contains the **agent** with the **host** OS's own process sandbox (Bubblewrap, Seatbelt) instead of a container, using the **host**'s toolchain.
+_Avoid_: local provider, lightweight sandbox, OS sandbox
+
 **Isolated sandbox provider**:
 A **sandbox provider** where the environment has its own filesystem, requiring sync to move code in and commits out.
 _Avoid_: "remote provider", "sync provider"

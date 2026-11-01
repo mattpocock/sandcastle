@@ -327,7 +327,7 @@ describe("vercel() auth from the environment", () => {
     vi.stubEnv("VERCEL_TOKEN", "env-token");
 
     await expect(vercel().create({ env: {} })).rejects.toThrow(
-      /VERCEL_TEAM_ID.*VERCEL_PROJECT_ID/,
+      /VERCEL_TEAM_ID.*VERCEL_PROJECT_ID/u,
     );
     expect(sandboxCreate).not.toHaveBeenCalled();
   });

@@ -26,6 +26,18 @@ export const TEST_FILES: readonly string[] = [
   "src/testSandbox.ts",
 ];
 
+/** Mirrors the third override in .oxlintrc.json: one-shot tooling scripts. */
+export const TOOLING_SCRIPTS: readonly string[] = [
+  "scripts/**",
+  ".sandcastle/**",
+];
+
+/** Mirrors the fourth override in .oxlintrc.json: the package source. */
+export const SOURCE_FILES: readonly string[] = ["src/**"];
+
+/** Mirrors the fifth override in .oxlintrc.json: the init templates. */
+export const TEMPLATE_FILES: readonly string[] = ["src/templates/**"];
+
 /**
  * The end-to-end tests: the only place a new test may go. Mirrors the `e2e`
  * project in vitest.config.ts. A test file anywhere else, outside
@@ -45,7 +57,8 @@ export const TOOLING_TESTS: readonly string[] = [
 
 /**
  * Effect diagnostics that do not apply where they are reported. The language
- * service has no per-file config, so these live here.
+ * service has no per-file config, so these live here. `"*"` exempts every
+ * Effect diagnostic.
  */
 export const EFFECT_EXEMPTIONS: readonly Exemption[] = [
   {
@@ -76,8 +89,8 @@ export const EFFECT_EXEMPTIONS: readonly Exemption[] = [
   },
   {
     files: ["src/templates/**/*"],
-    rules: ["globalConsole"],
-    why: "templates are scripts users scaffold and run; console is their output",
+    rules: ["*"],
+    why: "templates are scripts users scaffold and run, and they do not use Effect",
   },
   {
     files: ["src/sandboxes/**/*"],
@@ -96,5 +109,15 @@ export const ALLOWED_DIRECTIVES: readonly Exemption[] = [
     files: TEST_FILES,
     rules: ["@ts-expect-error"],
     why: "type-level tests assert that an option is rejected",
+  },
+  {
+    files: ["src/bwrapPreflight.ts"],
+    rules: ["oxlint-disable"],
+    why: "bwrap() must throw NativeSandboxUnavailableError at construction (#1272), and construction is synchronous, so its Bubblewrap probe is spawnSync and its os-release read is readFileSync. One file-level node/no-sync disable, nothing else.",
+  },
+  {
+    files: ["src/seatbeltPreflight.ts"],
+    rules: ["oxlint-disable"],
+    why: "seatbelt() must throw NativeSandboxUnavailableError at construction (#1272), and construction is synchronous, so its sandbox-exec probe is spawnSync and its sandbox-exec check is existsSync. One file-level node/no-sync disable, nothing else.",
   },
 ];

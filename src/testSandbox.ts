@@ -111,7 +111,7 @@ export const makeLocalSandbox = (sandboxDir: string): SandboxService => {
         },
         catch: (e) =>
           new CopyError({
-            message: `Failed to copy ${hostPath} -> ${sandboxPath}: ${e}`,
+            message: `Failed to copy ${hostPath} -> ${sandboxPath}: ${e instanceof Error ? e.message : String(e)}`,
           }),
       }),
 
@@ -123,7 +123,7 @@ export const makeLocalSandbox = (sandboxDir: string): SandboxService => {
         },
         catch: (e) =>
           new CopyError({
-            message: `Failed to copy ${sandboxPath} -> ${hostPath}: ${e}`,
+            message: `Failed to copy ${sandboxPath} -> ${hostPath}: ${e instanceof Error ? e.message : String(e)}`,
           }),
       }),
   };

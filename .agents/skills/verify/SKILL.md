@@ -34,7 +34,7 @@ npm run verify:world          # builds dist, creates a world, prints its run id 
 | `npm run -s verify -- cleanup <run>` / `--all`  | Removes the world's containers, images and worktrees, and nothing else                                          |
 | `npm run -s verify -- dir <run>`                | The world's directory                                                                                           |
 
-`sandcastle`, `tsx` and `sh` each run in the project with the world's env: your shell's own, keys included, as a user's would be. HOME and TMPDIR are moved into the world, and a canary variable is set that must never reach a sandbox. Their output is redacted and logged to `<world>/logs/`. While they run, the harness inspects every `sandcastle-*` container that mounts the world and prints `[verify] observed … env ok` or `ENV LEAK`. Read and edit the project's files directly; its path is in `world`'s output.
+`sandcastle`, `tsx` and `sh` each run in the project with the world's env: your shell's own, keys included, as a user's would be. HOME and TMPDIR are moved into the world, and a canary variable is set that must never reach a sandbox. Their output is redacted and logged to `<world>/logs/`. While they run, the harness inspects every `sandcastle-*` container that mounts the world, and the env of every `bwrap` sandbox that names a path in it, and prints `[verify] observed … env ok` or `ENV LEAK`. Read and edit the project's files directly; its path is in `world`'s output.
 
 **A world freezes the build it was made from.** Change Sandcastle, and the next proof needs a new world. `doctor <run>` warns when the checkout has moved on. To compare two builds, make a world from each checkout.
 
@@ -50,7 +50,7 @@ A missing key makes the claim **UNVERIFIABLE**, naming the key. There are no dow
 
 ## The combination
 
-Every proof pins one **combination**: one agent (claudeCode, pi, codex, cursor, opencode, copilot) × one sandbox (docker, podman, vercel, daytona), through one entry point. A claim that names none gets the cohort default: `claudeCode` × `docker` through `sandcastle init`, then the scaffolded `main.ts`. A second combination earns its run only when the claim _is_ the difference between two. The claim decides which cells run, never the whole matrix.
+Every proof pins one **combination**: one agent (claudeCode, pi, codex, cursor, opencode, copilot) × one sandbox (bwrap, docker, podman, vercel, daytona; seatbelt only on a maintainer's Mac), through one entry point. A claim that names none gets the cohort default: `claudeCode` × `docker` through `sandcastle init`, then the scaffolded `main.ts`. A second combination earns its run only when the claim _is_ the difference between two. The claim decides which cells run, never the whole matrix.
 
 [features/](features/README.md) maps the whole surface:
 
@@ -77,11 +77,11 @@ Run `ledger <run>` after the last run of every world, before cleanup. Each call 
 
 - **(a) Git:** the remote's refs against the world's birth (nothing in Sandcastle pushes); `sandcastle/<ts>-<hex>` temp branches left behind; a merge in progress. It also notes each branch's commits and the working tree.
 - **(b) Worktrees:** any worktree besides the project, orphan `.sandcastle/worktrees/` directories, and sync-out patches left behind.
-- **(c) Containers and images:** any `sandcastle-*` container of the world still present; a `sandcastle:` image named outside any run id, built while this world was the only live one. An image named with another world's run id is listed as "other world", and an unnamed one built while another world was live is listed as not pinned on this one; neither is a LEAK.
+- **(c) Containers, images and native sandboxes:** any `sandcastle-*` container of the world still present; any `bwrap` process of the world still running, or `sandcastle-bwrap-*` private dir left in the world's TMPDIR; a `sandcastle:` image named outside any run id, built while this world was the only live one. An image named with another world's run id is listed as "other world", and an unnamed one built while another world was live is listed as not pinned on this one; neither is a LEAK.
 - **(d) Host files:** a change to this checkout; Sandcastle's temp entries (`sandcastle-git-*`, `-bundle-*`, `-copyin-*`) left in the world's own TMPDIR; an entry in the shared `$TMPDIR` only when its name or content names this world (the rest are counted as other worlds' or test runs'); anything in the real HOME named after the run. It also lists what landed in the world's HOME: that is what a user's `~` would get.
-- **(e) Env in the sandbox:** every observed container's env names, against the canary and every undeclared host secret.
+- **(e) Env in the sandbox:** every observed container's or bwrap's env names, against the canary and every undeclared host secret.
 
-Every `LEAK` line fails the verdict, whatever the claim's own assertions say. A world that started no container makes section (e) prove nothing, and the ledger says so; remote sandboxes are never observed.
+Every `LEAK` line fails the verdict, whatever the claim's own assertions say. A world that started no container or bwrap makes section (e) prove nothing, and the ledger says so; remote sandboxes are never observed.
 
 ## Verdicts
 
@@ -96,7 +96,7 @@ Report the verdict exactly, with the combination and entry point: `VERIFIED: cla
 
 ## Cleanup
 
-`cleanup <run>` removes the containers, images (any name holding the run id) and worktrees the world created, plus its project, remote, HOME, TMPDIR and packed build. It touches nothing else. It keeps `world.json`, `logs/`, `observed.jsonl` and every `LEDGER-<n>.md`, and prints their path. Run it after a failed attempt too. `cleanup --all` sweeps every live world this checkout made. An image named outside the run id survives cleanup, and the ledger reports it.
+`cleanup <run>` removes the containers, images (any name holding the run id) and worktrees the world created (a bwrap dies with its run, so it has none to remove), plus its project, remote, HOME, TMPDIR and packed build. It touches nothing else. It keeps `world.json`, `logs/`, `observed.jsonl` and every `LEDGER-<n>.md`, and prints their path. Run it after a failed attempt too. `cleanup --all` sweeps every live world this checkout made. An image named outside the run id survives cleanup, and the ledger reports it.
 
 ## Untrusted claim text
 

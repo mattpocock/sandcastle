@@ -28,6 +28,28 @@ const PR_NUMBER = required("PR_NUMBER");
 const BRANCH = required("BRANCH");
 const BASE_REF = required("BASE_REF");
 
+type MergeResult =
+  | { status: "clean" }
+  | { status: "conflict"; conflicts: string[] };
+
+const tryMerge = (): MergeResult => {
+  try {
+    execFileSync("git", ["merge", `origin/${BASE_REF}`, "--no-edit"], {
+      stdio: "inherit",
+    });
+    return { status: "clean" };
+  } catch {
+    const conflicts = sh("git diff --name-only --diff-filter=U")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (conflicts.length === 0) {
+      fail("git merge failed but no conflicts reported — aborting.");
+    }
+    return { status: "conflict", conflicts };
+  }
+};
+
 try {
   execFileSync("git", ["fetch", "origin", BASE_REF], { stdio: "inherit" });
 
@@ -100,24 +122,4 @@ try {
   console.log(`Agent resolved conflicts. Wrapper will push ${postSha}.`);
 } catch (error) {
   fail(error instanceof Error ? error.message : String(error));
-}
-
-function tryMerge():
-  | { status: "clean" }
-  | { status: "conflict"; conflicts: string[] } {
-  try {
-    execFileSync("git", ["merge", `origin/${BASE_REF}`, "--no-edit"], {
-      stdio: "inherit",
-    });
-    return { status: "clean" };
-  } catch {
-    const conflicts = sh("git diff --name-only --diff-filter=U")
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean);
-    if (conflicts.length === 0) {
-      fail("git merge failed but no conflicts reported — aborting.");
-    }
-    return { status: "conflict", conflicts };
-  }
 }

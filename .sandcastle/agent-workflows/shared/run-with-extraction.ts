@@ -30,7 +30,7 @@ export async function runWithExtraction<T>(
   const produce = await run(produceOptions);
   const sessionId = produce.iterations.at(-1)?.sessionId;
 
-  if (!sessionId) {
+  if (sessionId === undefined || sessionId === "") {
     throw new Error(
       "Cannot extract structured output because the produce run had no session id.",
     );
@@ -39,7 +39,10 @@ export async function runWithExtraction<T>(
   const { promptArgs: _promptArgs, ...extractionOptions } = produceOptions;
   const extraction = await run({
     ...extractionOptions,
-    name: produceOptions.name ? `${produceOptions.name} (extract)` : undefined,
+    name:
+      produceOptions.name !== undefined && produceOptions.name !== ""
+        ? `${produceOptions.name} (extract)`
+        : undefined,
     promptFile: undefined,
     prompt: extractionPrompt,
     // Extraction ends with the output tag, not `<promise>COMPLETE</promise>`.

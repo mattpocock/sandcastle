@@ -30,6 +30,16 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
+      # bwrap() is proven here under real Bubblewrap (#1272): the containment
+      # suite fails, rather than skips, when CI is set and bwrap can't run.
+      # Ubuntu 24.04's AppArmor blocks the unprivileged user namespaces bwrap
+      # needs, so lift that restriction on this throwaway runner.
+      - name: Install Bubblewrap
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          bwrap --ro-bind / / true
       - run: npm run typecheck
       # Tests import from dist, so build before test. Lint too: the scripts
       # in .sandcastle/ and .factory/ import @ai-hero/sandcastle, whose types
@@ -41,7 +51,11 @@ jobs:
       # in the PR as a report diff, which CODEOWNERS routes to Matt.
       - run: npm run api:report -- --check
       - run: npm run lint
-      - run: npm test
+      # `npm test`, split so the e2e tests run once: the floor runs them with
+      # coverage, fails on a failing test, and holds their line coverage to
+      # scripts/coverage-baseline.json (see scripts/coverage-floor.ts).
+      - run: npx vitest run --project tooling --project legacy
+      - run: npm run coverage:floor
 
   # Everything that runs on a real Windows host, in one job: real cmd.exe and
   # Windows argv rules for noSandbox (#940), plus the end-to-end tests
@@ -59,5 +73,29 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
-      - run: npx vitest run --project e2e
+      # Coverage for scripts/coverage-gate.ts: code that runs only on win32
+      # can count toward deleting a legacy test. The gate merges this artifact
+      # with `--coverage-from <dir>` (see the comment at the top of the gate).
+      - run: npx vitest run --project e2e --coverage.enabled --coverage.reporter=json --coverage.reportsDirectory=coverage/e2e-windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e2e-coverage-windows
+          path: coverage/e2e-windows/coverage-final.json
+          retention-days: 14
       - run: npx vitest run --project legacy src/sandboxes/no-sandbox.test.ts
+
+  # The end-to-end tests on a real macOS host. This is the only place
+  # seatbelt() can be proven (#1272), so it runs on every PR. The e2e tests
+  # run from src through the vitest alias, but tests/cli.test.ts also starts
+  # the built CLI (dist/main.js) off Windows, so build first. No secrets: the
+  # e2e tests need no agent keys.
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run build
+      - run: npx vitest run --project e2e

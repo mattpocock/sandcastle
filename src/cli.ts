@@ -20,6 +20,7 @@ import {
   listIssueTrackers,
   getIssueTracker,
   listSandboxProviders,
+  listSandboxProviderChoices,
   getSandboxProvider,
   getNextStepsLines,
   detectPackageManager,
@@ -29,6 +30,8 @@ import {
   buildImageShellCommand,
   parseBdVersion,
   beadsVersionWarning,
+  sandboxProviderPreflightWarning,
+  agentCliWarning,
 } from "./InitService.js";
 import { defaultImageName } from "./sandboxes/docker.js";
 import { ConfigDirError, InitError } from "./errors.js";
@@ -96,6 +99,18 @@ const failInitUnless = (
   ok ? Effect.void : Effect.fail(new InitError({ message }));
 
 /**
+ * The registry entry `selectName` resolved. The flags and prompts only offer
+ * registry names, so a miss is a bug; fail with an InitError naming it.
+ */
+const registryEntry = <T>(
+  entry: T | undefined,
+  what: string,
+): Effect.Effect<T, InitError> =>
+  entry === undefined
+    ? Effect.fail(new InitError({ message: `Unknown ${what}` }))
+    : Effect.succeed(entry);
+
+/**
  * The name the user chose: the CLI flag when given, else an interactive
  * select. Without a TTY a missing flag fails fast, naming the flag; cancelling
  * the prompt aborts init.
@@ -145,7 +160,9 @@ const initModelOption = Options.text("model").pipe(
 );
 
 const sandboxOption = Options.text("sandbox").pipe(
-  Options.withDescription("Sandbox provider to use (e.g. docker, podman)"),
+  Options.withDescription(
+    "Sandbox provider to use (bwrap, seatbelt, docker or podman)",
+  ),
   Options.optional,
 );
 
@@ -348,7 +365,17 @@ const initCommand = Command.make(
         ) {
           missing.push("--install-template-deps");
         }
-        if (tracker !== "custom" && buildImageChoice._tag === "None") {
+        // --build-image only applies to a provider with an image. Without
+        // --sandbox the provider is unknown, so --build-image is still named.
+        const sandboxName = Option.getOrUndefined(sandboxFlag);
+        const providerHasImage =
+          sandboxName === undefined ||
+          getSandboxProvider(sandboxName)?.image !== undefined;
+        if (
+          tracker !== "custom" &&
+          providerHasImage &&
+          buildImageChoice._tag === "None"
+        ) {
           missing.push("--build-image");
         }
         yield* failInitUnless(
@@ -358,23 +385,25 @@ const initCommand = Command.make(
       }
 
       // Each choice below: CLI flag (already validated above) > interactive select.
-      const selectedAgent = getAgent(
-        yield* selectName({
-          flag: agentFlag,
-          flagName: "--agent",
-          isInteractive,
-          cancelMessage: "Agent selection cancelled.",
-          prompt: {
-            message: "Select an agent:",
-            initialValue: "claude-code",
-            options: listAgents().map((a) => ({
-              value: a.name,
-              label: a.label,
-              hint: `Default model: ${a.defaultModel}`,
-            })),
-          },
-        }),
-      )!;
+      const selectedAgent = yield* selectName({
+        flag: agentFlag,
+        flagName: "--agent",
+        isInteractive,
+        cancelMessage: "Agent selection cancelled.",
+        prompt: {
+          message: "Select an agent:",
+          initialValue: "claude-code",
+          options: listAgents().map((a) => ({
+            value: a.name,
+            label: a.label,
+            hint: `Default model: ${a.defaultModel}`,
+          })),
+        },
+      }).pipe(
+        Effect.flatMap((name) =>
+          registryEntry(getAgent(name), `agent "${name}"`),
+        ),
+      );
 
       // Resolve model: CLI flag > agent default
       const selectedModel =
@@ -382,39 +411,49 @@ const initCommand = Command.make(
           ? modelFlag.value
           : selectedAgent.defaultModel;
 
-      // No default sandbox provider — the user must choose.
-      const selectedSandboxProvider = getSandboxProvider(
-        yield* selectName({
-          flag: sandboxFlag,
-          flagName: "--sandbox",
-          isInteractive,
-          cancelMessage: "Sandbox provider selection cancelled.",
-          prompt: {
-            message: "Select a sandbox provider:",
-            options: listSandboxProviders().map((p) => ({
-              value: p.name,
-              label: p.label,
-            })),
-          },
-        }),
-      )!;
+      // No silent default sandbox provider: the user must choose. The host
+      // OS's native provider is listed first and preselected.
+      const sandboxChoices = listSandboxProviderChoices(process.platform);
+      const recommendedSandbox = sandboxChoices.find((c) => c.recommended);
+      const selectedSandboxProvider = yield* selectName({
+        flag: sandboxFlag,
+        flagName: "--sandbox",
+        isInteractive,
+        cancelMessage: "Sandbox provider selection cancelled.",
+        prompt: {
+          message: "Select a sandbox provider:",
+          ...(recommendedSandbox === undefined
+            ? {}
+            : { initialValue: recommendedSandbox.entry.name }),
+          options: sandboxChoices.map(({ entry, recommended }) => ({
+            value: entry.name,
+            label: recommended ? `${entry.label} (recommended)` : entry.label,
+          })),
+        },
+      }).pipe(
+        Effect.flatMap((name) =>
+          registryEntry(getSandboxProvider(name), `sandbox provider "${name}"`),
+        ),
+      );
 
-      const selectedIssueTracker = getIssueTracker(
-        yield* selectName({
-          flag: issueTrackerFlag,
-          flagName: "--issue-tracker",
-          isInteractive,
-          cancelMessage: "Issue tracker selection cancelled.",
-          prompt: {
-            message: "Select an issue tracker:",
-            initialValue: "github-issues",
-            options: listIssueTrackers().map((b) => ({
-              value: b.name,
-              label: b.label,
-            })),
-          },
-        }),
-      )!;
+      const selectedIssueTracker = yield* selectName({
+        flag: issueTrackerFlag,
+        flagName: "--issue-tracker",
+        isInteractive,
+        cancelMessage: "Issue tracker selection cancelled.",
+        prompt: {
+          message: "Select an issue tracker:",
+          initialValue: "github-issues",
+          options: listIssueTrackers().map((b) => ({
+            value: b.name,
+            label: b.label,
+          })),
+        },
+      }).pipe(
+        Effect.flatMap((name) =>
+          registryEntry(getIssueTracker(name), `issue tracker "${name}"`),
+        ),
+      );
 
       const selectedTemplate = yield* selectName({
         flag: template,
@@ -465,7 +504,10 @@ const initCommand = Command.make(
           createLabel: shouldCreateLabel,
           issueTracker: selectedIssueTracker,
           sandboxProvider: selectedSandboxProvider,
-          imageName: customImageName,
+          imageName:
+            selectedSandboxProvider.image === undefined
+              ? undefined
+              : customImageName,
         }).pipe(
           Effect.mapError(
             (e) =>
@@ -476,9 +518,32 @@ const initCommand = Command.make(
         ),
       );
 
+      // A native provider runs on the host's own sandbox tool. Check it works
+      // now, so a missing tool shows up at init, not on the first run.
+      const preflightWarning = sandboxProviderPreflightWarning(
+        selectedSandboxProvider,
+      );
+      if (preflightWarning !== undefined) {
+        yield* d.status(preflightWarning, "warn");
+      }
+      // ...and the agent CLI it runs is installed on the host.
+      if (selectedSandboxProvider.image === undefined) {
+        const agentWarning = yield* agentCliWarning(
+          selectedAgent,
+          selectedSandboxProvider,
+        );
+        if (agentWarning !== undefined) {
+          yield* d.status(agentWarning, "warn");
+        }
+      }
+
       // Beads sandboxes open the host's .beads/ with the image's bd, so a
       // different host bd breaks one side or the other (see beadsVersionWarning).
-      if (selectedIssueTracker.name === "beads") {
+      // Only an image-based provider has an image bd to disagree with.
+      if (
+        selectedIssueTracker.name === "beads" &&
+        selectedSandboxProvider.image !== undefined
+      ) {
         const warning = beadsVersionWarning(yield* detectHostBdVersion(cwd));
         if (warning !== undefined) {
           yield* d.status(warning, "warn");
@@ -533,8 +598,18 @@ const initCommand = Command.make(
       // so there is nothing valid to build yet — skip the build prompt entirely
       // (and silently ignore --build-image) and let the next steps point the
       // user at the setup doc.
+      // A provider with no image has nothing to build, so init skips the
+      // build-image prompt (and ignores --build-image) for it.
       const providerLabel = selectedSandboxProvider.label;
-      if (selectedIssueTracker.name === "custom") {
+      const providerImage = selectedSandboxProvider.image;
+      if (providerImage === undefined) {
+        yield* d.status(
+          selectedIssueTracker.name === "custom"
+            ? "Init complete! Your custom issue tracker isn't configured yet — see the steps below."
+            : "Init complete!",
+          "success",
+        );
+      } else if (selectedIssueTracker.name === "custom") {
         yield* d.status(
           "Init complete! Your custom issue tracker isn't configured yet — see the steps below before building.",
           "success",
@@ -565,7 +640,7 @@ const initCommand = Command.make(
           );
         } else {
           yield* d.status(
-            `Init complete! Run \`${buildImageShellCommand(selectedSandboxProvider, customImageName)}\` to build the ${providerLabel} image later.`,
+            `Init complete! Run \`${buildImageShellCommand(providerImage, customImageName)}\` to build the ${providerLabel} image later.`,
             "success",
           );
         }
@@ -579,6 +654,7 @@ const initCommand = Command.make(
         selectedAgent,
         packageManager,
         installedDependencies,
+        selectedSandboxProvider,
       );
       for (const [i, line] of nextSteps.entries()) {
         yield* d.text(i === 0 ? line : styleText("dim", line));

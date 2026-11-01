@@ -131,6 +131,10 @@ export interface VercelOptions {
   readonly maxOutputTailChars?: number;
 }
 
+/** An option or env var counts as unset when it is missing or empty. */
+const setOrUndefined = (value: string | undefined): string | undefined =>
+  value === "" ? undefined : value;
+
 /**
  * Resolve the auth params for `Sandbox.create()`.
  *
@@ -143,25 +147,31 @@ const resolveVercelAuth = (
   options: VercelOptions | undefined,
 ): { token?: string; teamId?: string; projectId?: string } => {
   const { env } = process;
-  const token = options?.token || env.VERCEL_TOKEN || undefined;
+  const tokenOption = setOrUndefined(options?.token);
+  const teamIdOption = setOrUndefined(options?.teamId);
+  const projectIdOption = setOrUndefined(options?.projectId);
+  const token = tokenOption ?? setOrUndefined(env.VERCEL_TOKEN);
 
-  if (!token) {
+  if (token === undefined) {
     // No token: the SDK's OIDC flow, which may use team/project ids as hints.
     return {
-      ...(options?.teamId ? { teamId: options.teamId } : {}),
-      ...(options?.projectId ? { projectId: options.projectId } : {}),
+      ...(teamIdOption === undefined ? {} : { teamId: teamIdOption }),
+      ...(projectIdOption === undefined ? {} : { projectId: projectIdOption }),
     };
   }
 
-  const teamId = options?.teamId || env.VERCEL_TEAM_ID || undefined;
-  const projectId = options?.projectId || env.VERCEL_PROJECT_ID || undefined;
+  const teamId = teamIdOption ?? setOrUndefined(env.VERCEL_TEAM_ID);
+  const projectId = projectIdOption ?? setOrUndefined(env.VERCEL_PROJECT_ID);
   const missing = [
-    teamId ? null : "VERCEL_TEAM_ID (or the teamId option)",
-    projectId ? null : "VERCEL_PROJECT_ID (or the projectId option)",
+    teamId === undefined ? "VERCEL_TEAM_ID (or the teamId option)" : null,
+    projectId === undefined
+      ? "VERCEL_PROJECT_ID (or the projectId option)"
+      : null,
   ].filter((name): name is string => name !== null);
 
   if (missing.length > 0) {
-    const source = options?.token ? "the token option" : "VERCEL_TOKEN";
+    const source =
+      tokenOption === undefined ? "VERCEL_TOKEN" : "the token option";
     throw new Error(
       `vercel(): ${source} is set, but a Vercel token also needs a team and project id. ` +
         `Missing: ${missing.join(", ")}.`,
@@ -193,6 +203,45 @@ const setUpOrStop = async (
   }
 };
 
+/** The `Sandbox.create` params: SDK pass-through options, env and auth. */
+const toCreateParams = (
+  options: VercelOptions | undefined,
+  env: Record<string, string>,
+): Record<string, unknown> => {
+  const createParams: Record<string, unknown> = {};
+
+  // Pass through SDK options
+  if (options?.source) {
+    createParams.source = options.source;
+  }
+  if (options?.ports) {
+    createParams.ports = options.ports;
+  }
+  if (options?.resources) {
+    createParams.resources = options.resources;
+  }
+  if (options?.networkPolicy) {
+    createParams.networkPolicy = options.networkPolicy;
+  }
+  // runtime takes precedence over the template convenience alias
+  const resolvedRuntime = options?.runtime ?? options?.template;
+  if (resolvedRuntime !== undefined && resolvedRuntime !== "") {
+    createParams.runtime = resolvedRuntime;
+  }
+
+  // Timeout: prefer explicit timeout, fall back to timeoutMs alias
+  const timeoutValue = options?.timeout ?? options?.timeoutMs;
+  if (timeoutValue !== undefined) {
+    createParams.timeout = timeoutValue;
+  }
+
+  // Merge provider env with Sandcastle env
+  createParams.env = env;
+
+  Object.assign(createParams, resolveVercelAuth(options));
+  return createParams;
+};
+
 /**
  * Create a Vercel isolated sandbox provider.
  *
@@ -210,26 +259,7 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
       // Dynamic import so the peer dependency is only loaded at runtime
       const { Sandbox } = await import("@vercel/sandbox");
 
-      const createParams: Record<string, unknown> = {};
-
-      // Pass through SDK options
-      if (options?.source) createParams.source = options.source;
-      if (options?.ports) createParams.ports = options.ports;
-      if (options?.resources) createParams.resources = options.resources;
-      if (options?.networkPolicy)
-        createParams.networkPolicy = options.networkPolicy;
-      // runtime takes precedence over the template convenience alias
-      const resolvedRuntime = options?.runtime ?? options?.template;
-      if (resolvedRuntime) createParams.runtime = resolvedRuntime;
-
-      // Timeout: prefer explicit timeout, fall back to timeoutMs alias
-      const timeoutValue = options?.timeout ?? options?.timeoutMs;
-      if (timeoutValue !== undefined) createParams.timeout = timeoutValue;
-
-      // Merge provider env with Sandcastle env
-      createParams.env = createOptions.env;
-
-      Object.assign(createParams, resolveVercelAuth(options));
+      const createParams = toCreateParams(options, createOptions.env);
 
       const sandbox = await Sandbox.create(createParams);
 
@@ -315,7 +345,7 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
               cwd: opts?.cwd ?? VERCEL_REPO_PATH,
               stdout: stdoutWritable,
               stderr: stderrWritable,
-              ...(opts?.sudo ? { sudo: true } : {}),
+              ...(opts?.sudo === true ? { sudo: true } : {}),
             });
 
             return {
@@ -329,7 +359,7 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
             cmd: "sh",
             args: ["-c", effectiveCommand],
             cwd: opts?.cwd ?? VERCEL_REPO_PATH,
-            ...(opts?.sudo ? { sudo: true } : {}),
+            ...(opts?.sudo === true ? { sudo: true } : {}),
           });
 
           const stdout = await result.stdout();

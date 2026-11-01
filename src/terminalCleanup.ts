@@ -24,12 +24,8 @@ export const makeTerminalCleanupHandler =
     stdout: { write: (data: string) => boolean },
   ) =>
   (): void => {
-    if (stdin.isTTY && stdin.setRawMode) {
-      try {
-        stdin.setRawMode(false);
-      } catch {
-        // Best-effort — may fail if stdin is already closed
-      }
+    if (stdin.isTTY === true && stdin.setRawMode !== undefined) {
+      stdin.setRawMode(false);
     }
     stdout.write(SHOW_CURSOR);
   };

@@ -1,4 +1,4 @@
-import { Effect, Layer, Ref } from "effect";
+import { Effect, Ref } from "effect";
 import { exec } from "node:child_process";
 import { constants, existsSync } from "node:fs";
 import {
@@ -11,13 +11,14 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
 import { assert, describe, expect, it } from "vitest";
 import { SilentDisplay } from "./Display.js";
 import type { DisplayEntry } from "./Display.js";
-import type { SandboxService } from "./SandboxFactory.js";
+import type { ExecResult, SandboxService } from "./SandboxFactory.js";
 import { makeLocalSandbox } from "./testSandbox.js";
-import { ExecError, SyncError } from "./errors.js";
+import { SyncError } from "./errors.js";
 import { withSandboxLifecycle, runHostHooks } from "./SandboxLifecycle.js";
 
 /**
@@ -47,21 +48,30 @@ const makePathTranslatingSandbox = (
 
 const execAsync = promisify(exec);
 
-const initRepo = async (dir: string) => {
-  await execAsync("git init -b main", { cwd: dir });
-  await execAsync('git config user.email "test@test.com"', { cwd: dir });
-  await execAsync('git config user.name "Test"', { cwd: dir });
-};
+const EXEC_OK: ExecResult = { stdout: "", stderr: "", exitCode: 0 };
 
-const commitFile = async (
-  dir: string,
-  name: string,
-  content: string,
-  message: string,
-) => {
-  await writeFile(join(dir, name), content);
-  await execAsync(`git add "${name}"`, { cwd: dir });
-  await execAsync(`git commit -m "${message}"`, { cwd: dir });
+/**
+ * A fake sandbox whose exec hands the commands `matches` picks to `onMatch`,
+ * and succeeds with no output for every other command.
+ */
+const sandboxRouting = (
+  matches: (command: string) => boolean,
+  onMatch: SandboxService["exec"],
+): SandboxService => ({
+  exec: (command, options) =>
+    matches(command) ? onMatch(command, options) : Effect.succeed(EXEC_OK),
+  copyIn: () => Effect.void,
+  copyFileOut: () => Effect.void,
+});
+
+/** The result for the 1-based `attempt`; the last one repeats from then on. */
+const resultForAttempt = (
+  results: readonly ExecResult[],
+  attempt: number,
+): ExecResult => {
+  const result = results[Math.min(attempt, results.length) - 1];
+  assert.isDefined(result, `no result for attempt ${attempt}`);
+  return result;
 };
 
 const getHead = async (dir: string) => {
@@ -88,7 +98,8 @@ const makeFifoGate = async (dir: string) => {
       await writeFile(path, "");
       // Opening for read+write never blocks, and it wakes any reader stuck
       // opening the FIFO; closing it then gives that reader EOF.
-      await (await open(parked, constants.O_RDWR)).close();
+      const handle = await open(parked, constants.O_RDWR);
+      await handle.close();
     },
   };
 };
@@ -96,14 +107,6 @@ const makeFifoGate = async (dir: string) => {
 const testDisplayLayer = SilentDisplay.layer(
   Ref.unsafeMake<readonly DisplayEntry[]>([]),
 );
-
-const setup = async () => {
-  const hostDir = await mkdtemp(join(tmpdir(), "host-"));
-  const sandboxDir = await mkdtemp(join(tmpdir(), "sandbox-"));
-  const sandboxRepoDir = join(sandboxDir, "repo");
-  const sandbox = makeLocalSandbox(sandboxDir);
-  return { hostDir, sandboxDir, sandboxRepoDir, sandbox };
-};
 
 describe("withSandboxLifecycle (worktree mode)", () => {
   const setupWorktree = async () => {
@@ -275,22 +278,18 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     // Track the order of start/end events to verify parallel execution
     const events: string[] = [];
 
-    const sandbox: SandboxService = {
-      exec: (command, options) => {
-        if (command === "slow-hook-a" || command === "slow-hook-b") {
-          events.push(`start:${command}`);
-          return Effect.gen(function* () {
-            // Yield to allow the other hook to start
-            yield* Effect.yieldNow();
-            events.push(`end:${command}`);
-            return { stdout: "", stderr: "", exitCode: 0 };
-          });
-        }
-        return Effect.succeed({ stdout: "", stderr: "", exitCode: 0 });
+    const sandbox = sandboxRouting(
+      (command) => ["slow-hook-a", "slow-hook-b"].includes(command),
+      (command) => {
+        events.push(`start:${command}`);
+        return Effect.gen(function* () {
+          // Yield to allow the other hook to start
+          yield* Effect.yieldNow();
+          events.push(`end:${command}`);
+          return EXEC_OK;
+        });
       },
-      copyIn: () => Effect.void,
-      copyFileOut: () => Effect.void,
-    };
+    );
 
     await Effect.runPromise(
       withSandboxLifecycle(
@@ -458,7 +457,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
             }),
         ).pipe(Effect.provide(testDisplayLayer)),
       ),
-    ).rejects.toThrow(/merge.*failed/i);
+    ).rejects.toThrow(/merge.*failed/iu);
 
     // Temp branch should still exist for recovery
     const { stdout } = await execAsync('git branch --list "sandcastle/test"', {
@@ -514,10 +513,10 @@ describe("withSandboxLifecycle (worktree mode)", () => {
 
     // The message says the merge was aborted and names a retry that works
     const { message } = error as { message: string };
-    expect(message).toMatch(/aborted/i);
+    expect(message).toMatch(/aborted/iu);
     expect(message).toContain("git merge sandcastle/test");
     // git's own output is included, not swallowed
-    expect(message).toMatch(/CONFLICT/);
+    expect(message).toMatch(/CONFLICT/u);
 
     // The suggested retry reaches the conflict itself, rather than failing
     // with "Merging is not possible because you have unmerged files".
@@ -529,8 +528,8 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       (e: { stdout?: string; stderr?: string }) =>
         [e.stdout, e.stderr].join(""),
     );
-    expect(retry).not.toMatch(/unmerged files/);
-    expect(retry).toMatch(/CONFLICT/);
+    expect(retry).not.toMatch(/unmerged files/u);
+    expect(retry).toMatch(/CONFLICT/u);
   });
 
   it("a merge git refuses (local changes) keeps those changes and includes git's reason", async () => {
@@ -564,8 +563,8 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     );
 
     const { message } = error as { message: string };
-    expect(message).toMatch(/would be overwritten/);
-    expect(message).not.toMatch(/aborted/);
+    expect(message).toMatch(/would be overwritten/u);
+    expect(message).not.toMatch(/aborted/u);
     await expect(readFile(join(hostDir, "file.txt"), "utf8")).resolves.toBe(
       "uncommitted host edit",
     );
@@ -931,7 +930,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
         },
         sandbox,
         (ctx) =>
-          Effect.gen(function* () {
+          Effect.sync(() => {
             capturedBaseHead = ctx.baseHead;
           }),
       ).pipe(Effect.provide(testDisplayLayer)),
@@ -1045,11 +1044,9 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       }).pipe(Effect.provide(displayLayer)),
     );
 
-    const syncLog = entries.find(
-      (e) =>
-        e._tag === "taskLog" &&
-        (e.title === "No commits to sync out" || e.title.startsWith("Syncing")),
-    );
+    const syncLog = entries
+      .filter((e) => e._tag === "taskLog")
+      .find((e) => /^(?:No commits to sync out$|Syncing)/u.test(e.title));
     expect(syncLog).toBeUndefined();
   });
 
@@ -1205,7 +1202,9 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       ).pipe(Effect.provide(testDisplayLayer)),
     );
 
-    setTimeout(() => ac.abort("cancelled"), 50);
+    setTimeout(() => {
+      ac.abort("cancelled");
+    }, 50);
     await expect(promise).rejects.toThrow(
       "Command aborted: sleep 60 (cancelled)",
     );
@@ -1233,7 +1232,9 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       ).pipe(Effect.provide(testDisplayLayer)),
     );
 
-    setTimeout(() => ac.abort("cancelled"), 50);
+    setTimeout(() => {
+      ac.abort("cancelled");
+    }, 50);
     await expect(promise).rejects.toThrow("Aborted: cancelled");
   });
 
@@ -1290,26 +1291,17 @@ describe("withSandboxLifecycle (worktree mode)", () => {
           () => Effect.succeed("ok"),
         ).pipe(Effect.provide(testDisplayLayer)),
       ),
-    ).rejects.toThrow(/Host hook failed/);
+    ).rejects.toThrow(/Host hook failed/u);
   });
 
   it("sandbox.onSandboxReady respects per-hook timeoutMs", async () => {
     const { hostDir, worktreeDir } = await setupWorktree();
 
-    const sandbox: SandboxService = {
-      exec: (command, _options) => {
-        if (command === "slow-install") {
-          // Simulate a command that takes longer than the short timeout
-          return Effect.gen(function* () {
-            yield* Effect.sleep("2 seconds");
-            return { stdout: "", stderr: "", exitCode: 0 };
-          });
-        }
-        return Effect.succeed({ stdout: "", stderr: "", exitCode: 0 });
-      },
-      copyIn: () => Effect.void,
-      copyFileOut: () => Effect.void,
-    };
+    const sandbox = sandboxRouting(
+      (command) => command === "slow-install",
+      // Simulate a command that takes longer than the short timeout
+      () => Effect.as(Effect.sleep("2 seconds"), EXEC_OK),
+    );
 
     const result = Effect.runPromise(
       withSandboxLifecycle(
@@ -1328,7 +1320,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       ).pipe(Effect.provide(testDisplayLayer)),
     );
 
-    await expect(result).rejects.toThrow(/timed out/);
+    await expect(result).rejects.toThrow(/timed out/u);
   });
 
   it("host.onSandboxReady respects per-hook timeoutMs", async () => {
@@ -1351,7 +1343,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       ).pipe(Effect.provide(testDisplayLayer)),
     );
 
-    await expect(result).rejects.toThrow(/timed out/);
+    await expect(result).rejects.toThrow(/timed out/u);
   });
 
   it("host.onSandboxReady kills the hook's whole process tree on timeout", async () => {
@@ -1374,7 +1366,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       ).pipe(Effect.provide(testDisplayLayer)),
     );
 
-    await expect(result).rejects.toThrow(/timed out after 500ms/);
+    await expect(result).rejects.toThrow(/timed out after 500ms/u);
     await waitForProcessGone(await readPid(worktreeDir));
   });
 
@@ -1414,20 +1406,17 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     // (overlayfs/exec race seen under heavy parallelism), then succeeds.
     // Effect.sync defers per-run so retries re-evaluate, matching how the
     // real exec (Effect.tryPromise) re-invokes the SDK on each attempt.
-    const sandbox: SandboxService = {
-      exec: (command, _options) =>
+    const sandbox = sandboxRouting(
+      (command) => command.includes("safe.directory"),
+      () =>
         Effect.sync(() => {
-          if (command.includes("safe.directory")) {
-            safeDirAttempts++;
-            if (safeDirAttempts === 1) {
-              return { stdout: "", stderr: "cannot exec", exitCode: 126 };
-            }
-          }
-          return { stdout: "", stderr: "", exitCode: 0 };
+          safeDirAttempts++;
+          return resultForAttempt(
+            [{ stdout: "", stderr: "cannot exec", exitCode: 126 }, EXEC_OK],
+            safeDirAttempts,
+          );
         }),
-      copyIn: () => Effect.void,
-      copyFileOut: () => Effect.void,
-    };
+    );
 
     const result = await Effect.runPromise(
       withSandboxLifecycle(
@@ -1449,18 +1438,14 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     const { hostDir, worktreeDir } = await setupWorktree();
 
     let safeDirAttempts = 0;
-    const sandbox: SandboxService = {
-      exec: (command, _options) =>
+    const sandbox = sandboxRouting(
+      (command) => command.includes("safe.directory"),
+      () =>
         Effect.sync(() => {
-          if (command.includes("safe.directory")) {
-            safeDirAttempts++;
-            return { stdout: "", stderr: "fatal: bad config", exitCode: 1 };
-          }
-          return { stdout: "", stderr: "", exitCode: 0 };
+          safeDirAttempts++;
+          return { stdout: "", stderr: "fatal: bad config", exitCode: 1 };
         }),
-      copyIn: () => Effect.void,
-      copyFileOut: () => Effect.void,
-    };
+    );
 
     await expect(
       Effect.runPromise(
@@ -1474,7 +1459,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
           () => Effect.succeed("ok"),
         ).pipe(Effect.provide(testDisplayLayer)),
       ),
-    ).rejects.toThrow(/exit 1/);
+    ).rejects.toThrow(/exit 1/u);
 
     expect(safeDirAttempts).toBe(1);
   });
@@ -1485,19 +1470,10 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     // The git safe.directory setup command takes longer than the short
     // gitSetupMs override, so it should time out rather than succeed under
     // the default 10s timeout.
-    const sandbox: SandboxService = {
-      exec: (command, _options) => {
-        if (command.includes("safe.directory")) {
-          return Effect.gen(function* () {
-            yield* Effect.sleep("2 seconds");
-            return { stdout: "", stderr: "", exitCode: 0 };
-          });
-        }
-        return Effect.succeed({ stdout: "", stderr: "", exitCode: 0 });
-      },
-      copyIn: () => Effect.void,
-      copyFileOut: () => Effect.void,
-    };
+    const sandbox = sandboxRouting(
+      (command) => command.includes("safe.directory"),
+      () => Effect.as(Effect.sleep("2 seconds"), EXEC_OK),
+    );
 
     const result = Effect.runPromise(
       withSandboxLifecycle(
@@ -1512,7 +1488,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       ).pipe(Effect.provide(testDisplayLayer)),
     );
 
-    await expect(result).rejects.toThrow(/Git command timed out after 300ms/);
+    await expect(result).rejects.toThrow(/Git command timed out after 300ms/u);
   });
 
   it("respects a commitCollectionMs timeout override", async () => {
@@ -1542,7 +1518,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
 
     try {
       await expect(result).rejects.toThrow(
-        /Commit collection timed out after 1ms/,
+        /Commit collection timed out after 1ms/u,
       );
     } finally {
       await gate.release();
@@ -1593,7 +1569,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     );
 
     try {
-      await expect(result).rejects.toThrow(/timed out after 1ms/);
+      await expect(result).rejects.toThrow(/timed out after 1ms/u);
     } finally {
       await gate.release();
     }
@@ -1603,18 +1579,14 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     const { hostDir, worktreeDir } = await setupWorktree();
 
     let safeDirAttempts = 0;
-    const sandbox: SandboxService = {
-      exec: (command, _options) =>
+    const sandbox = sandboxRouting(
+      (command) => command.includes("safe.directory"),
+      () =>
         Effect.sync(() => {
-          if (command.includes("safe.directory")) {
-            safeDirAttempts++;
-            return { stdout: "", stderr: "cannot exec", exitCode: 126 };
-          }
-          return { stdout: "", stderr: "", exitCode: 0 };
+          safeDirAttempts++;
+          return { stdout: "", stderr: "cannot exec", exitCode: 126 };
         }),
-      copyIn: () => Effect.void,
-      copyFileOut: () => Effect.void,
-    };
+    );
 
     await expect(
       Effect.runPromise(
@@ -1628,7 +1600,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
           () => Effect.succeed("ok"),
         ).pipe(Effect.provide(testDisplayLayer)),
       ),
-    ).rejects.toThrow(/exit 126/);
+    ).rejects.toThrow(/exit 126/u);
 
     // Initial attempt + bounded retries (does not loop forever)
     expect(safeDirAttempts).toBeGreaterThan(1);
@@ -1648,7 +1620,7 @@ const waitForProcessGone = async (pid: number, withinMs = 3000) => {
     } catch {
       return;
     }
-    await new Promise((r) => setTimeout(r, 50));
+    await sleep(50);
   }
   process.kill(pid, "SIGKILL");
   throw new Error(
@@ -1659,8 +1631,10 @@ const waitForProcessGone = async (pid: number, withinMs = 3000) => {
 /** A hook that backgrounds a grandchild `sleep`, records its pid, and waits. */
 const ORPHAN_HOOK = "sleep 30 & echo $! > sleep.pid; wait";
 
-const readPid = async (dir: string) =>
-  Number((await readFile(join(dir, "sleep.pid"), "utf8")).trim());
+const readPid = async (dir: string) => {
+  const text = await readFile(join(dir, "sleep.pid"), "utf8");
+  return Number(text.trim());
+};
 
 describe("runHostHooks", () => {
   it("runs hooks sequentially in declared order", async () => {
@@ -1694,7 +1668,7 @@ describe("runHostHooks", () => {
           dir,
         ),
       ),
-    ).rejects.toThrow(/Host hook failed/);
+    ).rejects.toThrow(/Host hook failed/u);
   });
 
   it("uses the provided cwd", async () => {
@@ -1745,7 +1719,7 @@ describe("runHostHooks", () => {
       Effect.runPromise(
         runHostHooks([{ command: "sleep 2", timeoutMs: 500 }], dir),
       ),
-    ).rejects.toThrow(/timed out/);
+    ).rejects.toThrow(/timed out/u);
   });
 
   it("kills the hook's whole process tree when it times out", async () => {
@@ -1755,7 +1729,7 @@ describe("runHostHooks", () => {
       Effect.runPromise(
         runHostHooks([{ command: ORPHAN_HOOK, timeoutMs: 500 }], dir),
       ),
-    ).rejects.toThrow(/timed out after 500ms/);
+    ).rejects.toThrow(/timed out after 500ms/u);
 
     await waitForProcessGone(await readPid(dir));
   });
