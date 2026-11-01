@@ -143,17 +143,17 @@ export const loadKeys = (): void => {
   const file = keysFile();
   if (!file) return;
   for (const line of readFileSync(file, "utf8").split("\n")) {
-    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/u.exec(line);
+    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line);
     if (!m) continue;
     const [, key, raw] = m as unknown as [string, string, string];
-    const value = raw.replace(/^(['"])(.*)\1$/u, "$2");
+    const value = raw.replace(/^(['"])(.*)\1$/, "$2");
     if (value && !process.env[key]) process.env[key] = value;
   }
 };
 
 // --- Secret redaction -----------------------------------------------------------
 
-export const SECRET_NAME = /TOKEN|KEY|SECRET|PASSWORD|CREDENTIAL/iu;
+export const SECRET_NAME = /TOKEN|KEY|SECRET|PASSWORD|CREDENTIAL/i;
 
 /** Every secret-looking variable in `env`, as name → value. */
 export const secretsIn = (
