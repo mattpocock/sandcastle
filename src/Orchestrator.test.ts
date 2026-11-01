@@ -13,7 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import { Display, SilentDisplay } from "./Display.js";
 import type { DisplayEntry } from "./Display.js";
 import { makeLocalSandbox } from "./testSandbox.js";
@@ -38,6 +38,13 @@ import type { BindMountSandboxHandle } from "./SandboxProvider.js";
 const noopAgentStreamEmitterLayer = agentStreamEmitterLayer();
 
 const execAsync = promisify(exec);
+
+/** The item at `index`, failing the test if the array is too short. */
+const itemAt = <T>(items: readonly T[], index: number): T => {
+  const item = items[index];
+  assert(item !== undefined, `expected an item at index ${index}`);
+  return item;
+};
 
 const testProvider = claudeCode("test-model");
 
@@ -714,11 +721,11 @@ describe("OrchestrateResult", () => {
 
     // Should have exactly one commit
     expect(result.commits).toHaveLength(1);
-    expect(result.commits[0]!.sha).toMatch(/^[0-9a-f]{40}$/);
+    expect(itemAt(result.commits, 0).sha).toMatch(/^[0-9a-f]{40}$/);
 
     // The sha should match what's on the host
     const hostHead = await getHead(hostDir);
-    expect(result.commits[0]!.sha).toBe(hostHead);
+    expect(itemAt(result.commits, 0).sha).toBe(hostHead);
   });
 
   it("surfaces commits even when worktree has uncommitted changes", async () => {
@@ -816,7 +823,7 @@ describe("OrchestrateResult", () => {
 
     // Commits should still be surfaced
     expect(result.commits).toHaveLength(1);
-    expect(result.commits[0]!.sha).toMatch(/^[0-9a-f]{40}$/);
+    expect(itemAt(result.commits, 0).sha).toMatch(/^[0-9a-f]{40}$/);
   });
 });
 
@@ -1212,9 +1219,9 @@ describe("Orchestrator agent stream emitter", () => {
     const toolCallEvents = events.filter((e) => e.type === "toolCall");
 
     expect(textEvents.length).toBeGreaterThan(0);
-    expect(textEvents[0]!.message).toContain("Working now");
-    expect(textEvents[0]!.iteration).toBe(1);
-    expect(textEvents[0]!.timestamp).toBeInstanceOf(Date);
+    expect(itemAt(textEvents, 0).message).toContain("Working now");
+    expect(itemAt(textEvents, 0).iteration).toBe(1);
+    expect(itemAt(textEvents, 0).timestamp).toBeInstanceOf(Date);
 
     expect(toolCallEvents).toHaveLength(1);
     expect(toolCallEvents[0]).toMatchObject({
@@ -1223,7 +1230,7 @@ describe("Orchestrator agent stream emitter", () => {
       formattedArgs: "ls",
       iteration: 1,
     });
-    expect(toolCallEvents[0]!.timestamp).toBeInstanceOf(Date);
+    expect(itemAt(toolCallEvents, 0).timestamp).toBeInstanceOf(Date);
   });
 
   it("swallows errors thrown by the callback", async () => {
@@ -1379,8 +1386,8 @@ describe("Orchestrator agent stream emitter", () => {
       recognisedLine,
       resultLine,
     ]);
-    expect(rawEvents[0]!.iteration).toBe(1);
-    expect(rawEvents[0]!.timestamp).toBeInstanceOf(Date);
+    expect(itemAt(rawEvents, 0).iteration).toBe(1);
+    expect(itemAt(rawEvents, 0).timestamp).toBeInstanceOf(Date);
   });
 });
 
@@ -3272,7 +3279,7 @@ describe("Orchestrator with codex provider", () => {
     );
 
     // Usage flows from the stream even without bind-mount session capture.
-    expect(result.iterations[0]!.usage).toEqual({
+    expect(itemAt(result.iterations, 0).usage).toEqual({
       inputTokens: 49,
       cacheCreationInputTokens: 0,
       cacheReadInputTokens: 8448,
@@ -3434,18 +3441,22 @@ describe("Session capture integration", () => {
 
     // Verify iteration result
     expect(result.iterations).toHaveLength(1);
-    expect(result.iterations[0]!.sessionId).toBe(mockSessionId);
-    expect(result.iterations[0]!.sessionFilePath).toBeDefined();
+    expect(itemAt(result.iterations, 0).sessionId).toBe(mockSessionId);
+    expect(itemAt(result.iterations, 0).sessionFilePath).toBeDefined();
 
     // Verify the captured file exists on the host
-    const capturedPath = result.iterations[0]!.sessionFilePath!;
+    const capturedPath = itemAt(result.iterations, 0).sessionFilePath;
+    assert(capturedPath !== undefined);
     const capturedContent = await readFile(capturedPath, "utf8");
     const lines = capturedContent.split("\n");
 
     // Verify cwd was rewritten from sandbox cwd to host cwd
-    const firstEntry = JSON.parse(lines[0]!) as { cwd: string };
+    const firstEntry = JSON.parse(itemAt(lines, 0)) as { cwd: string };
     expect(firstEntry.cwd).toBe(hostDir);
-    const secondEntry = JSON.parse(lines[1]!) as { cwd: string; text: string };
+    const secondEntry = JSON.parse(itemAt(lines, 1)) as {
+      cwd: string;
+      text: string;
+    };
     expect(secondEntry.cwd).toBe(hostDir);
     expect(secondEntry.text).toBe("hello");
   });
@@ -3474,7 +3485,7 @@ describe("Session capture integration", () => {
     );
 
     expect(result.iterations).toHaveLength(1);
-    expect(result.iterations[0]!.sessionFilePath).toBeUndefined();
+    expect(itemAt(result.iterations, 0).sessionFilePath).toBeUndefined();
   });
 
   it("skips capture when no sessionId is extracted", async () => {
@@ -3498,8 +3509,8 @@ describe("Session capture integration", () => {
     );
 
     expect(result.iterations).toHaveLength(1);
-    expect(result.iterations[0]!.sessionId).toBeUndefined();
-    expect(result.iterations[0]!.sessionFilePath).toBeUndefined();
+    expect(itemAt(result.iterations, 0).sessionId).toBeUndefined();
+    expect(itemAt(result.iterations, 0).sessionFilePath).toBeUndefined();
   });
 
   it("resumes a session: transfers JSONL to sandbox and passes --resume to agent", async () => {
@@ -3543,7 +3554,7 @@ describe("Session capture integration", () => {
         const content = await readFile(sbSessionPath, "utf8");
         const lines = content.split("\n");
         // Verify cwd was rewritten from host to sandbox
-        const firstEntry = JSON.parse(lines[0]!) as { cwd: string };
+        const firstEntry = JSON.parse(itemAt(lines, 0)) as { cwd: string };
         expect(firstEntry.cwd).toBe(repoDir);
 
         // Also write the new session file the agent would produce
@@ -3578,14 +3589,15 @@ describe("Session capture integration", () => {
 
     // Verify iteration result
     expect(result.iterations).toHaveLength(1);
-    expect(result.iterations[0]!.sessionId).toBe(mockSessionId);
-    expect(result.iterations[0]!.sessionFilePath).toBeDefined();
+    expect(itemAt(result.iterations, 0).sessionId).toBe(mockSessionId);
+    expect(itemAt(result.iterations, 0).sessionFilePath).toBeDefined();
 
     // Verify the captured file on host has rewritten cwd
-    const capturedPath = result.iterations[0]!.sessionFilePath!;
+    const capturedPath = itemAt(result.iterations, 0).sessionFilePath;
+    assert(capturedPath !== undefined);
     const capturedContent = await readFile(capturedPath, "utf8");
     const capturedLines = capturedContent.split("\n");
-    const entry = JSON.parse(capturedLines[0]!) as { cwd: string };
+    const entry = JSON.parse(itemAt(capturedLines, 0)) as { cwd: string };
     expect(entry.cwd).toBe(hostDir);
   });
 
@@ -3744,14 +3756,15 @@ describe("Session capture integration", () => {
     expect(capturedCommand).toContain("--fork-session");
 
     // The iteration captured the CHILD session id, not the parent.
-    expect(result.iterations[0]!.sessionId).toBe(childSessionId);
+    expect(itemAt(result.iterations, 0).sessionId).toBe(childSessionId);
 
     // The parent JSONL on the host is untouched — fork must not overwrite it.
     const parentAfter = await readFile(parentSessionPath, "utf8");
     expect(parentAfter).toBe(parentContent);
 
     // A child session file was captured to the host under the child id.
-    const childCaptured = result.iterations[0]!.sessionFilePath!;
+    const childCaptured = itemAt(result.iterations, 0).sessionFilePath;
+    assert(childCaptured !== undefined);
     expect(childCaptured).toContain(`${childSessionId}.jsonl`);
     const childContent = await readFile(childCaptured, "utf8");
     expect(childContent).toContain("forked work");
@@ -3815,7 +3828,7 @@ describe("Session capture integration", () => {
       }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
     );
 
-    expect(result.iterations[0]!.usage).toEqual({
+    expect(itemAt(result.iterations, 0).usage).toEqual({
       inputTokens: 3,
       cacheCreationInputTokens: 9294,
       cacheReadInputTokens: 8526,
@@ -3844,7 +3857,7 @@ describe("Session capture integration", () => {
       }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
     );
 
-    expect(result.iterations[0]!.usage).toBeUndefined();
+    expect(itemAt(result.iterations, 0).usage).toBeUndefined();
   });
 });
 
@@ -3912,7 +3925,8 @@ describe("Orchestrator signal (AbortSignal)", () => {
 
       // A line arrives after the run settled (e.g. Claude's final event as
       // its container is removed).
-      lateOnLine!(
+      assert(lateOnLine);
+      lateOnLine(
         JSON.stringify({
           type: "assistant",
           message: { content: [{ type: "text", text: "late" }] },
@@ -4455,7 +4469,7 @@ describe("Orchestrator context window (last model call)", () => {
       }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
     );
 
-    expect(result.iterations[0]!.contextWindow).toEqual({
+    expect(itemAt(result.iterations, 0).contextWindow).toEqual({
       tokens: 31_899,
       limit: 258_400,
     });

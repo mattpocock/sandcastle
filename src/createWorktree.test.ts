@@ -957,7 +957,7 @@ describe("worktree.run()", () => {
         logging: { type: "file", path: logPath },
       });
 
-      expect(result.iterations[0]!.usage).toStrictEqual({
+      expect(firstIteration(result).usage).toStrictEqual({
         inputTokens: 50_000,
         cacheCreationInputTokens: 0,
         cacheReadInputTokens: 0,
