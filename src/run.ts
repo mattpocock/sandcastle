@@ -145,10 +145,11 @@ export const buildLogFilename = (
 ): string => {
   const sanitized = sanitizeBranchForFilename(resolvedBranch);
   // One dash per UTF-16 unit, as before the `u` flag on the regex below.
-  const nameSuffix = name
-    ? `-${name.toLowerCase().replaceAll(/[^a-z0-9_.-]/gu, (char) => "-".repeat(char.length))}`
-    : "";
-  if (targetBranch) {
+  const nameSuffix =
+    name !== undefined && name !== ""
+      ? `-${name.toLowerCase().replaceAll(/[^a-z0-9_.-]/gu, (char) => "-".repeat(char.length))}`
+      : "";
+  if (targetBranch !== undefined && targetBranch !== "") {
     return `${sanitizeBranchForFilename(targetBranch)}-${sanitized}${nameSuffix}.log`;
   }
   return `${sanitized}${nameSuffix}.log`;
