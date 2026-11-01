@@ -3,7 +3,7 @@ import { Effect } from "effect";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import {
   scaffold,
   getNextStepsLines,
@@ -27,12 +27,23 @@ import { SKELETON_PROMPT } from "./templates.js";
 
 const makeDir = async () => mkdtemp(join(tmpdir(), "init-service-"));
 
-const claudeCodeAgent = getAgent("claude-code")!;
-const piAgent = getAgent("pi")!;
-const codexAgent = getAgent("codex")!;
-const cursorAgent = getAgent("cursor")!;
-const opencodeAgent = getAgent("opencode")!;
-const copilotAgent = getAgent("copilot")!;
+/** Unwraps a registry lookup, failing the test if the entry is missing. */
+const registered = <T>(entry: T | undefined, name: string): T => {
+  assert(entry !== undefined, `${name} is not registered`);
+  return entry;
+};
+const requireAgent = (name: string) => registered(getAgent(name), name);
+const requireIssueTracker = (name: string) =>
+  registered(getIssueTracker(name), name);
+const requireSandboxProvider = (name: string) =>
+  registered(getSandboxProvider(name), name);
+
+const claudeCodeAgent = requireAgent("claude-code");
+const piAgent = requireAgent("pi");
+const codexAgent = requireAgent("codex");
+const cursorAgent = requireAgent("cursor");
+const opencodeAgent = requireAgent("opencode");
+const copilotAgent = requireAgent("copilot");
 
 const defaultOptions: ScaffoldOptions = {
   agent: claudeCodeAgent,
@@ -571,8 +582,8 @@ describe("InitService scaffold", () => {
   });
 
   describe("getNextStepsLines", () => {
-    const ghIssues = getIssueTracker("github-issues")!;
-    const customManager = getIssueTracker("custom")!;
+    const ghIssues = requireIssueTracker("github-issues");
+    const customManager = requireIssueTracker("custom");
     // Non-custom issue tracker keeps the template-driven next steps; the
     // custom branch is exercised separately below.
     const next = (
@@ -856,13 +867,13 @@ describe("InitService scaffold", () => {
         "blank",
         "main.mts",
         customManager,
-        getAgent("opencode")!,
+        requireAgent("opencode"),
         "npm",
         [],
       );
       const joined = lines.join("\n");
       expect(joined.toLowerCase()).toContain("host");
-      expect(joined).toContain(getAgent("opencode")!.setupCommand);
+      expect(joined).toContain(requireAgent("opencode").setupCommand);
     });
   });
 
@@ -1394,76 +1405,71 @@ describe("InitService scaffold", () => {
     });
 
     it("getIssueTracker returns github-issues entry with expected templateArgs", () => {
-      const manager = getIssueTracker("github-issues");
-      expect(manager).toBeDefined();
-      expect(manager!.label).toBe("GitHub Issues");
-      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain(
+      const manager = requireIssueTracker("github-issues");
+      expect(manager.label).toBe("GitHub Issues");
+      expect(manager.templateArgs.LIST_TASKS_COMMAND).toContain(
         "gh issue list",
       );
-      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain("labels");
-      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain("comments");
-      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain("--limit 100");
-      expect(manager!.templateArgs.VIEW_TASK_COMMAND).toContain(
-        "gh issue view",
-      );
-      expect(manager!.templateArgs.CLOSE_TASK_COMMAND).toContain(
+      expect(manager.templateArgs.LIST_TASKS_COMMAND).toContain("labels");
+      expect(manager.templateArgs.LIST_TASKS_COMMAND).toContain("comments");
+      expect(manager.templateArgs.LIST_TASKS_COMMAND).toContain("--limit 100");
+      expect(manager.templateArgs.VIEW_TASK_COMMAND).toContain("gh issue view");
+      expect(manager.templateArgs.CLOSE_TASK_COMMAND).toContain(
         "gh issue close",
       );
-      expect(manager!.templateArgs.ISSUE_TRACKER_TOOLS).toContain("GitHub CLI");
-      expect(manager!.templateArgs.ISSUE_TRACKER_TOOLS).toContain("gh");
+      expect(manager.templateArgs.ISSUE_TRACKER_TOOLS).toContain("GitHub CLI");
+      expect(manager.templateArgs.ISSUE_TRACKER_TOOLS).toContain("gh");
     });
 
     it("getIssueTracker returns beads entry with expected templateArgs", () => {
-      const manager = getIssueTracker("beads");
-      expect(manager).toBeDefined();
-      expect(manager!.label).toBe("Beads");
-      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toBe("bd ready --json");
-      expect(manager!.templateArgs.VIEW_TASK_COMMAND).toContain("bd show");
-      expect(manager!.templateArgs.CLOSE_TASK_COMMAND).toContain("bd close");
-      expect(manager!.templateArgs.CLOSE_TASK_COMMAND).toContain("--reason=");
-      expect(manager!.templateArgs.ISSUE_TRACKER_TOOLS).toContain("beads");
-      expect(manager!.templateArgs.ISSUE_TRACKER_TOOLS).toContain("libicu72");
-      expect(manager!.templateArgs.ISSUE_TRACKER_TOOLS).toContain(
+      const manager = requireIssueTracker("beads");
+      expect(manager.label).toBe("Beads");
+      expect(manager.templateArgs.LIST_TASKS_COMMAND).toBe("bd ready --json");
+      expect(manager.templateArgs.VIEW_TASK_COMMAND).toContain("bd show");
+      expect(manager.templateArgs.CLOSE_TASK_COMMAND).toContain("bd close");
+      expect(manager.templateArgs.CLOSE_TASK_COMMAND).toContain("--reason=");
+      expect(manager.templateArgs.ISSUE_TRACKER_TOOLS).toContain("beads");
+      expect(manager.templateArgs.ISSUE_TRACKER_TOOLS).toContain("libicu72");
+      expect(manager.templateArgs.ISSUE_TRACKER_TOOLS).toContain(
         "corepack enable",
       );
-      expect(manager!.templateArgs.ISSUE_TRACKER_TOOLS).not.toContain("gh");
-      expect(manager!.templateArgs.ISSUE_TRACKER_TOOLS).not.toContain(
+      expect(manager.templateArgs.ISSUE_TRACKER_TOOLS).not.toContain("gh");
+      expect(manager.templateArgs.ISSUE_TRACKER_TOOLS).not.toContain(
         "x86_64-linux-gnu",
       );
-      expect(manager!.templateArgs.ISSUE_TRACKER_TOOLS).toContain(
+      expect(manager.templateArgs.ISSUE_TRACKER_TOOLS).toContain(
         "dpkg-architecture -qDEB_HOST_MULTIARCH",
       );
     });
 
     it("getIssueTracker returns custom entry with broken-until-configured templateArgs", () => {
-      const manager = getIssueTracker("custom");
-      expect(manager).toBeDefined();
-      expect(manager!.label).toBe("Custom");
+      const manager = requireIssueTracker("custom");
+      expect(manager.label).toBe("Custom");
       // Only the list command is a real shell expression — it hard-fails the
       // run (exit 1) and points at the setup doc.
-      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain("exit 1");
-      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain(
+      expect(manager.templateArgs.LIST_TASKS_COMMAND).toContain("exit 1");
+      expect(manager.templateArgs.LIST_TASKS_COMMAND).toContain(
         "SETUP_ISSUE_TRACKER.md",
       );
-      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain(">&2");
+      expect(manager.templateArgs.LIST_TASKS_COMMAND).toContain(">&2");
       // View/close are inline text markers, not runnable commands.
-      expect(manager!.templateArgs.VIEW_TASK_COMMAND).toContain("view command");
-      expect(manager!.templateArgs.VIEW_TASK_COMMAND).toContain(
+      expect(manager.templateArgs.VIEW_TASK_COMMAND).toContain("view command");
+      expect(manager.templateArgs.VIEW_TASK_COMMAND).toContain(
         "SETUP_ISSUE_TRACKER.md",
       );
-      expect(manager!.templateArgs.CLOSE_TASK_COMMAND).toContain(
+      expect(manager.templateArgs.CLOSE_TASK_COMMAND).toContain(
         "close command",
       );
-      expect(manager!.templateArgs.CLOSE_TASK_COMMAND).toContain(
+      expect(manager.templateArgs.CLOSE_TASK_COMMAND).toContain(
         "SETUP_ISSUE_TRACKER.md",
       );
       // Dockerfile install block is a TODO comment pointing at the doc.
-      expect(manager!.templateArgs.ISSUE_TRACKER_TOOLS).toContain("TODO");
-      expect(manager!.templateArgs.ISSUE_TRACKER_TOOLS).toContain(
+      expect(manager.templateArgs.ISSUE_TRACKER_TOOLS).toContain("TODO");
+      expect(manager.templateArgs.ISSUE_TRACKER_TOOLS).toContain(
         "SETUP_ISSUE_TRACKER.md",
       );
-      expect(manager!.envExample).toContain("TODO");
-      expect(manager!.envExample).toContain("SETUP_ISSUE_TRACKER.md");
+      expect(manager.envExample).toContain("TODO");
+      expect(manager.envExample).toContain("SETUP_ISSUE_TRACKER.md");
     });
 
     it("listIssueTrackers includes custom", () => {
@@ -1502,7 +1508,7 @@ describe("InitService scaffold", () => {
     ])(
       "$name has the expected interactive setupCommand",
       ({ name, command }) => {
-        expect(getAgent(name)!.setupCommand).toBe(command);
+        expect(requireAgent(name).setupCommand).toBe(command);
       },
     );
   });
@@ -1632,7 +1638,7 @@ describe("InitService scaffold", () => {
 
     // --- custom issue tracker ---
 
-    const customManager = getIssueTracker("custom");
+    const customManager = requireIssueTracker("custom");
 
     it("custom scaffolds .sandcastle/SETUP_ISSUE_TRACKER.md", async () => {
       const dir = await makeDir();
@@ -1652,8 +1658,8 @@ describe("InitService scaffold", () => {
       // It must explicitly tell the agent to remove the exit 1 sentinel.
       expect(setup).toContain("exit 1");
       // The markers the agent will actually find in the scaffolded files.
-      expect(setup).toContain(customManager!.templateArgs.VIEW_TASK_COMMAND);
-      expect(setup).toContain(customManager!.templateArgs.CLOSE_TASK_COMMAND);
+      expect(setup).toContain(customManager.templateArgs.VIEW_TASK_COMMAND);
+      expect(setup).toContain(customManager.templateArgs.CLOSE_TASK_COMMAND);
     });
 
     it("custom SETUP doc references the chosen provider's build-image command", async () => {
@@ -2188,7 +2194,7 @@ describe("InitService scaffold", () => {
 
     it("scaffold with beads + podman produces Containerfile with beads install", async () => {
       const dir = await makeDir();
-      const podmanProvider = getSandboxProvider("podman")!;
+      const podmanProvider = requireSandboxProvider("podman");
       await runScaffold(dir, {
         issueTracker: getIssueTracker("beads"),
         sandboxProvider: podmanProvider,
@@ -2283,7 +2289,7 @@ describe("InitService scaffold", () => {
         await runScaffold(dir, {
           templateName: "parallel-planner",
           issueTracker: getIssueTracker("beads"),
-          sandboxProvider: getSandboxProvider("podman")!,
+          sandboxProvider: requireSandboxProvider("podman"),
         });
 
         const main = await readFile(
@@ -2447,8 +2453,8 @@ describe("InitService scaffold", () => {
   // ---------------------------------------------------------------------------
 
   describe("sandbox provider", () => {
-    const dockerProvider = getSandboxProvider("docker")!;
-    const podmanProvider = getSandboxProvider("podman")!;
+    const dockerProvider = requireSandboxProvider("docker");
+    const podmanProvider = requireSandboxProvider("podman");
 
     it("selecting docker writes Dockerfile to .sandcastle/", async () => {
       const dir = await makeDir();
