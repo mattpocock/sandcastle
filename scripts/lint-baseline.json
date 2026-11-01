@@ -164,30 +164,25 @@
     "vitest(prefer-strict-equal)": 3
   },
   "src/AgentProvider.ts": {
-    "effect/asyncFunction": 15,
+    "effect/asyncFunction": 14,
     "effect/globalConsole": 1,
     "effect/globalDate": 2,
     "effect/globalRandom": 2,
-    "effect/processEnv": 1,
     "eslint(complexity)": 4,
-    "eslint(curly)": 39,
+    "eslint(curly)": 38,
     "eslint(max-lines-per-function)": 8,
     "eslint(max-lines)": 1,
     "eslint(max-params)": 1,
     "eslint(max-statements)": 3,
     "eslint(no-await-in-loop)": 1,
     "eslint(no-empty-function)": 2,
-    "eslint(require-unicode-regexp)": 1,
     "typescript(method-signature-style)": 11,
-    "typescript(no-non-null-assertion)": 3,
+    "typescript(no-non-null-assertion)": 2,
     "typescript(no-unsafe-assignment)": 38,
     "typescript(no-unsafe-member-access)": 108,
     "typescript(no-unsafe-type-assertion)": 8,
     "typescript(promise-function-async)": 4,
-    "typescript(strict-boolean-expressions)": 22
-  },
-  "src/boundedTail.test.ts": {
-    "unicorn(prefer-single-call)": 5
+    "typescript(strict-boolean-expressions)": 21
   },
   "src/ClackDisplay.test.ts": {
     "effect/anyUnknownInErrorContext": 1,
@@ -215,12 +210,11 @@
     "typescript(unbound-method)": 1
   },
   "src/CopyToWorktree.test.ts": {
-    "eslint(no-await-in-loop)": 1,
     "eslint(no-promise-executor-return)": 1,
     "promise(param-names)": 1,
     "typescript(strict-void-return)": 1,
     "vitest(no-conditional-expect)": 2,
-    "vitest(no-conditional-in-test)": 4
+    "vitest(no-conditional-in-test)": 3
   },
   "src/CopyToWorktree.ts": {
     "eslint(max-lines-per-function)": 2,
@@ -570,7 +564,7 @@
   },
   "src/run.test.ts": {
     "eslint(prefer-named-capture-group)": 2,
-    "eslint(require-unicode-regexp)": 9,
+    "eslint(require-unicode-regexp)": 8,
     "import(max-dependencies)": 1,
     "typescript(no-unsafe-type-assertion)": 1,
     "vitest(expect-expect)": 2,
@@ -792,14 +786,12 @@
   },
   "src/SessionStore.ts": {
     "effect/asyncFunction": 12,
-    "effect/processEnv": 8,
+    "effect/processEnv": 1,
     "eslint(max-lines)": 1,
     "eslint(max-params)": 1,
-    "eslint(no-await-in-loop)": 3,
-    "eslint(prefer-destructuring)": 2,
+    "eslint(no-await-in-loop)": 2,
     "eslint(prefer-named-capture-group)": 1,
-    "eslint(require-unicode-regexp)": 6,
-    "typescript(strict-boolean-expressions)": 5
+    "eslint(require-unicode-regexp)": 6
   },
   "src/SessionStore.windowsPath.test.ts": {
     "eslint(require-unicode-regexp)": 1,
@@ -890,9 +882,6 @@
   "src/TextDeltaBuffer.ts": {
     "effect/globalTimers": 1,
     "eslint(require-unicode-regexp)": 1
-  },
-  "src/validateTimeouts.test.ts": {
-    "typescript(no-unsafe-type-assertion)": 1
   },
   "src/validateTimeouts.ts": {
     "typescript(no-base-to-string)": 1
