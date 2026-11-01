@@ -84,42 +84,32 @@ describe("InitService scaffold", () => {
   it.each([
     {
       agent: claudeCodeAgent,
-      expectedKey: "CLAUDE_CODE_OAUTH_TOKEN=",
-      unexpectedKey: "CODEX_API_KEY=",
-      expectClaudeSetupTokenHint: true,
+      expectedContent: ["CLAUDE_CODE_OAUTH_TOKEN=", "claude setup-token"],
+      unexpectedContent: ["CODEX_API_KEY="],
     },
     {
       agent: piAgent,
-      expectedKey: "ANTHROPIC_API_KEY=",
-      unexpectedKey: "CODEX_API_KEY=",
-      expectClaudeSetupTokenHint: false,
+      expectedContent: ["ANTHROPIC_API_KEY="],
+      unexpectedContent: ["CODEX_API_KEY=", "claude setup-token"],
     },
     {
       agent: codexAgent,
-      expectedKey: "CODEX_API_KEY=",
-      unexpectedKey: "ANTHROPIC_API_KEY=",
-      expectClaudeSetupTokenHint: false,
+      expectedContent: ["CODEX_API_KEY="],
+      unexpectedContent: ["ANTHROPIC_API_KEY=", "claude setup-token"],
     },
     {
       agent: opencodeAgent,
-      expectedKey: "OPENCODE_API_KEY=",
-      unexpectedKey: "ANTHROPIC_API_KEY=",
-      expectClaudeSetupTokenHint: false,
+      expectedContent: ["OPENCODE_API_KEY="],
+      unexpectedContent: ["ANTHROPIC_API_KEY=", "claude setup-token"],
     },
     {
       agent: cursorAgent,
-      expectedKey: "CURSOR_API_KEY=",
-      unexpectedKey: "ANTHROPIC_API_KEY=",
-      expectClaudeSetupTokenHint: false,
+      expectedContent: ["CURSOR_API_KEY="],
+      unexpectedContent: ["ANTHROPIC_API_KEY=", "claude setup-token"],
     },
   ])(
     "generates .env.example with $agent.name env var",
-    async ({
-      agent,
-      expectedKey,
-      unexpectedKey,
-      expectClaudeSetupTokenHint,
-    }) => {
+    async ({ agent, expectedContent, unexpectedContent }) => {
       const dir = await makeDir();
       await runScaffold(dir, { agent, model: agent.defaultModel });
 
@@ -127,14 +117,13 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", ".env.example"),
         "utf8",
       );
-      expect(envExample).toContain(expectedKey);
-      expect(envExample).not.toContain(unexpectedKey);
-      expect(envExample).not.toContain("issues/191");
-      if (expectClaudeSetupTokenHint) {
-        expect(envExample).toContain("claude setup-token");
-      } else {
-        expect(envExample).not.toContain("claude setup-token");
+      for (const content of expectedContent) {
+        expect(envExample).toContain(content);
       }
+      for (const content of unexpectedContent) {
+        expect(envExample).not.toContain(content);
+      }
+      expect(envExample).not.toContain("issues/191");
     },
   );
 
@@ -571,12 +560,8 @@ describe("InitService scaffold", () => {
 
     const { readdir } = await import("node:fs/promises");
     const files = await readdir(join(dir, ".sandcastle"));
-    const compiledFiles = files.filter(
-      (f) =>
-        f.endsWith(".js") ||
-        f.endsWith(".d.ts") ||
-        f.endsWith(".js.map") ||
-        f.endsWith(".d.ts.map"),
+    const compiledFiles = files.filter((f) =>
+      /\.(?:js|d\.ts|js\.map|d\.ts\.map)$/u.test(f),
     );
     expect(compiledFiles).toEqual([]);
   });
@@ -771,64 +756,82 @@ describe("InitService scaffold", () => {
         pm: PackageManager;
         run: string;
         add: string;
-        install: string;
+        /** Only a non-npm manager names its install step... */
+        mustContain: string[];
+        /** ...and avoids `npm run`. */
+        mustNotMatch: RegExp[];
       }[] = [
         {
           pm: "npm",
           run: "npm run sandcastle",
           add: "npm install zod",
-          install: "npm install",
+          mustContain: [],
+          mustNotMatch: [],
         },
         {
           pm: "pnpm",
           run: "pnpm run sandcastle",
           add: "pnpm add zod",
-          install: "pnpm install",
+          mustContain: ["`pnpm install`"],
+          mustNotMatch: [/\bnpm run/u],
         },
         {
           pm: "yarn",
           run: "yarn run sandcastle",
           add: "yarn add zod",
-          install: "yarn install",
+          mustContain: ["`yarn install`"],
+          mustNotMatch: [/\bnpm run/u],
         },
         {
           pm: "bun",
           run: "bun run sandcastle",
           add: "bun add zod",
-          install: "bun install",
+          mustContain: ["`bun install`"],
+          mustNotMatch: [/\bnpm run/u],
         },
       ];
 
-      for (const { pm, run, add, install } of managers) {
-        for (const zodInstalled of [false, true]) {
-          it(`parallel-planner, ${pm}, zod ${zodInstalled ? "installed" : "not installed"}`, () => {
+      for (const { pm, run, add, mustContain, mustNotMatch } of managers) {
+        it.each([
+          {
+            zod: "not installed",
+            installed: [],
+            present: [add, ...mustContain],
+            absent: [],
+          },
+          {
+            zod: "installed",
+            installed: ["zod"],
+            present: mustContain,
+            absent: ["zod", "schema validator"],
+          },
+        ])(
+          `parallel-planner, ${pm}, zod $zod`,
+          ({ installed, present, absent }) => {
             const joined = next(
               "parallel-planner",
               "main.ts",
               pm,
-              zodInstalled ? ["zod"] : [],
+              installed,
             ).join("\n");
             expect(joined).toContain(`Run \`${run}\``);
-            if (pm !== "npm") {
-              expect(joined).not.toMatch(/\bnpm run/);
+            for (const text of present) {
+              expect(joined).toContain(text);
             }
-            if (zodInstalled) {
-              expect(joined).not.toContain("zod");
-              expect(joined).not.toContain("schema validator");
-            } else {
-              expect(joined).toContain(add);
+            for (const text of absent) {
+              expect(joined).not.toContain(text);
             }
-            if (pm !== "npm") {
-              expect(joined).toContain(`\`${install}\``);
+            for (const pattern of mustNotMatch) {
+              expect(joined).not.toMatch(pattern);
             }
-          });
-        }
+          },
+        );
 
         it(`blank, ${pm}: run step uses ${run}`, () => {
           const joined = next("blank", "main.ts", pm).join("\n");
           expect(joined).toContain(`Run \`${run}\``);
-          if (pm !== "npm") {
-            expect(joined).not.toMatch(/\bnpm run/);
+          for (const pattern of mustNotMatch) {
+            expect(joined).not.toMatch(pattern);
           }
         });
       }
@@ -2273,7 +2276,9 @@ describe("InitService scaffold", () => {
             "utf8",
           );
           expect(main).not.toContain("docker()");
-          const calls = main.match(/\bdocker\(([^)]*)\)/g) ?? [];
+          const calls = [...main.matchAll(/\bdocker\([^)]*\)/gu)].map(
+            ([call]) => call,
+          );
           expect(calls.length).toBeGreaterThan(0);
           for (const call of calls) {
             expect(call).toBe("docker(sandboxOptions)");
@@ -2586,6 +2591,10 @@ describe("init scaffold consistency (every agent x template x sandbox x tracker)
           template: template.name,
           sandboxProvider,
           issueTracker,
+          // Only a non-Claude agent's main file must not mention claudeCode.
+          mainMustNotMatch:
+            agent.factoryImport === "claudeCode" ? [] : [/\bclaudeCode\b/u],
+          otherSandbox: sandboxProvider.name === "docker" ? "podman" : "docker",
         })),
       ),
     ),
@@ -2599,7 +2608,14 @@ describe("init scaffold consistency (every agent x template x sandbox x tracker)
 
   it.each(combos)(
     "$agent.name x $template x $sandboxProvider.name x $issueTracker.name",
-    async ({ agent, template, sandboxProvider, issueTracker }) => {
+    async ({
+      agent,
+      template,
+      sandboxProvider,
+      issueTracker,
+      mainMustNotMatch,
+      otherSandbox,
+    }) => {
       const dir = await makeDir();
       const imageName = "sandcastle:custom-image";
       const { mainFilename } = await runScaffold(dir, {
@@ -2625,14 +2641,15 @@ describe("init scaffold consistency (every agent x template x sandbox x tracker)
       // Main file: the chosen agent, model, sandbox provider and image name.
       const main = await readFile(join(configDir, mainFilename), "utf8");
       expect(main).toContain(`${agent.factoryImport}("test-model")`);
-      if (agent.factoryImport !== "claudeCode") {
-        expect(main).not.toMatch(/\bclaudeCode\b/);
+      for (const pattern of mainMustNotMatch) {
+        expect(main).not.toMatch(pattern);
       }
-      const other = sandboxProvider.name === "docker" ? "podman" : "docker";
-      expect(main).not.toMatch(new RegExp(`\\b${other}\\(`));
-      const sandboxCalls =
-        main.match(new RegExp(`\\b${sandboxProvider.name}\\([^)]*\\)`, "g")) ??
-        [];
+      expect(main).not.toMatch(new RegExp(`\\b${otherSandbox}\\(`));
+      const sandboxCalls = [
+        ...main.matchAll(
+          new RegExp(`\\b${sandboxProvider.name}\\([^)]*\\)`, "gu"),
+        ),
+      ].map(([call]) => call);
       expect(sandboxCalls.length).toBeGreaterThan(0);
       for (const call of sandboxCalls) {
         expect(call).toBe(
@@ -2648,17 +2665,32 @@ describe("init scaffold consistency (every agent x template x sandbox x tracker)
       const keys = declaredKeys(envExample);
       expect(keys).toContain(AGENT_AUTH_KEY[agent.name]);
       expect(new Set(keys).size).toBe(keys.length);
+    },
+  );
 
-      // Custom tracker: the setup doc's build command builds the same image.
-      if (issueTracker.name === "custom") {
-        const setupDoc = await readFile(
-          join(configDir, "SETUP_ISSUE_TRACKER.md"),
-          "utf8",
-        );
-        expect(setupDoc).toContain(
-          `sandcastle ${sandboxProvider.cliNamespace} build-image --image-name ${imageName}`,
-        );
-      }
+  // Custom tracker: the setup doc's build command builds the same image.
+  it.each(combos.filter(({ issueTracker }) => issueTracker.name === "custom"))(
+    "$agent.name x $template x $sandboxProvider.name x custom: setup doc builds the same image",
+    async ({ agent, template, sandboxProvider, issueTracker }) => {
+      const dir = await makeDir();
+      const imageName = "sandcastle:custom-image";
+      await runScaffold(dir, {
+        agent,
+        model: "test-model",
+        templateName: template,
+        sandboxProvider,
+        issueTracker,
+        createLabel: false,
+        imageName,
+      });
+
+      const setupDoc = await readFile(
+        join(dir, ".sandcastle", "SETUP_ISSUE_TRACKER.md"),
+        "utf8",
+      );
+      expect(setupDoc).toContain(
+        `sandcastle ${sandboxProvider.cliNamespace} build-image --image-name ${imageName}`,
+      );
     },
   );
 
