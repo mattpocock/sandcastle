@@ -9,7 +9,7 @@ Ledger section (e) checks the result against the world's canary and every undecl
 
 ## docker (`@ai-hero/sandcastle/sandboxes/docker`, bind-mount)
 
-- **Entry:** `docker({ imageName?, mounts?, env?, network?, … })` (`src/sandboxes/docker.ts:132`).
+- **Entry:** `docker({ imageName?, mounts?, env?, network?, … })` (`src/sandboxes/docker.ts:126`).
 - **What it creates** (`src/DockerLifecycle.ts:156-170`):
   - A container named `sandcastle-<uuid>`, started with `docker run -d`, `-e` for each key, `HOME=/home/agent`, `--user <host uid>:<gid>`, workdir `/home/agent/workspace`.
   - No `--rm` and no labels.
@@ -22,7 +22,7 @@ Ledger section (e) checks the result against the world's canary and every undecl
 
 ## podman (`…/sandboxes/podman`, bind-mount)
 
-- **Entry:** `podman({ …docker's options, userns? })` (`src/sandboxes/podman.ts:145`).
+- **Entry:** `podman({ …docker's options, userns? })` (`src/sandboxes/podman.ts:139`).
 - **What it creates:**
   - A container `sandcastle-<uuid>`, started with `--userns=keep-id:uid=N,gid=N` and `--entrypoint sleep … infinity`.
   - The uid defaults to 1000, not the host's.
@@ -56,4 +56,4 @@ Ledger section (e) checks the result against the world's canary and every undecl
 
 ## noSandbox: never run
 
-`noSandbox()` runs the agent on this host with the host's **whole** env (`src/sandboxes/no-sandbox.ts:51`). That is unsafe here, and no sandbox seam exists to test. Its claims are proved by vitest tests beside `src/sandboxes/no-sandbox.ts` and reported as `VERIFIED (unit test)` or `FAILED (unit test)`, naming the test. `interactive()` and `wt.interactive()` default to it, so always pass a sandbox.
+`noSandbox()` runs the agent on this host with the host's **whole** env (`src/sandboxes/no-sandbox.ts:50`). That is unsafe here, and no sandbox seam exists to test. Its claims are proved by vitest tests beside `src/sandboxes/no-sandbox.ts` and reported as `VERIFIED (unit test)` or `FAILED (unit test)`, naming the test. `interactive()` and `wt.interactive()` default to it, so always pass a sandbox.

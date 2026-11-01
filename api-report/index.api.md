@@ -19,8 +19,6 @@ export interface AgentCommandOptions {
 // @public (undocumented)
 export interface AgentProvider {
     // (undocumented)
-    buildInteractiveArgs?(options: AgentCommandOptions): string[];
-    // (undocumented)
     buildPrintCommand(options: AgentCommandOptions): PrintCommand;
     readonly captureSessions: boolean;
     readonly env: Record<string, string>;
@@ -84,9 +82,6 @@ export interface BindMountSandboxHandle {
         sudo?: boolean;
         stdin?: string;
     }): Promise<ExecResult>;
-    interactiveExec?(args: string[], options: InteractiveExecOptions): Promise<{
-        exitCode: number;
-    }>;
     readonly worktreePath: string;
 }
 
@@ -280,48 +275,6 @@ export interface HostSessionLookup {
 }
 
 // @public
-export const interactive: (options: InteractiveOptions) => Promise<InteractiveResult>;
-
-// @public
-export interface InteractiveExecOptions {
-    // (undocumented)
-    readonly cwd?: string;
-    // (undocumented)
-    readonly stderr: NodeJS.WritableStream;
-    // (undocumented)
-    readonly stdin: NodeJS.ReadableStream;
-    // (undocumented)
-    readonly stdout: NodeJS.WritableStream;
-}
-
-// @public (undocumented)
-export interface InteractiveOptions {
-    readonly agent: AgentProvider;
-    readonly branchStrategy?: BranchStrategy;
-    readonly copyToWorktree?: string[];
-    readonly cwd?: string;
-    readonly env?: Record<string, string>;
-    readonly hooks?: SandboxHooks;
-    readonly name?: string;
-    readonly prompt?: string;
-    readonly promptArgs?: PromptArgs;
-    readonly promptFile?: string;
-    readonly sandbox?: SandboxProvider;
-    readonly signal?: AbortSignal;
-    readonly timeouts?: Timeouts;
-}
-
-// @public (undocumented)
-export interface InteractiveResult {
-    readonly branch: string;
-    readonly commits: {
-        sha: string;
-    }[];
-    readonly exitCode: number;
-    readonly preservedWorktreePath?: string;
-}
-
-// @public
 export type IsolatedBranchStrategy = MergeToHeadBranchStrategy | NamedBranchStrategy;
 
 // @public
@@ -340,9 +293,6 @@ export interface IsolatedSandboxHandle {
         sudo?: boolean;
         stdin?: string;
     }): Promise<ExecResult>;
-    interactiveExec?(args: string[], options: InteractiveExecOptions): Promise<{
-        exitCode: number;
-    }>;
     readonly worktreePath: string;
 }
 
@@ -428,9 +378,6 @@ export interface NoSandboxHandle {
         sudo?: boolean;
         stdin?: string;
     }): Promise<ExecResult>;
-    interactiveExec(args: string[], options: InteractiveExecOptions): Promise<{
-        exitCode: number;
-    }>;
     readonly worktreePath: string;
 }
 
@@ -593,7 +540,6 @@ export interface Sandbox {
     readonly branch: string;
     close(): Promise<CloseResult>;
     exec(command: string, options?: SandboxExecOptions): Promise<ExecResult>;
-    interactive(options: SandboxInteractiveOptions): Promise<SandboxInteractiveResult>;
     run(options: SandboxRunOptions): Promise<SandboxRunResult>;
     readonly worktreePath: string;
 }
@@ -627,24 +573,6 @@ export interface SandboxHooks {
             readonly timeoutMs?: number;
         }[];
     };
-}
-
-// @public (undocumented)
-export interface SandboxInteractiveOptions {
-    readonly agent: AgentProvider;
-    readonly name?: string;
-    readonly prompt?: string;
-    readonly promptArgs?: PromptArgs;
-    readonly promptFile?: string;
-    readonly signal?: AbortSignal;
-}
-
-// @public (undocumented)
-export interface SandboxInteractiveResult {
-    readonly commits: {
-        sha: string;
-    }[];
-    readonly exitCode: number;
 }
 
 // @public
@@ -728,7 +656,6 @@ export interface Worktree {
     readonly branch: string;
     close(): Promise<CloseResult>;
     createSandbox(options: WorktreeCreateSandboxOptions): Promise<Sandbox>;
-    interactive(options: WorktreeInteractiveOptions): Promise<InteractiveResult>;
     run(options: WorktreeRunOptions): Promise<WorktreeRunResult>;
     readonly worktreePath: string;
 }
@@ -742,19 +669,6 @@ export interface WorktreeCreateSandboxOptions {
     readonly hooks?: SandboxHooks;
     readonly sandbox: SandboxProvider;
     readonly timeouts?: Timeouts;
-}
-
-// @public (undocumented)
-export interface WorktreeInteractiveOptions {
-    readonly agent: AgentProvider;
-    readonly env?: Record<string, string>;
-    readonly hooks?: SandboxHooks;
-    readonly name?: string;
-    readonly prompt?: string;
-    readonly promptArgs?: PromptArgs;
-    readonly promptFile?: string;
-    readonly sandbox?: SandboxProvider;
-    readonly signal?: AbortSignal;
 }
 
 // @public (undocumented)

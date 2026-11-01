@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { Effect, Layer } from "effect";
 import type { AgentProvider } from "./AgentProvider.js";
 import { ClackDisplay, Display, FileDisplay } from "./Display.js";
-import { preprocessPrompt } from "./PromptPreprocessor.js";
 import { resolvePrompt } from "./PromptResolver.js";
 import {
   reuseSandboxFactoryLayer,
@@ -13,7 +12,7 @@ import {
 } from "./SandboxFactory.js";
 import type { MountEntry } from "./SandboxFactory.js";
 import { patchGitMountsForWindows, removeMountTempDirs } from "./mountUtils.js";
-import { withSandboxLifecycle, runHostHooks } from "./SandboxLifecycle.js";
+import { runHostHooks } from "./SandboxLifecycle.js";
 import type { SandboxHooks } from "./SandboxLifecycle.js";
 import type {
   SandboxProvider,
@@ -25,7 +24,6 @@ import type {
 } from "./SandboxProvider.js";
 import type { CloseResult, Sandbox } from "./createSandbox.js";
 import { createSandboxFromWorktree } from "./createSandbox.js";
-import type { InteractiveResult } from "./interactive.js";
 import {
   buildAgentStreamHandler,
   buildCompletionMessage,
@@ -52,8 +50,6 @@ import {
   BUILT_IN_PROMPT_ARG_KEYS,
 } from "./PromptArgumentSubstitution.js";
 import type { PromptArgs } from "./PromptArgumentSubstitution.js";
-import { noSandbox } from "./sandboxes/no-sandbox.js";
-import { raceAbortSignal } from "./raceAbortSignal.js";
 import { validateTimeoutOptions } from "./validateTimeouts.js";
 
 /** Branch strategies valid for createWorktree — head is excluded. */
@@ -77,40 +73,10 @@ export interface CreateWorktreeOptions {
   readonly copyToWorktree?: string[];
   /** Lifecycle hooks grouped by execution location (host or sandbox).
    *  Only `host.onWorktreeReady` is executed here — other hooks are passed through
-   *  to `run()`, `interactive()`, or `createSandbox()`. */
+   *  to `run()` or `createSandbox()`. */
   readonly hooks?: SandboxHooks;
   /** Override default timeouts for built-in lifecycle steps. Unset keys keep their defaults. */
   readonly timeouts?: Timeouts;
-}
-
-export interface WorktreeInteractiveOptions {
-  /** Agent provider to use (e.g. claudeCode("claude-opus-4-8")) */
-  readonly agent: AgentProvider;
-  /** Sandbox provider (e.g. docker(), noSandbox()). Defaults to noSandbox(). */
-  readonly sandbox?: SandboxProvider;
-  /** Inline prompt string (mutually exclusive with promptFile). */
-  readonly prompt?: string;
-  /** Path to a prompt file (mutually exclusive with prompt). */
-  readonly promptFile?: string;
-  /** Optional name for the interactive session. */
-  readonly name?: string;
-  /** Hooks to run during sandbox lifecycle */
-  readonly hooks?: SandboxHooks;
-  /** Key-value map for {{KEY}} placeholder substitution in prompts */
-  readonly promptArgs?: PromptArgs;
-  /** Environment variables to inject into the sandbox. */
-  readonly env?: Record<string, string>;
-  /**
-   * An `AbortSignal` that cancels the interactive session when aborted.
-   *
-   * - If `signal.aborted` is already `true` at entry, rejects immediately.
-   * - Aborting during an active session kills the agent subprocess.
-   * - The worktree is preserved on disk after abort.
-   * - The `Worktree` handle remains usable for subsequent operations.
-   * - The rejected promise surfaces `signal.reason` via
-   *   `signal.throwIfAborted()` — no Sandcastle-specific wrapping.
-   */
-  readonly signal?: AbortSignal;
 }
 
 export interface WorktreeRunOptions {
@@ -193,8 +159,6 @@ export interface Worktree {
   readonly worktreePath: string;
   /** Run an AFK agent in this worktree with a required sandbox. */
   run(options: WorktreeRunOptions): Promise<WorktreeRunResult>;
-  /** Run an interactive agent session in this worktree. */
-  interactive(options: WorktreeInteractiveOptions): Promise<InteractiveResult>;
   /** Create a long-lived sandbox backed by this worktree's worktree. */
   createSandbox(options: WorktreeCreateSandboxOptions): Promise<Sandbox>;
   /** Clean up the worktree. Preserves worktree if dirty. */
@@ -225,7 +189,7 @@ export const createWorktree = async (
       ? options.branchStrategy.baseBranch
       : undefined;
 
-  // Captured for the worktree's run/interactive/createSandbox methods so they
+  // Captured for the worktree's run/createSandbox methods so they
   // can route the branch correctly into `SandboxLifecycle`: in `merge-to-head`
   // mode they pass `branch: undefined` (to trigger the merge step) plus
   // `keepSourceBranch: true` (so the worktree's source branch survives).
@@ -290,233 +254,6 @@ export const createWorktree = async (
     }).pipe(Effect.runPromise);
   };
 
-  const worktreeInteractive = async (
-    opts: WorktreeInteractiveOptions,
-  ): Promise<InteractiveResult> => {
-    // If signal is already aborted, reject immediately without any setup
-    opts.signal?.throwIfAborted();
-
-    const { prompt, promptFile, hooks, agent: provider } = opts;
-    const resolvedSandbox = opts.sandbox ?? noSandbox();
-
-    // Validate buildInteractiveArgs is available
-    if (!provider.buildInteractiveArgs) {
-      throw new Error(
-        `Agent provider "${provider.name}" does not support buildInteractiveArgs, required for interactive sessions.`,
-      );
-    }
-
-    const inner = Effect.gen(function* () {
-      const d = yield* Display;
-
-      // 1. Resolve prompt (from string or file), or skip if neither provided
-      const hasPromptSource = prompt !== undefined || promptFile !== undefined;
-      const resolved = hasPromptSource
-        ? yield* resolvePrompt({ prompt, promptFile })
-        : undefined;
-      const rawPrompt = resolved?.text ?? "";
-      const isInlinePrompt = resolved?.source === "inline";
-
-      // 2. Resolve env vars
-      const resolvedEnv = yield* resolveEnv(hostRepoDir);
-      const env = mergeProviderEnv({
-        resolvedEnv,
-        agentProviderEnv: provider.env,
-        sandboxProviderEnv: resolvedSandbox.env,
-      });
-      const effectiveEnv = { ...env, ...opts.env };
-
-      // 3. Prompt args substitution (skip when no prompt, or when inline passthrough)
-      let substitutedPrompt = rawPrompt;
-      if (hasPromptSource && !isInlinePrompt) {
-        const userArgs = opts.promptArgs ?? {};
-        yield* validateNoBuiltInArgOverride(userArgs);
-
-        // TARGET_BRANCH is the host's active branch at run() time, matching
-        // top-level run(): the branch merge-to-head merges back into.
-        const currentHostBranch =
-          yield* WorktreeManager.getCurrentBranch(hostRepoDir);
-        const effectiveArgs = {
-          SOURCE_BRANCH: worktreeInfo.branch,
-          TARGET_BRANCH: currentHostBranch,
-          ...userArgs,
-        };
-        const builtInArgKeysSet = new Set<string>(BUILT_IN_PROMPT_ARG_KEYS);
-        substitutedPrompt = yield* substitutePromptArgs(
-          rawPrompt,
-          effectiveArgs,
-          builtInArgKeysSet,
-        );
-      } else if (isInlinePrompt) {
-        yield* validateNoArgsWithInlinePrompt(opts.promptArgs ?? {});
-      }
-
-      // Display intro
-      yield* d.intro(opts.name ?? "sandcastle interactive");
-      yield* d.summary("Interactive Session", {
-        Agent: opts.name ?? provider.name,
-        Sandbox: resolvedSandbox.name,
-        Branch: worktreeInfo.branch,
-      });
-
-      // 4. Start sandbox
-      // Temp dirs behind the git mounts, removed once the sandbox is closed.
-      const mountsToClean: MountEntry[] = [];
-      let handle:
-        | BindMountSandboxHandle
-        | IsolatedSandboxHandle
-        | NoSandboxHandle;
-
-      if (resolvedSandbox.tag === "none") {
-        handle = yield* Effect.promise(async () =>
-          resolvedSandbox.create({
-            worktreePath: worktreeInfo.path,
-            env: effectiveEnv,
-          }),
-        );
-      } else if (resolvedSandbox.tag === "isolated") {
-        const startResult = yield* d.taskLog("Starting sandbox", () =>
-          startSandbox({
-            provider: resolvedSandbox,
-            hostRepoDir: worktreeInfo.path,
-            env: effectiveEnv,
-            copyPaths: options.copyToWorktree,
-            copySourceDir: hostRepoDir,
-          }),
-        );
-        handle = startResult.handle;
-      } else {
-        const gitPath = join(hostRepoDir, ".git");
-        const rawGitMounts = yield* resolveGitMounts(gitPath);
-        const gitMounts = yield* patchGitMountsForWindows(
-          rawGitMounts,
-          worktreeInfo.path,
-          SANDBOX_REPO_DIR,
-        );
-        mountsToClean.push(...gitMounts);
-        const startResult = yield* d.taskLog("Starting sandbox", () =>
-          startSandbox({
-            provider: resolvedSandbox,
-            hostRepoDir,
-            env: effectiveEnv,
-            worktreeOrRepoPath: worktreeInfo.path,
-            gitMounts,
-            repoDir: SANDBOX_REPO_DIR,
-          }),
-        );
-        handle = startResult.handle;
-      }
-
-      // Run lifecycle — worktree owns worktree, so no worktree cleanup here
-      return yield* Effect.gen(function* () {
-        if (!handle.interactiveExec) {
-          throw new Error(
-            `Sandbox provider does not support interactiveExec. ` +
-              `The provider must implement the optional interactiveExec method to use interactive().`,
-          );
-        }
-        const interactiveExecFn = handle.interactiveExec.bind(handle);
-        const sandbox = makeSandboxFromHandle(handle);
-        const { worktreePath } = handle;
-
-        const applyToHost =
-          resolvedSandbox.tag === "isolated"
-            ? () => syncOut(worktreeInfo.path, handle as IsolatedSandboxHandle)
-            : () => Effect.void;
-
-        const lifecycleEffect = withSandboxLifecycle(
-          {
-            hostRepoDir,
-            sandboxRepoDir: worktreePath,
-            hooks,
-            // merge-to-head: pass `undefined` so the lifecycle records the
-            // host's current branch and merges the worktree's commits back into
-            // it. branch strategy: pin to the worktree's branch.
-            branch: isMergeToHead ? undefined : worktreeInfo.branch,
-            hostWorktreePath: worktreeInfo.path,
-            applyToHost,
-            timeouts: options.timeouts,
-            keepSourceBranch: isMergeToHead,
-          },
-          sandbox,
-          (ctx) =>
-            Effect.gen(function* () {
-              const fullPrompt =
-                !hasPromptSource || isInlinePrompt
-                  ? substitutedPrompt
-                  : yield* preprocessPrompt(
-                      substitutedPrompt,
-                      ctx.sandbox,
-                      ctx.sandboxRepoDir,
-                    );
-
-              const interactiveArgs = provider.buildInteractiveArgs!({
-                prompt: fullPrompt,
-                dangerouslySkipPermissions: resolvedSandbox.tag !== "none",
-              });
-
-              const result = yield* raceAbortSignal(
-                Effect.promise(async () =>
-                  interactiveExecFn(interactiveArgs, {
-                    stdin: process.stdin,
-                    stdout: process.stdout,
-                    stderr: process.stderr,
-                    cwd: worktreePath,
-                  }),
-                ),
-                opts.signal,
-              );
-
-              return result.exitCode;
-            }),
-        );
-
-        const lifecycleResult = yield* lifecycleEffect;
-
-        const exitCode = lifecycleResult.result;
-
-        // Summary
-        yield* d.summary("Session Complete", {
-          Commits: String(lifecycleResult.commits.length),
-          Branch: lifecycleResult.branch,
-          "Exit code": String(exitCode),
-        });
-
-        return {
-          commits: lifecycleResult.commits,
-          branch: lifecycleResult.branch,
-          preservedWorktreePath: undefined,
-          exitCode,
-        } satisfies InteractiveResult;
-      }).pipe(
-        // Always close sandbox handle
-        Effect.ensuring(
-          Effect.promise(async () => handle.close().catch(() => {})).pipe(
-            Effect.andThen(removeMountTempDirs(mountsToClean)),
-          ),
-        ),
-      );
-    });
-
-    try {
-      return await Effect.runPromise(
-        inner.pipe(
-          Effect.provide(
-            Layer.mergeAll(
-              ClackDisplay.layer,
-              NodeContext.layer,
-              NodeFileSystem.layer,
-            ),
-          ),
-        ),
-      );
-    } catch (error: unknown) {
-      // If the signal was aborted, surface its reason verbatim (no wrapping)
-      opts.signal?.throwIfAborted();
-      throw error;
-    }
-  };
-
   const worktreeRun = async (
     opts: WorktreeRunOptions,
   ): Promise<WorktreeRunResult> => {
@@ -569,7 +306,7 @@ export const createWorktree = async (
       } else {
         yield* validateNoBuiltInArgOverride(userArgs);
         // TARGET_BRANCH is the host's active branch, matching top-level
-        // interactive(): the branch merge-to-head merges back into.
+        // run(): the branch merge-to-head merges back into.
         const currentHostBranch =
           yield* WorktreeManager.getCurrentBranch(hostRepoDir);
         const effectiveArgs = {
@@ -797,7 +534,6 @@ export const createWorktree = async (
     branch: worktreeInfo.branch,
     worktreePath: worktreeInfo.path,
     run: worktreeRun,
-    interactive: worktreeInteractive,
     createSandbox: worktreeCreateSandbox,
     close,
     async [Symbol.asyncDispose]() {

@@ -8,8 +8,6 @@ export type {
   ContextWindow,
   Timeouts,
 } from "./run.js";
-export { interactive } from "./interactive.js";
-export type { InteractiveOptions, InteractiveResult } from "./interactive.js";
 export { createSandbox } from "./createSandbox.js";
 export type {
   CreateSandboxOptions,
@@ -17,8 +15,6 @@ export type {
   SandboxRunOptions,
   SandboxRunResult,
   ResumeSandboxRunResultOptions,
-  SandboxInteractiveOptions,
-  SandboxInteractiveResult,
   SandboxExecOptions,
   CloseResult,
 } from "./createSandbox.js";
@@ -27,7 +23,6 @@ export type {
   CreateWorktreeOptions,
   Worktree,
   WorktreeBranchStrategy,
-  WorktreeInteractiveOptions,
   WorktreeRunOptions,
   WorktreeRunResult,
   WorktreeCreateSandboxOptions,
@@ -87,7 +82,6 @@ export type {
   BindMountSandboxHandle,
   IsolatedSandboxHandle,
   NoSandboxHandle,
-  InteractiveExecOptions,
   ExecResult,
   BindMountCreateOptions,
   BindMountSandboxProviderConfig,

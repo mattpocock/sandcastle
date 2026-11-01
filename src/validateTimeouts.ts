@@ -1,6 +1,6 @@
 import type { Timeouts } from "./run.js";
 
-/** The timeout-shaped options shared by `run()`, `interactive()`, `createSandbox()`, `createWorktree()` and their handles. */
+/** The timeout-shaped options shared by `run()`, `createSandbox()`, `createWorktree()` and their handles. */
 export interface TimeoutOptions {
   readonly idleTimeoutSeconds?: number;
   readonly completionTimeoutSeconds?: number;

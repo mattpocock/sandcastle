@@ -3,25 +3,23 @@
  *
  * Usage:
  *   import { noSandbox } from "sandcastle/sandboxes/no-sandbox";
- *   await interactive({ agent: claudeCode("claude-opus-4-8"), sandbox: noSandbox() });
+ *   await run({ agent: claudeCode("claude-opus-4-8"), sandbox: noSandbox(), prompt: "…" });
  *
- * Accepted by `run()`, `interactive()`, and `createSandbox()`. Skips
+ * Accepted by `run()` and `createSandbox()`. Skips
  * container isolation entirely — the agent executes on the host. Does not
  * pass `--dangerously-skip-permissions` to the agent — the user manages
  * permissions themselves.
  */
 
 import { spawn } from "node:child_process";
-import type { StdioOptions } from "node:child_process";
 import { createInterface } from "node:readline";
 import type {
   NoSandboxProvider,
   NoSandboxHandle,
   ExecResult,
-  InteractiveExecOptions,
 } from "../SandboxProvider.js";
 import { BoundedTail, MAX_TAIL_CHARS } from "../boundedTail.js";
-import { planWindowsExec, planWindowsSpawn } from "./windowsCommand.js";
+import { planWindowsExec } from "./windowsCommand.js";
 
 export interface NoSandboxOptions {
   /** Environment variables injected by this provider. Merged at launch time. */
@@ -148,48 +146,6 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
         });
       },
 
-      interactiveExec: async (
-        args: string[],
-        opts: InteractiveExecOptions,
-      ): Promise<{ exitCode: number }> => {
-        const cwd = opts.cwd ?? worktreePath;
-        const stdio = [opts.stdin, opts.stdout, opts.stderr] as StdioOptions;
-        // On Windows, spawn the resolved program with its argv (escaped for
-        // cmd.exe only when it is a `.cmd`/`.bat` npm shim, #940). If it
-        // isn't on PATH, fall back to `shell: true` so cmd.exe can try.
-        const plan =
-          process.platform === "win32"
-            ? await planWindowsSpawn(args, processEnv, cwd)
-            : undefined;
-        return new Promise((resolve, reject) => {
-          const [cmd, ...rest] = args;
-          if (cmd === undefined) {
-            reject(new Error("interactiveExec needs a command to run"));
-            return;
-          }
-          const proc = plan
-            ? spawn(plan.file, plan.args, {
-                cwd,
-                env: processEnv,
-                stdio,
-                windowsVerbatimArguments: plan.windowsVerbatimArguments,
-              })
-            : spawn(cmd, rest, {
-                cwd,
-                env: processEnv,
-                stdio,
-                shell: process.platform === "win32",
-              });
-
-          proc.on("error", (error: Error) => {
-            reject(new Error(`exec failed: ${error.message}`));
-          });
-
-          proc.on("close", (code: number | null) => {
-            resolve({ exitCode: code ?? 0 });
-          });
-        });
-      },
       close: async (): Promise<void> => {
         // No-op — no container to tear down
       },

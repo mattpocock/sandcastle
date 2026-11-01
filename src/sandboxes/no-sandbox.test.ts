@@ -119,47 +119,6 @@ describe("noSandbox", () => {
     );
 
     it.skipIf(isWindows)(
-      "interactiveExec spawns process and returns exit code",
-      async () => {
-        const provider = noSandbox();
-        const handle = await provider.create({
-          worktreePath: process.cwd(),
-          env: {},
-        });
-
-        const result = await handle.interactiveExec(["sh", "-c", "exit 0"], {
-          stdin: process.stdin,
-          stdout: process.stdout,
-          stderr: process.stderr,
-        });
-
-        expect(result.exitCode).toBe(0);
-      },
-    );
-
-    it.runIf(isWindows)(
-      "interactiveExec spawns process and returns exit code (cmd.exe)",
-      async () => {
-        const provider = noSandbox();
-        const handle = await provider.create({
-          worktreePath: process.cwd(),
-          env: {},
-        });
-
-        const result = await handle.interactiveExec(
-          ["cmd.exe", "/d", "/s", "/c", "exit 0"],
-          {
-            stdin: process.stdin,
-            stdout: process.stdout,
-            stderr: process.stderr,
-          },
-        );
-
-        expect(result.exitCode).toBe(0);
-      },
-    );
-
-    it.skipIf(isWindows)(
       "bounds streamed stdout to the configured tail without dropping live lines",
       async () => {
         const provider = noSandbox({ maxOutputTailChars: 100 });

@@ -223,7 +223,7 @@ export interface SandboxLifecycleOptions {
   readonly timeouts?: Timeouts;
   /** When true (used by `createWorktree`'s merge-to-head path), skip the post-merge
    *  detach-and-delete of the source branch so the worktree handle stays usable for
-   *  subsequent `wt.run()` / `wt.interactive()` calls. */
+   *  subsequent `wt.run()` calls. */
   readonly keepSourceBranch?: boolean;
 }
 

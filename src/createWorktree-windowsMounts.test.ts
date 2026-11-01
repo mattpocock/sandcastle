@@ -1,5 +1,5 @@
 /**
- * Tests that worktree.interactive() and worktree.run() (from createWorktree())
+ * Tests that worktree.run() (from createWorktree())
  * call patchGitMountsForWindows between resolveGitMounts and startSandbox,
  * mirroring the SandboxFactory pattern (ADR-0006).
  */
@@ -58,22 +58,6 @@ const toStreamJson = (output: string): string => {
   return lines.join("\n");
 };
 
-const makeInteractiveProvider = () =>
-  createBindMountSandboxProvider({
-    name: "capture-wt-interactive",
-    create: async (options) => {
-      const handle: BindMountSandboxHandle = {
-        worktreePath: options.worktreePath,
-        exec: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
-        interactiveExec: async () => ({ exitCode: 0 }),
-        copyFileIn: async () => {},
-        copyFileOut: async () => {},
-        close: async () => {},
-      };
-      return handle;
-    },
-  });
-
 const makeRunProvider = () =>
   createBindMountSandboxProvider({
     name: "capture-wt-run",
@@ -131,39 +115,6 @@ describe("createWorktree() Windows mount patching", () => {
     mockPatchGitMountsForWindows.mockClear();
     if (hostDir) {
       await rm(hostDir, { recursive: true, force: true }).catch(() => {});
-    }
-  });
-
-  it("worktree.interactive() calls patchGitMountsForWindows with the worktree path", async () => {
-    hostDir = await mkdtemp(join(tmpdir(), "wm-test-wt-interactive-"));
-    await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
-
-    const ws = await createWorktree({
-      branchStrategy: { type: "branch", branch: "wt-interactive-win" },
-      cwd: hostDir,
-    });
-
-    const provider = makeInteractiveProvider();
-
-    try {
-      await ws.interactive({
-        agent: claudeCode("claude-opus-4-8"),
-        sandbox: provider,
-        prompt: "test",
-      });
-
-      expect(mockPatchGitMountsForWindows).toHaveBeenCalledTimes(1);
-      const [call] = mockPatchGitMountsForWindows.mock.calls;
-      assert.isDefined(call);
-      const gitMounts = call[0];
-      const worktreePath = call[1];
-      const sandboxRepoDir = call[2];
-      expect(Array.isArray(gitMounts)).toBe(true);
-      expect(worktreePath).toBe(ws.worktreePath);
-      expect(sandboxRepoDir).toBe(SANDBOX_REPO_DIR);
-    } finally {
-      await ws.close();
     }
   });
 

@@ -65,16 +65,16 @@ await run({
 
 ## Sandbox Providers
 
-Sandcastle uses a `SandboxProvider` to create isolated environments. The `sandbox` option on `run()`, `interactive()`, and `createSandbox()` accepts any provider, including `noSandbox()` — opt in to running the agent directly on the host when container isolation is undesired. Built-in providers:
+Sandcastle uses a `SandboxProvider` to create isolated environments. The `sandbox` option on `run()` and `createSandbox()` accepts any provider, including `noSandbox()` — opt in to running the agent directly on the host when container isolation is undesired. Built-in providers:
 
-| Provider   | Import path                                | Type       | Accepted by                                 |
-| ---------- | ------------------------------------------ | ---------- | ------------------------------------------- |
-| Docker     | `@ai-hero/sandcastle/sandboxes/docker`     | Bind-mount | `run()`, `createSandbox()`, `interactive()` |
-| Podman     | `@ai-hero/sandcastle/sandboxes/podman`     | Bind-mount | `run()`, `createSandbox()`, `interactive()` |
-| Vercel     | `@ai-hero/sandcastle/sandboxes/vercel`     | Isolated   | `run()`, `createSandbox()`, `interactive()` |
-| No-sandbox | `@ai-hero/sandcastle/sandboxes/no-sandbox` | None       | `run()`, `createSandbox()`, `interactive()` |
+| Provider   | Import path                                | Type       | Accepted by                |
+| ---------- | ------------------------------------------ | ---------- | -------------------------- |
+| Docker     | `@ai-hero/sandcastle/sandboxes/docker`     | Bind-mount | `run()`, `createSandbox()` |
+| Podman     | `@ai-hero/sandcastle/sandboxes/podman`     | Bind-mount | `run()`, `createSandbox()` |
+| Vercel     | `@ai-hero/sandcastle/sandboxes/vercel`     | Isolated   | `run()`, `createSandbox()` |
+| No-sandbox | `@ai-hero/sandcastle/sandboxes/no-sandbox` | None       | `run()`, `createSandbox()` |
 
-Worktree methods (`wt.run()`, `wt.interactive()`, `wt.createSandbox()`) accept the same providers as their top-level counterparts. `wt.interactive()` defaults to `noSandbox()` when no sandbox is specified.
+Worktree methods (`wt.run()`, `wt.createSandbox()`) accept the same providers as their top-level counterparts.
 
 ```typescript
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
@@ -89,12 +89,12 @@ await run({
   prompt: "...",
 });
 
-// No-sandbox runs the agent directly on the host — accepted by run(),
-// createSandbox(), and interactive(). Skips container isolation entirely:
-await interactive({
+// No-sandbox runs the agent directly on the host — accepted by run() and
+// createSandbox(). Skips container isolation entirely:
+await run({
   agent: claudeCode("claude-opus-4-8"),
   sandbox: noSandbox(),
-  prompt: "...", // optional — omit to launch the TUI with no initial prompt
+  prompt: "...",
   cwd: "/path/to/other-repo", // optional — defaults to process.cwd()
 });
 ```
@@ -338,7 +338,7 @@ await sandbox.run({
 });
 ```
 
-`cwd` defaults to the sandbox repo path, matching `interactive()`. Pass `cwd` to override.
+`cwd` defaults to the sandbox repo path. Pass `cwd` to override.
 
 #### Automatic cleanup with `await using`
 
@@ -376,7 +376,6 @@ if (closeResult.preservedWorktreePath) {
 | `branch`                | string                                                                   | The branch the sandbox is on                                                                                              |
 | `worktreePath`          | string                                                                   | Host path to the worktree                                                                                                 |
 | `run(options)`          | `(SandboxRunOptions) => Promise<SandboxRunResult>`                       | Invoke an agent inside the existing sandbox                                                                               |
-| `interactive(options)`  | `(SandboxInteractiveOptions) => Promise<SandboxInteractiveResult>`       | Launch an interactive session in the sandbox                                                                              |
 | `exec(cmd, options?)`   | `(command: string, options?: SandboxExecOptions) => Promise<ExecResult>` | Run a shell command in the sandbox. `cwd` defaults to the sandbox repo path. Non-zero `exitCode` is returned, not thrown. |
 | `close()`               | `() => Promise<CloseResult>`                                             | Tear down the container and sandbox                                                                                       |
 | `[Symbol.asyncDispose]` | `() => Promise<void>`                                                    | Auto teardown via `await using`                                                                                           |
@@ -418,7 +417,7 @@ if (closeResult.preservedWorktreePath) {
 
 ### `createWorktree()` — independent worktree lifecycle
 
-Use `createWorktree()` when you need a worktree (git worktree) as an independent, first-class concept — separate from any sandbox. This is useful when you want to run an interactive session first and then hand the same worktree to a sandboxed AFK agent.
+Use `createWorktree()` when you need a worktree (git worktree) as an independent, first-class concept — separate from any sandbox. This is useful when you want to work in the worktree yourself (for example, by launching an agent CLI in `wt.worktreePath`) and then hand the same worktree to a sandboxed AFK agent.
 
 Only `branch` and `merge-to-head` strategies are accepted; `head` is a compile-time type error since it means no worktree.
 
@@ -435,12 +434,6 @@ await using wt = await createWorktree({
 
 console.log(wt.worktreePath); // host path to the worktree
 console.log(wt.branch); // "agent/fix-42"
-
-// Run an interactive session in the worktree (defaults to noSandbox)
-await wt.interactive({
-  agent: claudeCode("claude-opus-4-8"),
-  prompt: "Explore the codebase and understand the bug.",
-});
 
 // Run an AFK agent in the worktree (sandbox is required)
 const result = await wt.run({
@@ -465,9 +458,9 @@ await sandbox.close();
 // wt.close() cleans up the worktree
 ```
 
-`wt.close()` checks for uncommitted changes: if the worktree is dirty, it's preserved on disk; if clean, it's removed. `await using` calls `close()` automatically. The worktree persists after `run()`, `interactive()`, and `createSandbox()` complete, so you can hand it to another agent or inspect it.
+`wt.close()` checks for uncommitted changes: if the worktree is dirty, it's preserved on disk; if clean, it's removed. `await using` calls `close()` automatically. The worktree persists after `run()` and `createSandbox()` complete, so you can hand it to another agent or inspect it.
 
-With `branchStrategy: { type: "merge-to-head" }`, each `wt.run()` / `wt.interactive()` merges the agent's commits back to the host's current branch before returning, and the worktree's source branch is preserved across calls so subsequent ones can reuse the same handle. (This differs from top-level `run()`, where the temp branch is deleted after the merge.) `wt.close()` deletes it, unless it holds commits that are on no other branch (for example after a failed merge), in which case it is kept.
+With `branchStrategy: { type: "merge-to-head" }`, each `wt.run()` merges the agent's commits back to the host's current branch before returning, and the worktree's source branch is preserved across calls so subsequent ones can reuse the same handle. (This differs from top-level `run()`, where the temp branch is deleted after the merge.) `wt.close()` deletes it, unless it holds commits that are on no other branch (for example after a failed merge), in which case it is kept.
 
 **Split ownership**: When a sandbox is created via `wt.createSandbox()`, `sandbox.close()` tears down the container only — the worktree remains. `wt.close()` is responsible for worktree cleanup. This differs from the top-level `createSandbox()`, where `sandbox.close()` owns both container and worktree.
 
@@ -481,29 +474,14 @@ With `branchStrategy: { type: "merge-to-head" }`, each `wt.run()` / `wt.interact
 
 #### `Worktree`
 
-| Property / Method        | Type                                                                  | Description                                         |
-| ------------------------ | --------------------------------------------------------------------- | --------------------------------------------------- |
-| `branch`                 | string                                                                | The branch the worktree is on                       |
-| `worktreePath`           | string                                                                | Host path to the worktree                           |
-| `run(options)`           | `(options: WorktreeRunOptions) => Promise<WorktreeRunResult>`         | Run an AFK agent in the worktree (sandbox required) |
-| `interactive(options)`   | `(options: WorktreeInteractiveOptions) => Promise<InteractiveResult>` | Run an interactive agent session in the worktree    |
-| `createSandbox(options)` | `(options: WorktreeCreateSandboxOptions) => Promise<Sandbox>`         | Create a long-lived sandbox backed by this worktree |
-| `close()`                | `() => Promise<CloseResult>`                                          | Clean up the worktree (preserves if dirty)          |
-| `[Symbol.asyncDispose]`  | `() => Promise<void>`                                                 | Auto cleanup via `await using`                      |
-
-#### `WorktreeInteractiveOptions`
-
-| Option       | Type                   | Default       | Description                                                                                       |
-| ------------ | ---------------------- | ------------- | ------------------------------------------------------------------------------------------------- |
-| `agent`      | AgentProvider          | —             | **Required.** Agent provider                                                                      |
-| `sandbox`    | AnySandboxProvider     | `noSandbox()` | Sandbox provider (defaults to no sandbox)                                                         |
-| `prompt`     | string                 | —             | Inline prompt (mutually exclusive with `promptFile`)                                              |
-| `promptFile` | string                 | —             | Path to prompt file                                                                               |
-| `name`       | string                 | —             | Optional session name                                                                             |
-| `hooks`      | SandboxHooks           | —             | Lifecycle hooks (`host.*`, `sandbox.*`)                                                           |
-| `promptArgs` | PromptArgs             | —             | Key-value map for `{{KEY}}` placeholder substitution                                              |
-| `env`        | Record<string, string> | —             | Environment variables to inject into the sandbox                                                  |
-| `signal`     | AbortSignal            | —             | Cancel the session when aborted. The worktree is preserved on disk. Rejects with `signal.reason`. |
+| Property / Method        | Type                                                          | Description                                         |
+| ------------------------ | ------------------------------------------------------------- | --------------------------------------------------- |
+| `branch`                 | string                                                        | The branch the worktree is on                       |
+| `worktreePath`           | string                                                        | Host path to the worktree                           |
+| `run(options)`           | `(options: WorktreeRunOptions) => Promise<WorktreeRunResult>` | Run an AFK agent in the worktree (sandbox required) |
+| `createSandbox(options)` | `(options: WorktreeCreateSandboxOptions) => Promise<Sandbox>` | Create a long-lived sandbox backed by this worktree |
+| `close()`                | `() => Promise<CloseResult>`                                  | Clean up the worktree (preserves if dirty)          |
+| `[Symbol.asyncDispose]`  | `() => Promise<void>`                                         | Auto cleanup via `await using`                      |
 
 #### `WorktreeRunOptions`
 

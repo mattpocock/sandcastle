@@ -7,7 +7,7 @@
  * command each provider builds runs exactly as it would for a user, and the
  * printer reports the argv it received. No real agent CLI ever runs.
  */
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -184,20 +184,6 @@ describe.runIf(isWindows)("noSandbox on Windows (cmd.exe, #940)", () => {
     );
     expect(printed.probe).toBe("a b & 100%");
     expect(printed.argv).toStrictEqual(["x"]);
-  });
-
-  it("interactiveExec passes argv verbatim through a .cmd shim", async () => {
-    const out = join(dir, "interactive.json");
-    const args = NASTY_ARGS.filter((a) => a !== "");
-    const handle = await makeHandle({ SANDCASTLE_ARGV_OUT: out });
-    const result = await handle.interactiveExec(["argv-shim", ...args], {
-      stdin: process.stdin,
-      stdout: process.stdout,
-      stderr: process.stderr,
-    });
-    expect(result.exitCode).toBe(0);
-    const printed = Printed.parse(JSON.parse(readFileSync(out, "utf8")));
-    expect(printed.argv).toStrictEqual(args);
   });
 
   describe("every agent provider's print command", () => {

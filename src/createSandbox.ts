@@ -3,12 +3,7 @@ import { join } from "node:path";
 import { Effect, Layer, Ref } from "effect";
 import { shellEscape } from "./AgentProvider.js";
 import type { AgentProvider } from "./AgentProvider.js";
-import {
-  ClackDisplay,
-  Display,
-  FileDisplay,
-  SilentDisplay,
-} from "./Display.js";
+import { Display, FileDisplay, SilentDisplay } from "./Display.js";
 import type { DisplayEntry } from "./Display.js";
 import { resolveEnv } from "./EnvResolver.js";
 import { mergeProviderEnv } from "./mergeProviderEnv.js";
@@ -23,7 +18,6 @@ import {
 } from "./PromptArgumentSubstitution.js";
 import type { PromptArgs } from "./PromptArgumentSubstitution.js";
 import { resolvePrompt } from "./PromptResolver.js";
-import { preprocessPrompt } from "./PromptPreprocessor.js";
 import type { LoggingOption, Timeouts } from "./run.js";
 import {
   buildAgentStreamHandler,
@@ -32,7 +26,7 @@ import {
   buildLogFilename,
   printFileDisplayStartup,
 } from "./run.js";
-import { withSandboxLifecycle, runHostHooks } from "./SandboxLifecycle.js";
+import { runHostHooks } from "./SandboxLifecycle.js";
 import type { SyncError, SyncOutPathError } from "./errors.js";
 import type { SandboxHooks } from "./SandboxLifecycle.js";
 import {
@@ -61,7 +55,6 @@ import {
   assertResumeSessionExists,
 } from "./resumePrecheck.js";
 import { registerShutdown } from "./shutdownRegistry.js";
-import { raceAbortSignal } from "./raceAbortSignal.js";
 import { validateTimeoutOptions } from "./validateTimeouts.js";
 
 export interface CreateSandboxOptions {
@@ -192,34 +185,6 @@ export interface SandboxRunResult {
   ) => Promise<SandboxRunResult>;
 }
 
-export interface SandboxInteractiveOptions {
-  /** Agent provider to use (e.g. claudeCode("claude-opus-4-8")). */
-  readonly agent: AgentProvider;
-  /** Inline prompt string (mutually exclusive with promptFile). */
-  readonly prompt?: string;
-  /** Path to a prompt file (mutually exclusive with prompt). */
-  readonly promptFile?: string;
-  /** Key-value map for {{KEY}} placeholder substitution in prompts. */
-  readonly promptArgs?: PromptArgs;
-  /** Display name for this interactive session. */
-  readonly name?: string;
-  /**
-   * An `AbortSignal` that cancels the interactive session when aborted.
-   *
-   * - Pre-aborted signal rejects immediately without setup.
-   * - The rejected promise surfaces `signal.reason` verbatim.
-   * - The `Sandbox` handle remains usable after abort.
-   */
-  readonly signal?: AbortSignal;
-}
-
-export interface SandboxInteractiveResult {
-  /** List of commits made during the interactive session. */
-  readonly commits: { sha: string }[];
-  /** Exit code of the interactive process. */
-  readonly exitCode: number;
-}
-
 export interface CloseResult {
   /** Host path to the preserved worktree, set when the worktree had uncommitted changes. */
   readonly preservedWorktreePath?: string;
@@ -232,16 +197,11 @@ export interface Sandbox {
   readonly worktreePath: string;
   /** Invoke an agent inside the existing sandbox. */
   run(options: SandboxRunOptions): Promise<SandboxRunResult>;
-  /** Launch an interactive agent session inside the existing sandbox. */
-  interactive(
-    options: SandboxInteractiveOptions,
-  ): Promise<SandboxInteractiveResult>;
   /**
    * Execute a command inside the existing sandbox.
    *
-   * `cwd` defaults to the sandbox repo path (same default `interactive()`
-   * uses), so callers get the same working directory across providers. Pass
-   * `cwd` to override.
+   * `cwd` defaults to the sandbox repo path, so callers get the same working
+   * directory across providers. Pass `cwd` to override.
    *
    * Returns the full `ExecResult` — non-zero `exitCode` is surfaced, not
    * thrown. Callers that want strict semantics should check `result.exitCode`
@@ -295,7 +255,7 @@ interface SandboxHandleContext {
   /** Worktree branch strategy. Set only when the handle is backed by a
    *  `createWorktree(...)` handle; absent for top-level `createSandbox()`,
    *  which is always explicit-branch. When `type === "merge-to-head"`, each
-   *  run()/interactive() routes through the lifecycle's merge step and the
+   *  run() routes through the lifecycle's merge step and the
    *  worktree's source branch is preserved across calls. */
   readonly branchStrategy?: MergeToHeadBranchStrategy | NamedBranchStrategy;
 }
@@ -345,7 +305,7 @@ const withAgentEnv = (
 };
 
 /**
- * @internal Builds a Sandbox handle with run() and interactive() methods.
+ * @internal Builds a Sandbox handle with run(), exec() and close() methods.
  * The close callback controls teardown behavior — top-level createSandbox()
  * cleans up both container and worktree, while worktree-backed sandboxes
  * only tear down the container.
@@ -598,120 +558,6 @@ const buildSandboxHandle = (
       return baseResult;
     },
 
-    interactive: async (
-      interactiveOptions: SandboxInteractiveOptions,
-    ): Promise<SandboxInteractiveResult> => {
-      // If signal is already aborted, reject immediately without any setup
-      interactiveOptions.signal?.throwIfAborted();
-
-      const { agent: provider, prompt, promptFile } = interactiveOptions;
-
-      if (!provider.buildInteractiveArgs) {
-        throw new Error(
-          `Agent provider "${provider.name}" does not support buildInteractiveArgs, required for interactive sessions.`,
-        );
-      }
-
-      if (!providerHandle?.interactiveExec) {
-        throw new Error(
-          `Sandbox provider does not support interactiveExec. ` +
-            `The provider must implement the optional interactiveExec method to use interactive().`,
-        );
-      }
-      const interactiveExecFn =
-        providerHandle.interactiveExec.bind(providerHandle);
-
-      let lifecycleResult;
-      try {
-        lifecycleResult = await Effect.runPromise(
-          Effect.gen(function* () {
-            const resolved = yield* resolvePrompt({ prompt, promptFile });
-            const rawPrompt = resolved.text;
-            const isInlinePrompt = resolved.source === "inline";
-
-            const userArgs = interactiveOptions.promptArgs ?? {};
-            const currentHostBranch =
-              yield* WorktreeManager.getCurrentBranch(hostRepoDir);
-
-            let resolvedPrompt: string;
-            if (isInlinePrompt) {
-              yield* validateNoArgsWithInlinePrompt(userArgs);
-              resolvedPrompt = rawPrompt;
-            } else {
-              yield* validateNoBuiltInArgOverride(userArgs);
-              const effectiveArgs = {
-                SOURCE_BRANCH: branch,
-                TARGET_BRANCH: currentHostBranch,
-                ...userArgs,
-              };
-              const builtInArgKeysSet = new Set<string>(
-                BUILT_IN_PROMPT_ARG_KEYS,
-              );
-              resolvedPrompt = yield* substitutePromptArgs(
-                rawPrompt,
-                effectiveArgs,
-                builtInArgKeysSet,
-              );
-            }
-
-            return yield* withSandboxLifecycle(
-              {
-                hostRepoDir,
-                sandboxRepoDir,
-                branch: mergeToHead ? undefined : branch,
-                hostWorktreePath: worktreePath,
-                applyToHost,
-                timeouts,
-                keepSourceBranch: mergeToHead,
-              },
-              sandbox,
-              (ctx) =>
-                Effect.gen(function* () {
-                  const fullPrompt = isInlinePrompt
-                    ? resolvedPrompt
-                    : yield* preprocessPrompt(
-                        resolvedPrompt,
-                        ctx.sandbox,
-                        ctx.sandboxRepoDir,
-                      );
-
-                  const interactiveArgs = provider.buildInteractiveArgs!({
-                    prompt: fullPrompt,
-                    dangerouslySkipPermissions: true,
-                  });
-                  const execPromise = interactiveExecFn(interactiveArgs, {
-                    stdin: process.stdin,
-                    stdout: process.stdout,
-                    stderr: process.stderr,
-                    cwd: sandboxRepoDir,
-                  });
-
-                  const result = yield* raceAbortSignal(
-                    Effect.promise(() => execPromise),
-                    interactiveOptions.signal,
-                  );
-
-                  return result.exitCode;
-                }),
-            );
-          }).pipe(
-            Effect.provide(
-              Layer.mergeAll(ClackDisplay.layer, NodeContext.layer),
-            ),
-          ),
-        );
-      } catch (error: unknown) {
-        // If the signal was aborted, surface its reason verbatim
-        interactiveOptions.signal?.throwIfAborted();
-        throw error;
-      }
-
-      return {
-        commits: lifecycleResult.commits,
-        exitCode: lifecycleResult.result,
-      };
-    },
-
     exec: async (
       command: string,
       options?: SandboxExecOptions,
@@ -744,7 +590,7 @@ export interface CreateSandboxFromWorktreeOptions {
   readonly copyToWorktree?: string[];
   readonly timeouts?: Timeouts;
   /** Forwarded to the Sandbox handle. Set by `createWorktree` so the handle
-   *  can route run()/interactive() correctly: for `merge-to-head`, each call
+   *  can route run() correctly: for `merge-to-head`, each call
    *  merges back to the host's current branch and the worktree's source
    *  branch is preserved; for `branch`, the lifecycle is driven as
    *  explicit-branch mode. Absent for top-level `createSandbox()`. */

@@ -348,7 +348,7 @@ const parseCursorStreamLine = (line: string): ParsedStreamEvent[] => {
   return parseStreamJsonLine(line);
 };
 
-/** Options passed to buildPrintCommand and buildInteractiveArgs. */
+/** Options passed to buildPrintCommand. */
 export interface AgentCommandOptions {
   readonly prompt: string;
   readonly dangerouslySkipPermissions: boolean;
@@ -425,7 +425,6 @@ export interface AgentProvider {
   /** Provider-owned storage and transfer behavior for resumable agent sessions. */
   readonly sessionStorage?: AgentSessionStorage;
   buildPrintCommand(options: AgentCommandOptions): PrintCommand;
-  buildInteractiveArgs?(options: AgentCommandOptions): string[];
   parseStreamLine(line: string): ParsedStreamEvent[];
   /** Parse token usage from the captured session JSONL content. Only implemented by Claude Code. */
   parseSessionUsage?(content: string): IterationUsage | undefined;
@@ -888,12 +887,6 @@ export const pi = (
     };
   },
 
-  buildInteractiveArgs({ prompt }: AgentCommandOptions): string[] {
-    const args = ["pi", "--model", model];
-    if (prompt) args.push(prompt);
-    return args;
-  },
-
   parseStreamLine(line: string): ParsedStreamEvent[] {
     return parsePiStreamLine(line);
   },
@@ -1087,12 +1080,6 @@ export const codex = (
     };
   },
 
-  buildInteractiveArgs({ prompt }: AgentCommandOptions): string[] {
-    const args = ["codex", "--model", model];
-    if (prompt) args.push(prompt);
-    return args;
-  },
-
   parseStreamLine(line: string): ParsedStreamEvent[] {
     return parseCodexStreamLine(line);
   },
@@ -1177,16 +1164,6 @@ export const cursor = (
     return {
       command: `agent --print --output-format stream-json --model ${shellEscape(model)} ${forceFlag}${resumeFlag} ${shellEscape(prompt)}`,
     };
-  },
-
-  buildInteractiveArgs({
-    prompt,
-    dangerouslySkipPermissions,
-  }: AgentCommandOptions): string[] {
-    const args = ["agent", "--model", model];
-    if (dangerouslySkipPermissions) args.push("--force");
-    if (prompt) args.push(prompt);
-    return args;
   },
 
   parseStreamLine(line: string): ParsedStreamEvent[] {
@@ -1350,16 +1327,6 @@ export const opencode = (
     return {
       command: `opencode run --format json --model ${shellEscape(model)}${variantFlag}${agentFlag}${permissionsFlag}${sessionFlags} ${shellEscape(prompt)}`,
     };
-  },
-
-  buildInteractiveArgs({ prompt }: AgentCommandOptions): string[] {
-    const args = ["opencode", "--model", model];
-    if (options?.agent) args.push("--agent", options.agent);
-    // The TUI's seed-prompt flag is `--prompt` (long form only); `-p` is the
-    // `opencode run`/`attach` basic-auth password flag, not a prompt seed.
-    // Pre-fills the textbox but does not auto-submit (sst/opencode#3937).
-    if (prompt) args.push("--prompt", prompt);
-    return args;
   },
 
   parseStreamLine(line: string): ParsedStreamEvent[] {
@@ -1555,17 +1522,6 @@ export const copilot = (
     };
   },
 
-  buildInteractiveArgs({ prompt }: AgentCommandOptions): string[] {
-    const args = ["copilot", "--model", model];
-    // Seed the interactive session with `-i`/`--interactive`, NOT `-p`. The
-    // `-p`/`--prompt` flag runs the prompt programmatically and exits after
-    // completion; since interactive() attaches these args to the real TTY,
-    // `-p` would print-and-exit instead of launching the TUI. `-i` starts an
-    // interactive session and auto-executes the prompt without exiting.
-    if (prompt) args.push("-i", prompt);
-    return args;
-  },
-
   parseStreamLine(line: string): ParsedStreamEvent[] {
     return parseCopilotStreamLine(line);
   },
@@ -1637,22 +1593,6 @@ export const claudeCode = (
       command: `claude --print --verbose${permissionFlag} --output-format stream-json --model ${shellEscape(model)}${effortFlag}${resumeFlag}${forkFlag} -p -`,
       stdin: prompt,
     };
-  },
-
-  buildInteractiveArgs({
-    prompt,
-    dangerouslySkipPermissions,
-  }: AgentCommandOptions): string[] {
-    const args = ["claude"];
-    if (options?.permissionMode) {
-      args.push("--permission-mode", options.permissionMode);
-    } else if (dangerouslySkipPermissions) {
-      args.push("--dangerously-skip-permissions");
-    }
-    args.push("--model", model);
-    if (options?.effort) args.push("--effort", options.effort);
-    if (prompt) args.push(prompt);
-    return args;
   },
 
   parseStreamLine(line: string): ParsedStreamEvent[] {
