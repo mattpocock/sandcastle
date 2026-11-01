@@ -3,6 +3,7 @@ import {
   baselineGrowth,
   compare,
   countViolations,
+  matchObjectUndefinedCount,
   shrink,
 } from "./lint-ratchet-core.ts";
 
@@ -61,5 +62,22 @@ describe("lint ratchet", () => {
         { "a.ts": { x: 3 } },
       ),
     ).toStrictEqual(["b.ts: x 0 -> 1"]);
+  });
+
+  it("counts toMatchObject calls that give a key the value undefined", () => {
+    // Built from parts so this file does not trip the check it tests.
+    const call = "toMatchObject";
+    const absent = "undefined";
+    const source = [
+      `expect(a).${call}({ k: ${absent} });`,
+      `expect(b).${call}({`,
+      "  nested: { k: f(1) },",
+      `  other:   ${absent},`,
+      "});",
+      `expect(c).${call}({ k: 1 });`,
+      `expect(d).toBe(${absent});`,
+      `const e = { k: ${absent} };`,
+    ].join("\n");
+    expect(matchObjectUndefinedCount(source)).toBe(2);
   });
 });
