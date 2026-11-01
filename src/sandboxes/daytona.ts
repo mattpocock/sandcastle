@@ -105,8 +105,9 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
     env: options?.env,
     create: async (createOptions): Promise<IsolatedSandboxHandle> => {
       const maxOutputTailChars = options?.maxOutputTailChars ?? MAX_TAIL_CHARS;
-      const { Daytona } =
-        (await import("@daytona/sdk")) as typeof import("@daytona/sdk");
+      const { Daytona } = (await import(
+        "@daytona/sdk"
+      )) as typeof import("@daytona/sdk");
 
       const client: DaytonaClient = new Daytona(toDaytonaConfig(options));
       // Pass the resolved env (env resolver + provider + agent) to the

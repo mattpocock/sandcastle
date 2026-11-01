@@ -44,8 +44,9 @@ vi.mock(import("./mountUtils.js"), async (importOriginal) => {
   };
 });
 
-const { createSandbox, createSandboxFromWorktree } =
-  await import("./createSandbox.js");
+const { createSandbox, createSandboxFromWorktree } = await import(
+  "./createSandbox.js"
+);
 const { createBindMountSandboxProvider } = await import("./SandboxProvider.js");
 const { SANDBOX_REPO_DIR } = await import("./SandboxFactory.js");
 

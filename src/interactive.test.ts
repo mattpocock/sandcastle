@@ -256,8 +256,9 @@ describe("interactive()", () => {
   });
 
   it("throws when provider is isolated (not bind-mount)", async () => {
-    const { createIsolatedSandboxProvider } =
-      await import("./SandboxProvider.js");
+    const { createIsolatedSandboxProvider } = await import(
+      "./SandboxProvider.js"
+    );
     const isolatedProvider = createIsolatedSandboxProvider({
       name: "test-isolated",
       create: async () => ({
