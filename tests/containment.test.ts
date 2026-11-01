@@ -9,9 +9,9 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
-import type { Dirent } from "node:fs";
 import { createServer } from "node:net";
 import type { Server } from "node:net";
 import { release, tmpdir, userInfo } from "node:os";
@@ -88,29 +88,11 @@ const portOf = (server: Server): number => {
 const hostProcesses = (): string =>
   execFileSync("ps", ["-eo", "args="], { encoding: "utf8" });
 
-/** The entries of `dir`, or none when it's gone (other test files delete theirs concurrently). */
-const entriesOf = (dir: string): Dirent[] => {
-  try {
-    return readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return [];
-  }
-};
-
 /** Paths under `root` whose last segment is `name`. */
-const filesNamed = (root: string, name: string): string[] => {
-  const found: string[] = [];
-  for (const entry of entriesOf(root)) {
-    const entryPath = path.join(root, entry.name);
-    if (entry.name === name) {
-      found.push(entryPath);
-    }
-    if (entry.isDirectory()) {
-      found.push(...filesNamed(entryPath, name));
-    }
-  }
-  return found;
-};
+const filesNamed = (root: string, name: string): string[] =>
+  readdirSync(root, { recursive: true, encoding: "utf8" })
+    .filter((entry) => path.basename(entry) === name)
+    .map((entry) => path.join(root, entry));
 
 describe.each(NATIVE_PROVIDERS)("containment: $name", (provider) => {
   describe.skipIf(skipsHere(provider))("on this host", () => {
@@ -238,6 +220,102 @@ describe.each(NATIVE_PROVIDERS)("containment: $name", (provider) => {
       } finally {
         rmSync(sibling, { recursive: true, force: true });
       }
+    });
+
+    describe("the toolchain behind a symlinked PATH executable", () => {
+      const writeScript = (file: string, body: string): void => {
+        mkdirSync(path.dirname(file), { recursive: true });
+        writeFileSync(file, `#!/bin/sh\n${body}\n`);
+        chmodSync(file, 0o755);
+      };
+
+      /** Puts `bin` first on the host PATH, as a `~/.local/bin` would be. */
+      const linkOnPath = (home: string, target: string, name: string): void => {
+        const bin = path.join(home, ".local", "bin");
+        mkdirSync(bin, { recursive: true });
+        symlinkSync(target, path.join(bin, name));
+        vi.stubEnv("HOME", home);
+        vi.stubEnv("PATH", `${bin}:${process.env["PATH"] ?? ""}`);
+      };
+
+      it("hides the projects beside a tool under a stray package.json", async () => {
+        const home = path.join(outside, "home");
+        const code = path.join(home, "code");
+        mkdirSync(code, { recursive: true });
+        writeFileSync(path.join(code, "package.json"), "{}\n");
+        const run = path.join(code, "mytool", "bin", "run");
+        writeScript(run, "echo mytool ran");
+        const secret = path.join(code, "other-project", ".env");
+        mkdirSync(path.dirname(secret));
+        writeFileSync(secret, "OTHER_PROJECT_SECRET\n");
+        linkOnPath(home, run, "mytool");
+        await using sandbox = await open();
+
+        const tool = await sandbox.exec("mytool");
+        const read = await sandbox.exec(`cat '${secret}'`);
+
+        expect(tool).toMatchObject({ exitCode: 0, stdout: "mytool ran\n" });
+        expect(read.stdout).not.toContain("OTHER_PROJECT_SECRET");
+      });
+
+      it("hides the rest of an npm-linked checkout", async () => {
+        const home = path.join(outside, "home");
+        const checkout = path.join(home, "projects", "mylib");
+        mkdirSync(path.join(checkout, ".git"), { recursive: true });
+        writeFileSync(path.join(checkout, "package.json"), "{}\n");
+        writeFileSync(path.join(checkout, ".env"), "CHECKOUT_SECRET\n");
+        const cli = path.join(checkout, "bin", "cli.js");
+        writeScript(cli, "echo mylib ran");
+        linkOnPath(home, cli, "mylib");
+        await using sandbox = await open();
+
+        const read = await sandbox.exec(`cat '${checkout}/.env'`);
+
+        expect(read.stdout).not.toContain("CHECKOUT_SECRET");
+      });
+
+      it("hides a repo whose root dir holds the tool itself", async () => {
+        const home = path.join(outside, "home");
+        const checkout = path.join(home, "scripts");
+        mkdirSync(path.join(checkout, ".git"), { recursive: true });
+        writeFileSync(path.join(checkout, ".env"), "SCRIPTS_SECRET\n");
+        const tool = path.join(checkout, "deploy");
+        writeScript(tool, "echo deploy ran");
+        linkOnPath(home, tool, "deploy");
+        await using sandbox = await open();
+
+        const read = await sandbox.exec(`cat '${checkout}/.env'`);
+
+        expect(read.stdout).not.toContain("SCRIPTS_SECRET");
+      });
+
+      it("makes readable the whole package of a global npm install", async () => {
+        // A global install under a prefix: the bin is a symlink into the
+        // package, and the script reads a file elsewhere in that package.
+        const home = path.join(outside, "home");
+        const pkg = path.join(
+          outside,
+          "prefix",
+          "lib",
+          "node_modules",
+          "@scope",
+          "agent",
+        );
+        mkdirSync(path.join(pkg, "data"), { recursive: true });
+        writeFileSync(path.join(pkg, "package.json"), "{}\n");
+        writeFileSync(path.join(pkg, "data", "greeting.txt"), "from pkg\n");
+        const bin = path.join(pkg, "bin", "agent");
+        writeScript(
+          bin,
+          'cat "$(dirname "$(readlink -f "$0")")/../data/greeting.txt"',
+        );
+        linkOnPath(home, bin, "agent");
+        await using sandbox = await open();
+
+        const result = await sandbox.exec("agent");
+
+        expect(result).toMatchObject({ exitCode: 0, stdout: "from pkg\n" });
+      });
     });
 
     describe("git control files", () => {
@@ -460,6 +538,10 @@ describe.each(NATIVE_PROVIDERS)("containment: $name", (provider) => {
       const home = path.join(outside, "home");
       mkdirSync(home);
       vi.stubEnv("HOME", home);
+      // The private dirs live under the host's temp dir: give this sandbox its own.
+      const hostTmp = path.join(outside, "tmp");
+      mkdirSync(hostTmp);
+      vi.stubEnv("TMPDIR", hostTmp);
       const name = `planted-${path.basename(outside)}.json`;
       {
         await using sandbox = await open();
@@ -467,13 +549,15 @@ describe.each(NATIVE_PROVIDERS)("containment: $name", (provider) => {
           `mkdir -p ~/.claude && echo '{}' > ~/.claude/${name}`,
         );
         expect(result.exitCode).toBe(0);
+        // Precondition: the scan below looks where the private home lives.
+        expect(filesNamed(hostTmp, name)).toHaveLength(1);
       }
 
       expect(existsSync(path.join(home, ".claude", name))).toBe(false);
       expect(existsSync(path.join(userInfo().homedir, ".claude", name))).toBe(
         false,
       );
-      expect(filesNamed(tmpdir(), name)).toStrictEqual([]);
+      expect(filesNamed(hostTmp, name)).toStrictEqual([]);
     });
 
     it("kills a background process started by exec on close()", async () => {

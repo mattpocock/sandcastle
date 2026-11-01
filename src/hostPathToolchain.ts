@@ -3,7 +3,8 @@
  * from the host `PATH`: every `PATH` dir, plus the install root of each
  * executable symlinked from those dirs (an nvm-installed `codex`, a `claude`
  * symlinked into `~/.local/bin`). A dir equal to the home dir or an ancestor
- * of it is refused, so the toolchain never exposes the whole home.
+ * of it is refused, so the toolchain never exposes the whole home, and an
+ * install root that holds a `.git` is refused, so it never exposes a repo.
  *
  * Provider-agnostic: it takes paths and returns paths. Shared by the native
  * sandbox providers.
@@ -61,10 +62,17 @@ const realPathOf = (
   path: string,
 ): Effect.Effect<Option.Option<string>> => Effect.option(fs.realPath(path));
 
+/** True when `dir` sits inside a `node_modules` tree. */
+const isInNodeModules = (dir: string): boolean =>
+  dir.split("/").includes("node_modules");
+
 /**
  * The install root of an executable's real file: the nearest ancestor holding
- * a `package.json` (a Node package's bin pulls in its own files), else the
- * file's dir. The search stops below the home dir.
+ * a `package.json` inside a `node_modules` tree (a globally installed Node
+ * package's bin pulls in its own files), else the file's dir. A `package.json`
+ * outside `node_modules` (an `npm link`ed checkout, a stray one above a
+ * projects dir) is not an install root: mounting it would expose a project.
+ * The search stops below the home dir.
  */
 const installRootOf = (
   fs: FileSystem.FileSystem,
@@ -74,21 +82,24 @@ const installRootOf = (
   Effect.gen(function* () {
     const fileDir = posix.dirname(file);
     let dir = fileDir;
-    while (!isHomeOrAncestor(dir, home)) {
+    while (isInNodeModules(dir) && !isHomeOrAncestor(dir, home)) {
       const hasPackageJson = yield* fs
         .exists(posix.join(dir, "package.json"))
         .pipe(Effect.orElseSucceed(() => false));
       if (hasPackageJson) {
         return dir;
       }
-      const parent = posix.dirname(dir);
-      if (parent === dir) {
-        break;
-      }
-      dir = parent;
+      dir = posix.dirname(dir);
     }
     return fileDir;
   });
+
+/** True when `dir` holds a `.git`: a repo's checkout is never an install root. */
+const isRepoRoot = (
+  fs: FileSystem.FileSystem,
+  dir: string,
+): Effect.Effect<boolean> =>
+  fs.exists(posix.join(dir, ".git")).pipe(Effect.orElseSucceed(() => false));
 
 /** The real files behind the symlinks directly inside `dir`. */
 const symlinkTargetsIn = (
@@ -157,7 +168,10 @@ const installRootsIn = (
     const roots = yield* Effect.all(
       targets.map((target) => installRootOf(fs, target, rules.home)),
     );
-    return roots.filter((root) => !isRefused(root, rules));
+    return yield* Effect.filter(
+      roots.filter((root) => !isRefused(root, rules)),
+      (root) => Effect.map(isRepoRoot(fs, root), (isRepo) => !isRepo),
+    );
   });
 
 /** Keeps only the dirs not inside another dir of the list. */
