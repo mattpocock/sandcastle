@@ -166,14 +166,15 @@ export const createWorld = (): World => {
   }
 
   // The Sandcastle under test, packed as npm would publish it.
-  const tgz = must(
-    "npm",
-    ["pack", "--silent", "--pack-destination", dir],
-    REPO_ROOT,
-    300_000,
-  )
-    .split("\n")
-    .pop()!;
+  const tgz =
+    must(
+      "npm",
+      ["pack", "--silent", "--pack-destination", dir],
+      REPO_ROOT,
+      300_000,
+    )
+      .split("\n")
+      .pop() ?? "";
 
   writeFileSync(
     join(project, "package.json"),
@@ -450,7 +451,7 @@ export const runInWorld = async (
     from.on("data", (chunk: string) => {
       buf += chunk;
       const lines = buf.split("\n");
-      buf = lines.pop()!;
+      buf = lines.pop() ?? "";
       for (const line of lines) {
         const clean = `${redact(line).split(world.canary).join("<CANARY>")}\n`;
         to.write(clean);
