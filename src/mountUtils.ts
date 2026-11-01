@@ -120,7 +120,7 @@ export const resolveUserMounts = (
     return {
       hostPath: resolvedHostPath,
       sandboxPath: resolveSandboxPath(m.sandboxPath, sandboxHomedir),
-      ...(m.readonly ? { readonly: true } : {}),
+      ...(m.readonly === true ? { readonly: true } : {}),
     };
   });
 
@@ -382,7 +382,10 @@ export const formatVolumeMount = (
   selinuxLabel: SelinuxLabel | undefined,
 ): string => {
   const base = `${mount.hostPath}:${mount.sandboxPath}`;
-  const options = [mount.readonly ? "ro" : undefined, selinuxLabel || undefined]
+  const options = [
+    mount.readonly === true ? "ro" : undefined,
+    selinuxLabel === false ? undefined : selinuxLabel,
+  ]
     .filter((option): option is string => option !== undefined)
     .join(",");
 
