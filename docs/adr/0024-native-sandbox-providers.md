@@ -11,7 +11,7 @@ Sandcastle ships **native sandbox providers**: bind-mount sandbox providers buil
 - **One provider per mechanism.** `bwrap()` (`@ai-hero/sandcastle/sandboxes/bwrap`) for Linux and WSL2, `seatbelt()` for macOS. No `native()` picker before v1. They share no provider code with each other or with Docker and Podman; only pure, provider-agnostic helpers may be shared. Both are built with `createBindMountSandboxProvider`: no new provider tag, no change to the `SandboxProvider` union.
 - **Paths at their host paths.** Every mount core passes is applied at its host path, in order, so the read-only git control-file overlays land on top of their writable parents. The handle's `worktreePath` is the host worktree path, so the worktree's `gitdir:` pointer resolves unchanged. User mounts must have `sandboxPath` equal to `hostPath`.
 - **No image; the host toolchain.** The system dirs are mounted read-only, and the agent runs the host's own tools.
-- **A private home.** Each sandbox gets a fresh home at `/home/agent` (its `sandboxHomedir`) and a private temp dir, both removed on close. Logins come only from env vars, so the host's stored logins stay hidden.
+- **A private home.** Each sandbox gets a fresh home and a private temp dir, both removed on close, which the handle reports as its `sandboxHomedir` and `sandboxTmpdir` (#1304): `/home/agent` and `/tmp` under `bwrap()`, real host dirs under `seatbelt()`, which can't remap paths. Copies addressed to `/home/agent` land in the private home on both. Logins come only from env vars, so the host's stored logins stay hidden.
 - **Open egress, host localhost reachable** in this version. Restricting the network is later work.
 - **Never falling back to `noSandbox()`.** A native provider that can't start fails loudly with the command that fixes it. It never runs the agent unsandboxed.
 - **No root.** `exec` with `sudo: true` rejects, naming the provider and pointing to `docker()`.
@@ -28,4 +28,4 @@ Sandcastle ships **native sandbox providers**: bind-mount sandbox providers buil
 
 - The agent's toolchain is whatever the host has; there is no image to keep in step.
 - Containment is a shared-kernel process sandbox: about runc-grade on Linux, weaker than Docker Desktop's VM on macOS. Remote providers remain the option for stronger isolation.
-- Each `exec` is a fresh sandboxed process; background processes don't survive from one `exec` to the next.
+- Each `exec` is a fresh sandboxed process; background processes don't survive from one `exec` to the next. The exception is a process under `seatbelt()` that leaves its process group (`setsid`, `setpgid`): with no PID namespace, it survives the group kill, still under the Seatbelt profile.

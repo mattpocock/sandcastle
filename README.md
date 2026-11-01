@@ -113,10 +113,10 @@ You can also [create your own provider](#custom-sandbox-providers) using `create
 A native sandbox contains the agent with your OS's own process sandbox instead of a container: Bubblewrap on Linux and WSL2, Seatbelt on macOS. There's no image to build and no daemon to run. Each `exec` is a fresh sandboxed process that runs your host's own tools, read-only.
 
 - **Files.** The agent can write only the repo (or its worktree), the git dirs Sandcastle mounts, a private temp dir and a private home. Your home directory, SSH keys, agent logins and other repos are hidden. The repo appears at its real host path, as it does under `noSandbox()`.
-- **Toolchain.** Every directory on your host `PATH` is readable, plus the install root of each executable symlinked from one, so a `claude` in `~/.local/bin` or an nvm-installed `codex` just works. A `PATH` entry equal to your home directory or an ancestor of it is never mounted. Add other paths with `mounts`.
-- **Logins.** Each sandbox gets a fresh private home, removed on close, so the agent can't use the logins stored in your home directory: `~/.claude`, `~/.codex`, `~/.config/gh`, or your macOS Keychain under `seatbelt()`. Put the agent's login in `.sandcastle/.env` (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY` and so on), and a `GH_TOKEN` there for `gh`. Your git identity is still copied in, so commits carry your name.
+- **Toolchain.** Every directory on your host `PATH` is readable, plus the install root of each executable symlinked from one, so a `claude` in `~/.local/bin` or an nvm-installed `codex` just works. The install root is the executable's package when it's installed under a `node_modules` dir, and otherwise only the executable's own directory, so an `npm link`ed checkout isn't exposed. A `PATH` entry equal to your home directory or an ancestor of it, and an install root holding a `.git`, are never mounted. Add other paths with `mounts`.
+- **Logins.** Each sandbox gets a fresh private home, removed on close, so the agent can't use the logins stored in your home directory: `~/.claude`, `~/.codex`, `~/.config/gh`. `seatbelt()` doesn't promise to keep the agent away from your macOS Keychain, so don't rely on it for that. Put the agent's login in `.sandcastle/.env` (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY` and so on), and a `GH_TOKEN` there for `gh`. Your git identity is still copied in, so commits carry your name.
 - **Env.** The agent sees only the env vars Sandcastle passes in, plus `PATH`, `HOME` and `TMPDIR`.
-- **Processes.** The agent can't signal your processes, and every process it started is killed when the sandbox closes.
+- **Processes.** The agent can't signal your processes, and every process it started is killed when the sandbox closes. Under `seatbelt()`, a process that leaves its process group (by calling `setsid` or `setpgid`) is the exception: see [Containment](#containment).
 - **Network.** Open, including your host's localhost.
 - **No root.** `exec` and hooks with `sudo: true` reject, pointing to `docker()`. There's no image to install system packages into, so install them on your host.
 - **No `interactive()`.** `interactive()` with a native provider throws `NativeInteractiveNotSupportedError`. Use `run()`, or pass `docker()` or `noSandbox()` to `interactive()`.
@@ -179,6 +179,7 @@ They don't protect against:
 - **Kernel escapes.** A native sandbox is a shared-kernel process sandbox. On Linux, `bwrap()` is about as strong as a runc container (Docker on Linux). On macOS, `seatbelt()` is weaker than Docker Desktop, which runs containers in a VM.
 - **Services on your host's localhost.** The network is open, and the sandbox can reach anything listening on `127.0.0.1`, such as a dev server or a local database.
 - **Process listing on macOS.** Seatbelt has no PID namespace. The agent can't signal your processes, and `ps`, `pgrep` and the process-list sysctl are blocked, but your processes aren't hidden the way they are in `bwrap()`'s own PID namespace. Paths outside the sandbox are visible as metadata: the agent can check that a path exists and read its size and timestamps, but not its contents.
+- **Detached processes on macOS.** `seatbelt()` kills each `exec`'s process group. A process that leaves that group, by calling `setsid` or `setpgid`, survives `close()` and your Node process being killed. It is still under the Seatbelt profile, so it can still write the worktree and reach the network, until it exits or you kill it.
 
 For an image-based sandbox, or a VM boundary on macOS and Windows, use `docker()` or `podman()`. For stronger isolation than a shared kernel, use a remote provider such as `vercel()`, which runs the agent in its own Firecracker microVM.
 
@@ -1148,14 +1149,16 @@ Sandcastle ships with built-in providers for Docker, Podman, and Vercel, but you
 
 Both provider types return a **sandbox handle** from their `create()` function. The handle exposes:
 
-| Method         | Required   | Description                                                                  |
-| -------------- | ---------- | ---------------------------------------------------------------------------- |
-| `exec`         | Both       | Run a command, optionally streaming stdout line-by-line via `options.onLine` |
-| `close`        | Both       | Tear down the sandbox                                                        |
-| `copyFileIn`   | Bind-mount | Copy a single file from the host into the sandbox                            |
-| `copyFileOut`  | Both       | Copy a single file from the sandbox to the host                              |
-| `copyIn`       | Isolated   | Copy a file or directory from the host into the sandbox                      |
-| `worktreePath` | Both       | Absolute path to the repo directory inside the sandbox                       |
+| Method           | Required             | Description                                                                       |
+| ---------------- | -------------------- | --------------------------------------------------------------------------------- |
+| `exec`           | Both                 | Run a command, optionally streaming stdout line-by-line via `options.onLine`      |
+| `close`          | Both                 | Tear down the sandbox                                                             |
+| `copyFileIn`     | Bind-mount           | Copy a single file from the host into the sandbox                                 |
+| `copyFileOut`    | Both                 | Copy a single file from the sandbox to the host                                   |
+| `copyIn`         | Isolated             | Copy a file or directory from the host into the sandbox                           |
+| `worktreePath`   | Both                 | Absolute path to the repo directory inside the sandbox                            |
+| `sandboxHomedir` | Bind-mount, optional | The agent's home as commands inside the sandbox see it. Defaults to `/home/agent` |
+| `sandboxTmpdir`  | Bind-mount, optional | A writable temp dir as commands inside the sandbox see it. Defaults to `/tmp`     |
 
 ### `ExecResult`
 

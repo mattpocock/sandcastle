@@ -35,7 +35,7 @@ Ledger section (e) checks the result against the world's canary and every undecl
 
 ## seatbelt (`…/sandboxes/seatbelt`, bind-mount, native): verify on a maintainer's Mac
 
-- **Entry:** `seatbelt()`, macOS only. It runs each exec under `/usr/bin/sandbox-exec` with a generated profile, a private home it translates to `/home/agent`, and a process group it kills on close.
+- **Entry:** `seatbelt()`, macOS only. It runs each exec under `/usr/bin/sandbox-exec` with a generated profile, a private home and temp dir at real host paths (the handle's `sandboxHomedir` and `sandboxTmpdir`; copies addressed to `/home/agent` land in the home), and a process group it kills on close (a process that calls `setsid` escapes the kill).
 - **UNVERIFIABLE here:** the harness doesn't run on macOS, so it isn't in the sandbox list and has no observer or ledger branch. Report any seatbelt claim as UNVERIFIABLE: "verify on a maintainer's Mac".
 - **Proof on a Mac:** bwrap's happy path and escape prompts, by hand: no `/proc` there, so check the env with the `env` escape prompt, and leftovers with `ps -g` and the private temp dir.
 
