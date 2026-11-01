@@ -87,6 +87,8 @@ export interface BindMountSandboxHandle {
     interactiveExec?(args: string[], options: InteractiveExecOptions): Promise<{
         exitCode: number;
     }>;
+    readonly sandboxHomedir?: string;
+    readonly sandboxTmpdir?: string;
     readonly worktreePath: string;
 }
 
@@ -415,6 +417,34 @@ export interface NamedBranchStrategy {
     // (undocumented)
     readonly type: "branch";
 }
+
+// @public
+export interface NativeInteractiveNotSupportedError extends Error {
+    // (undocumented)
+    readonly message: string;
+    readonly provider: string;
+    // (undocumented)
+    readonly _tag: "NativeInteractiveNotSupportedError";
+}
+
+// Warning: (ae-forgotten-export) The symbol "NativeInteractiveNotSupportedErrorConstructor" needs to be exported by the entry point index.d.ts
+//
+// @public
+export const NativeInteractiveNotSupportedError: NativeInteractiveNotSupportedErrorConstructor;
+
+// @public
+export interface NativeSandboxUnavailableError extends Error {
+    readonly fixCommand?: string;
+    // (undocumented)
+    readonly message: string;
+    // (undocumented)
+    readonly _tag: "NativeSandboxUnavailableError";
+}
+
+// Warning: (ae-forgotten-export) The symbol "NativeSandboxUnavailableErrorConstructor" needs to be exported by the entry point index.d.ts
+//
+// @public
+export const NativeSandboxUnavailableError: NativeSandboxUnavailableErrorConstructor;
 
 // @public
 export type NoSandboxBranchStrategy = HeadBranchStrategy | MergeToHeadBranchStrategy | NamedBranchStrategy;

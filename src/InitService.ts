@@ -1,8 +1,10 @@
 import { FileSystem } from "@effect/platform";
-import { Effect, Option, Schema } from "effect";
-import { dirname, join } from "node:path";
+import { Config, Effect, Option, Schema } from "effect";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertBwrapUsable } from "./bwrapPreflight.js";
 import { InitError } from "./errors.js";
+import { assertSeatbeltUsable } from "./seatbeltPreflight.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 
 const GITIGNORE = `.env
@@ -227,6 +229,12 @@ export interface AgentEntry {
    * sandbox image isn't built yet), so the user must have the CLI installed.
    */
   readonly setupCommand: string;
+  /**
+   * The agent's CLI on the host: the executable a native sandbox provider
+   * runs from the host `PATH`, and the command that installs it. Init warns
+   * with `install` when a native provider is chosen and `command` is missing.
+   */
+  readonly hostCli: { readonly command: string; readonly install: string };
 }
 
 const CLAUDE_CODE_DOCKERFILE = `FROM node:22-bookworm
@@ -444,6 +452,10 @@ CLAUDE_CODE_OAUTH_TOKEN=
 # Or use an Anthropic API key instead — uncomment and fill in:
 # ANTHROPIC_API_KEY=`,
     setupCommand: `claude "$(cat ${SETUP_ISSUE_TRACKER_PATH})"`,
+    hostCli: {
+      command: "claude",
+      install: "curl -fsSL https://claude.ai/install.sh | bash",
+    },
   },
   {
     name: "pi",
@@ -454,6 +466,10 @@ CLAUDE_CODE_OAUTH_TOKEN=
     envExample: `# Anthropic API key
 ANTHROPIC_API_KEY=`,
     setupCommand: `pi "$(cat ${SETUP_ISSUE_TRACKER_PATH})"`,
+    hostCli: {
+      command: "pi",
+      install: "npm install -g @mariozechner/pi-coding-agent",
+    },
   },
   {
     name: "codex",
@@ -464,6 +480,10 @@ ANTHROPIC_API_KEY=`,
     envExample: `# OpenAI API key from platform.openai.com (\`codex exec\` reads CODEX_API_KEY)
 CODEX_API_KEY=`,
     setupCommand: `codex "$(cat ${SETUP_ISSUE_TRACKER_PATH})"`,
+    hostCli: {
+      command: "codex",
+      install: "npm install -g @openai/codex",
+    },
   },
   {
     name: "cursor",
@@ -475,6 +495,10 @@ CODEX_API_KEY=`,
 # You can also pass --api-key directly to the agent CLI.
 CURSOR_API_KEY=`,
     setupCommand: `agent "$(cat ${SETUP_ISSUE_TRACKER_PATH})"`,
+    hostCli: {
+      command: "agent",
+      install: "curl https://cursor.com/install -fsS | bash",
+    },
   },
   {
     name: "opencode",
@@ -485,6 +509,10 @@ CURSOR_API_KEY=`,
     envExample: `# OpenCode API key
 OPENCODE_API_KEY=`,
     setupCommand: `opencode --prompt "$(cat ${SETUP_ISSUE_TRACKER_PATH})"`,
+    hostCli: {
+      command: "opencode",
+      install: "npm install -g opencode-ai@latest",
+    },
   },
   {
     name: "copilot",
@@ -498,10 +526,66 @@ OPENCODE_API_KEY=`,
 # so this key is used even when GH_TOKEN is set for the issue tracker.
 COPILOT_GITHUB_TOKEN=`,
     setupCommand: `copilot -i "$(cat ${SETUP_ISSUE_TRACKER_PATH})"`,
+    hostCli: {
+      command: "copilot",
+      install: "npm install -g @github/copilot",
+    },
   },
 ];
 
 export const listAgents = (): AgentEntry[] => AGENT_REGISTRY;
+
+/** True when `candidate` is a file (or a symlink to one). */
+const isFile = (
+  fs: FileSystem.FileSystem,
+  candidate: string,
+): Effect.Effect<boolean> =>
+  fs.stat(candidate).pipe(
+    Effect.map((info) => info.type === "File"),
+    Effect.orElseSucceed(() => false),
+  );
+
+/** True when a file named `command` is in one of the host `PATH` dirs. */
+const isOnHostPath = (
+  command: string,
+): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const pathValue = yield* Config.string("PATH").pipe(
+      Config.withDefault(""),
+      Effect.orElseSucceed(() => ""),
+    );
+    const pathExt = yield* Config.string("PATHEXT").pipe(
+      Config.withDefault(".EXE;.CMD;.BAT"),
+      Effect.orElseSucceed(() => ""),
+    );
+    const extensions =
+      process.platform === "win32" ? ["", ...pathExt.split(";")] : [""];
+    const candidates = pathValue
+      .split(delimiter)
+      .filter((dir) => dir !== "")
+      .flatMap((dir) => extensions.map((ext) => join(dir, `${command}${ext}`)));
+    const found = yield* Effect.all(
+      candidates.map((candidate) => isFile(fs, candidate)),
+      { concurrency: "unbounded" },
+    );
+    return found.includes(true);
+  });
+
+/**
+ * What init warns a native-provider user whose agent CLI isn't on the host
+ * `PATH`, or undefined when it is. A native sandbox runs the host's own
+ * agent CLI, so without it the first run fails inside the sandbox.
+ */
+export const agentCliWarning = (
+  agent: AgentEntry,
+  sandboxProvider: SandboxProviderEntry,
+): Effect.Effect<string | undefined, never, FileSystem.FileSystem> =>
+  Effect.map(isOnHostPath(agent.hostCli.command), (found) =>
+    found
+      ? undefined
+      : `The ${agent.label} CLI (\`${agent.hostCli.command}\`) isn't on your PATH, and ${sandboxProvider.name}() runs the host's own agent CLI. Install it with: ${agent.hostCli.install}`,
+  );
 
 // ---------------------------------------------------------------------------
 // Issue tracker registry (internal — not part of public API)
@@ -525,6 +609,12 @@ export interface IssueTrackerEntry {
    * every sandbox, including worktree sandboxes, which get tracked files only.
    */
   readonly sandboxOptions?: string;
+  /**
+   * The `sandboxOptions` source for a native provider, which shows every
+   * path at its host path, so mounts must be identity mounts. Falls back to
+   * `sandboxOptions` when unset.
+   */
+  readonly nativeSandboxOptions?: string;
 }
 
 const GITHUB_CLI_TOOLS = `# Install GitHub CLI
@@ -551,6 +641,18 @@ const BEADS_SANDBOX_OPTIONS = `// Beads keeps its database in .beads/, which git
 const sandboxOptions = {
   mounts: [{ hostPath: ".beads", sandboxPath: "${BEADS_SANDBOX_DIR}" }],
   env: { BEADS_DIR: "${BEADS_SANDBOX_DIR}" },
+};`;
+
+// A native sandbox shows every path at its host path, so the host's .beads/
+// appears at its own absolute path, and bd (the host's own) is pointed there.
+const BEADS_NATIVE_SANDBOX_OPTIONS = `// Beads keeps its database in .beads/, which git ignores, so a worktree
+// sandbox never gets it. Mount the host's .beads/ into every sandbox, at its
+// own path, and point bd at it, so every phase reads and closes issues in the
+// one shared database. Run this file from the repo root.
+const beadsDir = \`\${process.cwd()}/.beads\`;
+const sandboxOptions = {
+  mounts: [{ hostPath: beadsDir, sandboxPath: beadsDir }],
+  env: { BEADS_DIR: beadsDir },
 };`;
 
 const BEADS_TOOLS = `# Install system dependencies for Beads
@@ -657,6 +759,7 @@ GH_TOKEN=`,
     },
     envExample: "",
     sandboxOptions: BEADS_SANDBOX_OPTIONS,
+    nativeSandboxOptions: BEADS_NATIVE_SANDBOX_OPTIONS,
   },
   {
     name: "custom",
@@ -688,13 +791,36 @@ export const getAgent = (name: string): AgentEntry | undefined =>
 // Sandbox provider registry (internal — not part of public API)
 // ---------------------------------------------------------------------------
 
-export interface SandboxProviderEntry {
-  readonly name: string;
-  readonly label: string;
+/** How init scaffolds and builds the image an image-based provider runs. */
+export interface SandboxProviderImage {
   /** Filename written to .sandcastle/ (e.g. "Dockerfile" or "Containerfile") */
   readonly containerfileName: string;
   /** CLI namespace for build/remove commands (e.g. "docker" or "podman") */
   readonly cliNamespace: string;
+}
+
+export interface SandboxProviderEntry {
+  readonly name: string;
+  readonly label: string;
+  /**
+   * The provider's image, or undefined for a provider that runs without one.
+   * Every image-specific init step (containerfile scaffold, build-image
+   * prompt and flag, `imageName` rewrite, build-image next step, beads
+   * version warning) runs only when this is set.
+   */
+  readonly image?: SandboxProviderImage;
+  /**
+   * The one host OS a native provider runs on. Set only for native
+   * providers, which init offers first (and preselects) on that OS and
+   * doesn't offer on any other. `--sandbox <name>` still accepts it anywhere.
+   */
+  readonly nativePlatform?: NodeJS.Platform;
+  /**
+   * The native provider's construction check: throws
+   * `NativeSandboxUnavailableError` (whose message names the fix) when the
+   * host can't run the provider. Init runs it and warns, but still scaffolds.
+   */
+  readonly preflight?: () => void;
 }
 
 // A non-empty tuple type, so `[0]` (the default) is known to exist.
@@ -705,19 +831,68 @@ const SANDBOX_PROVIDER_REGISTRY: [
   {
     name: "docker",
     label: "Docker",
-    containerfileName: "Dockerfile",
-    cliNamespace: "docker",
+    image: { containerfileName: "Dockerfile", cliNamespace: "docker" },
   },
   {
     name: "podman",
     label: "Podman",
-    containerfileName: "Containerfile",
-    cliNamespace: "podman",
+    image: { containerfileName: "Containerfile", cliNamespace: "podman" },
+  },
+  {
+    name: "bwrap",
+    label: "Bubblewrap",
+    nativePlatform: "linux",
+    preflight: assertBwrapUsable,
+  },
+  {
+    name: "seatbelt",
+    label: "Seatbelt",
+    nativePlatform: "darwin",
+    preflight: assertSeatbeltUsable,
   },
 ];
 
 export const listSandboxProviders = (): SandboxProviderEntry[] =>
   SANDBOX_PROVIDER_REGISTRY;
+
+/**
+ * The providers init's interactive prompt offers on `platform`, in order: the
+ * host's native provider first (the one to preselect, marked recommended),
+ * then the image-based ones. Other OSes' native providers aren't offered.
+ */
+export const listSandboxProviderChoices = (
+  platform: NodeJS.Platform,
+): {
+  readonly entry: SandboxProviderEntry;
+  readonly recommended: boolean;
+}[] => {
+  const native = SANDBOX_PROVIDER_REGISTRY.filter(
+    (p) => p.nativePlatform === platform,
+  );
+  const others = SANDBOX_PROVIDER_REGISTRY.filter(
+    (p) => p.nativePlatform === undefined,
+  );
+  return [
+    ...native.map((entry) => ({ entry, recommended: true })),
+    ...others.map((entry) => ({ entry, recommended: false })),
+  ];
+};
+
+/**
+ * Why the host can't run `sandboxProvider`, as a warning naming the fix, or
+ * undefined when it can (or the provider has no host check).
+ */
+export const sandboxProviderPreflightWarning = (
+  sandboxProvider: SandboxProviderEntry,
+): string | undefined => {
+  try {
+    sandboxProvider.preflight?.();
+    return undefined;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return `This host can't run ${sandboxProvider.name}() yet, so the scaffolded main file fails until you fix it. ${reason}`;
+  }
+};
 
 export const getSandboxProvider = (
   name: string,
@@ -728,6 +903,27 @@ export const getSandboxProvider = (
 // Next steps
 // ---------------------------------------------------------------------------
 
+/** Notes under the "set the env vars" next step, for the agent and tracker. */
+const envNotes = (
+  issueTracker: IssueTrackerEntry,
+  agent: AgentEntry,
+  sandboxProvider: SandboxProviderEntry,
+): string[] => [
+  ...(agent.name === "claude-code"
+    ? [
+        "   To use your Claude subscription instead of an API key, run `claude setup-token` on your host and paste the result into CLAUDE_CODE_OAUTH_TOKEN.",
+      ]
+    : []),
+  // A native sandbox hides the host's gh login, so gh authenticates only
+  // from the env Sandcastle passes in.
+  ...(issueTracker.name === "github-issues" &&
+  sandboxProvider.image === undefined
+    ? [
+        `   ${sandboxProvider.name}() hides your host's \`gh\` login from the agent, so put a GH_TOKEN in .sandcastle/.env for \`gh\` to use.`,
+      ]
+    : []),
+];
+
 export const getNextStepsLines = (
   template: string,
   mainFilename: string,
@@ -736,6 +932,8 @@ export const getNextStepsLines = (
   packageManager: PackageManager,
   /** Template dependencies the host already has (declared, or installed by init). */
   installedDependencies: readonly string[],
+  /** The chosen sandbox provider. Defaults to the first (Docker). */
+  sandboxProvider: SandboxProviderEntry = SANDBOX_PROVIDER_REGISTRY[0],
 ): string[] => {
   const runStep = `Run \`${runScriptCommand(packageManager, "sandcastle")}\` to start the agent`;
   // The custom issue tracker scaffolds a broken-until-configured project, so
@@ -743,32 +941,30 @@ export const getNextStepsLines = (
   // normal "set env vars and go" flow. This branch wins over template-specific
   // steps regardless of the chosen template.
   if (issueTracker.name === "custom") {
+    const hasImage = sandboxProvider.image !== undefined;
     return [
       "Next steps:",
       "1. Your custom issue tracker isn't wired up yet — runs hard-fail until you configure it.",
       `2. Feed the setup prompt to ${agent.label} on your host to finish wiring it up:`,
       `   ${agent.setupCommand}`,
-      `   (Runs on the host — you need the ${agent.label} CLI installed locally, since the sandbox image isn't built yet.)`,
-      `3. Follow .sandcastle/${SETUP_ISSUE_TRACKER_DOC} to edit the scaffolded files in place, build the image, and verify.`,
+      hasImage
+        ? `   (Runs on the host — you need the ${agent.label} CLI installed locally, since the sandbox image isn't built yet.)`
+        : `   (Runs on the host — you need the ${agent.label} CLI installed locally.)`,
+      hasImage
+        ? `3. Follow .sandcastle/${SETUP_ISSUE_TRACKER_DOC} to edit the scaffolded files in place, build the image, and verify.`
+        : `3. Follow .sandcastle/${SETUP_ISSUE_TRACKER_DOC} to edit the scaffolded files in place and verify.`,
     ];
   }
   if (template === "blank") {
-    const lines = [
+    return [
       "Next steps:",
       `1. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
-    ];
-    if (agent.name === "claude-code") {
-      lines.push(
-        "   To use your Claude subscription instead of an API key, run `claude setup-token` on your host and paste the result into CLAUDE_CODE_OAUTH_TOKEN.",
-      );
-    }
-    lines.push(
+      ...envNotes(issueTracker, agent, sandboxProvider),
       "2. Read and customize .sandcastle/prompt.md to describe what you want the agent to do",
       `3. Customize .sandcastle/${mainFilename} — it uses the JS API (\`run()\`) to control how the agent runs`,
       `4. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
       `5. ${runStep}`,
-    );
-    return lines;
+    ];
   }
   const hasReviewer = template.includes("review");
   const needsPlanSchema =
@@ -778,20 +974,14 @@ export const getNextStepsLines = (
   const lines: string[] = [
     "Next steps:",
     `${step++}. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
-  ];
-  if (agent.name === "claude-code") {
-    lines.push(
-      "   To use your Claude subscription instead of an API key, run `claude setup-token` on your host and paste the result into CLAUDE_CODE_OAUTH_TOKEN.",
-    );
-  }
-  lines.push(
+    ...envNotes(issueTracker, agent, sandboxProvider),
     `${step++}. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
     `${step++}. Templates use \`copyToWorktree: ["node_modules"]\` to copy your host node_modules into the sandbox for fast startup — the \`npm install\` in the onSandboxReady hook is a safety net for platform-specific binaries. ${
       packageManager === "npm"
         ? "Adjust both if you use a different package manager"
         : `This project uses ${packageManager}, so change the hook to \`${installCommand(packageManager)}\` and check \`copyToWorktree\` suits it`
     }`,
-  );
+  ];
   if (needsPlanSchema) {
     lines.push(
       `${step++}. Install a schema validator for the planner's \`<plan>\` output — the template uses Zod (\`${addDependencyCommand(packageManager, "zod")}\`), but Valibot, ArkType, or any Standard Schema library works (https://standardschema.dev)`,
@@ -934,7 +1124,7 @@ const rewriteMainTs = (
     // A custom image name (init --image-name) must reach every sandbox factory
     // call, or the scaffolded run starts the default-named image instead of
     // the one init built.
-    if (imageName !== undefined) {
+    if (imageName !== undefined && sandboxProvider.image !== undefined) {
       content = content.replaceAll(
         new RegExp(`\\b${sandboxProvider.name}\\(\\)`, "gu"),
         `${sandboxProvider.name}({ imageName: ${JSON.stringify(imageName)} })`,
@@ -960,10 +1150,11 @@ const applyIssueTrackerSandboxOptions = (
   mainFilename: string,
 ): Effect.Effect<void, InitError, FileSystem.FileSystem> =>
   Effect.gen(function* () {
-    if (
-      issueTracker.sandboxOptions === undefined ||
-      issueTracker.sandboxOptions === ""
-    ) {
+    const sandboxOptions =
+      sandboxProvider.image === undefined
+        ? (issueTracker.nativeSandboxOptions ?? issueTracker.sandboxOptions)
+        : issueTracker.sandboxOptions;
+    if (sandboxOptions === undefined || sandboxOptions === "") {
       return;
     }
     const fs = yield* FileSystem.FileSystem;
@@ -992,7 +1183,7 @@ const applyIssueTrackerSandboxOptions = (
     }
 
     const updated = content
-      .replace(importRe, (line) => `${line}\n\n${issueTracker.sandboxOptions}`)
+      .replace(importRe, (line) => `${line}\n\n${sandboxOptions}`)
       .replaceAll(
         new RegExp(`\\b${provider}\\(\\)`, "gu"),
         `${provider}(sandboxOptions)`,
@@ -1120,14 +1311,17 @@ const substituteTemplateArgs = (
  * scaffolded main file runs, including `--image-name` when one was chosen.
  */
 export const buildImageShellCommand = (
-  sandboxProvider: SandboxProviderEntry,
+  image: SandboxProviderImage,
   imageName?: string,
 ): string =>
-  `sandcastle ${sandboxProvider.cliNamespace} build-image${
+  `sandcastle ${image.cliNamespace} build-image${
     imageName === undefined ? "" : ` --image-name ${imageName}`
   }`;
 
-const buildSetupIssueTrackerDoc = (buildCommand: string): string =>
+const buildSetupIssueTrackerDoc = (
+  /** The build-image command, or undefined for a provider with no image. */
+  buildCommand: string | undefined,
+): string =>
   `# Set up your custom issue tracker
 
 You are a coding agent. Finish wiring up the **custom issue tracker** for this Sandcastle project. It was scaffolded in a deliberately broken-until-configured state: until you complete the steps below, every Sandcastle run hard-fails with a pointer back to this file.
@@ -1153,7 +1347,10 @@ Work out, together with the user, the shell commands for:
 
 ## 3. Edit the scaffolded files in place
 
-- **Dockerfile / Containerfile** — replace the line
+${
+  buildCommand === undefined
+    ? ""
+    : `- **Dockerfile / Containerfile** — replace the line
 
   \`\`\`
   ${CUSTOM_TRACKER_TOOLS}
@@ -1161,7 +1358,8 @@ Work out, together with the user, the shell commands for:
 
   with the install steps for your tracker's CLI (if it needs one).
 
-- **Prompt files (\`.sandcastle/*.md\`)** — replace the sentinel
+`
+}- **Prompt files (\`.sandcastle/*.md\`)** — replace the sentinel
 
   \`\`\`
   ${CUSTOM_LIST_TASKS_SENTINEL}
@@ -1171,7 +1369,13 @@ Work out, together with the user, the shell commands for:
 
 - **\`.env.example\`** — replace the \`# TODO\` block with the real env var(s) your tracker needs, then tell the user to set them in \`.sandcastle/.env\`.
 
-## 4. Build the image
+${
+  buildCommand === undefined
+    ? `## 4. Verify
+
+Run your **list** command and confirm it returns the open tasks as JSON. If it errors, fix the command or the auth.
+`
+    : `## 4. Build the image
 
 Once the files are wired up, build the sandbox image:
 
@@ -1182,7 +1386,8 @@ ${buildCommand}
 ## 5. Verify
 
 Run your **list** command inside the built image and confirm it returns the open tasks as JSON. If it errors, fix the command or the auth and rebuild.
-`;
+`
+}`;
 
 // ---------------------------------------------------------------------------
 // Main scaffold function
@@ -1263,14 +1468,21 @@ export const scaffold = (
     }
     const envExampleContent = `${envExampleParts.join("\n")}\n`;
 
+    const { image } = sandboxProvider;
     yield* Effect.all(
       [
-        fs
-          .writeFileString(
-            join(configDir, sandboxProvider.containerfileName),
-            agent.dockerfileTemplate,
-          )
-          .pipe(Effect.mapError((e) => new InitError({ message: e.message }))),
+        ...(image === undefined
+          ? []
+          : [
+              fs
+                .writeFileString(
+                  join(configDir, image.containerfileName),
+                  agent.dockerfileTemplate,
+                )
+                .pipe(
+                  Effect.mapError((e) => new InitError({ message: e.message })),
+                ),
+            ]),
         fs
           .writeFileString(join(configDir, ".gitignore"), GITIGNORE)
           .pipe(Effect.mapError((e) => new InitError({ message: e.message }))),
@@ -1317,7 +1529,9 @@ export const scaffold = (
         .writeFileString(
           join(configDir, SETUP_ISSUE_TRACKER_DOC),
           buildSetupIssueTrackerDoc(
-            buildImageShellCommand(sandboxProvider, imageName),
+            image === undefined
+              ? undefined
+              : buildImageShellCommand(image, imageName),
           ),
         )
         .pipe(Effect.mapError((e) => new InitError({ message: e.message })));

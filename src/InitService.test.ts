@@ -2583,9 +2583,14 @@ const declaredKeys = (envExample: string): string[] =>
     .filter((k): k is string => k !== undefined);
 
 describe("init scaffold consistency (every agent x template x sandbox x tracker)", () => {
+  // Image-based providers only: a native provider scaffolds no containerfile
+  // and takes no image name (covered end to end in tests/init.test.ts).
+  const imageProviders = listSandboxProviders().filter(
+    (p) => p.image !== undefined,
+  );
   const combos = listAgents().flatMap((agent) =>
     listTemplates().flatMap((template) =>
-      listSandboxProviders().flatMap((sandboxProvider) =>
+      imageProviders.flatMap((sandboxProvider) =>
         listIssueTrackers().map((issueTracker) => ({
           agent,
           template: template.name,
@@ -2628,10 +2633,12 @@ describe("init scaffold consistency (every agent x template x sandbox x tracker)
         imageName,
       });
       const configDir = join(dir, ".sandcastle");
+      const { image } = sandboxProvider;
+      assert.isDefined(image);
 
       // Containerfile: every placeholder resolved, the real mount path shown.
       const containerfile = await readFile(
-        join(configDir, sandboxProvider.containerfileName),
+        join(configDir, image.containerfileName),
         "utf8",
       );
       expect(containerfile).not.toContain("${SANDBOX_REPO_DIR}");
@@ -2684,12 +2691,15 @@ describe("init scaffold consistency (every agent x template x sandbox x tracker)
         imageName,
       });
 
+      const { image } = sandboxProvider;
+      assert.isDefined(image);
+
       const setupDoc = await readFile(
         join(dir, ".sandcastle", "SETUP_ISSUE_TRACKER.md"),
         "utf8",
       );
       expect(setupDoc).toContain(
-        `sandcastle ${sandboxProvider.cliNamespace} build-image --image-name ${imageName}`,
+        `sandcastle ${image.cliNamespace} build-image --image-name ${imageName}`,
       );
     },
   );

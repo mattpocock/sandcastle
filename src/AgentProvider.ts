@@ -22,6 +22,7 @@ import {
   pathExists,
   piSessionDirPath,
   requireHostSessionPath,
+  sandboxDirsOf,
   transferClaudeSession,
   transferCodexSession,
   transferCopilotSession,
@@ -514,9 +515,9 @@ const makeClaudeSessionStorage = (
   options?: ClaudeCodeOptions,
 ): AgentSessionStorage => {
   const hostProjectsDir = options?.sessionStorage?.hostProjectsDir;
-  const sandboxProjectsDir =
+  const sandboxProjectsDirOf = (handle: BindMountSandboxHandle): string =>
     options?.sessionStorage?.sandboxProjectsDir ??
-    "/home/agent/.claude/projects";
+    posix.join(sandboxDirsOf(handle).home, ".claude", "projects");
 
   return {
     hostSessionFilePath: (cwd, id) =>
@@ -529,6 +530,7 @@ const makeClaudeSessionStorage = (
       return readFile(path, "utf8");
     },
     captureToHost: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
+      const sandboxProjectsDir = sandboxProjectsDirOf(handle);
       // Main session: failure is fatal — the user expects their session.
       await copyClaudeSessionFile({
         handle,
@@ -591,7 +593,7 @@ const makeClaudeSessionStorage = (
       const sandboxPath = claudeSandboxSessionPath(
         sandboxCwd,
         sessionId,
-        sandboxProjectsDir,
+        sandboxProjectsDirOf(handle),
       );
       await writeSandboxFile(handle, sandboxPath, rewritten, "claude-res");
     },
@@ -608,9 +610,9 @@ const makeCodexSessionStorage = (
   options?: CodexOptions,
 ): AgentSessionStorage => {
   const hostSessionsDir = options?.sessionStorage?.hostSessionsDir;
-  const sandboxSessionsDir =
+  const sandboxSessionsDirOf = (handle: BindMountSandboxHandle): string =>
     options?.sessionStorage?.sandboxSessionsDir ??
-    posix.join("/home/agent", ".codex", "sessions");
+    posix.join(sandboxDirsOf(handle).home, ".codex", "sessions");
   const capturedPaths = new Map<string, string>();
 
   return {
@@ -627,7 +629,7 @@ const makeCodexSessionStorage = (
     captureToHost: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
       const located = await locateSandboxSessionFile(
         handle,
-        sandboxSessionsDir,
+        sandboxSessionsDirOf(handle),
         `rollout-*-${sessionId}.jsonl`,
       );
       const jsonl = await readSandboxFile(handle, located.path, "codex-cap");
@@ -644,7 +646,7 @@ const makeCodexSessionStorage = (
       const jsonl = await readFile(path, "utf8");
       const rewritten = transferCodexSession(jsonl, hostCwd, sandboxCwd);
       const target = posix.join(
-        sandboxSessionsDir,
+        sandboxSessionsDirOf(handle),
         ...relative(found.searchedRoot, path).split(/[\\/]/u),
       );
       await writeSandboxFile(handle, target, rewritten, "codex-res");
@@ -677,9 +679,9 @@ const piHostCaptureTarget = (
 // not-found message) the best we can name is the directory.
 const makePiSessionStorage = (options?: PiOptions): AgentSessionStorage => {
   const hostSessionsDir = options?.sessionStorage?.hostSessionsDir;
-  const sandboxSessionsDir =
+  const sandboxSessionsDirOf = (handle: BindMountSandboxHandle): string =>
     options?.sessionStorage?.sandboxSessionsDir ??
-    posix.join("/home/agent", ".pi", "agent", "sessions");
+    posix.join(sandboxDirsOf(handle).home, ".pi", "agent", "sessions");
   const capturedPaths = new Map<string, string>();
   return {
     hostSessionFilePath: (cwd, id) =>
@@ -695,7 +697,7 @@ const makePiSessionStorage = (options?: PiOptions): AgentSessionStorage => {
     captureToHost: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
       const located = await locateSandboxSessionFile(
         handle,
-        sandboxSessionsDir,
+        sandboxSessionsDirOf(handle),
         `*_${sessionId}.jsonl`,
       );
       const jsonl = await readSandboxFile(handle, located.path, "pi-cap");
@@ -716,7 +718,7 @@ const makePiSessionStorage = (options?: PiOptions): AgentSessionStorage => {
       const rewritten = transferPiSession(jsonl, hostCwd, sandboxCwd);
       const filename = posix.basename(path.replaceAll("\\", "/"));
       const target = posix.join(
-        sandboxSessionsDir,
+        sandboxSessionsDirOf(handle),
         encodePiSessionDir(sandboxCwd),
         filename,
       );
@@ -1129,8 +1131,7 @@ const makeCursorSessionStorage = (
   options?: CursorOptions,
 ): AgentSessionStorage => {
   const hostDir = options?.sessionStorage?.hostChatsDir ?? cursorHostChatsDir();
-  const sandboxDir =
-    options?.sessionStorage?.sandboxChatsDir ?? "/home/agent/.cursor/chats";
+  const sandboxDirOverride = options?.sessionStorage?.sandboxChatsDir;
   return {
     ...makeSessionFileStorage({
       hostRoot: hostDir,
@@ -1138,8 +1139,13 @@ const makeCursorSessionStorage = (
         join(hostDir, cursorChatDirName(cwd), id, "store.db"),
       hostPathsById: (id, chatDirs) =>
         chatDirs.map((chatDir) => join(hostDir, chatDir, id, "store.db")),
-      sandboxPath: (cwd, id) =>
-        posix.join(sandboxDir, cursorChatDirName(cwd), id, "store.db"),
+      sandboxPath: (cwd, id, dirs) =>
+        posix.join(
+          sandboxDirOverride ?? posix.join(dirs.home, ".cursor", "chats"),
+          cursorChatDirName(cwd),
+          id,
+          "store.db",
+        ),
     }),
     canFork: false,
   };
@@ -1302,7 +1308,7 @@ const makeOpenCodeSessionStorage = (
 ): AgentSessionStorage => {
   const hostDir =
     options?.sessionStorage?.hostSessionsDir ?? opencodeHostSessionsDir();
-  const exportDir = options?.sessionStorage?.sandboxExportDir ?? "/tmp";
+  const exportDirOverride = options?.sessionStorage?.sandboxExportDir;
   const hostPath = (id: string): string => join(hostDir, `${id}.json`);
   return makeSessionFileStorage({
     hostRoot: hostDir,
@@ -1310,7 +1316,8 @@ const makeOpenCodeSessionStorage = (
     // A no-sandbox run resumes from OpenCode's own database, which can't be
     // queried by id from here; OpenCode reports an unknown id itself.
     hostPathsById: (id) => [hostPath(id), opencodeHostDatabase()],
-    sandboxPath: (_cwd, id) => posix.join(exportDir, `${id}.json`),
+    sandboxPath: (_cwd, id, dirs) =>
+      posix.join(exportDirOverride ?? dirs.tmp, `${id}.json`),
     sandboxExport: (id, path) =>
       `opencode export ${shellEscape(id)} > ${shellEscape(path)}`,
     sandboxImport: (_id, path) => `opencode import ${shellEscape(path)}`,
@@ -1504,16 +1511,19 @@ const makeCopilotSessionStorage = (
 ): AgentSessionStorage => {
   const hostDir =
     options?.sessionStorage?.hostSessionsDir ?? copilotHostSessionsDir();
-  const sandboxDir =
-    options?.sessionStorage?.sandboxSessionsDir ??
-    "/home/agent/.copilot/session-state";
+  const sandboxDirOverride = options?.sessionStorage?.sandboxSessionsDir;
   const hostPath = (id: string): string => join(hostDir, id, "events.jsonl");
   return {
     ...makeSessionFileStorage({
       hostRoot: hostDir,
       hostPath: (_cwd, id) => hostPath(id),
       hostPathsById: (id) => [hostPath(id)],
-      sandboxPath: (_cwd, id) => copilotSessionPath(sandboxDir, id),
+      sandboxPath: (_cwd, id, dirs) =>
+        copilotSessionPath(
+          sandboxDirOverride ??
+            posix.join(dirs.home, ".copilot", "session-state"),
+          id,
+        ),
       rewrite: transferCopilotSession,
     }),
     canFork: false,

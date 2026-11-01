@@ -4,14 +4,14 @@ What a user can do with Sandcastle, how to reach it inside a world, and the end 
 
 Every entry gives the **entry point** (what the user calls) and the **proof** (what you read back afterwards: a file, a commit, a branch, an image, an exit code). Facts cite `src/` so you can recheck them when the code moves.
 
-| Surface                                                              | File                                         |
-| -------------------------------------------------------------------- | -------------------------------------------- |
-| `sandcastle init`: flags, templates, issue trackers                  | [init.md](init.md)                           |
-| `sandcastle docker\|podman build-image\|remove-image`                | [images.md](images.md)                       |
-| `run()`, `interactive()`, `createSandbox()`, `createWorktree()`      | [entry-points.md](entry-points.md)           |
-| Branch strategies: `head`, `merge-to-head`, `branch`                 | [branch-strategies.md](branch-strategies.md) |
-| Sandboxes: docker, podman, vercel, daytona (and why never noSandbox) | [sandboxes.md](sandboxes.md)                 |
-| Agents: claudeCode, pi, codex, cursor, opencode, copilot             | [agents.md](agents.md)                       |
+| Surface                                                                               | File                                         |
+| ------------------------------------------------------------------------------------- | -------------------------------------------- |
+| `sandcastle init`: flags, templates, issue trackers                                   | [init.md](init.md)                           |
+| `sandcastle docker\|podman build-image\|remove-image`                                 | [images.md](images.md)                       |
+| `run()`, `interactive()`, `createSandbox()`, `createWorktree()`                       | [entry-points.md](entry-points.md)           |
+| Branch strategies: `head`, `merge-to-head`, `branch`                                  | [branch-strategies.md](branch-strategies.md) |
+| Sandboxes: bwrap, seatbelt, docker, podman, vercel, daytona (and why never noSandbox) | [sandboxes.md](sandboxes.md)                 |
+| Agents: claudeCode, pi, codex, cursor, opencode, copilot                              | [agents.md](agents.md)                       |
 
 ## Driving the JS API in a world
 
