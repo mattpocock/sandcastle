@@ -221,7 +221,7 @@ describe("FileDisplay", () => {
     );
 
     const log = readLog(logPath);
-    expect(log).toMatch(/^\n--- Run started: .+ ---\n$/);
+    expect(log).toMatch(/^\n--- Run started: .+ ---\n$/u);
   });
 
   it("writes status messages to file", async () => {
@@ -269,7 +269,7 @@ describe("FileDisplay", () => {
     );
 
     const log = readLog(logPath);
-    expect(log).toMatch(/Building image done \(\d+\.\ds\)/);
+    expect(log).toMatch(/Building image done \(\d+\.\ds\)/u);
   });
 
   it("writes summary to file", async () => {
@@ -327,7 +327,7 @@ describe("FileDisplay", () => {
     );
 
     const log = readLog(logPath);
-    expect(log).toMatch(/Setting up sandbox done \(\d+\.\ds\)/);
+    expect(log).toMatch(/Setting up sandbox done \(\d+\.\ds\)/u);
   });
 
   it("writes text messages to file", async () => {
@@ -417,7 +417,7 @@ describe("FileDisplay", () => {
     );
 
     const log = readLog(logPath);
-    expect(log).toMatch(/^\n--- Run started: .+ ---\n$/);
+    expect(log).toMatch(/^\n--- Run started: .+ ---\n$/u);
   });
 
   it("strips [Name] prefix from status messages", async () => {
@@ -488,7 +488,7 @@ describe("FileDisplay", () => {
     expect(logAfterSecondRun).toContain("second run output");
     // Two run delimiters
     const delimiterMatches = logAfterSecondRun.match(
-      /--- Run started: .+ ---/g,
+      /--- Run started: .+ ---/gu,
     );
     expect(delimiterMatches).toHaveLength(2);
   });
@@ -505,7 +505,7 @@ describe("FileDisplay", () => {
 
     const log = readLog(logPath);
     expect(log).toMatch(
-      /--- Run started: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z ---/,
+      /--- Run started: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z ---/u,
     );
   });
 
