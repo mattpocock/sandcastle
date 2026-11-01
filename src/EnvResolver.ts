@@ -2,6 +2,44 @@ import { FileSystem } from "@effect/platform";
 import { Effect } from "effect";
 import { join } from "node:path";
 
+const ESCAPES: Record<string, string> = {
+  n: "\n",
+  r: "\r",
+  t: "\t",
+  "\\": "\\",
+};
+
+/** Strips matching quotes; double-quoted values also expand \n, \r, \t, \\. */
+const unquote = (value: string): string => {
+  const isDoubleQuoted =
+    value.length >= 2 && value.startsWith('"') && value.at(-1) === '"';
+  const isSingleQuoted =
+    value.length >= 2 && value.startsWith("'") && value.at(-1) === "'";
+  if (isSingleQuoted) {
+    return value.slice(1, -1);
+  }
+  if (!isDoubleQuoted) {
+    return value;
+  }
+  return value
+    .slice(1, -1)
+    .replaceAll(/\\(?<escape>[nrt\\])/gu, (_, ch: string) => ESCAPES[ch] ?? ch);
+};
+
+/** One `KEY=value` line as a pair, or undefined for blanks and comments. */
+const parseEnvLine = (line: string): [string, string] | undefined => {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.startsWith("#")) {
+    return undefined;
+  }
+  const eqIndex = trimmed.indexOf("=");
+  if (eqIndex === -1) {
+    return undefined;
+  }
+  const key = trimmed.slice(0, eqIndex).trim();
+  return [key, unquote(trimmed.slice(eqIndex + 1).trim())];
+};
+
 const parseEnvFile = (
   filePath: string,
 ): Effect.Effect<Record<string, string>, never, FileSystem.FileSystem> =>
@@ -10,36 +48,14 @@ const parseEnvFile = (
     const content = yield* fs
       .readFileString(filePath)
       .pipe(Effect.catchAll(() => Effect.succeed(null)));
-    if (content === null) return {};
-    const vars: Record<string, string> = {};
-    for (const line of content.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const eqIndex = trimmed.indexOf("=");
-      if (eqIndex === -1) continue;
-      const key = trimmed.slice(0, eqIndex).trim();
-      let value = trimmed.slice(eqIndex + 1).trim();
-      const isDoubleQuoted =
-        value.length >= 2 && value.startsWith('"') && value.at(-1) === '"';
-      const isSingleQuoted =
-        value.length >= 2 && value.startsWith("'") && value.at(-1) === "'";
-      if (isDoubleQuoted || isSingleQuoted) {
-        value = value.slice(1, -1);
-      }
-      if (isDoubleQuoted) {
-        value = value.replaceAll(/\\([nrt\\])/gu, (_, ch: string) => {
-          const escapes: Record<string, string> = {
-            n: "\n",
-            r: "\r",
-            t: "\t",
-            "\\": "\\",
-          };
-          return escapes[ch] ?? ch;
-        });
-      }
-      vars[key] = value;
+    if (content === null) {
+      return {};
     }
-    return vars;
+    const entries = content
+      .split("\n")
+      .map((line) => parseEnvLine(line))
+      .filter((entry) => entry !== undefined);
+    return Object.fromEntries(entries);
   });
 
 /**
