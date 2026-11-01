@@ -102,6 +102,8 @@ Instead, create a config layer using Effect for that function, then instantiate 
 
 No disable comments (`eslint-disable`, `oxlint-disable`, `@ts-ignore`, `@ts-expect-error`, `@effect-diagnostics`) outside the reviewed allowlist in `scripts/lint-ratchet-config.ts`; each one counts as `ratchet/disable-comment`. The same file names the Effect entry points (the only modules that may call `Effect.runPromise` and friends) and the test-only Effect exemptions. `.oxlintrc.json` may not grow a per-file override.
 
+Host-side git goes through `hostGit()` (`src/hostGit.ts`): a raw `git` spawn in any other `src/` file counts as `ratchet/raw-git-spawn`.
+
 To pay down debt, pick a rule or a file from `npm run lint:report` and fix every violation of it. Fix behaviour-neutrally, one rule or one file per PR; `oxlint --fix` sweeps of one rule across the repo are fine.
 
 ---

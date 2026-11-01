@@ -9,6 +9,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
+import { isRawGitScanned, spawnsGitDirectly } from "./lint-ratchet-raw-git.ts";
 import type { Exemption } from "./lint-ratchet-config.ts";
 import {
   ALLOWED_DIRECTIVES,
@@ -186,4 +187,23 @@ export const collectDepcruise = async (): Promise<Violation[]> => {
     file: v.from,
     rule: `depcruise/${v.rule.name}`,
   }));
+};
+
+/**
+ * A src/ file that starts git on the host instead of through hostGit(); each
+ * counts once. The patterns and allowlist are in scripts/lint-ratchet-raw-git.ts.
+ */
+export const collectRawGitSpawns = async (): Promise<Violation[]> => {
+  const listed = await listFiles();
+  const perFile = await Promise.all(
+    listed
+      .filter((f) => isRawGitScanned(f))
+      .map(async (file) => {
+        const source = await readFile(path.join(ROOT, file), "utf8");
+        return spawnsGitDirectly(source)
+          ? [{ file, rule: "ratchet/raw-git-spawn" }]
+          : [];
+      }),
+  );
+  return perFile.flat();
 };
