@@ -145,7 +145,7 @@ query($owner:String!,$repo:String!,$number:Int!) {
       createdAt: comment.createdAt,
     })),
     review_summaries: reviews
-      .filter((review) => review.body && review.body.trim().length > 0)
+      .filter((review) => (review.body ?? "").trim().length > 0)
       .map((review) => ({
         author: review.user?.login ?? "unknown",
         state: review.state,
