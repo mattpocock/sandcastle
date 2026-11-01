@@ -115,8 +115,8 @@ describe("buildRecoveryMessage", () => {
     });
 
     // All paths should use patchDir directly, no absolute paths
-    expect(msg).not.toMatch(/\/tmp\//);
-    expect(msg).not.toMatch(/\/home\//);
+    expect(msg).not.toMatch(/\/tmp\//u);
+    expect(msg).not.toMatch(/\/home\//u);
     expect(msg).toContain(patchDir);
   });
 
