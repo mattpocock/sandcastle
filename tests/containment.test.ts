@@ -31,6 +31,7 @@ import {
   assertUsable,
   skipsHere,
 } from "./helpers/nativeProviders.js";
+import { spawnSandboxHolder } from "./helpers/sandboxHolder.js";
 
 // The containment suite: what a native sandbox lets the agent do, and what it
 // stops, proven on the real OS mechanism through the public API. Every
@@ -492,6 +493,66 @@ describe.each(NATIVE_PROVIDERS)("containment: $name", (provider) => {
       await running.catch(() => undefined);
 
       expect(hostProcesses()).not.toContain(marker);
+    });
+
+    // Nothing in a SIGKILLed process runs, so neither close() nor the
+    // shutdown handlers can help: only the provider's own defences can.
+    describe("when the host Node process is SIGKILLed", () => {
+      /**
+       * Opens a sandbox in another process and SIGKILLs that process once
+       * `started` holds. Returns the host processes still carrying the
+       * sandbox's marker after up to 5 s: none, if the sandbox died.
+       */
+      const survivorsOfKill = async (
+        started: (processes: string, marker: string) => boolean,
+      ): Promise<string[]> => {
+        // Unique per run, so no other process's command line matches it.
+        const seconds = `765.${process.pid}${String(Date.now() % 1000)}`;
+        const marker = `sleep ${seconds}`;
+        const holder = await spawnSandboxHolder(provider.name, repo, seconds);
+        try {
+          await vi.waitFor(
+            () => {
+              expect(started(hostProcesses(), marker)).toBe(true);
+            },
+            { timeout: 5000, interval: 20 },
+          );
+        } finally {
+          holder.kill("SIGKILL");
+        }
+
+        const survivors = (): string[] =>
+          hostProcesses()
+            .split("\n")
+            .filter((line) => line.includes(marker));
+        await vi
+          .waitFor(
+            () => {
+              expect(survivors()).toStrictEqual([]);
+            },
+            { timeout: 5000, interval: 100 },
+          )
+          .catch(() => undefined);
+        return survivors();
+      };
+
+      it("kills the sandbox's processes while its sleep is running", async () => {
+        const survivors = await survivorsOfKill((processes, marker) =>
+          processes.split("\n").includes(marker),
+        );
+
+        expect(survivors).toStrictEqual([]);
+      }, 20_000);
+
+      // The marker is in the sandbox tool's own command line from spawn, so
+      // this kills the host while the sandbox is still being set up.
+      it("kills the sandbox's processes while the exec is still starting", async () => {
+        const survivors = await survivorsOfKill((processes, marker) =>
+          processes.includes(marker),
+        );
+
+        expect(survivors).toStrictEqual([]);
+      }, 20_000);
     });
 
     it.skipIf(!isWsl2())(
