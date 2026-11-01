@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdtempSync,
@@ -9,7 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   claudeCode,
   createSandbox,
@@ -18,14 +18,20 @@ import {
   NativeInteractiveNotSupportedError,
 } from "@ai-hero/sandcastle";
 import { bwrap } from "@ai-hero/sandcastle/sandboxes/bwrap";
+import {
+  NATIVE_PROVIDERS,
+  assertUsable,
+  skipsHere,
+} from "./helpers/nativeProviders.js";
 
-// bwrap() through the public API, on the real Bubblewrap. Runs where bwrap
-// works (Linux, WSL2); skipped elsewhere. CI installs Bubblewrap in a later
-// change, which also makes a missing bwrap fail there.
+// bwrap() through the public API, on the real Bubblewrap. Gated like the
+// containment suite: skipped off Linux and where bwrap is missing, but a
+// missing bwrap fails when CI is set.
 
-const bwrapWorks =
-  process.platform === "linux" &&
-  spawnSync("bwrap", ["--ro-bind", "/", "/", "true"]).status === 0;
+const BWRAP = NATIVE_PROVIDERS.find((p) => p.name === "bwrap()");
+if (BWRAP === undefined) {
+  throw new Error("NATIVE_PROVIDERS has no bwrap() entry");
+}
 
 /**
  * An `onLine` callback that records every line, and a promise that resolves
@@ -52,7 +58,11 @@ const watchFor = (
   return { lines, onLine, seen };
 };
 
-describe.skipIf(!bwrapWorks)("bwrap() with createSandbox()", () => {
+describe.skipIf(skipsHere(BWRAP))("bwrap() with createSandbox()", () => {
+  beforeAll(() => {
+    assertUsable(BWRAP);
+  });
+
   let repo = "";
 
   beforeEach(() => {
