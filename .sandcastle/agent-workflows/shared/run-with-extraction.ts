@@ -5,10 +5,8 @@ import type {
   RunResult,
 } from "@ai-hero/sandcastle";
 
-export interface RunWithExtractionOptions<T> extends Omit<
-  RunOptions,
-  "output"
-> {
+export interface RunWithExtractionOptions<T>
+  extends Omit<RunOptions, "output"> {
   readonly output: OutputObjectDefinition<T>;
   readonly extractionPrompt: string;
   /**

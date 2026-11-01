@@ -14,8 +14,7 @@ const here = fileURLToPath(new URL(".", import.meta.url));
 const distDir = join(here, "..", "dist");
 
 /** Matches a string-literal module specifier of `effect` or `@effect/<sub>`. */
-const EFFECT_IMPORT_PATTERN =
-  /(["'])(?:effect(?:\/[^"']+)?|@effect\/[^"']+)\1/;
+const EFFECT_IMPORT_PATTERN = /(["'])(?:effect(?:\/[^"']+)?|@effect\/[^"']+)\1/;
 
 async function* walk(dir) {
   const entries = await readdir(dir, { withFileTypes: true });
