@@ -26,6 +26,15 @@ export const TEST_FILES: readonly string[] = [
   "src/testSandbox.ts",
 ];
 
+/** Mirrors the third override in .oxlintrc.json: one-shot tooling scripts. */
+export const TOOLING_SCRIPTS: readonly string[] = [
+  "scripts/**",
+  ".sandcastle/**",
+];
+
+/** Mirrors the fourth override in .oxlintrc.json: the package source. */
+export const SOURCE_FILES: readonly string[] = ["src/**"];
+
 /**
  * The end-to-end tests: the only place a new test may go. Mirrors the `e2e`
  * project in vitest.config.ts. A test file anywhere else, outside
@@ -45,7 +54,8 @@ export const TOOLING_TESTS: readonly string[] = [
 
 /**
  * Effect diagnostics that do not apply where they are reported. The language
- * service has no per-file config, so these live here.
+ * service has no per-file config, so these live here. `"*"` exempts every
+ * Effect diagnostic.
  */
 export const EFFECT_EXEMPTIONS: readonly Exemption[] = [
   {
@@ -76,8 +86,8 @@ export const EFFECT_EXEMPTIONS: readonly Exemption[] = [
   },
   {
     files: ["src/templates/**/*"],
-    rules: ["globalConsole"],
-    why: "templates are scripts users scaffold and run; console is their output",
+    rules: ["*"],
+    why: "templates are scripts users scaffold and run, and they do not use Effect",
   },
   {
     files: ["src/sandboxes/**/*"],

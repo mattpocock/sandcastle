@@ -64,6 +64,7 @@
     "verify": "tsx .sandcastle/verify/verify.ts",
     "verify:world": "npm run build >/dev/null && tsx .sandcastle/verify/verify.ts world",
     "coverage:gate": "tsx scripts/coverage-gate.ts",
+    "coverage:floor": "tsx scripts/coverage-floor.ts",
     "api:report": "tsx scripts/api-report.ts"
   },
   "keywords": [

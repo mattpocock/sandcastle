@@ -46,7 +46,7 @@ const git = (world: World, ...args: string[]): string =>
   sh("git", args, { cwd: world.project }).stdout.trim();
 
 /** Branch names Sandcastle generates for temp branches: <ts>-<6hex>. */
-const TEMP_BRANCH = /^sandcastle\/(.+\/)?\d{8}-\d{6}-[0-9a-f]{6}$/;
+const TEMP_BRANCH = /^sandcastle\/(.+\/)?\d{8}-\d{6}-[0-9a-f]{6}$/u;
 
 const gitState = (world: World): Section => {
   const leaks: string[] = [];

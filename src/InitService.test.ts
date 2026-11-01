@@ -27,12 +27,23 @@ import { SKELETON_PROMPT } from "./templates.js";
 
 const makeDir = async () => mkdtemp(join(tmpdir(), "init-service-"));
 
-const claudeCodeAgent = getAgent("claude-code")!;
-const piAgent = getAgent("pi")!;
-const codexAgent = getAgent("codex")!;
-const cursorAgent = getAgent("cursor")!;
-const opencodeAgent = getAgent("opencode")!;
-const copilotAgent = getAgent("copilot")!;
+/** Unwraps a registry lookup, failing the test if the entry is missing. */
+const registered = <T>(entry: T | undefined, name: string): T => {
+  assert(entry !== undefined, `${name} is not registered`);
+  return entry;
+};
+const requireAgent = (name: string) => registered(getAgent(name), name);
+const requireIssueTracker = (name: string) =>
+  registered(getIssueTracker(name), name);
+const requireSandboxProvider = (name: string) =>
+  registered(getSandboxProvider(name), name);
+
+const claudeCodeAgent = requireAgent("claude-code");
+const piAgent = requireAgent("pi");
+const codexAgent = requireAgent("codex");
+const cursorAgent = requireAgent("cursor");
+const opencodeAgent = requireAgent("opencode");
+const copilotAgent = requireAgent("copilot");
 
 const defaultOptions: ScaffoldOptions = {
   agent: claudeCodeAgent,
@@ -73,42 +84,32 @@ describe("InitService scaffold", () => {
   it.each([
     {
       agent: claudeCodeAgent,
-      expectedKey: "CLAUDE_CODE_OAUTH_TOKEN=",
-      unexpectedKey: "CODEX_API_KEY=",
-      expectClaudeSetupTokenHint: true,
+      expectedContent: ["CLAUDE_CODE_OAUTH_TOKEN=", "claude setup-token"],
+      unexpectedContent: ["CODEX_API_KEY="],
     },
     {
       agent: piAgent,
-      expectedKey: "ANTHROPIC_API_KEY=",
-      unexpectedKey: "CODEX_API_KEY=",
-      expectClaudeSetupTokenHint: false,
+      expectedContent: ["ANTHROPIC_API_KEY="],
+      unexpectedContent: ["CODEX_API_KEY=", "claude setup-token"],
     },
     {
       agent: codexAgent,
-      expectedKey: "CODEX_API_KEY=",
-      unexpectedKey: "ANTHROPIC_API_KEY=",
-      expectClaudeSetupTokenHint: false,
+      expectedContent: ["CODEX_API_KEY="],
+      unexpectedContent: ["ANTHROPIC_API_KEY=", "claude setup-token"],
     },
     {
       agent: opencodeAgent,
-      expectedKey: "OPENCODE_API_KEY=",
-      unexpectedKey: "ANTHROPIC_API_KEY=",
-      expectClaudeSetupTokenHint: false,
+      expectedContent: ["OPENCODE_API_KEY="],
+      unexpectedContent: ["ANTHROPIC_API_KEY=", "claude setup-token"],
     },
     {
       agent: cursorAgent,
-      expectedKey: "CURSOR_API_KEY=",
-      unexpectedKey: "ANTHROPIC_API_KEY=",
-      expectClaudeSetupTokenHint: false,
+      expectedContent: ["CURSOR_API_KEY="],
+      unexpectedContent: ["ANTHROPIC_API_KEY=", "claude setup-token"],
     },
   ])(
     "generates .env.example with $agent.name env var",
-    async ({
-      agent,
-      expectedKey,
-      unexpectedKey,
-      expectClaudeSetupTokenHint,
-    }) => {
+    async ({ agent, expectedContent, unexpectedContent }) => {
       const dir = await makeDir();
       await runScaffold(dir, { agent, model: agent.defaultModel });
 
@@ -116,14 +117,13 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", ".env.example"),
         "utf8",
       );
-      expect(envExample).toContain(expectedKey);
-      expect(envExample).not.toContain(unexpectedKey);
-      expect(envExample).not.toContain("issues/191");
-      if (expectClaudeSetupTokenHint) {
-        expect(envExample).toContain("claude setup-token");
-      } else {
-        expect(envExample).not.toContain("claude setup-token");
+      for (const content of expectedContent) {
+        expect(envExample).toContain(content);
       }
+      for (const content of unexpectedContent) {
+        expect(envExample).not.toContain(content);
+      }
+      expect(envExample).not.toContain("issues/191");
     },
   );
 
@@ -560,19 +560,15 @@ describe("InitService scaffold", () => {
 
     const { readdir } = await import("node:fs/promises");
     const files = await readdir(join(dir, ".sandcastle"));
-    const compiledFiles = files.filter(
-      (f) =>
-        f.endsWith(".js") ||
-        f.endsWith(".d.ts") ||
-        f.endsWith(".js.map") ||
-        f.endsWith(".d.ts.map"),
+    const compiledFiles = files.filter((f) =>
+      /\.(?:js|d\.ts|js\.map|d\.ts\.map)$/u.test(f),
     );
     expect(compiledFiles).toEqual([]);
   });
 
   describe("getNextStepsLines", () => {
-    const ghIssues = getIssueTracker("github-issues")!;
-    const customManager = getIssueTracker("custom")!;
+    const ghIssues = requireIssueTracker("github-issues");
+    const customManager = requireIssueTracker("custom");
     // Non-custom issue tracker keeps the template-driven next steps; the
     // custom branch is exercised separately below.
     const next = (
@@ -760,64 +756,82 @@ describe("InitService scaffold", () => {
         pm: PackageManager;
         run: string;
         add: string;
-        install: string;
+        /** Only a non-npm manager names its install step... */
+        mustContain: string[];
+        /** ...and avoids `npm run`. */
+        mustNotMatch: RegExp[];
       }[] = [
         {
           pm: "npm",
           run: "npm run sandcastle",
           add: "npm install zod",
-          install: "npm install",
+          mustContain: [],
+          mustNotMatch: [],
         },
         {
           pm: "pnpm",
           run: "pnpm run sandcastle",
           add: "pnpm add zod",
-          install: "pnpm install",
+          mustContain: ["`pnpm install`"],
+          mustNotMatch: [/\bnpm run/u],
         },
         {
           pm: "yarn",
           run: "yarn run sandcastle",
           add: "yarn add zod",
-          install: "yarn install",
+          mustContain: ["`yarn install`"],
+          mustNotMatch: [/\bnpm run/u],
         },
         {
           pm: "bun",
           run: "bun run sandcastle",
           add: "bun add zod",
-          install: "bun install",
+          mustContain: ["`bun install`"],
+          mustNotMatch: [/\bnpm run/u],
         },
       ];
 
-      for (const { pm, run, add, install } of managers) {
-        for (const zodInstalled of [false, true]) {
-          it(`parallel-planner, ${pm}, zod ${zodInstalled ? "installed" : "not installed"}`, () => {
+      for (const { pm, run, add, mustContain, mustNotMatch } of managers) {
+        it.each([
+          {
+            zod: "not installed",
+            installed: [],
+            present: [add, ...mustContain],
+            absent: [],
+          },
+          {
+            zod: "installed",
+            installed: ["zod"],
+            present: mustContain,
+            absent: ["zod", "schema validator"],
+          },
+        ])(
+          `parallel-planner, ${pm}, zod $zod`,
+          ({ installed, present, absent }) => {
             const joined = next(
               "parallel-planner",
               "main.ts",
               pm,
-              zodInstalled ? ["zod"] : [],
+              installed,
             ).join("\n");
             expect(joined).toContain(`Run \`${run}\``);
-            if (pm !== "npm") {
-              expect(joined).not.toMatch(/\bnpm run/);
+            for (const text of present) {
+              expect(joined).toContain(text);
             }
-            if (zodInstalled) {
-              expect(joined).not.toContain("zod");
-              expect(joined).not.toContain("schema validator");
-            } else {
-              expect(joined).toContain(add);
+            for (const text of absent) {
+              expect(joined).not.toContain(text);
             }
-            if (pm !== "npm") {
-              expect(joined).toContain(`\`${install}\``);
+            for (const pattern of mustNotMatch) {
+              expect(joined).not.toMatch(pattern);
             }
-          });
-        }
+          },
+        );
 
         it(`blank, ${pm}: run step uses ${run}`, () => {
           const joined = next("blank", "main.ts", pm).join("\n");
           expect(joined).toContain(`Run \`${run}\``);
-          if (pm !== "npm") {
-            expect(joined).not.toMatch(/\bnpm run/);
+          for (const pattern of mustNotMatch) {
+            expect(joined).not.toMatch(pattern);
           }
         });
       }
@@ -856,13 +870,13 @@ describe("InitService scaffold", () => {
         "blank",
         "main.mts",
         customManager,
-        getAgent("opencode")!,
+        requireAgent("opencode"),
         "npm",
         [],
       );
       const joined = lines.join("\n");
       expect(joined.toLowerCase()).toContain("host");
-      expect(joined).toContain(getAgent("opencode")!.setupCommand);
+      expect(joined).toContain(requireAgent("opencode").setupCommand);
     });
   });
 
@@ -1394,76 +1408,71 @@ describe("InitService scaffold", () => {
     });
 
     it("getIssueTracker returns github-issues entry with expected templateArgs", () => {
-      const manager = getIssueTracker("github-issues");
-      expect(manager).toBeDefined();
-      expect(manager!.label).toBe("GitHub Issues");
-      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain(
+      const manager = requireIssueTracker("github-issues");
+      expect(manager.label).toBe("GitHub Issues");
+      expect(manager.templateArgs.LIST_TASKS_COMMAND).toContain(
         "gh issue list",
       );
-      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain("labels");
-      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain("comments");
-      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain("--limit 100");
-      expect(manager!.templateArgs.VIEW_TASK_COMMAND).toContain(
-        "gh issue view",
-      );
-      expect(manager!.templateArgs.CLOSE_TASK_COMMAND).toContain(
+      expect(manager.templateArgs.LIST_TASKS_COMMAND).toContain("labels");
+      expect(manager.templateArgs.LIST_TASKS_COMMAND).toContain("comments");
+      expect(manager.templateArgs.LIST_TASKS_COMMAND).toContain("--limit 100");
+      expect(manager.templateArgs.VIEW_TASK_COMMAND).toContain("gh issue view");
+      expect(manager.templateArgs.CLOSE_TASK_COMMAND).toContain(
         "gh issue close",
       );
-      expect(manager!.templateArgs.ISSUE_TRACKER_TOOLS).toContain("GitHub CLI");
-      expect(manager!.templateArgs.ISSUE_TRACKER_TOOLS).toContain("gh");
+      expect(manager.templateArgs.ISSUE_TRACKER_TOOLS).toContain("GitHub CLI");
+      expect(manager.templateArgs.ISSUE_TRACKER_TOOLS).toContain("gh");
     });
 
     it("getIssueTracker returns beads entry with expected templateArgs", () => {
-      const manager = getIssueTracker("beads");
-      expect(manager).toBeDefined();
-      expect(manager!.label).toBe("Beads");
-      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toBe("bd ready --json");
-      expect(manager!.templateArgs.VIEW_TASK_COMMAND).toContain("bd show");
-      expect(manager!.templateArgs.CLOSE_TASK_COMMAND).toContain("bd close");
-      expect(manager!.templateArgs.CLOSE_TASK_COMMAND).toContain("--reason=");
-      expect(manager!.templateArgs.ISSUE_TRACKER_TOOLS).toContain("beads");
-      expect(manager!.templateArgs.ISSUE_TRACKER_TOOLS).toContain("libicu72");
-      expect(manager!.templateArgs.ISSUE_TRACKER_TOOLS).toContain(
+      const manager = requireIssueTracker("beads");
+      expect(manager.label).toBe("Beads");
+      expect(manager.templateArgs.LIST_TASKS_COMMAND).toBe("bd ready --json");
+      expect(manager.templateArgs.VIEW_TASK_COMMAND).toContain("bd show");
+      expect(manager.templateArgs.CLOSE_TASK_COMMAND).toContain("bd close");
+      expect(manager.templateArgs.CLOSE_TASK_COMMAND).toContain("--reason=");
+      expect(manager.templateArgs.ISSUE_TRACKER_TOOLS).toContain("beads");
+      expect(manager.templateArgs.ISSUE_TRACKER_TOOLS).toContain("libicu72");
+      expect(manager.templateArgs.ISSUE_TRACKER_TOOLS).toContain(
         "corepack enable",
       );
-      expect(manager!.templateArgs.ISSUE_TRACKER_TOOLS).not.toContain("gh");
-      expect(manager!.templateArgs.ISSUE_TRACKER_TOOLS).not.toContain(
+      expect(manager.templateArgs.ISSUE_TRACKER_TOOLS).not.toContain("gh");
+      expect(manager.templateArgs.ISSUE_TRACKER_TOOLS).not.toContain(
         "x86_64-linux-gnu",
       );
-      expect(manager!.templateArgs.ISSUE_TRACKER_TOOLS).toContain(
+      expect(manager.templateArgs.ISSUE_TRACKER_TOOLS).toContain(
         "dpkg-architecture -qDEB_HOST_MULTIARCH",
       );
     });
 
     it("getIssueTracker returns custom entry with broken-until-configured templateArgs", () => {
-      const manager = getIssueTracker("custom");
-      expect(manager).toBeDefined();
-      expect(manager!.label).toBe("Custom");
+      const manager = requireIssueTracker("custom");
+      expect(manager.label).toBe("Custom");
       // Only the list command is a real shell expression — it hard-fails the
       // run (exit 1) and points at the setup doc.
-      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain("exit 1");
-      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain(
+      expect(manager.templateArgs.LIST_TASKS_COMMAND).toContain("exit 1");
+      expect(manager.templateArgs.LIST_TASKS_COMMAND).toContain(
         "SETUP_ISSUE_TRACKER.md",
       );
-      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain(">&2");
+      expect(manager.templateArgs.LIST_TASKS_COMMAND).toContain(">&2");
       // View/close are inline text markers, not runnable commands.
-      expect(manager!.templateArgs.VIEW_TASK_COMMAND).toContain("view command");
-      expect(manager!.templateArgs.VIEW_TASK_COMMAND).toContain(
+      expect(manager.templateArgs.VIEW_TASK_COMMAND).toContain("view command");
+      expect(manager.templateArgs.VIEW_TASK_COMMAND).toContain(
         "SETUP_ISSUE_TRACKER.md",
       );
-      expect(manager!.templateArgs.CLOSE_TASK_COMMAND).toContain(
+      expect(manager.templateArgs.CLOSE_TASK_COMMAND).toContain(
         "close command",
       );
-      expect(manager!.templateArgs.CLOSE_TASK_COMMAND).toContain(
+      expect(manager.templateArgs.CLOSE_TASK_COMMAND).toContain(
         "SETUP_ISSUE_TRACKER.md",
       );
       // Dockerfile install block is a TODO comment pointing at the doc.
-      expect(manager!.templateArgs.ISSUE_TRACKER_TOOLS).toContain("TODO");
-      expect(manager!.templateArgs.ISSUE_TRACKER_TOOLS).toContain(
+      expect(manager.templateArgs.ISSUE_TRACKER_TOOLS).toContain("TODO");
+      expect(manager.templateArgs.ISSUE_TRACKER_TOOLS).toContain(
         "SETUP_ISSUE_TRACKER.md",
       );
-      expect(manager!.envExample).toContain("TODO");
-      expect(manager!.envExample).toContain("SETUP_ISSUE_TRACKER.md");
+      expect(manager.envExample).toContain("TODO");
+      expect(manager.envExample).toContain("SETUP_ISSUE_TRACKER.md");
     });
 
     it("listIssueTrackers includes custom", () => {
@@ -1502,7 +1511,7 @@ describe("InitService scaffold", () => {
     ])(
       "$name has the expected interactive setupCommand",
       ({ name, command }) => {
-        expect(getAgent(name)!.setupCommand).toBe(command);
+        expect(requireAgent(name).setupCommand).toBe(command);
       },
     );
   });
@@ -1632,7 +1641,7 @@ describe("InitService scaffold", () => {
 
     // --- custom issue tracker ---
 
-    const customManager = getIssueTracker("custom");
+    const customManager = requireIssueTracker("custom");
 
     it("custom scaffolds .sandcastle/SETUP_ISSUE_TRACKER.md", async () => {
       const dir = await makeDir();
@@ -1652,8 +1661,8 @@ describe("InitService scaffold", () => {
       // It must explicitly tell the agent to remove the exit 1 sentinel.
       expect(setup).toContain("exit 1");
       // The markers the agent will actually find in the scaffolded files.
-      expect(setup).toContain(customManager!.templateArgs.VIEW_TASK_COMMAND);
-      expect(setup).toContain(customManager!.templateArgs.CLOSE_TASK_COMMAND);
+      expect(setup).toContain(customManager.templateArgs.VIEW_TASK_COMMAND);
+      expect(setup).toContain(customManager.templateArgs.CLOSE_TASK_COMMAND);
     });
 
     it("custom SETUP doc references the chosen provider's build-image command", async () => {
@@ -2188,7 +2197,7 @@ describe("InitService scaffold", () => {
 
     it("scaffold with beads + podman produces Containerfile with beads install", async () => {
       const dir = await makeDir();
-      const podmanProvider = getSandboxProvider("podman")!;
+      const podmanProvider = requireSandboxProvider("podman");
       await runScaffold(dir, {
         issueTracker: getIssueTracker("beads"),
         sandboxProvider: podmanProvider,
@@ -2267,7 +2276,9 @@ describe("InitService scaffold", () => {
             "utf8",
           );
           expect(main).not.toContain("docker()");
-          const calls = main.match(/\bdocker\(([^)]*)\)/g) ?? [];
+          const calls = [...main.matchAll(/\bdocker\([^)]*\)/gu)].map(
+            ([call]) => call,
+          );
           expect(calls.length).toBeGreaterThan(0);
           for (const call of calls) {
             expect(call).toBe("docker(sandboxOptions)");
@@ -2283,7 +2294,7 @@ describe("InitService scaffold", () => {
         await runScaffold(dir, {
           templateName: "parallel-planner",
           issueTracker: getIssueTracker("beads"),
-          sandboxProvider: getSandboxProvider("podman")!,
+          sandboxProvider: requireSandboxProvider("podman"),
         });
 
         const main = await readFile(
@@ -2447,8 +2458,8 @@ describe("InitService scaffold", () => {
   // ---------------------------------------------------------------------------
 
   describe("sandbox provider", () => {
-    const dockerProvider = getSandboxProvider("docker")!;
-    const podmanProvider = getSandboxProvider("podman")!;
+    const dockerProvider = requireSandboxProvider("docker");
+    const podmanProvider = requireSandboxProvider("podman");
 
     it("selecting docker writes Dockerfile to .sandcastle/", async () => {
       const dir = await makeDir();
@@ -2585,6 +2596,10 @@ describe("init scaffold consistency (every agent x template x sandbox x tracker)
           template: template.name,
           sandboxProvider,
           issueTracker,
+          // Only a non-Claude agent's main file must not mention claudeCode.
+          mainMustNotMatch:
+            agent.factoryImport === "claudeCode" ? [] : [/\bclaudeCode\b/u],
+          otherSandbox: sandboxProvider.name === "docker" ? "podman" : "docker",
         })),
       ),
     ),
@@ -2598,7 +2613,14 @@ describe("init scaffold consistency (every agent x template x sandbox x tracker)
 
   it.each(combos)(
     "$agent.name x $template x $sandboxProvider.name x $issueTracker.name",
-    async ({ agent, template, sandboxProvider, issueTracker }) => {
+    async ({
+      agent,
+      template,
+      sandboxProvider,
+      issueTracker,
+      mainMustNotMatch,
+      otherSandbox,
+    }) => {
       const dir = await makeDir();
       const imageName = "sandcastle:custom-image";
       const { mainFilename } = await runScaffold(dir, {
@@ -2626,14 +2648,15 @@ describe("init scaffold consistency (every agent x template x sandbox x tracker)
       // Main file: the chosen agent, model, sandbox provider and image name.
       const main = await readFile(join(configDir, mainFilename), "utf8");
       expect(main).toContain(`${agent.factoryImport}("test-model")`);
-      if (agent.factoryImport !== "claudeCode") {
-        expect(main).not.toMatch(/\bclaudeCode\b/);
+      for (const pattern of mainMustNotMatch) {
+        expect(main).not.toMatch(pattern);
       }
-      const other = sandboxProvider.name === "docker" ? "podman" : "docker";
-      expect(main).not.toMatch(new RegExp(`\\b${other}\\(`));
-      const sandboxCalls =
-        main.match(new RegExp(`\\b${sandboxProvider.name}\\([^)]*\\)`, "g")) ??
-        [];
+      expect(main).not.toMatch(new RegExp(`\\b${otherSandbox}\\(`));
+      const sandboxCalls = [
+        ...main.matchAll(
+          new RegExp(`\\b${sandboxProvider.name}\\([^)]*\\)`, "gu"),
+        ),
+      ].map(([call]) => call);
       expect(sandboxCalls.length).toBeGreaterThan(0);
       for (const call of sandboxCalls) {
         expect(call).toBe(
@@ -2649,17 +2672,35 @@ describe("init scaffold consistency (every agent x template x sandbox x tracker)
       const keys = declaredKeys(envExample);
       expect(keys).toContain(AGENT_AUTH_KEY[agent.name]);
       expect(new Set(keys).size).toBe(keys.length);
+    },
+  );
 
-      // Custom tracker: the setup doc's build command builds the same image.
-      if (issueTracker.name === "custom") {
-        const setupDoc = await readFile(
-          join(configDir, "SETUP_ISSUE_TRACKER.md"),
-          "utf8",
-        );
-        expect(setupDoc).toContain(
-          `sandcastle ${image.cliNamespace} build-image --image-name ${imageName}`,
-        );
-      }
+  // Custom tracker: the setup doc's build command builds the same image.
+  it.each(combos.filter(({ issueTracker }) => issueTracker.name === "custom"))(
+    "$agent.name x $template x $sandboxProvider.name x custom: setup doc builds the same image",
+    async ({ agent, template, sandboxProvider, issueTracker }) => {
+      const dir = await makeDir();
+      const imageName = "sandcastle:custom-image";
+      await runScaffold(dir, {
+        agent,
+        model: "test-model",
+        templateName: template,
+        sandboxProvider,
+        issueTracker,
+        createLabel: false,
+        imageName,
+      });
+
+      const { image } = sandboxProvider;
+      assert.isDefined(image);
+
+      const setupDoc = await readFile(
+        join(dir, ".sandcastle", "SETUP_ISSUE_TRACKER.md"),
+        "utf8",
+      );
+      expect(setupDoc).toContain(
+        `sandcastle ${image.cliNamespace} build-image --image-name ${imageName}`,
+      );
     },
   );
 

@@ -5,18 +5,26 @@
 // - oxlint (.oxlintrc.json, type-aware)               rule: `eslint(curly)`
 // - Effect's language service (tsconfig.json plugin)  rule: `effect/<name>`
 // - inline disable comments outside the allowlist     rule: `ratchet/disable-comment`
+// - `toMatchObject({ k: undefined })` in a test        rule: `ratchet/match-object-undefined`
+// - a raw git spawn in src/ that bypasses hostGit()    rule: `ratchet/raw-git-spawn`
 //
 // The test ratchet, scripts/test-baseline.json. New tests go in tests/ and use
 // only the public API; the legacy tests elsewhere only ever leave:
 // - a test file outside tests/ and the tooling tests  rule: `ratchet/test-outside-tests`
 // - dependency-cruiser (.dependency-cruiser.mjs)      rule: `depcruise/<name>`
+// - a type assertion in tests/, except `as const`     rule: `ratchet/test-type-assertion`
+//
+// The typecheck ratchet, scripts/typecheck-baseline.json. `npm run typecheck`
+// covers src/ and tests/ and passes clean; the tooling in .sandcastle/ ran
+// unchecked, so its errors at the time are the baseline:
+// - tsc, .sandcastle/tsconfig.typecheck.json         rule: `tsc/TS2345`
 //
 // Each fails when a count rises or a new file × rule appears. A count that
 // falls below the baseline passes: lowering the baseline is optional in a PR,
 // and .github/workflows/lint-shrink.yml opens a "shrink baseline" PR after
 // each push to main. It also fails if a baseline grew against origin/main
 // (where that ref exists), and if .oxlintrc.json gains an override beyond
-// the two reviewed ones in scripts/lint-ratchet-config.ts.
+// the four reviewed ones in scripts/lint-ratchet-config.ts.
 //
 //   npm run lint          both ratchets
 //   npm run lint:shrink   lower the baselines to what is found (never raises
@@ -30,7 +38,12 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import { ENTRY_POINTS, TEST_FILES } from "./lint-ratchet-config.ts";
+import {
+  ENTRY_POINTS,
+  SOURCE_FILES,
+  TEST_FILES,
+  TOOLING_SCRIPTS,
+} from "./lint-ratchet-config.ts";
 import type { Counts, Violation } from "./lint-ratchet-core.ts";
 import {
   baselineGrowth,
@@ -45,7 +58,11 @@ import {
   collectDirectives,
   collectEffect,
   collectLegacyTests,
+  collectMatchObjectUndefined,
   collectOxlint,
+  collectRawGitSpawns,
+  collectSandcastleTypes,
+  collectTestTypeAssertions,
   run,
 } from "./lint-ratchet-sources.ts";
 
@@ -61,16 +78,29 @@ const RATCHETS: readonly Ratchet[] = [
   {
     name: "lint ratchet",
     baselinePath: "scripts/lint-baseline.json",
-    sources: [collectOxlint, collectEffect, collectDirectives],
+    sources: [
+      collectOxlint,
+      collectEffect,
+      collectDirectives,
+      collectMatchObjectUndefined,
+      collectRawGitSpawns,
+    ],
     grownTitle:
       "New violations (file: rule baseline -> found). Fix them; never add a disable comment or raise the baseline. `npx oxlint <file>` shows where:",
   },
   {
     name: "test ratchet",
     baselinePath: "scripts/test-baseline.json",
-    sources: [collectLegacyTests, collectDepcruise],
+    sources: [collectLegacyTests, collectDepcruise, collectTestTypeAssertions],
     grownTitle:
-      "New test files outside tests/ or import-boundary violations (file: rule baseline -> found). Write new tests in tests/, importing only @ai-hero/sandcastle and its subpaths; `npx depcruise src tests` shows where:",
+      "New test files outside tests/, import-boundary violations or type assertions in tests/ (file: rule baseline -> found). Write new tests in tests/, importing only @ai-hero/sandcastle and its subpaths; `npx depcruise src tests` shows where. For `ratchet/test-type-assertion`, drop the `as T` / `<T>x`: build a value of the real type, or narrow with `expect` or a type guard (`as const` is fine):",
+  },
+  {
+    name: "typecheck ratchet",
+    baselinePath: "scripts/typecheck-baseline.json",
+    sources: [collectSandcastleTypes],
+    grownTitle:
+      "New type errors in .sandcastle/ (file: rule baseline -> found). Fix them; never add a ts-ignore or raise the baseline. `npx tsc --noEmit -p .sandcastle/tsconfig.typecheck.json` shows where:",
   },
 ];
 
@@ -112,7 +142,7 @@ const OxlintConfig = z.object({
 const sameList = (a: readonly string[], b: readonly string[]): boolean =>
   a.length === b.length && a.every((item, i) => item === b[i]);
 
-/** .oxlintrc.json may only loosen rules for the entry points and tests. */
+/** .oxlintrc.json may only loosen rules for the entry points, tests, tooling and src/. */
 const checkOverrides = async (): Promise<string[]> => {
   const source = await readFile(path.join(ROOT, ".oxlintrc.json"), "utf8");
   const config = OxlintConfig.parse(
@@ -120,11 +150,14 @@ const checkOverrides = async (): Promise<string[]> => {
   );
   return config.overrides
     .filter(
-      (o) => !sameList(o.files, ENTRY_POINTS) && !sameList(o.files, TEST_FILES),
+      (o) =>
+        ![ENTRY_POINTS, TEST_FILES, TOOLING_SCRIPTS, SOURCE_FILES].some(
+          (reviewed) => sameList(o.files, reviewed),
+        ),
     )
     .map(
       (o) =>
-        `.oxlintrc.json: the override for ${o.files.join(", ")} is not one of the two reviewed ones (entry points, tests). Lower the baseline instead of turning a rule off.`,
+        `.oxlintrc.json: the override for ${o.files.join(", ")} is not one of the four reviewed ones (entry points, tests, tooling scripts, source). Lower the baseline instead of turning a rule off.`,
     );
 };
 

@@ -10,183 +10,115 @@
 // It prints a Markdown report for the migration PR's body, and exits 1 when
 // the gate fails.
 //
-//   npm run coverage:gate -- src/boundedTail.test.ts
+// C merges every source of end-to-end coverage, and the report names each:
 //
+// - the e2e tests' own vitest process (this machine);
+// - CLI subprocesses: any Node process an e2e test spawns (dist/main.js)
+//   writes raw V8 coverage to NODE_V8_COVERAGE, mapped back to src/ through
+//   dist's source maps. dist/ is rebuilt first if stale;
+// - the windows CI job, given `--coverage-from <dir>`: its e2e step uploads
+//   coverage-final.json as the `e2e-coverage-windows` artifact, so code that
+//   runs only on win32 can count. Fetch it from the PR's CI run with
+//   `gh run download <run-id> -n e2e-coverage-windows -D <dir>`.
+//   The flag repeats, and takes a coverage-final.json or a folder holding one.
+//
+//   npm run coverage:gate -- src/boundedTail.test.ts [--coverage-from <dir>]
+//
+// The decisions live in scripts/coverage-gate-core.ts and
+// scripts/coverage-gate-v8.ts; running vitest, in scripts/coverage-e2e.ts.
 // See .sandcastle/CODING_STANDARDS.md, "Where tests live".
 
-import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { promisify } from "node:util";
-import { z } from "zod";
+import { parseArgs } from "node:util";
+import {
+  linesFromIstanbul,
+  merge,
+  minus,
+  missing,
+  report,
+  total,
+} from "./coverage-gate-core.ts";
+import type { Lines } from "./coverage-gate-core.ts";
+import { ROOT, coverage, e2eCoverage, ensureBuild } from "./coverage-e2e.ts";
 
-const ROOT = path.resolve(import.meta.dirname, "..");
-const VITEST = path.join(ROOT, "node_modules", ".bin", "vitest");
-const MAX_BUFFER = 256 * 1024 * 1024;
-const MAX_LISTED_RANGES = 40;
+const WINDOWS_ARTIFACT = "e2e-coverage-windows";
 
-const Coverage = z.record(
-  z.string(),
-  z.object({
-    statementMap: z.record(
-      z.string(),
-      z.object({ start: z.object({ line: z.number() }) }),
-    ),
-    s: z.record(z.string(), z.number()),
-  }),
-);
-
-/** Repo-relative file → covered line numbers. */
-type Lines = Map<string, Set<number>>;
-
-interface Run {
-  readonly label: string;
-  readonly args: readonly string[];
-}
-
-/** Runs vitest; resolves whether every test passed. */
-const vitest: (args: readonly string[]) => Promise<boolean> = promisify(
-  (
-    args: readonly string[],
-    callback: (error: Error | null, passed: boolean) => void,
-  ): void => {
-    execFile(VITEST, args, { cwd: ROOT, maxBuffer: MAX_BUFFER }, (error) => {
-      callback(null, error === null);
-    });
-  },
-);
-
-/** Runs vitest with coverage; resolves the covered lines, failing or not. */
-const coveredLines = async ({ label, args }: Run): Promise<Lines> => {
-  const dir = await mkdtemp(path.join(tmpdir(), "coverage-gate-"));
-  try {
-    const passed = await vitest([
-      "run",
-      ...args,
-      "--coverage.enabled",
-      "--coverage.reporter=json",
-      "--coverage.reportOnFailure",
-      `--coverage.reportsDirectory=${dir}`,
-    ]);
-    if (!passed) {
-      process.stderr.write(
-        `coverage-gate: ${label} had failing tests; its coverage still counts. Run \`npm run build\` first: some legacy tests need dist.\n`,
-      );
-    }
-    const source = await readFile(
-      path.join(dir, "coverage-final.json"),
-      "utf8",
-    );
-    const lines: Lines = new Map();
-    for (const [file, data] of Object.entries(
-      Coverage.parse(JSON.parse(source)),
-    )) {
-      const hit = new Set(
-        Object.entries(data.s)
-          .filter(([, count]) => count > 0)
-          .map(([id]) => data.statementMap[id]?.start.line ?? 0)
-          .filter((line) => line > 0),
-      );
-      lines.set(path.relative(ROOT, file), hit);
-    }
-    return lines;
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
+/** Coverage from another machine: a coverage-final.json, or a folder with one. */
+const extraLines = async (input: string): Promise<Lines> => {
+  const info = await stat(input);
+  const file = info.isDirectory()
+    ? path.join(input, "coverage-final.json")
+    : input;
+  return linesFromIstanbul(JSON.parse(await readFile(file, "utf8")), ROOT);
 };
 
-/** Lines in `a` that `b` lacks. */
-const minus = (a: Lines, b: Lines): Lines =>
-  new Map(
-    [...a]
-      .map(([file, lines]): [string, Set<number>] => [
-        file,
-        new Set([...lines].filter((l) => b.get(file)?.has(l) !== true)),
-      ])
-      .filter(([, lines]) => lines.size > 0),
+/** The legacy test file, repo-relative, and the `--coverage-from` inputs. */
+const parseCli = (): { file: string; coverageFrom: readonly string[] } => {
+  const { positionals, values } = parseArgs({
+    allowPositionals: true,
+    options: { "coverage-from": { type: "string", multiple: true } },
+  });
+  const [file] = positionals;
+  if (file === undefined || positionals.length > 1) {
+    throw new Error(
+      "usage: npm run coverage:gate -- <legacy test file> [--coverage-from <dir>]...",
+    );
+  }
+  return {
+    file: path.relative(ROOT, path.resolve(file)),
+    coverageFrom: values["coverage-from"] ?? [],
+  };
+};
+
+/** Coverage from `--coverage-from`, and a report line per input. */
+const extraSources = async (
+  inputs: readonly string[],
+): Promise<{ lines: Lines[]; sources: string[] }> => {
+  if (inputs.length === 0) {
+    return {
+      lines: [],
+      sources: [
+        `windows CI job: not counted. To count it, run \`gh run download <run-id> -n ${WINDOWS_ARTIFACT} -D <dir>\` and pass \`--coverage-from <dir>\`.`,
+      ],
+    };
+  }
+  const lines = await Promise.all(
+    inputs.map(async (input) => extraLines(input)),
   );
-
-const total = (lines: Lines): number =>
-  [...lines.values()].reduce((sum, set) => sum + set.size, 0);
-
-/** `3, 4, 5, 9` → `3-5, 9`. */
-const ranges = (lines: ReadonlySet<number>): string => {
-  const sorted = [...lines].toSorted((a, b) => a - b);
-  const out: string[] = [];
-  let start = sorted[0] ?? 0;
-  let prev = start;
-  for (const line of [...sorted.slice(1), Number.NaN]) {
-    if (line !== prev + 1) {
-      out.push(
-        start === prev ? String(start) : `${String(start)}-${String(prev)}`,
-      );
-      start = line;
-    }
-    prev = line;
-  }
-  return out.join(", ");
-};
-
-const table = (lines: Lines): string[] =>
-  [...lines]
-    .toSorted(([a], [b]) => a.localeCompare(b))
-    .slice(0, MAX_LISTED_RANGES)
-    .map(
-      ([file, set]) => `| \`${file}\` | ${String(set.size)} | ${ranges(set)} |`,
-    );
-
-const report = (file: string, only: Lines, missing: Lines): string => {
-  const verdict =
-    total(missing) === 0
-      ? `**Gate: pass.** The e2e tests cover all ${String(total(only))} lines that only \`${file}\` covers.`
-      : `**Gate: fail.** ${String(total(missing))} of the ${String(total(only))} lines that only \`${file}\` covers have no e2e coverage yet.`;
-  const missingTable =
-    total(missing) === 0
-      ? []
-      : [
-          "",
-          "Not yet covered end to end:",
-          "",
-          "| File | Lines | Line numbers |",
-          "| --- | --- | --- |",
-          ...table(missing),
-        ];
-  return [
-    `### Coverage gate: \`${file}\``,
-    "",
-    verdict,
-    "",
-    `Lines covered only by this file, out of the other legacy tests: ${String(total(only))} across ${String(only.size)} files.`,
-    ...missingTable,
-    "",
-    "_Generated by `npm run coverage:gate`._",
-  ].join("\n");
+  return {
+    lines,
+    sources: inputs.map(
+      (input, i) =>
+        `--coverage-from ${input} (e.g. the windows CI job): ${String(total(lines[i] ?? new Map()))} lines`,
+    ),
+  };
 };
 
 const main = async (): Promise<void> => {
-  const file = process.argv.at(2);
-  if (file === undefined) {
-    throw new Error("usage: npm run coverage:gate -- <legacy test file>");
-  }
-  const relative = path.relative(ROOT, path.resolve(file));
+  const { file, coverageFrom } = parseCli();
+  // Subprocess coverage maps dist/ back to src/, so dist/ must be current.
+  // Some legacy tests need it too.
+  await ensureBuild();
   // One after another: the legacy suite has timing-sensitive tests.
-  const alone = await coveredLines({
+  const alone = await coverage({
     label: "the file alone",
-    args: ["--project", "legacy", relative],
+    args: ["--project", "legacy", file],
   });
-  const others = await coveredLines({
+  const others = await coverage({
     label: "the other legacy tests",
-    args: ["--project", "legacy", "--exclude", relative],
+    args: ["--project", "legacy", "--exclude", file],
   });
-  const e2e = await coveredLines({
-    label: "the e2e tests",
-    args: ["--project", "e2e"],
-  });
-  const only = minus(alone, others);
-  const missing = minus(only, e2e);
-  process.stdout.write(`${report(relative, only, missing)}\n`);
-  if (total(missing) > 0) {
+  const local = await e2eCoverage();
+  const extra = await extraSources(coverageFrom);
+  const input = {
+    file,
+    only: minus(alone.lines, others.lines),
+    e2e: merge(local.lines, ...extra.lines),
+    sources: [...local.sources, ...extra.sources],
+  };
+  process.stdout.write(`${report(input)}\n`);
+  if (total(missing(input)) > 0) {
     process.exitCode = 1;
   }
 };

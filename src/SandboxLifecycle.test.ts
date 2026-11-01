@@ -15,7 +15,7 @@ import { promisify } from "node:util";
 import { assert, describe, expect, it } from "vitest";
 import { SilentDisplay } from "./Display.js";
 import type { DisplayEntry } from "./Display.js";
-import type { SandboxService } from "./SandboxFactory.js";
+import type { ExecResult, SandboxService } from "./SandboxFactory.js";
 import { makeLocalSandbox } from "./testSandbox.js";
 import { ExecError, SyncError } from "./errors.js";
 import { withSandboxLifecycle, runHostHooks } from "./SandboxLifecycle.js";
@@ -46,6 +46,32 @@ const makePathTranslatingSandbox = (
 };
 
 const execAsync = promisify(exec);
+
+const EXEC_OK: ExecResult = { stdout: "", stderr: "", exitCode: 0 };
+
+/**
+ * A fake sandbox whose exec hands the commands `matches` picks to `onMatch`,
+ * and succeeds with no output for every other command.
+ */
+const sandboxRouting = (
+  matches: (command: string) => boolean,
+  onMatch: SandboxService["exec"],
+): SandboxService => ({
+  exec: (command, options) =>
+    matches(command) ? onMatch(command, options) : Effect.succeed(EXEC_OK),
+  copyIn: () => Effect.void,
+  copyFileOut: () => Effect.void,
+});
+
+/** The result for the 1-based `attempt`; the last one repeats from then on. */
+const resultForAttempt = (
+  results: readonly ExecResult[],
+  attempt: number,
+): ExecResult => {
+  const result = results[Math.min(attempt, results.length) - 1];
+  assert.isDefined(result, `no result for attempt ${attempt}`);
+  return result;
+};
 
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });
@@ -275,22 +301,18 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     // Track the order of start/end events to verify parallel execution
     const events: string[] = [];
 
-    const sandbox: SandboxService = {
-      exec: (command, options) => {
-        if (command === "slow-hook-a" || command === "slow-hook-b") {
-          events.push(`start:${command}`);
-          return Effect.gen(function* () {
-            // Yield to allow the other hook to start
-            yield* Effect.yieldNow();
-            events.push(`end:${command}`);
-            return { stdout: "", stderr: "", exitCode: 0 };
-          });
-        }
-        return Effect.succeed({ stdout: "", stderr: "", exitCode: 0 });
+    const sandbox = sandboxRouting(
+      (command) => ["slow-hook-a", "slow-hook-b"].includes(command),
+      (command) => {
+        events.push(`start:${command}`);
+        return Effect.gen(function* () {
+          // Yield to allow the other hook to start
+          yield* Effect.yieldNow();
+          events.push(`end:${command}`);
+          return EXEC_OK;
+        });
       },
-      copyIn: () => Effect.void,
-      copyFileOut: () => Effect.void,
-    };
+    );
 
     await Effect.runPromise(
       withSandboxLifecycle(
@@ -1045,11 +1067,9 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       }).pipe(Effect.provide(displayLayer)),
     );
 
-    const syncLog = entries.find(
-      (e) =>
-        e._tag === "taskLog" &&
-        (e.title === "No commits to sync out" || e.title.startsWith("Syncing")),
-    );
+    const syncLog = entries
+      .filter((e) => e._tag === "taskLog")
+      .find((e) => /^(?:No commits to sync out$|Syncing)/u.test(e.title));
     expect(syncLog).toBeUndefined();
   });
 
@@ -1296,20 +1316,11 @@ describe("withSandboxLifecycle (worktree mode)", () => {
   it("sandbox.onSandboxReady respects per-hook timeoutMs", async () => {
     const { hostDir, worktreeDir } = await setupWorktree();
 
-    const sandbox: SandboxService = {
-      exec: (command, _options) => {
-        if (command === "slow-install") {
-          // Simulate a command that takes longer than the short timeout
-          return Effect.gen(function* () {
-            yield* Effect.sleep("2 seconds");
-            return { stdout: "", stderr: "", exitCode: 0 };
-          });
-        }
-        return Effect.succeed({ stdout: "", stderr: "", exitCode: 0 });
-      },
-      copyIn: () => Effect.void,
-      copyFileOut: () => Effect.void,
-    };
+    const sandbox = sandboxRouting(
+      (command) => command === "slow-install",
+      // Simulate a command that takes longer than the short timeout
+      () => Effect.as(Effect.sleep("2 seconds"), EXEC_OK),
+    );
 
     const result = Effect.runPromise(
       withSandboxLifecycle(
@@ -1414,20 +1425,17 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     // (overlayfs/exec race seen under heavy parallelism), then succeeds.
     // Effect.sync defers per-run so retries re-evaluate, matching how the
     // real exec (Effect.tryPromise) re-invokes the SDK on each attempt.
-    const sandbox: SandboxService = {
-      exec: (command, _options) =>
+    const sandbox = sandboxRouting(
+      (command) => command.includes("safe.directory"),
+      () =>
         Effect.sync(() => {
-          if (command.includes("safe.directory")) {
-            safeDirAttempts++;
-            if (safeDirAttempts === 1) {
-              return { stdout: "", stderr: "cannot exec", exitCode: 126 };
-            }
-          }
-          return { stdout: "", stderr: "", exitCode: 0 };
+          safeDirAttempts++;
+          return resultForAttempt(
+            [{ stdout: "", stderr: "cannot exec", exitCode: 126 }, EXEC_OK],
+            safeDirAttempts,
+          );
         }),
-      copyIn: () => Effect.void,
-      copyFileOut: () => Effect.void,
-    };
+    );
 
     const result = await Effect.runPromise(
       withSandboxLifecycle(
@@ -1449,18 +1457,14 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     const { hostDir, worktreeDir } = await setupWorktree();
 
     let safeDirAttempts = 0;
-    const sandbox: SandboxService = {
-      exec: (command, _options) =>
+    const sandbox = sandboxRouting(
+      (command) => command.includes("safe.directory"),
+      () =>
         Effect.sync(() => {
-          if (command.includes("safe.directory")) {
-            safeDirAttempts++;
-            return { stdout: "", stderr: "fatal: bad config", exitCode: 1 };
-          }
-          return { stdout: "", stderr: "", exitCode: 0 };
+          safeDirAttempts++;
+          return { stdout: "", stderr: "fatal: bad config", exitCode: 1 };
         }),
-      copyIn: () => Effect.void,
-      copyFileOut: () => Effect.void,
-    };
+    );
 
     await expect(
       Effect.runPromise(
@@ -1485,19 +1489,10 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     // The git safe.directory setup command takes longer than the short
     // gitSetupMs override, so it should time out rather than succeed under
     // the default 10s timeout.
-    const sandbox: SandboxService = {
-      exec: (command, _options) => {
-        if (command.includes("safe.directory")) {
-          return Effect.gen(function* () {
-            yield* Effect.sleep("2 seconds");
-            return { stdout: "", stderr: "", exitCode: 0 };
-          });
-        }
-        return Effect.succeed({ stdout: "", stderr: "", exitCode: 0 });
-      },
-      copyIn: () => Effect.void,
-      copyFileOut: () => Effect.void,
-    };
+    const sandbox = sandboxRouting(
+      (command) => command.includes("safe.directory"),
+      () => Effect.as(Effect.sleep("2 seconds"), EXEC_OK),
+    );
 
     const result = Effect.runPromise(
       withSandboxLifecycle(
@@ -1603,18 +1598,14 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     const { hostDir, worktreeDir } = await setupWorktree();
 
     let safeDirAttempts = 0;
-    const sandbox: SandboxService = {
-      exec: (command, _options) =>
+    const sandbox = sandboxRouting(
+      (command) => command.includes("safe.directory"),
+      () =>
         Effect.sync(() => {
-          if (command.includes("safe.directory")) {
-            safeDirAttempts++;
-            return { stdout: "", stderr: "cannot exec", exitCode: 126 };
-          }
-          return { stdout: "", stderr: "", exitCode: 0 };
+          safeDirAttempts++;
+          return { stdout: "", stderr: "cannot exec", exitCode: 126 };
         }),
-      copyIn: () => Effect.void,
-      copyFileOut: () => Effect.void,
-    };
+    );
 
     await expect(
       Effect.runPromise(

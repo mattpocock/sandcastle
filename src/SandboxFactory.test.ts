@@ -194,15 +194,12 @@ describe("WorktreeDockerSandboxFactory", () => {
   });
 
   it("creates the worktree before calling provider.create", async () => {
-    const callOrder: string[] = [];
+    let worktreeExistedAtCreate: boolean | undefined;
     const { provider } = makeMockProvider();
     const origCreate = provider.create;
     (provider as any).create = async (opts: any) => {
-      callOrder.push("provider-create");
-      // Verify the worktree directory already exists at this point
-      if (existsSync(opts.worktreePath)) {
-        callOrder.push("worktree-exists-before-provider-create");
-      }
+      // Record whether the worktree directory already exists at this point
+      worktreeExistedAtCreate = existsSync(opts.worktreePath);
       return origCreate(opts);
     };
 
@@ -227,7 +224,7 @@ describe("WorktreeDockerSandboxFactory", () => {
       }).pipe(Effect.provide(layer)),
     );
 
-    expect(callOrder).toContain("worktree-exists-before-provider-create");
+    expect(worktreeExistedAtCreate).toBe(true);
   });
 
   it("passes worktree path and git mounts to provider.create", async () => {

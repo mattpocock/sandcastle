@@ -460,8 +460,8 @@ describe("listClaudeSubagentSessionsInSandbox", () => {
       return new Promise((resolve) => {
         exec(command, (err, stdout, stderr) => {
           resolve({
-            stdout: stdout.toString(),
-            stderr: stderr.toString(),
+            stdout,
+            stderr,
             exitCode: err && typeof err.code === "number" ? err.code : 0,
           });
         });

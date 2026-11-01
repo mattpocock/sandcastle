@@ -79,9 +79,9 @@ const claudePathHash = (value: string): string => {
  * the full path. A trailing path separator is ignored.
  */
 export const encodeProjectPath = (cwd: string): string => {
-  const isRoot = cwd === "/" || /^[A-Za-z]:[\\/]?$/.test(cwd);
-  const normalized = isRoot ? cwd : cwd.replace(/[\\/]+$/, "");
-  const encoded = normalized.replaceAll(/[^A-Za-z0-9]/g, "-");
+  const isRoot = cwd === "/" || /^[A-Za-z]:[\\/]?$/u.test(cwd);
+  const normalized = isRoot ? cwd : cwd.replace(/[\\/]+$/u, "");
+  const encoded = normalized.replaceAll(/[^A-Za-z0-9]/gu, "-");
   if (encoded.length <= MAX_PROJECT_DIR_LENGTH) {
     return encoded;
   }
@@ -364,8 +364,8 @@ export const transferCodexSession = (
  * `SessionManager` directory encoding (verified against pi 0.73.1).
  */
 export const encodePiSessionDir = (cwd: string): string => {
-  const stripped = cwd.replace(/^[/\\]/, "");
-  const replaced = stripped.replaceAll(/[/\\:]/g, "-");
+  const stripped = cwd.replace(/^[/\\]/u, "");
+  const replaced = stripped.replaceAll(/[/\\:]/gu, "-");
   return `--${replaced}--`;
 };
 

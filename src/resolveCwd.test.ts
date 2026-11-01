@@ -42,7 +42,7 @@ describe("resolveCwd", () => {
     );
     expect(result).toBeInstanceOf(CwdError);
     expect(result.cwd).toBe("/tmp/does-not-exist-12345");
-    expect(result.message).toMatch(/does not exist/i);
+    expect(result.message).toMatch(/does not exist/iu);
   });
 
   it("fails with CwdError when path is a file, not a directory", async () => {
@@ -58,7 +58,7 @@ describe("resolveCwd", () => {
       );
       expect(result).toBeInstanceOf(CwdError);
       expect(result.cwd).toBe(filePath);
-      expect(result.message).toMatch(/not a directory/i);
+      expect(result.message).toMatch(/not a directory/iu);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

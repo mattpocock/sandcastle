@@ -208,7 +208,7 @@ export const interactive = async (
           clack.text({
             message: `Enter value for {{${key}}}`,
             validate: (v) => {
-              if (!v) {
+              if (v === undefined || v === "") {
                 return `A value is required for {{${key}}}`;
               }
             },
@@ -259,7 +259,7 @@ export const interactive = async (
         WorktreeManager.pruneStale(hostRepoDir).pipe(
           Effect.catchAll(() => Effect.void),
           Effect.andThen(
-            branch
+            branch !== undefined && branch !== ""
               ? WorktreeManager.create(hostRepoDir, { branch })
               : WorktreeManager.create(hostRepoDir, {
                   name: options.name,
@@ -273,6 +273,7 @@ export const interactive = async (
     // head mode (the only mode without a worktree).
     const hostWorkPath = worktreeInfo?.path ?? hostRepoDir;
     const copyPaths = options.copyToWorktree;
+    const onWorktreeReady = hooks?.host?.onWorktreeReady ?? [];
 
     // 6. Prepare the worktree and start the sandbox. If any step fails after the
     // worktree exists (copying, hooks, or sandbox start), remove the worktree so
@@ -302,12 +303,12 @@ export const interactive = async (
         }
 
         // Run host.onWorktreeReady hooks
-        if (hooks?.host?.onWorktreeReady?.length) {
-          yield* runHostHooks(hooks.host.onWorktreeReady, hostWorkPath);
+        if (onWorktreeReady.length > 0) {
+          yield* runHostHooks(onWorktreeReady, hostWorkPath);
         }
-      } else if (hooks?.host?.onWorktreeReady?.length) {
+      } else if (onWorktreeReady.length > 0) {
         // Head strategy: cwd is the host repo root
-        yield* runHostHooks(hooks.host.onWorktreeReady, hostRepoDir);
+        yield* runHostHooks(onWorktreeReady, hostRepoDir);
       }
 
       // Start sandbox
@@ -443,7 +444,7 @@ export const interactive = async (
       }
 
       // Clean up worktree if not preserved
-      if (worktreeInfo && !preservedWorktreePath) {
+      if (worktreeInfo && preservedWorktreePath === undefined) {
         yield* WorktreeManager.remove(worktreeInfo.path).pipe(
           Effect.catchAll(() => Effect.void),
         );
@@ -454,9 +455,9 @@ export const interactive = async (
         Commits: String(lifecycleResult.commits.length),
         Branch: lifecycleResult.branch,
         "Exit code": String(exitCode),
-        ...(preservedWorktreePath
-          ? { "Preserved worktree": preservedWorktreePath }
-          : {}),
+        ...(preservedWorktreePath === undefined
+          ? {}
+          : { "Preserved worktree": preservedWorktreePath }),
       });
 
       return {

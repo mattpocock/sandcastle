@@ -95,8 +95,8 @@ export const createTempSandbox = async (
             reject(new Error(`exec failed: ${error.message}`));
           } else {
             resolve({
-              stdout: stdout.toString(),
-              stderr: stderr.toString(),
+              stdout,
+              stderr,
               exitCode: typeof error?.code === "number" ? error.code : 0,
             });
           }

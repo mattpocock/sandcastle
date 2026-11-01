@@ -8,6 +8,7 @@ import {
   it,
   vi,
 } from "vitest";
+import type { MockInstance } from "vitest";
 import { SilentDisplay } from "./Display.js";
 import type { DisplayEntry, Display } from "./Display.js";
 import {
@@ -157,12 +158,13 @@ describe("formatErrorMessage", () => {
 // --- withFriendlyErrors ---
 
 describe("withFriendlyErrors", () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let mockExit: any;
+  let mockExit: MockInstance<typeof process.exit>;
 
   beforeEach(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    mockExit = vi.spyOn(process, "exit").mockImplementation((() => {}) as any);
+    // process.exit never returns, so the fake throws instead.
+    mockExit = vi.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("process.exit called");
+    });
   });
 
   afterEach(() => {
@@ -173,7 +175,9 @@ describe("withFriendlyErrors", () => {
     effect: Effect.Effect<unknown, never, Display>,
   ): Promise<readonly DisplayEntry[]> => {
     const ref = Ref.unsafeMake<readonly DisplayEntry[]>([]);
-    await Effect.runPromise(Effect.provide(effect, SilentDisplay.layer(ref)));
+    await Effect.runPromiseExit(
+      Effect.provide(effect, SilentDisplay.layer(ref)),
+    );
     return Effect.runSync(Ref.get(ref));
   };
 

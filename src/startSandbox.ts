@@ -4,12 +4,11 @@ import { join, posix } from "node:path";
 import {
   ContainerStartTimeoutError,
   CopyToWorktreeTimeoutError,
-  SyncError,
   SyncInTimeoutError,
   WorktreeError,
   withTimeout,
 } from "./errors.js";
-import type { DockerError } from "./errors.js";
+import type { DockerError, SyncError } from "./errors.js";
 import type {
   BindMountSandboxProvider,
   BindMountSandboxHandle,

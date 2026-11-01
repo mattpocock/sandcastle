@@ -12,7 +12,7 @@ import {
   resolveGitMounts,
   SANDBOX_REPO_DIR,
 } from "./SandboxFactory.js";
-import type { MountEntry } from "./SandboxFactory.js";
+import type { MountEntry, SandboxService } from "./SandboxFactory.js";
 import { patchGitMountsForWindows, removeMountTempDirs } from "./mountUtils.js";
 import { withSandboxLifecycle, runHostHooks } from "./SandboxLifecycle.js";
 import type { SandboxHooks } from "./SandboxLifecycle.js";
@@ -181,9 +181,7 @@ export interface WorktreeCreateSandboxOptions {
   readonly timeouts?: Timeouts;
   /** @internal Test-only overrides to bypass the sandbox provider. */
   readonly _test?: {
-    readonly buildSandbox?: (
-      sandboxDir: string,
-    ) => import("./SandboxFactory.js").SandboxService;
+    readonly buildSandbox?: (sandboxDir: string) => SandboxService;
   };
 }
 
@@ -250,8 +248,9 @@ export const createWorktree = async (
       );
     }
     // Run host.onWorktreeReady hooks after copyToWorktree, before sandbox creation
-    if (options.hooks?.host?.onWorktreeReady?.length) {
-      yield* runHostHooks(options.hooks.host.onWorktreeReady, info.path);
+    const onWorktreeReady = options.hooks?.host?.onWorktreeReady;
+    if (onWorktreeReady !== undefined && onWorktreeReady.length > 0) {
+      yield* runHostHooks(onWorktreeReady, info.path);
     }
     return { hostRepoDir: repoDir, worktreeInfo: info };
   }).pipe(Effect.provide(NodeContext.layer), Effect.runPromise);
@@ -302,7 +301,8 @@ export const createWorktree = async (
     assertInteractiveSupported(resolvedSandbox);
 
     // Validate buildInteractiveArgs is available
-    if (!provider.buildInteractiveArgs) {
+    const buildInteractiveArgs = provider.buildInteractiveArgs?.bind(provider);
+    if (!buildInteractiveArgs) {
       throw new Error(
         `Agent provider "${provider.name}" does not support buildInteractiveArgs, required for interactive sessions.`,
       );
@@ -452,7 +452,7 @@ export const createWorktree = async (
                       ctx.sandboxRepoDir,
                     );
 
-              const interactiveArgs = provider.buildInteractiveArgs!({
+              const interactiveArgs = buildInteractiveArgs({
                 prompt: fullPrompt,
                 dangerouslySkipPermissions: resolvedSandbox.tag !== "none",
               });
@@ -531,14 +531,17 @@ export const createWorktree = async (
 
     validateTimeoutOptions(opts);
 
-    if (opts.resumeSession && maxIterations > 1) {
+    const isResuming =
+      opts.resumeSession !== undefined && opts.resumeSession !== "";
+
+    if (isResuming && maxIterations > 1) {
       throw new Error(
         "resumeSession cannot be combined with maxIterations > 1. " +
           "Resume applies to iteration 1 only; multi-iteration resume semantics are not supported.",
       );
     }
 
-    if (opts.resumeSession) {
+    if (isResuming) {
       await assertResumeSessionExists({
         provider,
         sandboxTag: sandboxProvider.tag,

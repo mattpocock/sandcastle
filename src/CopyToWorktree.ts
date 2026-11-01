@@ -1,4 +1,5 @@
-import { type ChildProcess, execFile } from "node:child_process";
+import { execFile } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname, join, sep } from "node:path";

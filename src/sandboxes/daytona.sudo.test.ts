@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assert, beforeEach, describe, expect, it, vi } from "vitest";
+import { daytona } from "./daytona.js";
 
 // A fake @daytona/sdk that records the commands sent to the sandbox.
 const sdk = vi.hoisted(() => ({ commands: [] as string[] }));
@@ -39,8 +40,6 @@ vi.mock("@daytona/sdk", () => {
   }
   return { Daytona };
 });
-
-import { daytona } from "./daytona.js";
 
 beforeEach(() => {
   sdk.commands.length = 0;

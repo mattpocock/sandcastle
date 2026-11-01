@@ -51,7 +51,11 @@ jobs:
       # in the PR as a report diff, which CODEOWNERS routes to Matt.
       - run: npm run api:report -- --check
       - run: npm run lint
-      - run: npm test
+      # `npm test`, split so the e2e tests run once: the floor runs them with
+      # coverage, fails on a failing test, and holds their line coverage to
+      # scripts/coverage-baseline.json (see scripts/coverage-floor.ts).
+      - run: npx vitest run --project tooling --project legacy
+      - run: npm run coverage:floor
 
   # Everything that runs on a real Windows host, in one job: real cmd.exe and
   # Windows argv rules for noSandbox (#940), plus the end-to-end tests
@@ -69,7 +73,15 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
-      - run: npx vitest run --project e2e
+      # Coverage for scripts/coverage-gate.ts: code that runs only on win32
+      # can count toward deleting a legacy test. The gate merges this artifact
+      # with `--coverage-from <dir>` (see the comment at the top of the gate).
+      - run: npx vitest run --project e2e --coverage.enabled --coverage.reporter=json --coverage.reportsDirectory=coverage/e2e-windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e2e-coverage-windows
+          path: coverage/e2e-windows/coverage-final.json
+          retention-days: 14
       - run: npx vitest run --project legacy src/sandboxes/no-sandbox.test.ts
 
   # The end-to-end tests on a real macOS host. This is the only place

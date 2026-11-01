@@ -10,6 +10,11 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
+import { interactive } from "./interactive.js";
+import { createBindMountSandboxProvider } from "./SandboxProvider.js";
+import type { BindMountSandboxHandle } from "./SandboxProvider.js";
+import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
+import { claudeCode } from "./AgentProvider.js";
 
 const execAsync = promisify(exec);
 
@@ -35,14 +40,6 @@ vi.mock("./mountUtils.js", async (importOriginal) => {
       ),
   };
 });
-
-import { interactive } from "./interactive.js";
-import {
-  createBindMountSandboxProvider,
-  type BindMountSandboxHandle,
-} from "./SandboxProvider.js";
-import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
-import { claudeCode } from "./AgentProvider.js";
 
 /** A bind-mount provider whose handle executes commands on the host worktree. */
 const makeInteractiveProvider = () =>
@@ -106,9 +103,7 @@ describe("interactive() Windows mount patching", () => {
     expect(mockPatchGitMountsForWindows).toHaveBeenCalledTimes(1);
     const [call] = mockPatchGitMountsForWindows.mock.calls;
     assert.isDefined(call);
-    const gitMounts = call[0];
-    const worktreePath = call[1];
-    const sandboxRepoDir = call[2];
+    const [gitMounts, worktreePath, sandboxRepoDir] = call;
     expect(Array.isArray(gitMounts)).toBe(true);
     expect(worktreePath).toContain(".sandcastle/worktrees");
     expect(sandboxRepoDir).toBe(SANDBOX_REPO_DIR);
@@ -132,8 +127,7 @@ describe("interactive() Windows mount patching", () => {
     expect(mockPatchGitMountsForWindows).toHaveBeenCalledTimes(1);
     const [call] = mockPatchGitMountsForWindows.mock.calls;
     assert.isDefined(call);
-    const worktreePath = call[1];
-    const sandboxRepoDir = call[2];
+    const [, worktreePath, sandboxRepoDir] = call;
     expect(worktreePath).toBe(hostDir);
     expect(sandboxRepoDir).toBe(SANDBOX_REPO_DIR);
   });
