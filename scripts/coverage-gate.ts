@@ -13,9 +13,11 @@
 // C merges every source of end-to-end coverage, and the report names each:
 //
 // - the e2e tests' own vitest process (this machine);
-// - CLI subprocesses: any Node process an e2e test spawns (dist/main.js)
-//   writes raw V8 coverage to NODE_V8_COVERAGE, mapped back to src/ through
-//   dist's source maps. dist/ is rebuilt first if stale;
+// - CLI subprocesses: any Node process an e2e test spawns writes raw V8
+//   coverage to NODE_V8_COVERAGE, mapped back to src/. A process running the
+//   built dist/main.js maps through dist's source maps (dist/ is rebuilt
+//   first if stale); one running src/main.ts through tsx maps through the
+//   source maps Node records in the report;
 // - the windows CI job, given `--coverage-from <dir>`: its e2e step uploads
 //   coverage-final.json as the `e2e-coverage-windows` artifact, so code that
 //   runs only on win32 can count. Fetch it from the PR's CI run with
@@ -160,7 +162,7 @@ const e2eLines = async (): Promise<{ lines: Lines; sources: string[] }> => {
       lines: merge(inProcess, subprocess),
       sources: [
         `e2e tests in vitest (this machine): ${String(total(inProcess))} lines`,
-        `CLI subprocesses spawned by e2e tests (built dist/, source-mapped to src/): ${String(processes.length)} processes, ${String(total(subprocess))} lines`,
+        `CLI subprocesses spawned by e2e tests (built dist/ or src/ through tsx, source-mapped to src/): ${String(processes.length)} processes, ${String(total(subprocess))} lines`,
       ],
     };
   } finally {
