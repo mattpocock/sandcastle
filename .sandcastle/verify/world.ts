@@ -54,7 +54,7 @@ export interface World {
 }
 
 const stamp = (d: Date): string =>
-  d.toISOString().replaceAll(/[-:]/g, "").replace("T", "-").slice(0, 15);
+  d.toISOString().replaceAll(/[-:]/gu, "").replace("T", "-").slice(0, 15);
 
 const must = (
   command: string,
@@ -107,7 +107,9 @@ export const listImages = (): string[] =>
 /** Sandcastle's own temp entries (sandcastle-bundle-*, -git-*, -copyin-*) in `dir`. */
 export const listTmpEntries = (dir: string = tmpdir()): string[] =>
   existsSync(dir)
-    ? readdirSync(dir).filter((n) => /^sandcastle-(bundle|git|copyin)-/.test(n))
+    ? readdirSync(dir).filter((n) =>
+        /^sandcastle-(bundle|git|copyin)-/u.test(n),
+      )
     : [];
 
 /** When `engine` built image `id`, as the engine prints it. */
@@ -240,7 +242,7 @@ export const saveWorld = (world: World): void => {
 
 /** The world `runId`, which this checkout must have created. */
 export const loadWorld = (runId: string | undefined): World => {
-  if (!runId || !/^\d{8}-\d{6}-[0-9a-f]{4}$/.test(runId)) {
+  if (!runId || !/^\d{8}-\d{6}-[0-9a-f]{4}$/u.test(runId)) {
     throw new Error(
       `a run id is required (the one \`npm run verify:world\` printed), got ${JSON.stringify(runId ?? "")}`,
     );
@@ -328,7 +330,7 @@ export const declaredKeys = (world: World): Set<string> => {
   return new Set(
     readFileSync(file, "utf8")
       .split("\n")
-      .map((l) => /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(l)?.[1])
+      .map((l) => /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/u.exec(l)?.[1])
       .filter((k): k is string => Boolean(k)),
   );
 };
