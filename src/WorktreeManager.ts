@@ -35,9 +35,15 @@ const formatTimestamp = (date: Date): string =>
  */
 const randomBranchSuffix = (): string => randomBytes(3).toString("hex");
 
-/** Sanitize a name for use in branch names and directory names. */
+/**
+ * Sanitize a name for use in branch names and directory names. One dash per
+ * UTF-16 unit, as before the `u` flag, so names with astral characters (e.g.
+ * emoji) keep mapping to the same branches and worktree directories.
+ */
 export const sanitizeName = (name: string): string =>
-  name.toLowerCase().replaceAll(/[^a-z0-9]/g, "-");
+  name
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]/gu, (char) => "-".repeat(char.length));
 
 const execGit = (
   args: string[],
