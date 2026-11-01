@@ -4,8 +4,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { describe, it } from "vitest";
-import type { TestContext } from "vitest";
+import { beforeAll, describe, expect, it, onTestFinished } from "vitest";
 import * as sandcastle from "@ai-hero/sandcastle";
 
 // `sandcastle init --agent <name>`: which agents the CLI offers, and what each
@@ -93,63 +92,70 @@ const AGENTS = [
   },
 ] as const;
 
-/** A fresh git repo, removed when the test finishes. */
-const freshRepo = ({ onTestFinished }: TestContext): string => {
+/** A fresh git repo; call the returned function to remove it. */
+const freshRepo = (): { repo: string; remove: () => void } => {
   const repo = mkdtempSync(path.join(tmpdir(), "e2e-init-agents-"));
-  onTestFinished(() => {
-    rmSync(repo, { recursive: true, force: true });
-  });
   execFileSync("git", ["init", "-b", "main"], { cwd: repo, stdio: "ignore" });
-  return repo;
+  return {
+    repo,
+    remove: () => {
+      rmSync(repo, { recursive: true, force: true });
+    },
+  };
 };
 
-const scaffolded = (repo: string, file: string): string =>
-  readFileSync(path.join(repo, ".sandcastle", file), "utf8");
+// One CLI process at a time: they take about a second each, and running them
+// all at once starves the other test files on a small CI machine.
+describe("sandcastle init --agent", () => {
+  it("rejects an unknown agent, listing every agent it offers", async () => {
+    const { repo, remove } = freshRepo();
+    onTestFinished(remove);
 
-// Each test spawns its own CLI in its own repo, so they run concurrently.
-describe.concurrent(
-  "sandcastle init --agent",
-  () => {
-    it("rejects an unknown agent, listing every agent it offers", async (ctx) => {
-      const { expect } = ctx;
-      const repo = freshRepo(ctx);
-      const result = await sandcastleInit(repo, "nonexistent");
+    const result = await sandcastleInit(repo, "nonexistent");
 
-      expect(result).toMatchObject({ exitCode: 1 });
-      expect(result.output).toContain(
-        'Unknown agent "nonexistent". Available: claude-code, pi, codex, cursor, opencode, copilot',
+    expect(result).toMatchObject({ exitCode: 1 });
+    expect(result.output).toContain(
+      'Unknown agent "nonexistent". Available: claude-code, pi, codex, cursor, opencode, copilot',
+    );
+  });
+
+  describe.each(AGENTS)("$name", ({ name, factory, model, installs }) => {
+    // Both tests read the same scaffold: one init per agent.
+    let result: CliResult = { exitCode: -1, output: "" };
+    let scaffolded: (file: string) => string = () => "";
+
+    beforeAll(async () => {
+      const { repo, remove } = freshRepo();
+      result = await sandcastleInit(repo, name);
+      const dir = path.join(repo, ".sandcastle");
+      const files = new Map(
+        ["main.mts", "Dockerfile"].map((file) => [
+          file,
+          readFileSync(path.join(dir, file), "utf8"),
+        ]),
       );
+      remove();
+      scaffolded = (file) => files.get(file) ?? "";
+    }, 60_000);
+
+    it(`runs the agent through ${factory}("${model}") from the package`, () => {
+      expect(result).toMatchObject({ exitCode: 0 });
+      expect(scaffolded("main.mts")).toMatch(
+        new RegExp(
+          `import \\{[^}]*\\b${factory}\\b[^}]*\\} from "@ai-hero/sandcastle";`,
+          "u",
+        ),
+      );
+      expect(scaffolded("main.mts")).toContain(
+        `agent: ${factory}("${model}"),`,
+      );
+      expect(sandcastle).toHaveProperty(factory, expect.any(Function));
     });
 
-    describe.each(AGENTS)("$name", ({ name, factory, model, installs }) => {
-      it(`runs the agent through ${factory}("${model}") from the package`, async (ctx) => {
-        const { expect } = ctx;
-        const repo = freshRepo(ctx);
-        const result = await sandcastleInit(repo, name);
-
-        expect(result).toMatchObject({ exitCode: 0 });
-        expect(scaffolded(repo, "main.mts")).toMatch(
-          new RegExp(
-            `import \\{[^}]*\\b${factory}\\b[^}]*\\} from "@ai-hero/sandcastle";`,
-            "u",
-          ),
-        );
-        expect(scaffolded(repo, "main.mts")).toContain(
-          `agent: ${factory}("${model}"),`,
-        );
-        expect(sandcastle).toHaveProperty(factory, expect.any(Function));
-      });
-
-      it(`writes a Dockerfile that installs the ${name} CLI`, async (ctx) => {
-        const { expect } = ctx;
-        const repo = freshRepo(ctx);
-        await sandcastleInit(repo, name);
-
-        const dockerfile = scaffolded(repo, "Dockerfile");
-        expect(dockerfile).toMatch(/^FROM /mu);
-        expect(dockerfile).toContain(installs);
-      });
+    it(`writes a Dockerfile that installs the ${name} CLI`, () => {
+      const dockerfile = scaffolded("Dockerfile");
+      expect(dockerfile).toMatch(/^FROM /mu);
+      expect(dockerfile).toContain(installs);
     });
-  },
-  60_000,
-);
+  });
+}, 60_000);
