@@ -150,8 +150,13 @@
     // --- Off: they duplicate or contradict another enabled rule -------------
     // import/no-duplicates covers it, and lets `import type` stand apart.
     "eslint/no-duplicate-imports": "off",
-    // typescript/require-await is the type-aware version.
+    // An `async` function with nothing to await (a `create` that builds its
+    // handle synchronously) must stay `async`: promise-function-async wants
+    // it, and `async` turns a throw into a rejection instead of a sync throw
+    // past the caller's `.catch`. require-await flags exactly that function,
+    // and no-floating-promises already catches the missing `await` it guards.
     "eslint/require-await": "off",
+    "typescript/require-await": "off",
     // unicorn/no-negated-condition is the same rule.
     "eslint/no-negated-condition": "off",
     // typescript/no-extraneous-class is the same rule.
@@ -277,10 +282,7 @@
         "eslint/no-empty-function": "off",
         "promise/avoid-new": "off",
         // Helpers sit next to the tests that use them.
-        "unicorn/consistent-function-scoping": "off",
-        // Stubs return promises without awaiting: promise-function-async
-        // wants them async, this wants an await, and no fix satisfies both.
-        "typescript/require-await": "off"
+        "unicorn/consistent-function-scoping": "off"
       }
     },
     {
