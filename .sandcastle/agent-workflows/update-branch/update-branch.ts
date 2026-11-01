@@ -1,4 +1,4 @@
-import * as fs from "node:fs";
+import { readFile } from "node:fs/promises";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 import * as sandcastle from "@ai-hero/sandcastle";
@@ -79,7 +79,7 @@ try {
       tag: "output",
       schema: updateBranchOutputSchema,
     }),
-    extractionPrompt: fs.readFileSync(
+    extractionPrompt: await readFile(
       path.join(import.meta.dirname, "extraction.md"),
       "utf8",
     ),

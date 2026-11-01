@@ -1,4 +1,4 @@
-import * as fs from "node:fs";
+import { readFile } from "node:fs/promises";
 import * as path from "node:path";
 import * as sandcastle from "@ai-hero/sandcastle";
 import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
@@ -43,7 +43,7 @@ try {
       tag: "output",
       schema: implementPrOutputSchema,
     }),
-    extractionPrompt: fs.readFileSync(
+    extractionPrompt: await readFile(
       path.join(import.meta.dirname, "extraction.md"),
       "utf8",
     ),

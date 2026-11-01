@@ -1,4 +1,4 @@
-import * as fs from "node:fs";
+import { readFile } from "node:fs/promises";
 import * as path from "node:path";
 import * as sandcastle from "@ai-hero/sandcastle";
 import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
@@ -22,7 +22,7 @@ const MAX_RETRIES = 1;
 const promptPath = (file: string) => path.join(import.meta.dirname, file);
 
 try {
-  const batch = parseBatch(JSON.parse(fs.readFileSync(ISSUES_FILE, "utf8")));
+  const batch = parseBatch(JSON.parse(await readFile(ISSUES_FILE, "utf8")));
   if (batch.length === 0) {
     fail("No open agent:explore issues in the batch file.");
   }
@@ -47,7 +47,7 @@ try {
       tag: "output",
       schema: planSchema(batch),
     }),
-    extractionPrompt: fs.readFileSync(promptPath("extraction.md"), "utf8"),
+    extractionPrompt: await readFile(promptPath("extraction.md"), "utf8"),
     maxRetries: MAX_RETRIES,
   });
 
