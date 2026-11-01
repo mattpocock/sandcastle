@@ -1,4 +1,4 @@
-import { Deferred, Duration, Effect, Fiber } from "effect";
+import { Deferred, Duration, Effect, Fiber, Runtime } from "effect";
 import { AgentStreamEmitter } from "./AgentStreamEmitter.js";
 import { Display } from "./Display.js";
 import { preprocessPrompt } from "./PromptPreprocessor.js";
@@ -9,11 +9,14 @@ import {
 } from "./errors.js";
 import type { SandboxError } from "./errors.js";
 import type { SandboxService } from "./SandboxFactory.js";
-import { SandboxFactory, SANDBOX_REPO_DIR } from "./SandboxFactory.js";
-import { withSandboxLifecycle, type SandboxHooks } from "./SandboxLifecycle.js";
+import { SandboxFactory } from "./SandboxFactory.js";
+import { withSandboxLifecycle } from "./SandboxLifecycle.js";
+import type { SandboxHooks } from "./SandboxLifecycle.js";
 import type { AgentProvider, IterationUsage } from "./AgentProvider.js";
 import type { Timeouts } from "./run.js";
 import { TextDeltaBuffer } from "./TextDeltaBuffer.js";
+import { buildContextWindowLines } from "./ContextWindow.js";
+import type { ContextWindow } from "./ContextWindow.js";
 
 export type { ParsedStreamEvent, IterationUsage } from "./AgentProvider.js";
 
@@ -32,6 +35,7 @@ const invokeAgent = (
   onRawLine: (line: string) => void,
   onIdleWarning: (minutes: number) => void,
   onCompletionTimeout: (timeoutMs: number) => void,
+  onContextWindow: (contextWindow: ContextWindow) => void,
   idleWarningIntervalMs: number = IDLE_WARNING_INTERVAL_MS,
   resumeSession?: string,
   forkSession?: boolean,
@@ -42,6 +46,8 @@ const invokeAgent = (
 > =>
   Effect.gen(function* () {
     let resultText = "";
+    // Last error the agent reported in its own stream (see ParsedStreamEvent).
+    let streamError: string | undefined;
     let sessionId: string | undefined;
     let usage: IterationUsage | undefined;
     // Accumulated text/result output, scanned for the completion signal so a
@@ -55,27 +61,38 @@ const invokeAgent = (
     // fires (signal seen but process hasn't exited). Resolving lets the race
     // hand control back to the orchestrator with the buffered output, which
     // still contains the signal so the existing completionSignal check works.
-    const completionTimeoutDeferred = yield* Deferred.make<
-      { result: string; sessionId?: string; usage?: IterationUsage },
-      never
-    >();
+    const completionTimeoutDeferred = yield* Deferred.make<{
+      result: string;
+      sessionId?: string;
+      usage?: IterationUsage;
+    }>();
+    // Timer and abort callbacks fire outside any fiber; they fork onto the
+    // surrounding runtime rather than a fresh default one.
+    const runFork = Runtime.runFork(yield* Effect.runtime());
     let timeoutFiber: Fiber.RuntimeFiber<unknown, unknown> | null = null;
     let completionDetected = false;
 
     // Periodic idle warning state
     let warningFiber: Fiber.RuntimeFiber<unknown, unknown> | null = null;
     let idleMinuteCounter = 0;
+    // Set once the race below settles (success, failure, abort, idle or
+    // completion timeout). The losing exec may still be streaming — e.g. a
+    // `docker exec` outliving the run — and every line would otherwise fork
+    // fresh timer fibers nobody interrupts, keeping the host process alive.
+    let settled = false;
 
     const interruptFiber = (
       fiber: Fiber.RuntimeFiber<unknown, unknown> | null,
     ) => {
-      if (fiber !== null) Effect.runFork(Fiber.interrupt(fiber));
+      if (fiber !== null) {
+        runFork(Fiber.interrupt(fiber));
+      }
     };
 
     const startWarningInterval = () => {
       interruptFiber(warningFiber);
       idleMinuteCounter = 0;
-      warningFiber = Effect.runFork(
+      warningFiber = runFork(
         Effect.gen(function* () {
           while (true) {
             yield* Effect.sleep(Duration.millis(idleWarningIntervalMs));
@@ -90,7 +107,7 @@ const invokeAgent = (
       interruptFiber(timeoutFiber);
       if (completionDetected) {
         // Post-signal grace window — successful resolution on expiry.
-        timeoutFiber = Effect.runFork(
+        timeoutFiber = runFork(
           Effect.gen(function* () {
             yield* Effect.sleep(Duration.millis(completionTimeoutMs));
             onCompletionTimeout(completionTimeoutMs);
@@ -103,13 +120,13 @@ const invokeAgent = (
         );
       } else {
         // Pre-signal idle window — failure on expiry.
-        timeoutFiber = Effect.runFork(
+        timeoutFiber = runFork(
           Effect.gen(function* () {
             yield* Effect.sleep(Duration.millis(idleTimeoutMs));
             yield* Deferred.fail(
               timeoutSignal,
               new AgentIdleTimeoutError({
-                message: `Agent idle for ${idleTimeoutMs / 1000} seconds — no output received. Consider increasing the idle timeout with --idle-timeout.`,
+                message: `Agent idle for ${idleTimeoutMs / 1000} seconds — no output received. Increase the idleTimeoutSeconds option to allow longer silences.`,
                 timeoutMs: idleTimeoutMs,
               }),
             );
@@ -122,17 +139,19 @@ const invokeAgent = (
 
     // Deferred that will be resolved (as a defect) when the AbortSignal fires.
     // Uses Effect.die so the abort reason propagates as-is to run().
-    const abortDeferred = yield* Deferred.make<never, never>();
+    const abortDeferred = yield* Deferred.make<never>();
     let abortCleanup: (() => void) | null = null;
     if (signal) {
       if (signal.aborted) {
         return yield* Effect.die(signal.reason);
       }
       const onAbort = () => {
-        Effect.runFork(Deferred.die(abortDeferred, signal.reason));
+        runFork(Deferred.die(abortDeferred, signal.reason));
       };
       signal.addEventListener("abort", onAbort, { once: true });
-      abortCleanup = () => signal.removeEventListener("abort", onAbort);
+      abortCleanup = () => {
+        signal.removeEventListener("abort", onAbort);
+      };
     }
 
     resetTimer();
@@ -146,6 +165,9 @@ const invokeAgent = (
       });
       const execResult = yield* sandbox.exec(printCmd.command, {
         onLine: (line) => {
+          if (settled) {
+            return;
+          }
           // Surface the raw line FIRST so verbose mode/forwarders see every
           // stdout line the agent produced, including ones parseStreamLine
           // drops. Errors thrown by the callback are caught by the emitter
@@ -160,6 +182,8 @@ const invokeAgent = (
             if (parsed.type === "text") {
               onText(parsed.text);
               accumulatedOutput += parsed.text;
+            } else if (parsed.type === "context_window") {
+              onContextWindow(parsed.contextWindow);
             } else if (parsed.type === "result") {
               resultText = parsed.result;
               accumulatedOutput += parsed.result;
@@ -169,6 +193,8 @@ const invokeAgent = (
               sessionId = parsed.sessionId;
             } else if (parsed.type === "usage") {
               usage = parsed.usage;
+            } else if (parsed.type === "error") {
+              streamError = parsed.message;
             }
           }
           // Check for the completion signal AFTER parsing this line so the
@@ -189,9 +215,13 @@ const invokeAgent = (
       });
 
       if (execResult.exitCode !== 0) {
-        // Prefer stderr; fall back to resultText (from parsed stream events),
-        // then to the tail of raw stdout (last 20 non-empty lines).
+        // Prefer stderr; fall back to the stream's own error, then resultText
+        // (from parsed stream events), then to the tail of raw stdout (last
+        // 20 non-empty lines).
         let errorDetail = execResult.stderr;
+        if (!errorDetail.trim()) {
+          errorDetail = streamError ?? "";
+        }
         if (!errorDetail.trim()) {
           errorDetail = resultText;
         }
@@ -199,11 +229,17 @@ const invokeAgent = (
           const lines = execResult.stdout.split("\n").filter((l) => l.trim());
           errorDetail = lines.slice(-20).join("\n");
         }
-        return yield* Effect.fail(
-          new AgentError({
-            message: `${provider.name} exited with code ${execResult.exitCode}:\n${errorDetail}`,
-          }),
-        );
+        return yield* new AgentError({
+          message: `${provider.name} exited with code ${execResult.exitCode}:\n${errorDetail}`,
+        });
+      }
+
+      // Some agents (pi, opencode) exit 0 after reporting a failure in their
+      // stream. Treat the reported error as authoritative.
+      if (streamError !== undefined) {
+        return yield* new AgentError({
+          message: `${provider.name} reported an error:\n${streamError}`,
+        });
       }
 
       return { result: resultText || execResult.stdout, sessionId, usage };
@@ -224,15 +260,13 @@ const invokeAgent = (
     > = Effect.raceFirst(execEffect, Deferred.await(timeoutSignal));
     raced = Effect.raceFirst(raced, Deferred.await(completionTimeoutDeferred));
     if (signal) {
-      raced = Effect.raceFirst(
-        raced,
-        Deferred.await(abortDeferred) as Effect.Effect<never, never>,
-      );
+      raced = Effect.raceFirst(raced, Deferred.await(abortDeferred));
     }
 
     return yield* raced.pipe(
       Effect.ensuring(
         Effect.sync(() => {
+          settled = true;
           abortCleanup?.();
           interruptFiber(timeoutFiber);
           timeoutFiber = null;
@@ -297,6 +331,8 @@ export interface IterationResult {
   readonly sessionFilePath?: string;
   /** Token usage snapshot from the last assistant message in the session, or undefined when capture is disabled or provider does not support usage parsing. */
   readonly usage?: IterationUsage;
+  /** Input tokens of the iteration's last model call (cache included), plus the model's limit when the agent reports it. Undefined when the agent reports no per-call figure. */
+  readonly contextWindow?: ContextWindow;
 }
 
 export interface OrchestrateResult {
@@ -327,8 +363,12 @@ export const orchestrate = (
     const factory = yield* SandboxFactory;
     const display = yield* Display;
     const streamEmitter = yield* AgentStreamEmitter;
+    // The agent's stream callbacks fire outside any fiber; they fork their
+    // display and emitter effects onto the surrounding runtime.
+    const runFork = Runtime.runFork(yield* Effect.runtime());
     const { hostRepoDir, iterations, hooks, prompt, branch, provider } =
       options;
+    const { sessionStorage } = provider;
     let completionSignals: string[];
     if (options.completionSignal === undefined) {
       completionSignals = [DEFAULT_COMPLETION_SIGNAL];
@@ -356,208 +396,238 @@ export const orchestrate = (
       yield* checkAbort();
       yield* display.status(label(`Iteration ${i}/${iterations}`), "info");
 
-      const sandboxResult = yield* factory.withSandbox(
-        (
-          { hostWorktreePath, sandboxRepoPath, applyToHost, bindMountHandle },
-          sandbox,
-        ) =>
-          withSandboxLifecycle(
-            {
-              hostRepoDir,
-              sandboxRepoDir: sandboxRepoPath,
-              hooks,
-              branch,
-              hostWorktreePath,
-              applyToHost,
-              signal: options.signal,
-              timeouts: options.timeouts,
-              keepSourceBranch: options.keepSourceBranch,
-            },
+      const sandboxResult = yield* factory
+        .withSandbox(
+          (
+            { hostWorktreePath, sandboxRepoPath, applyToHost, bindMountHandle },
             sandbox,
-            (ctx) =>
-              Effect.gen(function* () {
-                // Resume session: transfer JSONL from host to sandbox before iteration 1
-                const iterationResumeSession =
-                  i === 1 ? options.resumeSession : undefined;
-                const iterationForkSession =
-                  i === 1 ? options.forkSession : undefined;
-                if (
-                  iterationResumeSession &&
-                  bindMountHandle &&
-                  provider.sessionStorage
-                ) {
-                  yield* display.status(label("Resuming session"), "info");
-                  yield* Effect.tryPromise({
-                    try: () =>
-                      provider.sessionStorage!.resumeIntoSandbox({
-                        hostCwd: hostRepoDir,
-                        sandboxCwd: ctx.sandboxRepoDir,
-                        sessionId: iterationResumeSession,
-                        handle: bindMountHandle,
-                      }),
-                    catch: (e) =>
-                      new SessionCaptureError({
-                        message: `Session resume failed: ${e instanceof Error ? e.message : String(e)}`,
-                        sessionId: iterationResumeSession,
-                      }),
-                  });
-                }
+          ) =>
+            withSandboxLifecycle(
+              {
+                hostRepoDir,
+                sandboxRepoDir: sandboxRepoPath,
+                hooks,
+                branch,
+                hostWorktreePath,
+                applyToHost,
+                signal: options.signal,
+                timeouts: options.timeouts,
+                keepSourceBranch: options.keepSourceBranch,
+              },
+              sandbox,
+              (ctx) =>
+                Effect.gen(function* () {
+                  // Resume session: transfer JSONL from host to sandbox before iteration 1
+                  const iterationResumeSession =
+                    i === 1 ? options.resumeSession : undefined;
+                  const iterationForkSession =
+                    i === 1 ? options.forkSession : undefined;
+                  if (
+                    iterationResumeSession &&
+                    bindMountHandle &&
+                    sessionStorage
+                  ) {
+                    yield* display.status(label("Resuming session"), "info");
+                    yield* Effect.tryPromise({
+                      try: () =>
+                        sessionStorage.resumeIntoSandbox({
+                          hostCwd: hostRepoDir,
+                          sandboxCwd: ctx.sandboxRepoDir,
+                          sessionId: iterationResumeSession,
+                          handle: bindMountHandle,
+                        }),
+                      catch: (e) =>
+                        new SessionCaptureError({
+                          message: `Session resume failed: ${e instanceof Error ? e.message : String(e)}`,
+                          sessionId: iterationResumeSession,
+                        }),
+                    });
+                  }
 
-                // Preprocess prompt (run !`command` expressions inside sandbox).
-                // Inline prompts pass through literally — skip expansion.
-                const fullPrompt = options.skipPromptExpansion
-                  ? prompt
-                  : yield* preprocessPrompt(
-                      prompt,
-                      ctx.sandbox,
-                      ctx.sandboxRepoDir,
+                  // Preprocess prompt (run !`command` expressions inside sandbox).
+                  // Inline prompts pass through literally — skip expansion.
+                  const fullPrompt = options.skipPromptExpansion
+                    ? prompt
+                    : yield* preprocessPrompt(
+                        prompt,
+                        ctx.sandbox,
+                        ctx.sandboxRepoDir,
+                      );
+
+                  yield* display.status(label("Agent started"), "success");
+
+                  // Invoke the agent — buffer text deltas so Pi's single-token
+                  // chunks are displayed as readable multi-word lines.
+                  const textBuffer = new TextDeltaBuffer((chunk) => {
+                    runFork(display.textChunk(chunk));
+                    runFork(
+                      streamEmitter.emit({
+                        type: "text",
+                        message: chunk,
+                        iteration: i,
+                        timestamp: new Date(),
+                      }),
                     );
-
-                yield* display.status(label("Agent started"), "success");
-
-                // Invoke the agent — buffer text deltas so Pi's single-token
-                // chunks are displayed as readable multi-word lines.
-                const textBuffer = new TextDeltaBuffer((chunk) => {
-                  Effect.runPromise(display.textChunk(chunk));
-                  Effect.runPromise(
-                    streamEmitter.emit({
-                      type: "text",
-                      message: chunk,
-                      iteration: i,
-                      timestamp: new Date(),
-                    }),
-                  );
-                });
-                const onText = (text: string) => {
-                  textBuffer.write(text);
-                };
-                const onToolCall = (name: string, formattedArgs: string) => {
-                  textBuffer.flush();
-                  Effect.runPromise(display.toolCall(name, formattedArgs));
-                  Effect.runPromise(
-                    streamEmitter.emit({
-                      type: "toolCall",
-                      name,
-                      formattedArgs,
-                      iteration: i,
-                      timestamp: new Date(),
-                    }),
-                  );
-                };
-                const onRawLine = (line: string) => {
-                  Effect.runPromise(
-                    streamEmitter.emit({
-                      type: "raw",
-                      line,
-                      iteration: i,
-                      timestamp: new Date(),
-                    }),
-                  );
-                };
-                const onIdleWarning = (minutes: number) => {
-                  const msg =
-                    minutes === 1
-                      ? "Agent idle for 1 minute"
-                      : `Agent idle for ${minutes} minutes`;
-                  Effect.runPromise(display.status(label(msg), "warn"));
-                };
-                const onCompletionTimeout = (timeoutMs: number) => {
-                  Effect.runPromise(
-                    display.status(
-                      label(
-                        `Completion signal seen but agent process is hanging — force-completing after ${timeoutMs / 1000}s grace window.`,
+                  });
+                  const onText = (text: string) => {
+                    textBuffer.write(text);
+                  };
+                  const onToolCall = (name: string, formattedArgs: string) => {
+                    textBuffer.flush();
+                    runFork(display.toolCall(name, formattedArgs));
+                    runFork(
+                      streamEmitter.emit({
+                        type: "toolCall",
+                        name,
+                        formattedArgs,
+                        iteration: i,
+                        timestamp: new Date(),
+                      }),
+                    );
+                  };
+                  const onRawLine = (line: string) => {
+                    runFork(
+                      streamEmitter.emit({
+                        type: "raw",
+                        line,
+                        iteration: i,
+                        timestamp: new Date(),
+                      }),
+                    );
+                  };
+                  const onIdleWarning = (minutes: number) => {
+                    const msg =
+                      minutes === 1
+                        ? "Agent idle for 1 minute"
+                        : `Agent idle for ${minutes} minutes`;
+                    runFork(display.status(label(msg), "warn"));
+                  };
+                  const onCompletionTimeout = (timeoutMs: number) => {
+                    runFork(
+                      display.status(
+                        label(
+                          `Completion signal seen but agent process is hanging — force-completing after ${timeoutMs / 1000}s grace window.`,
+                        ),
+                        "warn",
                       ),
-                      "warn",
-                    ),
-                  );
-                };
-                const {
-                  result: agentOutput,
-                  sessionId,
-                  usage: streamUsage,
-                } = yield* invokeAgent(
-                  ctx.sandbox,
-                  ctx.sandboxRepoDir,
-                  fullPrompt,
-                  provider,
-                  idleTimeoutMs,
-                  completionTimeoutMs,
-                  completionSignals,
-                  onText,
-                  onToolCall,
-                  onRawLine,
-                  onIdleWarning,
-                  onCompletionTimeout,
-                  options._idleWarningIntervalMs,
-                  iterationResumeSession,
-                  iterationForkSession,
-                  options.signal,
-                );
-
-                // Flush any remaining buffered text deltas
-                textBuffer.dispose();
-
-                yield* display.status(label("Agent stopped"), "info");
-
-                // Capture session while sandbox is still alive. Usage from the
-                // stream (e.g. Codex's turn.completed) is the baseline; a
-                // session-parsed value below overrides it when available.
-                let sessionFilePath: string | undefined;
-                let usage: IterationUsage | undefined = streamUsage;
-                if (
-                  provider.captureSessions &&
-                  provider.sessionStorage &&
-                  sessionId &&
-                  bindMountHandle
-                ) {
-                  yield* display.status(label("Capturing session"), "info");
-                  yield* Effect.tryPromise({
-                    try: () =>
-                      provider.sessionStorage!.captureToHost({
-                        hostCwd: hostRepoDir,
-                        sandboxCwd: ctx.sandboxRepoDir,
-                        sessionId,
-                        handle: bindMountHandle,
-                      }),
-                    catch: (e) =>
-                      new SessionCaptureError({
-                        message: `Session capture failed: ${e instanceof Error ? e.message : String(e)}`,
-                        sessionId,
-                      }),
-                  });
-                  sessionFilePath = provider.sessionStorage.hostSessionFilePath(
-                    hostRepoDir,
-                    sessionId,
-                  );
-
-                  // Parse token usage from the captured session JSONL
-                  if (provider.parseSessionUsage) {
-                    const content = yield* Effect.promise(() =>
-                      provider
-                        .sessionStorage!.readHostSession(hostRepoDir, sessionId)
-                        .catch(() => undefined as string | undefined),
                     );
-                    if (content) {
-                      const parsedUsage = provider.parseSessionUsage(content);
-                      if (parsedUsage) usage = parsedUsage;
+                  };
+                  // Last call wins: each event is one model call, and the last
+                  // call's input is the context size (see ContextWindow).
+                  let contextWindow: ContextWindow | undefined;
+                  const onContextWindow = (cw: ContextWindow) => {
+                    contextWindow = cw;
+                  };
+                  const {
+                    result: agentOutput,
+                    sessionId,
+                    usage: streamUsage,
+                  } = yield* invokeAgent(
+                    ctx.sandbox,
+                    ctx.sandboxRepoDir,
+                    fullPrompt,
+                    provider,
+                    idleTimeoutMs,
+                    completionTimeoutMs,
+                    completionSignals,
+                    onText,
+                    onToolCall,
+                    onRawLine,
+                    onIdleWarning,
+                    onCompletionTimeout,
+                    onContextWindow,
+                    options._idleWarningIntervalMs,
+                    iterationResumeSession,
+                    iterationForkSession,
+                    options.signal,
+                  );
+
+                  // Flush any remaining buffered text deltas
+                  textBuffer.dispose();
+
+                  yield* display.status(label("Agent stopped"), "info");
+
+                  // Capture session while sandbox is still alive. Usage from the
+                  // stream (e.g. Codex's turn.completed) is the baseline; a
+                  // session-parsed value below overrides it when available.
+                  let sessionFilePath: string | undefined;
+                  let usage: IterationUsage | undefined = streamUsage;
+                  if (
+                    provider.captureSessions &&
+                    sessionStorage &&
+                    sessionId &&
+                    bindMountHandle
+                  ) {
+                    yield* display.status(label("Capturing session"), "info");
+                    yield* Effect.tryPromise({
+                      try: () =>
+                        sessionStorage.captureToHost({
+                          hostCwd: hostRepoDir,
+                          sandboxCwd: ctx.sandboxRepoDir,
+                          sessionId,
+                          handle: bindMountHandle,
+                        }),
+                      catch: (e) =>
+                        new SessionCaptureError({
+                          message: `Session capture failed: ${e instanceof Error ? e.message : String(e)}`,
+                          sessionId,
+                        }),
+                    });
+                    sessionFilePath = sessionStorage.hostSessionFilePath(
+                      hostRepoDir,
+                      sessionId,
+                    );
+
+                    // Parse token usage and the context window from the
+                    // captured session JSONL
+                    if (
+                      provider.parseSessionUsage ||
+                      provider.parseSessionContextWindow
+                    ) {
+                      const content = yield* Effect.promise(() =>
+                        sessionStorage
+                          .readHostSession(hostRepoDir, sessionId)
+                          .catch(() => undefined as string | undefined),
+                      );
+                      if (content) {
+                        const parsedUsage =
+                          provider.parseSessionUsage?.(content);
+                        if (parsedUsage) {
+                          usage = parsedUsage;
+                        }
+                        const parsedContextWindow =
+                          provider.parseSessionContextWindow?.(content);
+                        if (parsedContextWindow) {
+                          contextWindow = parsedContextWindow;
+                        }
+                      }
                     }
                   }
-                }
 
-                // Check completion signal
-                const matchedSignal = completionSignals.find((sig) =>
-                  agentOutput.includes(sig),
-                );
-                return {
-                  completionSignal: matchedSignal,
-                  stdout: agentOutput,
-                  sessionId,
-                  sessionFilePath,
-                  usage,
-                } as const;
-              }),
+                  // Check completion signal
+                  const matchedSignal = completionSignals.find((sig) =>
+                    agentOutput.includes(sig),
+                  );
+                  return {
+                    completionSignal: matchedSignal,
+                    stdout: agentOutput,
+                    sessionId,
+                    sessionFilePath,
+                    usage,
+                    contextWindow,
+                  } as const;
+                }),
+            ),
+        )
+        .pipe(
+          // A failed iteration ends the run before run() prints the context
+          // window lines, so print the completed iterations' lines here.
+          Effect.tapError(() =>
+            Effect.forEach(buildContextWindowLines(allIterations), (line) =>
+              display.text(line),
+            ),
           ),
-      );
+        );
 
       const lifecycleResult = sandboxResult.value;
       iterationPreservedPath = sandboxResult.preservedWorktreePath;
@@ -570,6 +640,7 @@ export const orchestrate = (
         sessionId: lifecycleResult.result.sessionId,
         sessionFilePath: lifecycleResult.result.sessionFilePath,
         usage: lifecycleResult.result.usage,
+        contextWindow: lifecycleResult.result.contextWindow,
       });
 
       if (lifecycleResult.result.completionSignal !== undefined) {

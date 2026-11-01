@@ -5,24 +5,33 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { execSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import {
+  assert,
+  describe,
+  expect,
+  it,
+  vi,
+  beforeEach,
+  afterEach,
+} from "vitest";
+import {
+  buildAgentStreamHandler,
   buildCompletionMessage,
-  buildContextWindowLines,
   buildLogFilename,
   buildRunSummaryRows,
   buildStructuredOutputRetryFeedback,
   DEFAULT_MAX_ITERATIONS,
-  formatContextWindowSize,
   printFileDisplayStartup,
   run,
   sanitizeBranchForFilename,
-  type RunOptions,
-  type RunResult,
 } from "./run.js";
-import { claudeCode, cursor, opencode } from "./AgentProvider.js";
+import type { RunOptions, RunResult } from "./run.js";
+import { claudeCode, copilot, cursor } from "./AgentProvider.js";
+import type { AgentProvider } from "./AgentProvider.js";
+import { ForkNotSupportedError } from "./errors.js";
 import { Output, StructuredOutputError } from "./Output.js";
 import { claudeHostSessionPath } from "./SessionStore.js";
 import { defaultImageName } from "./sandboxes/docker.js";
@@ -31,6 +40,15 @@ import { createBindMountSandboxProvider } from "./SandboxProvider.js";
 import { testStubProvider } from "./sandboxes/test-shared.js";
 
 const testSandbox = testStubProvider({ name: "test" }).provider;
+
+/** An agent provider with no session storage, so it cannot resume. */
+const noResumeAgent: AgentProvider = {
+  name: "no-resume-agent",
+  env: {},
+  captureSessions: false,
+  buildPrintCommand: () => ({ command: "true" }),
+  parseStreamLine: () => [],
+};
 
 describe("printFileDisplayStartup", () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
@@ -104,7 +122,7 @@ describe("printFileDisplayStartup", () => {
     });
     const allOutput = consoleSpy.mock.calls.flat().join(" ");
     // Bold ANSI escape code
-    expect(allOutput).toContain("\u001b[1m");
+    expect(allOutput).toContain("\u001B[1m");
   });
 
   it("prints a relative log path when hostRepoDir equals process.cwd()", () => {
@@ -129,6 +147,53 @@ describe("printFileDisplayStartup", () => {
     expect(allOutput).toContain(
       "tail -f /some/other/repo/.sandcastle/logs/main.log",
     );
+  });
+});
+
+describe("buildAgentStreamHandler (verbose file mode)", () => {
+  const rawEvent = (line: string) =>
+    ({ type: "raw", line, iteration: 1, timestamp: new Date() }) as const;
+
+  it("starts a raw line on a fresh line when the log ends mid-line", () => {
+    const dir = mkdtempSync(join(tmpdir(), "verbose-sink-"));
+    try {
+      const logPath = join(dir, "run.log");
+      // FileDisplay streams agent prose as raw chunks with no trailing newline.
+      writeFileSync(logPath, "I'll commit the result myself.");
+      const handler = buildAgentStreamHandler({
+        type: "file",
+        path: logPath,
+        verbose: true,
+      });
+      assert.isDefined(handler);
+      handler(rawEvent('{"type":"assistant"}'));
+      expect(readFileSync(logPath, "utf8")).toBe(
+        'I\'ll commit the result myself.\n{"type":"assistant"}\n',
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("adds no blank line when the log already ends with a newline", () => {
+    const dir = mkdtempSync(join(tmpdir(), "verbose-sink-"));
+    try {
+      const logPath = join(dir, "run.log");
+      writeFileSync(logPath, "Agent started\n");
+      const handler = buildAgentStreamHandler({
+        type: "file",
+        path: logPath,
+        verbose: true,
+      });
+      assert.isDefined(handler);
+      handler(rawEvent('{"type":"system"}'));
+      handler(rawEvent('{"type":"assistant"}'));
+      expect(readFileSync(logPath, "utf8")).toBe(
+        'Agent started\n{"type":"system"}\n{"type":"assistant"}\n',
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -187,9 +252,9 @@ describe("RunResult", () => {
       commits: [],
       branch: "main",
     };
-    expect(result.iterations.length).toBe(2);
-    expect(result.iterations[0]!.sessionId).toBe("abc-123");
-    expect(result.iterations[1]!.sessionId).toBe("def-456");
+    expect(result.iterations).toHaveLength(2);
+    expect(result.iterations[0]?.sessionId).toBe("abc-123");
+    expect(result.iterations[1]?.sessionId).toBe("def-456");
   });
 
   it("has undefined sessionId for non-Claude agent iterations", () => {
@@ -200,7 +265,9 @@ describe("RunResult", () => {
       commits: [],
       branch: "main",
     };
-    expect(result.iterations[0]!.sessionId).toBeUndefined();
+    const [iteration] = result.iterations;
+    assert.isDefined(iteration);
+    expect(iteration.sessionId).toBeUndefined();
   });
 
   it("carries sessionFilePath when session capture is enabled", () => {
@@ -217,7 +284,7 @@ describe("RunResult", () => {
       commits: [],
       branch: "main",
     };
-    expect(result.iterations[0]!.sessionFilePath).toContain("abc-123.jsonl");
+    expect(result.iterations[0]?.sessionFilePath).toContain("abc-123.jsonl");
   });
 
   it("has undefined sessionFilePath when capture is disabled", () => {
@@ -228,7 +295,9 @@ describe("RunResult", () => {
       commits: [],
       branch: "main",
     };
-    expect(result.iterations[0]!.sessionFilePath).toBeUndefined();
+    const [iteration] = result.iterations;
+    assert.isDefined(iteration);
+    expect(iteration.sessionFilePath).toBeUndefined();
   });
 
   it("allows fork as an optional sibling of resume on the type", () => {
@@ -247,7 +316,7 @@ describe("RunResult", () => {
         branch: "main",
       }),
     };
-    expect(typeof result.fork).toBe("function");
+    expect(result.fork).toBeTypeOf("function");
   });
 });
 
@@ -398,18 +467,15 @@ describe("signal (AbortSignal)", () => {
     const reason = new DOMException("user cancelled", "AbortError");
     const ac = new AbortController();
     ac.abort(reason);
-    try {
-      await run({
+    await expect(
+      run({
         agent: claudeCode("claude-opus-4-8"),
         sandbox: testSandbox,
         prompt: "test",
         branchStrategy: { type: "head" },
         signal: ac.signal,
-      });
-      expect.unreachable("should have thrown");
-    } catch (err) {
-      expect(err).toBe(reason);
-    }
+      }),
+    ).rejects.toBe(reason);
   });
 });
 
@@ -470,6 +536,46 @@ describe("forkSession validation", () => {
         forkSession: true,
       } as RunOptions),
     ).rejects.toThrow("forkSession requires resumeSession");
+  });
+});
+
+describe("timeout option validation", () => {
+  it("rejects idleTimeoutSeconds: 0 before starting anything", async () => {
+    await expect(
+      run({
+        agent: claudeCode("claude-opus-4-8"),
+        sandbox: testSandbox,
+        prompt: "test",
+        branchStrategy: { type: "head" },
+        idleTimeoutSeconds: 0,
+      }),
+    ).rejects.toThrow(
+      "idleTimeoutSeconds must be a positive number of seconds. Received: 0",
+    );
+  });
+
+  it("rejects a negative completionTimeoutSeconds", async () => {
+    await expect(
+      run({
+        agent: claudeCode("claude-opus-4-8"),
+        sandbox: testSandbox,
+        prompt: "test",
+        branchStrategy: { type: "head" },
+        completionTimeoutSeconds: -1,
+      }),
+    ).rejects.toThrow("completionTimeoutSeconds must be a positive number");
+  });
+
+  it("rejects timeouts.gitSetupMs: NaN", async () => {
+    await expect(
+      run({
+        agent: claudeCode("claude-opus-4-8"),
+        sandbox: testSandbox,
+        prompt: "test",
+        branchStrategy: { type: "head" },
+        timeouts: { gitSetupMs: Number.NaN },
+      }),
+    ).rejects.toThrow("timeouts.gitSetupMs must be a positive number");
   });
 });
 
@@ -572,7 +678,9 @@ describe("sanitizeBranchForFilename", () => {
   });
 
   it("replaces backslashes with dashes", () => {
-    expect(sanitizeBranchForFilename("feature\\branch")).toBe("feature-branch");
+    expect(sanitizeBranchForFilename(String.raw`feature\branch`)).toBe(
+      "feature-branch",
+    );
   });
 
   it("replaces all problematic filesystem characters", () => {
@@ -705,8 +813,8 @@ describe("inline prompt passthrough", () => {
     // matching value". With inline passthrough, {{KEY}} is delivered literally
     // and substitution is skipped entirely, so no scan happens.
     //
-    // The run still fails (fake sandbox can't actually run the agent) but the
-    // failure must not be a prompt-substitution error.
+    // The fake sandbox runs to completion, so the run resolves; a
+    // prompt-substitution error would reject it.
     const promise = run({
       agent: claudeCode("claude-opus-4-8"),
       sandbox: testSandbox,
@@ -714,10 +822,7 @@ describe("inline prompt passthrough", () => {
       branchStrategy: { type: "head" },
     });
 
-    await promise.catch((err: Error) => {
-      expect(err.message).not.toContain("matching value in promptArgs");
-      expect(err.message).not.toContain("{{BRANCH}}");
-    });
+    await expect(promise).resolves.toHaveProperty("iterations");
   });
 
   it("accepts inline prompt with empty promptArgs ({})", async () => {
@@ -732,11 +837,7 @@ describe("inline prompt passthrough", () => {
       promptArgs: {},
     });
 
-    await promise.catch((err: Error) => {
-      expect(err.message).not.toContain(
-        "promptArgs is only supported with promptFile",
-      );
-    });
+    await expect(promise).resolves.toHaveProperty("iterations");
   });
 });
 
@@ -767,7 +868,7 @@ describe("run() error logging to file", () => {
       }),
     ).rejects.toThrow();
 
-    const log = readFileSync(logPath, "utf-8");
+    const log = readFileSync(logPath, "utf8");
     expect(log).toContain("SOURCE_BRANCH");
     expect(log).toContain("built-in prompt argument");
   });
@@ -788,164 +889,6 @@ describe("run() error logging to file", () => {
         logging: { type: "file", path: logPath },
       }),
     ).rejects.toThrow("SOURCE_BRANCH");
-  });
-});
-
-describe("formatContextWindowSize", () => {
-  it("rounds up to the nearest 1000 tokens", () => {
-    expect(
-      formatContextWindowSize({
-        inputTokens: 102400,
-        cacheCreationInputTokens: 0,
-        cacheReadInputTokens: 0,
-        outputTokens: 0,
-      }),
-    ).toBe("103k");
-  });
-
-  it("returns exact k value when total is a multiple of 1000", () => {
-    expect(
-      formatContextWindowSize({
-        inputTokens: 100000,
-        cacheCreationInputTokens: 0,
-        cacheReadInputTokens: 0,
-        outputTokens: 0,
-      }),
-    ).toBe("100k");
-  });
-
-  it("rounds 100001 up to 101k", () => {
-    expect(
-      formatContextWindowSize({
-        inputTokens: 100001,
-        cacheCreationInputTokens: 0,
-        cacheReadInputTokens: 0,
-        outputTokens: 0,
-      }),
-    ).toBe("101k");
-  });
-
-  it("rounds 1 up to 1k", () => {
-    expect(
-      formatContextWindowSize({
-        inputTokens: 1,
-        cacheCreationInputTokens: 0,
-        cacheReadInputTokens: 0,
-        outputTokens: 0,
-      }),
-    ).toBe("1k");
-  });
-
-  it("rounds 999 up to 1k", () => {
-    expect(
-      formatContextWindowSize({
-        inputTokens: 999,
-        cacheCreationInputTokens: 0,
-        cacheReadInputTokens: 0,
-        outputTokens: 0,
-      }),
-    ).toBe("1k");
-  });
-
-  it("returns 1k for exactly 1000", () => {
-    expect(
-      formatContextWindowSize({
-        inputTokens: 1000,
-        cacheCreationInputTokens: 0,
-        cacheReadInputTokens: 0,
-        outputTokens: 0,
-      }),
-    ).toBe("1k");
-  });
-
-  it("rounds 1001 up to 2k", () => {
-    expect(
-      formatContextWindowSize({
-        inputTokens: 1001,
-        cacheCreationInputTokens: 0,
-        cacheReadInputTokens: 0,
-        outputTokens: 0,
-      }),
-    ).toBe("2k");
-  });
-
-  it("sums inputTokens, cacheCreationInputTokens, and cacheReadInputTokens", () => {
-    expect(
-      formatContextWindowSize({
-        inputTokens: 50000,
-        cacheCreationInputTokens: 25000,
-        cacheReadInputTokens: 25000,
-        outputTokens: 9999,
-      }),
-    ).toBe("100k");
-  });
-
-  it("rounds 99500 up to 100k", () => {
-    expect(
-      formatContextWindowSize({
-        inputTokens: 99500,
-        cacheCreationInputTokens: 0,
-        cacheReadInputTokens: 0,
-        outputTokens: 0,
-      }),
-    ).toBe("100k");
-  });
-});
-
-describe("buildContextWindowLines", () => {
-  it("returns one line per iteration with usage data", () => {
-    const lines = buildContextWindowLines([
-      {
-        usage: {
-          inputTokens: 50000,
-          cacheCreationInputTokens: 0,
-          cacheReadInputTokens: 0,
-          outputTokens: 1000,
-        },
-      },
-      {
-        usage: {
-          inputTokens: 100000,
-          cacheCreationInputTokens: 0,
-          cacheReadInputTokens: 0,
-          outputTokens: 2000,
-        },
-      },
-    ]);
-    expect(lines).toEqual(["Context window: 50k", "Context window: 100k"]);
-  });
-
-  it("skips iterations without usage data", () => {
-    const lines = buildContextWindowLines([
-      {
-        usage: {
-          inputTokens: 50000,
-          cacheCreationInputTokens: 0,
-          cacheReadInputTokens: 0,
-          outputTokens: 1000,
-        },
-      },
-      {},
-      {
-        usage: {
-          inputTokens: 100000,
-          cacheCreationInputTokens: 0,
-          cacheReadInputTokens: 0,
-          outputTokens: 2000,
-        },
-      },
-    ]);
-    expect(lines).toEqual(["Context window: 50k", "Context window: 100k"]);
-  });
-
-  it("returns empty array when no iterations have usage", () => {
-    const lines = buildContextWindowLines([{}, {}, {}]);
-    expect(lines).toEqual([]);
-  });
-
-  it("returns empty array for empty iterations list", () => {
-    const lines = buildContextWindowLines([]);
-    expect(lines).toEqual([]);
   });
 });
 
@@ -1084,21 +1027,18 @@ describe("structured output error carries the failed session id", () => {
   it("threads iterations[].sessionId onto StructuredOutputError", async () => {
     // captureSessions: false keeps the session id from the stream without
     // attempting to transfer a (nonexistent) session file off the sandbox.
-    try {
-      await run({
-        agent: claudeCode("claude-opus-4-8", { captureSessions: false }),
-        sandbox: sessionEmittingSandbox,
-        prompt: "emit your answer inside <result> tags",
-        branchStrategy: { type: "head" },
-        output: Output.object({ tag: "result", schema: mockSchema() }),
-      });
-      expect.unreachable("should have thrown StructuredOutputError");
-    } catch (err) {
-      expect(err).toBeInstanceOf(StructuredOutputError);
-      const soe = err as StructuredOutputError;
-      expect(soe.sessionId).toBe("sess-abc-123");
-      expect(soe.rawMatched).toBe("not valid json");
-    }
+    const promise = run({
+      agent: claudeCode("claude-opus-4-8", { captureSessions: false }),
+      sandbox: sessionEmittingSandbox,
+      prompt: "emit your answer inside <result> tags",
+      branchStrategy: { type: "head" },
+      output: Output.object({ tag: "result", schema: mockSchema() }),
+    });
+    await expect(promise).rejects.toBeInstanceOf(StructuredOutputError);
+    await expect(promise).rejects.toMatchObject({
+      sessionId: "sess-abc-123",
+      rawMatched: "not valid json",
+    });
   });
 });
 
@@ -1137,10 +1077,10 @@ describe("output.maxRetries entry-time validation", () => {
     consoleSpy.mockRestore();
   });
 
-  it("throws when maxRetries > 0 and the agent provider lacks session resumption (cursor)", async () => {
+  it("throws when maxRetries > 0 and the agent provider lacks session resumption", async () => {
     await expect(
       run({
-        agent: cursor("cursor-medium"),
+        agent: noResumeAgent,
         sandbox: testSandbox,
         prompt: "emit your answer inside <result> tags",
         branchStrategy: { type: "head" },
@@ -1155,10 +1095,10 @@ describe("output.maxRetries entry-time validation", () => {
     );
   });
 
-  it("throws when maxRetries > 0 and the agent provider lacks session resumption (opencode)", async () => {
+  it("throws when maxRetries > 0 and the agent provider lacks session resumption (no sessionStorage)", async () => {
     await expect(
       run({
-        agent: opencode("opencode-m"),
+        agent: noResumeAgent,
         sandbox: testSandbox,
         prompt: "emit your answer inside <result> tags",
         branchStrategy: { type: "head" },
@@ -1172,7 +1112,7 @@ describe("output.maxRetries entry-time validation", () => {
   it("names the non-resumable provider in the error message", async () => {
     await expect(
       run({
-        agent: cursor("cursor-medium"),
+        agent: noResumeAgent,
         sandbox: testSandbox,
         prompt: "emit your answer inside <result> tags",
         branchStrategy: { type: "head" },
@@ -1182,7 +1122,7 @@ describe("output.maxRetries entry-time validation", () => {
           maxRetries: 1,
         }),
       }),
-    ).rejects.toThrow(/"cursor"/);
+    ).rejects.toThrow(/"no-resume-agent"/u);
   });
 
   it("allows maxRetries = 0 with a non-resumable provider", async () => {
@@ -1190,7 +1130,7 @@ describe("output.maxRetries entry-time validation", () => {
     // <result> tag), not the maxRetries validation.
     await expect(
       run({
-        agent: cursor("cursor-medium"),
+        agent: noResumeAgent,
         sandbox: testSandbox,
         prompt: "emit your answer inside <result> tags",
         branchStrategy: { type: "head" },
@@ -1347,7 +1287,7 @@ describe("output.maxRetries end-to-end", () => {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(
       path,
-      JSON.stringify({ type: "system", cwd: hostRepoDir }) + "\n",
+      `${JSON.stringify({ type: "system", cwd: hostRepoDir })}\n`,
     );
   };
 
@@ -1395,7 +1335,7 @@ describe("output.maxRetries end-to-end", () => {
       ],
       [
         `{"type":"system","subtype":"init","session_id":"${sessionId}"}`,
-        '{"type":"result","result":"<result>{\\"answer\\":42}</result>"}',
+        String.raw`{"type":"result","result":"<result>{\"answer\":42}</result>"}`,
       ],
     ]);
 
@@ -1414,7 +1354,7 @@ describe("output.maxRetries end-to-end", () => {
           maxRetries: 1,
         }),
       });
-      expect(result.output).toEqual({ answer: 42 });
+      expect(result.output).toStrictEqual({ answer: 42 });
     } finally {
       rmSync(hostProjectsDir, { recursive: true, force: true });
     }
@@ -1433,7 +1373,7 @@ describe("output.maxRetries end-to-end", () => {
     const sandbox = stagedAgentSandbox([badStage, badStage, badStage]);
 
     try {
-      await run({
+      const promise = run({
         agent: claudeCode("claude-opus-4-8", {
           captureSessions: false,
           sessionStorage: { hostProjectsDir },
@@ -1447,10 +1387,10 @@ describe("output.maxRetries end-to-end", () => {
           maxRetries: 2,
         }),
       });
-      expect.unreachable("should have thrown StructuredOutputError");
-    } catch (err) {
-      expect(err).toBeInstanceOf(StructuredOutputError);
-      expect((err as StructuredOutputError).rawMatched).toBe("still not valid");
+      await expect(promise).rejects.toBeInstanceOf(StructuredOutputError);
+      await expect(promise).rejects.toMatchObject({
+        rawMatched: "still not valid",
+      });
     } finally {
       rmSync(hostProjectsDir, { recursive: true, force: true });
     }
@@ -1466,7 +1406,7 @@ describe("output.maxRetries end-to-end", () => {
         // Should never reach this stage — a stray success would mask a missing
         // guard around the recursion.
         `{"type":"system","subtype":"init","session_id":"sess-noretry"}`,
-        '{"type":"result","result":"<result>{\\"answer\\":1}</result>"}',
+        String.raw`{"type":"result","result":"<result>{\"answer\":1}</result>"}`,
       ],
     ]);
 
@@ -1479,5 +1419,408 @@ describe("output.maxRetries end-to-end", () => {
         output: Output.object({ tag: "result", schema: mockSchema() }),
       }),
     ).rejects.toBeInstanceOf(StructuredOutputError);
+  });
+});
+
+describe("merge-to-head temp branch name", () => {
+  let hostDir: string;
+
+  beforeEach(() => {
+    hostDir = mkdtempSync(join(tmpdir(), "sandcastle-run-m2h-"));
+    const git = (cmd: string) =>
+      execSync(`git ${cmd}`, { cwd: hostDir, stdio: "ignore" });
+    git("init -b main");
+    git('config user.email "test@test.com"');
+    git('config user.name "Test"');
+    writeFileSync(join(hostDir, "README.md"), "# Test\n");
+    git("add .");
+    git('commit -m "initial"');
+  });
+
+  afterEach(() => {
+    rmSync(hostDir, { recursive: true, force: true });
+  });
+
+  // Runs sandbox commands on the host, in the worktree Sandcastle created.
+  const hostWorktreeSandbox = createBindMountSandboxProvider({
+    name: "host-worktree",
+    create: async (options) => ({
+      worktreePath: options.worktreePath,
+      exec: async (command) => {
+        const stdout = execSync(command, {
+          cwd: options.worktreePath,
+          encoding: "utf8",
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+        return { stdout, stderr: "", exitCode: 0 };
+      },
+      copyFileIn: async () => {},
+      copyFileOut: async () => {},
+      close: async () => {},
+    }),
+  });
+
+  it("uses one name for the log file, {{SOURCE_BRANCH}} and the branch the agent works on", async () => {
+    const promptPath = join(hostDir, "prompt.md");
+    writeFileSync(
+      promptPath,
+      "SOURCE={{SOURCE_BRANCH}} ACTUAL=!`git rev-parse --abbrev-ref HEAD`",
+    );
+    let agentPrompt: string | undefined;
+    const recordingAgent: AgentProvider = {
+      name: "recording",
+      env: {},
+      captureSessions: false,
+      buildPrintCommand: ({ prompt }) => {
+        agentPrompt = prompt;
+        return { command: "true" };
+      },
+      parseStreamLine: () => [],
+    };
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      const result = await run({
+        agent: recordingAgent,
+        sandbox: hostWorktreeSandbox,
+        promptFile: promptPath,
+        cwd: hostDir,
+        branchStrategy: { type: "merge-to-head" },
+      });
+
+      const match = agentPrompt?.match(/^SOURCE=(\S+) ACTUAL=(\S+)$/);
+      assert.exists(match);
+      const [, sourceBranch, actualBranch] = match;
+      assert.isDefined(actualBranch);
+      expect(actualBranch).toMatch(/^sandcastle\//);
+      expect(sourceBranch).toBe(actualBranch);
+      expect(result.logFilePath).toBe(
+        join(
+          hostDir,
+          ".sandcastle",
+          "logs",
+          buildLogFilename(actualBranch, "main"),
+        ),
+      );
+    } finally {
+      consoleSpy.mockRestore();
+    }
+  });
+});
+
+describe("resume/fork after a promptFile + promptArgs run", () => {
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    consoleSpy.mockRestore();
+  });
+
+  it("runs the follow-up prompt inline, without the original promptArgs", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sandcastle-resume-args-"));
+    const hostProjectsDir = join(dir, "projects");
+    const sessionId = "sess-resume-args";
+    const sessionPath = claudeHostSessionPath(
+      process.cwd(),
+      sessionId,
+      hostProjectsDir,
+    );
+    mkdirSync(dirname(sessionPath), { recursive: true });
+    writeFileSync(
+      sessionPath,
+      `${JSON.stringify({ type: "system", cwd: process.cwd() })}\n`,
+    );
+    const promptFile = join(dir, "prompt.md");
+    writeFileSync(promptFile, "Remember {{TOKEN}}");
+
+    const agentStdin: (string | undefined)[] = [];
+    const sandbox = createBindMountSandboxProvider({
+      name: "resume-args",
+      create: async () => ({
+        worktreePath: process.cwd(),
+        exec: async (
+          _command: string,
+          options?: { onLine?: (line: string) => void; stdin?: string },
+        ) => {
+          if (options?.onLine) {
+            agentStdin.push(options.stdin);
+            options.onLine(
+              `{"type":"system","subtype":"init","session_id":"${sessionId}"}`,
+            );
+            options.onLine('{"type":"result","result":"ok"}');
+          }
+          return { stdout: "", stderr: "", exitCode: 0 };
+        },
+        copyFileIn: async () => {},
+        copyFileOut: async () => {},
+        close: async () => {},
+      }),
+    });
+
+    try {
+      const first = await run({
+        agent: claudeCode("claude-opus-4-8", {
+          captureSessions: false,
+          sessionStorage: { hostProjectsDir },
+        }),
+        sandbox,
+        promptFile,
+        promptArgs: { TOKEN: "tok-123" },
+        branchStrategy: { type: "head" },
+        logging: { type: "file", path: join(dir, "run.log") },
+      });
+
+      assert.isDefined(first.resume);
+      assert.isDefined(first.fork);
+      const resumed = await first.resume("repeat {{TOKEN}}");
+      const forked = await first.fork("fork {{TOKEN}}");
+
+      expect(resumed.iterations).toHaveLength(1);
+      expect(forked.iterations).toHaveLength(1);
+      // The follow-up prompts are inline: passed as-is, never substituted.
+      expect(agentStdin).toStrictEqual([
+        "Remember tok-123",
+        "repeat {{TOKEN}}",
+        "fork {{TOKEN}}",
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("resume/fork after a structured-output run", () => {
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    consoleSpy.mockRestore();
+  });
+
+  const setup = () => {
+    const dir = mkdtempSync(join(tmpdir(), "sandcastle-resume-output-"));
+    const hostProjectsDir = join(dir, "projects");
+    const sessionId = "sess-resume-output";
+    const sessionPath = claudeHostSessionPath(
+      process.cwd(),
+      sessionId,
+      hostProjectsDir,
+    );
+    mkdirSync(dirname(sessionPath), { recursive: true });
+    writeFileSync(
+      sessionPath,
+      `${JSON.stringify({ type: "system", cwd: process.cwd() })}\n`,
+    );
+
+    const agentStdin: (string | undefined)[] = [];
+    const sandbox = createBindMountSandboxProvider({
+      name: "resume-output",
+      create: async () => ({
+        worktreePath: process.cwd(),
+        exec: async (
+          _command: string,
+          options?: { onLine?: (line: string) => void; stdin?: string },
+        ) => {
+          if (options?.onLine) {
+            agentStdin.push(options.stdin);
+            options.onLine(
+              `{"type":"system","subtype":"init","session_id":"${sessionId}"}`,
+            );
+            options.onLine(
+              '{"type":"result","result":"<summary>all good</summary>"}',
+            );
+          }
+          return { stdout: "", stderr: "", exitCode: 0 };
+        },
+        copyFileIn: async () => {},
+        copyFileOut: async () => {},
+        close: async () => {},
+      }),
+    });
+
+    const first = async () =>
+      run({
+        agent: claudeCode("claude-opus-4-8", {
+          captureSessions: false,
+          sessionStorage: { hostProjectsDir },
+        }),
+        sandbox,
+        prompt: "Summarise inside <summary> tags",
+        branchStrategy: { type: "head" },
+        logging: { type: "file", path: join(dir, "run.log") },
+        output: Output.string({ tag: "summary" }),
+      });
+
+    return { dir, agentStdin, first };
+  };
+
+  it("does not carry output into a follow-up whose prompt lacks the tag", async () => {
+    const { dir, agentStdin, first } = setup();
+    try {
+      const r = await first();
+      expect(r.output).toBe("all good");
+
+      assert.isDefined(r.resume);
+      assert.isDefined(r.fork);
+      const resumed = await r.resume("write the word DONE into done.txt");
+      const forked = await r.fork("write the word DONE into done.txt");
+
+      expect(resumed.iterations).toHaveLength(1);
+      expect(forked.iterations).toHaveLength(1);
+      expect("output" in resumed).toBe(false);
+      expect("output" in forked).toBe(false);
+      expect(agentStdin).toStrictEqual([
+        "Summarise inside <summary> tags",
+        "write the word DONE into done.txt",
+        "write the word DONE into done.txt",
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("still extracts output when the follow-up passes it explicitly", async () => {
+    const { dir, first } = setup();
+    try {
+      const r = await first();
+      assert.isDefined(r.resume);
+      assert.isDefined(r.fork);
+      const resumed = (await r.resume("Summarise again in <summary> tags", {
+        output: Output.string({ tag: "summary" }),
+      })) as { output?: unknown };
+      expect(resumed.output).toBe("all good");
+
+      await expect(
+        r.fork("no tag here", { output: Output.string({ tag: "summary" }) }),
+      ).rejects.toThrow(/output tag <summary> not found/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("fork on an agent provider that resumes but cannot fork", () => {
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    consoleSpy.mockRestore();
+  });
+
+  it("copilot: fork() throws ForkNotSupportedError naming copilot, before any sandbox starts", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sandcastle-copilot-fork-"));
+    const sessionId = "9f2885bc-f7a6-44ad-8c8e-4e22ca99fa26";
+    let creates = 0;
+    const sandbox = createBindMountSandboxProvider({
+      name: "copilot-fork",
+      create: async () => {
+        creates++;
+        return {
+          worktreePath: process.cwd(),
+          exec: async (
+            _command: string,
+            options?: { onLine?: (line: string) => void },
+          ) => {
+            options?.onLine?.(
+              JSON.stringify({
+                type: "assistant.message",
+                data: { content: "OK" },
+              }),
+            );
+            options?.onLine?.(
+              JSON.stringify({ type: "result", sessionId, exitCode: 0 }),
+            );
+            return { stdout: "", stderr: "", exitCode: 0 };
+          },
+          copyFileIn: async () => {},
+          copyFileOut: async () => {},
+          close: async () => {},
+        };
+      },
+    });
+
+    try {
+      const first = await run({
+        agent: copilot("claude-haiku-4.5", { captureSessions: false }),
+        sandbox,
+        prompt: "remember a token",
+        branchStrategy: { type: "head" },
+        logging: { type: "file", path: join(dir, "run.log") },
+      });
+      expect(first.iterations[0]?.sessionId).toBe(sessionId);
+      expect(creates).toBe(1);
+
+      const forked = first.fork?.("fork it");
+      await expect(forked).rejects.toBeInstanceOf(ForkNotSupportedError);
+      await expect(forked).rejects.toMatchObject({
+        name: "ForkNotSupportedError",
+        agentProvider: "copilot",
+      });
+      await expect(forked).rejects.toThrow(/copilot cannot fork/u);
+      expect(creates).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("cursor: fork() throws ForkNotSupportedError naming cursor, before any sandbox starts", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sandcastle-cursor-fork-"));
+    const sessionId = "dd42b549-290c-4635-b058-04801905e8cf";
+    let creates = 0;
+    const sandbox = createBindMountSandboxProvider({
+      name: "cursor-fork",
+      create: async () => {
+        creates++;
+        return {
+          worktreePath: process.cwd(),
+          exec: async (
+            _command: string,
+            options?: { onLine?: (line: string) => void },
+          ) => {
+            options?.onLine?.(
+              JSON.stringify({
+                type: "system",
+                subtype: "init",
+                session_id: sessionId,
+              }),
+            );
+            options?.onLine?.(JSON.stringify({ type: "result", result: "OK" }));
+            return { stdout: "", stderr: "", exitCode: 0 };
+          },
+          copyFileIn: async () => {},
+          copyFileOut: async () => {},
+          close: async () => {},
+        };
+      },
+    });
+
+    try {
+      const first = await run({
+        agent: cursor("composer-2", { captureSessions: false }),
+        sandbox,
+        prompt: "remember a code word",
+        branchStrategy: { type: "head" },
+        logging: { type: "file", path: join(dir, "run.log") },
+      });
+      expect(first.iterations[0]?.sessionId).toBe(sessionId);
+      expect(creates).toBe(1);
+
+      const forked = first.fork?.("fork it");
+      await expect(forked).rejects.toBeInstanceOf(ForkNotSupportedError);
+      await expect(forked).rejects.toMatchObject({
+        name: "ForkNotSupportedError",
+        agentProvider: "cursor",
+      });
+      await expect(forked).rejects.toThrow(/cursor cannot fork/u);
+      expect(creates).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

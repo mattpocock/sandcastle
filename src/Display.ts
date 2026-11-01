@@ -1,7 +1,7 @@
 import * as clack from "@clack/prompts";
 import { FileSystem } from "@effect/platform";
 import { dirname } from "node:path";
-import { Context, Effect, Layer, Ref } from "effect";
+import { Clock, Context, DateTime, Effect, Layer, Ref } from "effect";
 import { styleText } from "node:util";
 
 export type Severity = "info" | "success" | "warn" | "error";
@@ -22,7 +22,7 @@ export type DisplayEntry =
   | {
       readonly _tag: "taskLog";
       readonly title: string;
-      readonly messages: ReadonlyArray<string>;
+      readonly messages: readonly string[];
     }
   | { readonly _tag: "text"; readonly message: string }
   | { readonly _tag: "textChunk"; readonly message: string }
@@ -67,13 +67,13 @@ export interface DisplayService {
   ) => Effect.Effect<void>;
 }
 
-export class Display extends Context.Tag("Display")<
+export class Display extends Context.Tag("@ai-hero/sandcastle/Display")<
   Display,
   DisplayService
 >() {}
 
 export const SilentDisplay = {
-  layer: (ref: Ref.Ref<ReadonlyArray<DisplayEntry>>): Layer.Layer<Display> =>
+  layer: (ref: Ref.Ref<readonly DisplayEntry[]>): Layer.Layer<Display> =>
     Layer.succeed(Display, {
       intro: (title) =>
         Ref.update(ref, (entries) => [
@@ -87,14 +87,14 @@ export const SilentDisplay = {
           { _tag: "status" as const, message, severity },
         ]),
 
-      spinner: (message, effect) =>
-        Effect.flatMap(
-          Ref.update(ref, (entries) => [
-            ...entries,
-            { _tag: "spinner" as const, message },
-          ]),
-          () => effect,
-        ),
+      spinner: <A, E, R>(
+        message: string,
+        effect: Effect.Effect<A, E, R>,
+      ): Effect.Effect<A, E, R> =>
+        Ref.update(ref, (entries) => [
+          ...entries,
+          { _tag: "spinner" as const, message },
+        ]).pipe(Effect.andThen(effect)),
 
       summary: (title, rows) =>
         Ref.update(ref, (entries) => [
@@ -152,7 +152,7 @@ export const FileDisplay = {
         yield* fs
           .makeDirectory(dirname(filePath), { recursive: true })
           .pipe(Effect.orDie);
-        const delimiter = `\n--- Run started: ${new Date().toISOString()} ---\n`;
+        const delimiter = `\n--- Run started: ${DateTime.formatIso(yield* DateTime.now)} ---\n`;
         yield* fs
           .writeFileString(filePath, delimiter, { flag: "a" })
           .pipe(Effect.orDie);
@@ -174,7 +174,9 @@ export const FileDisplay = {
 
         const appendRaw = (chunk: string): Effect.Effect<void> =>
           Effect.suspend(() => {
-            if (chunk.length === 0) return Effect.void;
+            if (chunk.length === 0) {
+              return Effect.void;
+            }
             midLine = !chunk.endsWith("\n");
             return fs
               .writeFileString(filePath, chunk, { flag: "a" })
@@ -190,9 +192,12 @@ export const FileDisplay = {
           spinner: (message, effect) =>
             Effect.gen(function* () {
               yield* appendToLog(`${message}...`);
-              const start = Date.now();
+              const start = yield* Clock.currentTimeMillis;
               const result = yield* effect;
-              const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+              const elapsed = (
+                ((yield* Clock.currentTimeMillis) - start) /
+                1000
+              ).toFixed(1);
               yield* appendToLog(`${message} done (${elapsed}s)`);
               return result;
             }),
@@ -207,12 +212,15 @@ export const FileDisplay = {
           taskLog: (title, effect) =>
             Effect.gen(function* () {
               yield* appendToLog(title);
-              const start = Date.now();
+              const start = yield* Clock.currentTimeMillis;
               const messages: string[] = [];
               const result = yield* effect((msg) => {
                 messages.push(msg);
               });
-              const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+              const elapsed = (
+                ((yield* Clock.currentTimeMillis) - start) /
+                1000
+              ).toFixed(1);
               for (const msg of messages) {
                 yield* appendToLog(`  ${msg}`);
               }
@@ -246,63 +254,124 @@ export const terminalStyle = {
   toolCall: (text: string): string => styleText("dim", text),
 };
 
+/** Prints a text chunk via clack, dropping leading/trailing blank lines. */
+const printClackText = (text: string) => {
+  const trimmed = text.replaceAll(/^\n+|\n+$/g, "");
+  if (trimmed.trim().length > 0) {
+    clack.log.message(trimmed);
+  }
+};
+
 export const ClackDisplay = {
-  layer: Layer.succeed(Display, {
-    intro: (title) =>
-      Effect.sync(() => clack.intro(styleText("inverse", ` ${title} `))),
+  layer: Layer.scoped(
+    Display,
+    Effect.gen(function* () {
+      // Each clack.log.message() call is its own message on its own line, so
+      // streamed text chunks are held here until a whole line is ready —
+      // otherwise a chunk boundary that falls mid-word ("comm" / "ands")
+      // splits the word across messages. The pending partial line is flushed
+      // before any other output (tool calls, status, …) to keep ordering, and
+      // when the layer is released. Mirrors FileDisplay's `midLine`.
+      let pendingText = "";
 
-    status: (message, severity) =>
-      Effect.sync(() =>
-        severityToClack[severity](terminalStyle.status(message)),
-      ),
+      const flushText = () => {
+        const text = pendingText;
+        pendingText = "";
+        printClackText(text);
+      };
 
-    spinner: (message, effect) =>
-      Effect.acquireUseRelease(
+      const writeText = (chunk: string) => {
+        pendingText += chunk;
+        const lastNewline = pendingText.lastIndexOf("\n");
+        if (lastNewline === -1) {
+          return;
+        }
+        const complete = pendingText.slice(0, lastNewline);
+        pendingText = pendingText.slice(lastNewline + 1);
+        printClackText(complete);
+      };
+
+      const sync = (f: () => void) =>
         Effect.sync(() => {
-          const s = clack.spinner();
-          s.start(message);
-          return s;
-        }),
-        () => effect,
-        (s, exit) =>
-          Effect.sync(() => {
-            if (exit._tag === "Success") {
-              s.stop(message);
-            } else {
-              s.stop(`${message} (failed)`);
-            }
+          flushText();
+          f();
+        });
+
+      yield* Effect.addFinalizer(() => Effect.sync(flushText));
+
+      return {
+        intro: (title) =>
+          sync(() => {
+            clack.intro(styleText("inverse", ` ${title} `));
           }),
-      ),
 
-    summary: (title, rows) =>
-      Effect.sync(() => {
-        const lines = Object.entries(rows)
-          .map(([key, value]) => terminalStyle.summaryRow(key, value))
-          .join("\n");
-        clack.note(lines, terminalStyle.summaryTitle(title));
-      }),
-
-    taskLog: (title, effect) =>
-      Effect.acquireUseRelease(
-        Effect.sync(() => clack.taskLog({ title })),
-        (log) => effect((msg) => log.message(msg)),
-        (log, exit) =>
-          Effect.sync(() => {
-            if (exit._tag === "Success") {
-              log.success(title, { showLog: true });
-            } else {
-              log.error(title, { showLog: true });
-            }
+        status: (message, severity) =>
+          sync(() => {
+            severityToClack[severity](terminalStyle.status(message));
           }),
-      ),
 
-    text: (message) => Effect.sync(() => clack.log.message(message)),
+        spinner: (message, effect) =>
+          Effect.acquireUseRelease(
+            Effect.sync(() => {
+              flushText();
+              const s = clack.spinner();
+              s.start(message);
+              return s;
+            }),
+            () => effect,
+            (s, exit) =>
+              Effect.sync(() => {
+                if (exit._tag === "Success") {
+                  s.stop(message);
+                } else {
+                  s.stop(`${message} (failed)`);
+                }
+              }),
+          ),
 
-    textChunk: (chunk) => Effect.sync(() => clack.log.message(chunk)),
+        summary: (title, rows) =>
+          sync(() => {
+            const lines = Object.entries(rows)
+              .map(([key, value]) => terminalStyle.summaryRow(key, value))
+              .join("\n");
+            clack.note(lines, terminalStyle.summaryTitle(title));
+          }),
 
-    toolCall: (name, formattedArgs) =>
-      Effect.sync(() =>
-        clack.log.step(terminalStyle.toolCall(`${name}(${formattedArgs})`)),
-      ),
-  }),
+        taskLog: (title, effect) =>
+          Effect.acquireUseRelease(
+            Effect.sync(() => {
+              flushText();
+              return clack.taskLog({ title });
+            }),
+            (log) =>
+              effect((msg) => {
+                log.message(msg);
+              }),
+            (log, exit) =>
+              Effect.sync(() => {
+                if (exit._tag === "Success") {
+                  log.success(title, { showLog: true });
+                } else {
+                  log.error(title, { showLog: true });
+                }
+              }),
+          ),
+
+        text: (message) =>
+          sync(() => {
+            clack.log.message(message);
+          }),
+
+        textChunk: (chunk) =>
+          Effect.sync(() => {
+            writeText(chunk);
+          }),
+
+        toolCall: (name, formattedArgs) =>
+          sync(() => {
+            clack.log.step(terminalStyle.toolCall(`${name}(${formattedArgs})`));
+          }),
+      };
+    }),
+  ),
 };

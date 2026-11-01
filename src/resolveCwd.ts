@@ -23,7 +23,7 @@ export const resolveCwd = (
 ): Effect.Effect<string, CwdError, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const resolved =
-      cwd !== undefined ? resolve(process.cwd(), cwd) : resolve(process.cwd());
+      cwd === undefined ? resolve(process.cwd()) : resolve(process.cwd(), cwd);
 
     const fs = yield* FileSystem.FileSystem;
 

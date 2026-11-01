@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import { createWorktree } from "./createWorktree.js";
 import type {
   CreateWorktreeOptions,
@@ -21,14 +21,27 @@ import type {
 import { claudeCode, codex } from "./AgentProvider.js";
 import {
   createBindMountSandboxProvider,
-  type BindMountSandboxHandle,
-  type ExecResult,
-  type SandboxProvider,
+  createIsolatedSandboxProvider,
+} from "./SandboxProvider.js";
+import type {
+  BindMountSandboxHandle,
+  ExecResult,
+  SandboxProvider,
 } from "./SandboxProvider.js";
 import { encodeProjectPath } from "./SessionStore.js";
 import { makeLocalSandbox } from "./testSandbox.js";
+import { testIsolated } from "./sandboxes/test-isolated.js";
 
 const execAsync = promisify(exec);
+
+/** The first iteration of a run, failing the test if there is none. */
+const firstIteration = <T>(result: {
+  readonly iterations: readonly T[];
+}): T => {
+  const [iteration] = result.iterations;
+  assert.isDefined(iteration, "expected at least one iteration");
+  return iteration;
+};
 
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });
@@ -48,6 +61,25 @@ const commitFile = async (
 };
 
 describe("createWorktree", () => {
+  it("rejects invalid timeouts before creating the worktree", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-timeouts-validate-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    try {
+      await expect(
+        createWorktree({
+          branchStrategy: { type: "branch", branch: "timeouts-validate" },
+          cwd: hostDir,
+          timeouts: { copyToWorktreeMs: 0 },
+        }),
+      ).rejects.toThrow("timeouts.copyToWorktreeMs must be a positive number");
+      expect(existsSync(join(hostDir, ".sandcastle", "worktrees"))).toBe(false);
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
   it("creates a worktree with 'branch' strategy", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "ws-test-"));
     await initRepo(hostDir);
@@ -228,7 +260,7 @@ describe("createWorktree", () => {
       cwd: hostDir,
     });
 
-    const worktreePath = ws.worktreePath;
+    const { worktreePath } = ws;
     const result = await ws.close();
 
     expect(result.preservedWorktreePath).toBeUndefined();
@@ -274,7 +306,8 @@ describe("createWorktree", () => {
       worktreePath = ws.worktreePath;
       expect(existsSync(worktreePath)).toBe(true);
     }
-    expect(existsSync(worktreePath!)).toBe(false);
+    assert.isDefined(worktreePath);
+    expect(existsSync(worktreePath)).toBe(false);
     await rm(hostDir, { recursive: true, force: true });
   });
 
@@ -305,8 +338,8 @@ const toStreamJson = (output: string): string => {
       type: "assistant",
       message: { content: [{ type: "text", text: output }] },
     }),
+    JSON.stringify({ type: "result", result: output }),
   );
-  lines.push(JSON.stringify({ type: "result", result: output }));
   return lines.join("\n");
 };
 
@@ -338,8 +371,10 @@ describe("worktree.run()", () => {
    * and runs a mock behavior, while passing other commands through.
    */
   const makeRunTestProvider = (
-    mockAgentBehavior: (cwd: string) => Promise<string> = async () =>
-      "mock output",
+    mockAgentBehavior: (
+      cwd: string,
+      stdin?: string,
+    ) => Promise<string> = async () => "mock output",
   ) =>
     createBindMountSandboxProvider({
       name: "test-run",
@@ -352,12 +387,13 @@ describe("worktree.run()", () => {
               cwd?: string;
               onLine?: (line: string) => void;
               sudo?: boolean;
+              stdin?: string;
             },
           ): Promise<ExecResult> => {
             const cwd = execOptions?.cwd ?? options.worktreePath;
             // Intercept agent commands
             if (command.startsWith("claude ")) {
-              const output = await mockAgentBehavior(cwd);
+              const output = await mockAgentBehavior(cwd, execOptions?.stdin);
               const streamOutput = toStreamJson(output);
               if (execOptions?.onLine) {
                 for (const line of streamOutput.split("\n")) {
@@ -369,7 +405,7 @@ describe("worktree.run()", () => {
             if (command.startsWith("codex ")) {
               const output = await mockAgentBehavior(cwd);
               const streamOutput = toCodexStreamJsonWithUsage(output, {
-                input_tokens: 50000,
+                input_tokens: 50_000,
                 cached_input_tokens: 0,
                 output_tokens: 100,
               });
@@ -383,7 +419,7 @@ describe("worktree.run()", () => {
             // Pass through other commands
             const result = execSync(command, {
               cwd,
-              encoding: "utf-8",
+              encoding: "utf8",
               stdio: ["pipe", "pipe", "pipe"],
             });
             return { stdout: result, stderr: "", exitCode: 0 };
@@ -395,6 +431,40 @@ describe("worktree.run()", () => {
         return handle;
       },
     });
+
+  it("rejects idleTimeoutSeconds: 0 before the agent runs", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-run-idle-validate-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    let agentRan = false;
+    const sandbox = makeRunTestProvider(async () => {
+      agentRan = true;
+      return "mock output";
+    });
+
+    const ws = await createWorktree({
+      branchStrategy: { type: "branch", branch: "run-idle-validate" },
+      cwd: hostDir,
+    });
+
+    try {
+      await expect(
+        ws.run({
+          agent: claudeCode("claude-opus-4-8"),
+          sandbox,
+          prompt: "do something",
+          idleTimeoutSeconds: 0,
+        }),
+      ).rejects.toThrow(
+        "idleTimeoutSeconds must be a positive number of seconds. Received: 0",
+      );
+      expect(agentRan).toBe(false);
+    } finally {
+      await ws.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
 
   it("runs agent and returns WorktreeRunResult", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "ws-run-"));
@@ -416,8 +486,8 @@ describe("worktree.run()", () => {
         maxIterations: 1,
       });
 
-      expect(result.iterations.length).toBe(1);
-      expect(typeof result.stdout).toBe("string");
+      expect(result.iterations).toHaveLength(1);
+      expect(result.stdout).toBeTypeOf("string");
       expect(Array.isArray(result.commits)).toBe(true);
       expect(result.branch).toBe("run-test");
     } finally {
@@ -426,7 +496,7 @@ describe("worktree.run()", () => {
     }
   });
 
-  it("emits 'Context window: NNNk' line when an iteration has usage", async () => {
+  it("never shows codex's turn total as the context window", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "ws-run-ctxwin-"));
     await initRepo(hostDir);
     await commitFile(hostDir, "init.txt", "init", "initial commit");
@@ -448,18 +518,20 @@ describe("worktree.run()", () => {
         logging: { type: "file", path: logPath },
       });
 
-      // Sanity-check: orchestrator surfaced usage on the iteration.
-      expect(result.iterations[0]!.usage).toBeDefined();
+      // turn.completed usage is summed over every request (#898). It stays
+      // on `usage`, but it is not the context window.
+      expect(firstIteration(result).usage).toBeDefined();
+      expect(firstIteration(result).contextWindow).toBeUndefined();
 
-      const log = await readFile(logPath, "utf-8");
-      expect(log).toContain("Context window: 50k");
+      const log = await readFile(logPath, "utf8");
+      expect(log).not.toContain("Context window");
     } finally {
       await ws.close();
       await rm(hostDir, { recursive: true, force: true });
     }
   });
 
-  it("captures Claude session and emits 'Context window' from parsed usage (regression: #717)", async () => {
+  it("captures Claude session and emits 'Context window' (regression: #717)", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "ws-run-claude-cap-"));
     const hostProjectsDir = await mkdtemp(
       join(tmpdir(), "ws-run-claude-host-projects-"),
@@ -501,7 +573,7 @@ describe("worktree.run()", () => {
                     message: {
                       model: "claude-opus-4-8",
                       usage: {
-                        input_tokens: 50000,
+                        input_tokens: 50_000,
                         cache_creation_input_tokens: 0,
                         cache_read_input_tokens: 0,
                         output_tokens: 100,
@@ -519,7 +591,15 @@ describe("worktree.run()", () => {
                 }),
                 JSON.stringify({
                   type: "assistant",
-                  message: { content: [{ type: "text", text: "ok" }] },
+                  message: {
+                    content: [{ type: "text", text: "ok" }],
+                    usage: {
+                      input_tokens: 50_000,
+                      cache_creation_input_tokens: 0,
+                      cache_read_input_tokens: 0,
+                      output_tokens: 100,
+                    },
+                  },
                 }),
                 JSON.stringify({ type: "result", result: "ok" }),
               ].join("\n");
@@ -533,7 +613,7 @@ describe("worktree.run()", () => {
             try {
               const result = execSync(command, {
                 cwd,
-                encoding: "utf-8",
+                encoding: "utf8",
                 stdio: ["pipe", "pipe", "pipe"],
               });
               return { stdout: result, stderr: "", exitCode: 0 };
@@ -578,15 +658,15 @@ describe("worktree.run()", () => {
         logging: { type: "file", path: logPath },
       });
 
-      expect(result.iterations[0]!.usage).toEqual({
-        inputTokens: 50000,
+      expect(result.iterations[0]!.usage).toStrictEqual({
+        inputTokens: 50_000,
         cacheCreationInputTokens: 0,
         cacheReadInputTokens: 0,
         outputTokens: 100,
       });
-      expect(result.iterations[0]!.sessionFilePath).toBeDefined();
+      expect(firstIteration(result).sessionFilePath).toBeDefined();
 
-      const log = await readFile(logPath, "utf-8");
+      const log = await readFile(logPath, "utf8");
       expect(log).toContain("Context window: 50k");
     } finally {
       await ws.close();
@@ -626,7 +706,7 @@ describe("worktree.run()", () => {
       // The commit should be in the worktree
       const log = execSync("git log --oneline -1", {
         cwd: ws.worktreePath,
-        encoding: "utf-8",
+        encoding: "utf8",
       });
       expect(log).toContain("agent commit");
     } finally {
@@ -661,7 +741,7 @@ describe("worktree.run()", () => {
       });
 
       expect(result.commits.length).toBeGreaterThanOrEqual(1);
-      expect(result.commits[0]!.sha).toMatch(/^[0-9a-f]{40}$/);
+      expect(result.commits[0]?.sha).toMatch(/^[0-9a-f]{40}$/);
       expect(result.branch).toBe("commits-run-test");
     } finally {
       await ws.close();
@@ -727,6 +807,86 @@ describe("worktree.run()", () => {
     }
   });
 
+  it("merge-to-head: close() deletes the temp branch once its commits are on the host", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-close-mth-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const sandbox = makeRunTestProvider(async (cwd) => {
+      execSync('echo "agent file" > agent.txt', { cwd });
+      execSync("git add agent.txt", { cwd });
+      execSync('git commit -m "agent commit"', { cwd });
+      return "done";
+    });
+
+    const ws = await createWorktree({
+      branchStrategy: { type: "merge-to-head" },
+      cwd: hostDir,
+    });
+
+    try {
+      await ws.run({
+        agent: claudeCode("claude-opus-4-8"),
+        sandbox,
+        prompt: "create a file",
+        maxIterations: 1,
+      });
+      await ws.close();
+
+      const { stdout } = await execAsync(`git branch --list "${ws.branch}"`, {
+        cwd: hostDir,
+      });
+      expect(stdout.trim()).toBe("");
+    } finally {
+      await ws.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("merge-to-head: close() deletes an unused temp branch", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-close-mth-unused-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const ws = await createWorktree({
+      branchStrategy: { type: "merge-to-head" },
+      cwd: hostDir,
+    });
+
+    try {
+      await ws.close();
+      const { stdout } = await execAsync(`git branch --list "${ws.branch}"`, {
+        cwd: hostDir,
+      });
+      expect(stdout.trim()).toBe("");
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("merge-to-head: close() keeps the temp branch when it holds commits not on any other branch", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-close-mth-keep-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const ws = await createWorktree({
+      branchStrategy: { type: "merge-to-head" },
+      cwd: hostDir,
+    });
+
+    try {
+      // A commit that never made it back to the host (e.g. a failed merge)
+      await commitFile(ws.worktreePath, "unmerged.txt", "x", "unmerged work");
+      await ws.close();
+      const { stdout } = await execAsync(`git branch --list "${ws.branch}"`, {
+        cwd: hostDir,
+      });
+      expect(stdout.trim()).toBeTruthy();
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
   it("merge-to-head: two sequential run() calls both land on host", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "ws-run-mth-2x-"));
     await initRepo(hostDir);
@@ -768,12 +928,59 @@ describe("worktree.run()", () => {
         cwd: hostDir,
       });
       const messages = log.trim().split("\n");
-      expect(messages).toEqual(["agent commit 2", "agent commit 1"]);
+      expect(messages).toStrictEqual(["agent commit 2", "agent commit 1"]);
     } finally {
       await ws.close();
       await rm(hostDir, { recursive: true, force: true });
     }
   });
+
+  it.each([
+    { label: "merge-to-head", strategy: { type: "merge-to-head" } as const },
+    {
+      label: "branch",
+      strategy: { type: "branch", branch: "feature-x" } as const,
+    },
+  ])(
+    "$label: {{TARGET_BRANCH}} is the host's current branch, {{SOURCE_BRANCH}} the worktree's",
+    async ({ strategy }) => {
+      const hostDir = await mkdtemp(join(tmpdir(), "ws-run-target-"));
+      await initRepo(hostDir);
+      await commitFile(hostDir, "init.txt", "init", "initial commit");
+      await execAsync("git checkout -b host-branch", { cwd: hostDir });
+      const promptPath = join(hostDir, "..", `prompt-${Date.now()}.md`);
+      await writeFile(
+        promptPath,
+        "source={{SOURCE_BRANCH}} target={{TARGET_BRANCH}}",
+      );
+
+      let receivedPrompt: string | undefined;
+      const sandbox = makeRunTestProvider(async (_cwd, stdin) => {
+        receivedPrompt = stdin;
+        return "done";
+      });
+
+      const ws = await createWorktree({
+        branchStrategy: strategy,
+        cwd: hostDir,
+      });
+
+      try {
+        await ws.run({
+          agent: claudeCode("claude-opus-4-8"),
+          sandbox,
+          promptFile: promptPath,
+          maxIterations: 1,
+        });
+
+        expect(receivedPrompt).toBe(`source=${ws.branch} target=host-branch`);
+      } finally {
+        await ws.close();
+        await rm(hostDir, { recursive: true, force: true });
+        await rm(promptPath, { force: true });
+      }
+    },
+  );
 
   it("sandbox is required (type error if omitted)", () => {
     // This test validates at the type level — sandbox is required in WorktreeRunOptions
@@ -889,7 +1096,7 @@ describe("worktree.run()", () => {
         prompt: "do something else",
       });
 
-      expect(result.iterations.length).toBe(1);
+      expect(result.iterations).toHaveLength(1);
       expect(result.branch).toBe("abort-reuse-test");
     } finally {
       await ws.close();
@@ -920,6 +1127,31 @@ const testSandbox: SandboxProvider = createBindMountSandboxProvider({
 });
 
 describe("worktree.createSandbox()", () => {
+  it("rejects invalid timeouts before starting the sandbox", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-sandbox-timeouts-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const ws = await createWorktree({
+      branchStrategy: { type: "branch", branch: "ws-sandbox-timeouts" },
+      cwd: hostDir,
+    });
+
+    try {
+      await expect(
+        ws.createSandbox({
+          sandbox: testSandbox,
+          timeouts: { commitCollectionMs: -5 },
+        }),
+      ).rejects.toThrow(
+        "timeouts.commitCollectionMs must be a positive number",
+      );
+    } finally {
+      await ws.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
   it("creates a sandbox with branch and worktreePath from the worktree", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "ws-sandbox-"));
     await initRepo(hostDir);
@@ -990,7 +1222,7 @@ describe("worktree.createSandbox()", () => {
       cwd: hostDir,
     });
 
-    const worktreePath = ws.worktreePath;
+    const { worktreePath } = ws;
 
     const sandbox = await ws.createSandbox({
       sandbox: testSandbox,
@@ -1054,5 +1286,97 @@ describe("worktree.createSandbox()", () => {
       // @ts-expect-error - branch should not be accepted
       branch: "should-not-work",
     };
+  });
+});
+
+describe("isolated provider: createWorktree({ copyToWorktree })", () => {
+  /** Reads `secret.txt` from where the agent runs inside the sandbox. */
+  const readSecret = async (cwd: string) =>
+    existsSync(join(cwd, "secret.txt"))
+      ? (await readFile(join(cwd, "secret.txt"), "utf8")).trim()
+      : "MISSING";
+
+  /**
+   * An isolated provider whose agent records what `secret.txt` holds inside
+   * the sandbox. Everything else passes through to testIsolated().
+   */
+  const makeIsolatedProvider = (seen: { secret?: string }) => {
+    const base = testIsolated();
+    return createIsolatedSandboxProvider({
+      name: "test-isolated-copy",
+      create: async (opts) => {
+        const handle = await base.create(opts);
+        return {
+          ...handle,
+          exec: async (command, execOptions) => {
+            if (!command.startsWith("claude ")) {
+              return handle.exec(command, execOptions);
+            }
+            seen.secret = await readSecret(
+              execOptions?.cwd ?? handle.worktreePath,
+            );
+            const streamOutput = toStreamJson("done");
+            for (const line of streamOutput.split("\n")) {
+              execOptions?.onLine?.(line);
+            }
+            return { stdout: streamOutput, stderr: "", exitCode: 0 };
+          },
+        };
+      },
+    });
+  };
+
+  /** A host repo with a gitignored `secret.txt`, so no git bundle carries it. */
+  const makeHostRepo = async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-isolated-copy-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, ".gitignore", "secret.txt\n", "ignore secret");
+    await writeFile(join(hostDir, "secret.txt"), "host secret");
+    return hostDir;
+  };
+
+  it("wt.run() sees the copied file inside the sandbox", async () => {
+    const hostDir = await makeHostRepo();
+    const seen: { secret?: string } = {};
+    const ws = await createWorktree({
+      branchStrategy: { type: "branch", branch: "isolated-copy-run" },
+      cwd: hostDir,
+      copyToWorktree: ["secret.txt"],
+    });
+
+    try {
+      await ws.run({
+        agent: claudeCode("claude-opus-4-8"),
+        sandbox: makeIsolatedProvider(seen),
+        prompt: "read the secret",
+        maxIterations: 1,
+      });
+      expect(seen.secret).toBe("host secret");
+    } finally {
+      await ws.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("wt.createSandbox() sees the copied file inside the sandbox", async () => {
+    const hostDir = await makeHostRepo();
+    const ws = await createWorktree({
+      branchStrategy: { type: "branch", branch: "isolated-copy-sandbox" },
+      cwd: hostDir,
+      copyToWorktree: ["secret.txt"],
+    });
+
+    try {
+      const sandbox = await ws.createSandbox({ sandbox: testIsolated() });
+      try {
+        const result = await sandbox.exec("cat secret.txt || echo MISSING");
+        expect(result.stdout.trim()).toBe("host secret");
+      } finally {
+        await sandbox.close();
+      }
+    } finally {
+      await ws.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
   });
 });

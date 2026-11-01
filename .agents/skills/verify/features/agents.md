@@ -2,7 +2,9 @@
 
 Each is a factory `(model, options?) => AgentProvider` exported from `@ai-hero/sandcastle` (`src/AgentProvider.ts`).
 
-- **Model:** every run uses the cheapest model, which `doctor` prints and `VERIFY_MODEL` overrides.
+- **Model:** every run uses the cheapest model. `doctor` prints the whole factory call for it, options included, and `VERIFY_MODEL` overrides the model.
+  - Write that call into the main file exactly as printed. `init --model` sets only the model, so after `init`, add any options by hand.
+  - pi's call carries `{ thinking: "off" }`. Without it, pi sends its default thinking (`medium`), and claude-haiku-5-5 rejects that with a 400.
 - **Keys:** a missing key makes the run UNVERIFIABLE, naming the key. Matt adds keys with `.sandcastle/setup-verify-keys.sh`.
 - **Image:** the agent's CLI lives in the image that `init --agent <x>` writes, so each agent needs its own world or its own `init`.
 
@@ -11,9 +13,9 @@ Each is a factory `(model, options?) => AgentProvider` exported from `@ai-hero/s
 | `claudeCode` | claude-code    | `CLAUDE_CODE_OAUTH_TOKEN`, or `ANTHROPIC_API_KEY`                                              | `claude --print --output-format stream-json --model <m> -p -` (stdin)                  | yes             |
 | `pi`         | pi             | `ANTHROPIC_API_KEY`                                                                            | `pi -p --mode json --model <provider/id>` (stdin)                                      | yes             |
 | `codex`      | codex          | `CODEX_API_KEY`                                                                                | `codex exec --json -m <m>` (stdin)                                                     | yes             |
-| `cursor`     | cursor         | `CURSOR_API_KEY`                                                                               | `agent --print --output-format stream-json --model <m> '<prompt>'` (argv, max 120 KiB) | no              |
-| `opencode`   | opencode       | `OPENCODE_API_KEY`                                                                             | `opencode run --format json --model <m> '<prompt>'` (argv)                             | no              |
-| `copilot`    | copilot        | `COPILOT_GITHUB_TOKEN`, which wins over `GH_TOKEN`/`GITHUB_TOKEN` and needs "Copilot Requests" | `copilot -p '<prompt>' --output-format json --model <m>` (argv, max 120 KiB)           | no              |
+| `cursor`     | cursor         | `CURSOR_API_KEY`                                                                               | `agent --print --output-format stream-json --model <m> '<prompt>'` (argv, max 120 KiB) | yes             |
+| `opencode`   | opencode       | `OPENCODE_API_KEY`                                                                             | `opencode run --format json --model <m> '<prompt>'` (argv)                             | yes             |
+| `copilot`    | copilot        | `COPILOT_GITHUB_TOKEN`, which wins over `GH_TOKEN`/`GITHUB_TOKEN` and needs "Copilot Requests" | `copilot -p '<prompt>' --output-format json --model <m>` (argv, max 120 KiB)           | yes             |
 
 ## Declare exactly the agent's key
 

@@ -2,7 +2,7 @@ import { Command, Options } from "@effect/cli";
 import { FileSystem } from "@effect/platform";
 import { Effect, Option } from "effect";
 import * as clack from "@clack/prompts";
-import { execSync } from "node:child_process";
+import { execFile, execSync } from "node:child_process";
 import { join } from "node:path";
 import { styleText } from "node:util";
 
@@ -26,14 +26,13 @@ import {
   addDependencyCommand,
   hostHasDependency,
   getTemplateDependencies,
+  buildImageShellCommand,
+  parseBdVersion,
+  beadsVersionWarning,
 } from "./InitService.js";
 import { defaultImageName } from "./sandboxes/docker.js";
-import type {
-  AgentEntry,
-  IssueTrackerEntry,
-  SandboxProviderEntry,
-} from "./InitService.js";
 import { ConfigDirError, InitError } from "./errors.js";
+import type { DockerError, PodmanError } from "./errors.js";
 import { VERSION } from "./version.js";
 
 // --- Shared options ---
@@ -55,8 +54,12 @@ const defaultUidBuildArgs = (): Record<string, string> => {
   const args: Record<string, string> = {};
   const uid = process.getuid?.();
   const gid = process.getgid?.();
-  if (uid !== undefined) args.AGENT_UID = String(uid);
-  if (gid !== undefined) args.AGENT_GID = String(gid);
+  if (uid !== undefined) {
+    args.AGENT_UID = String(uid);
+  }
+  if (gid !== undefined) {
+    args.AGENT_GID = String(gid);
+  }
   return args;
 };
 
@@ -67,18 +70,57 @@ const CONFIG_DIR = ".sandcastle";
 const requireConfigDir = (
   cwd: string,
 ): Effect.Effect<void, ConfigDirError, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const exists = yield* fs
-      .exists(join(cwd, CONFIG_DIR))
-      .pipe(Effect.catchAll(() => Effect.succeed(false)));
-    if (!exists) {
-      yield* Effect.fail(
+  FileSystem.FileSystem.pipe(
+    Effect.flatMap((fs) => fs.exists(join(cwd, CONFIG_DIR))),
+    Effect.catchAll(() => Effect.succeed(false)),
+    Effect.filterOrFail(
+      (exists) => exists,
+      () =>
         new ConfigDirError({
           message: "No .sandcastle/ found. Run `sandcastle init` first.",
         }),
-      );
+    ),
+    Effect.asVoid,
+  );
+
+// --- Init flag resolution ---
+
+const nonInteractiveMessage = (flags: readonly string[]): string =>
+  `${flags.join(", ")} ${flags.length === 1 ? "is" : "are"} required in non-interactive mode (no TTY detected).`;
+
+/** Succeeds when `ok`; otherwise fails with an InitError carrying `message`. */
+const failInitUnless = (
+  ok: boolean,
+  message: string,
+): Effect.Effect<void, InitError> =>
+  ok ? Effect.void : Effect.fail(new InitError({ message }));
+
+/**
+ * The name the user chose: the CLI flag when given, else an interactive
+ * select. Without a TTY a missing flag fails fast, naming the flag; cancelling
+ * the prompt aborts init.
+ */
+const selectName = (params: {
+  readonly flag: Option.Option<string>;
+  readonly flagName: string;
+  readonly isInteractive: boolean;
+  readonly cancelMessage: string;
+  readonly prompt: clack.SelectOptions<string>;
+}): Effect.Effect<string, InitError> =>
+  Effect.gen(function* () {
+    if (params.flag._tag === "Some") {
+      return params.flag.value;
     }
+    if (!params.isInteractive) {
+      return yield* new InitError({
+        message: nonInteractiveMessage([params.flagName]),
+      });
+    }
+    const selected = yield* Effect.promise(() => clack.select(params.prompt));
+    if (clack.isCancel(selected)) {
+      return yield* new InitError({ message: params.cancelMessage });
+    }
+    return selected;
   });
 
 // --- Init command ---
@@ -153,6 +195,19 @@ const choiceToTriBool = (
 ): Option.Option<boolean> =>
   opt._tag === "Some" ? Option.some(opt.value === "true") : Option.none();
 
+/** The host's `bd version`, or undefined when bd isn't on the PATH. */
+const detectHostBdVersion = (cwd: string): Effect.Effect<string | undefined> =>
+  Effect.async((resume) => {
+    execFile(
+      "bd",
+      ["version"],
+      { cwd, encoding: "utf8", timeout: 15_000 },
+      (_error, stdout, stderr) => {
+        resume(Effect.succeed(parseBdVersion(`${stdout}\n${stderr}`)));
+      },
+    );
+  });
+
 const initCommand = Command.make(
   "init",
   {
@@ -181,47 +236,48 @@ const initCommand = Command.make(
       const d = yield* Display;
       const cwd = process.cwd();
       const imageName = resolveImageName(imageNameFlag, cwd);
+      // Only an explicit --image-name is written into the scaffold; without it
+      // the sandbox factory's own default resolves to the same name as above.
+      const customImageName = Option.getOrUndefined(imageNameFlag);
 
       // Early validation of CLI flags before interactive prompts
       const templates = listTemplates();
       if (template._tag === "Some") {
-        const valid = templates.find((tmpl) => tmpl.name === template.value);
-        if (!valid) {
-          const names = templates.map((tmpl) => tmpl.name).join(", ");
-          yield* Effect.fail(
-            new InitError({
-              message: `Unknown template "${template.value}". Available: ${names}`,
-            }),
-          );
-        }
+        const names = templates.map((tmpl) => tmpl.name).join(", ");
+        yield* failInitUnless(
+          templates.some((tmpl) => tmpl.name === template.value),
+          `Unknown template "${template.value}". Available: ${names}`,
+        );
       }
 
       if (sandboxFlag._tag === "Some") {
-        const valid = getSandboxProvider(sandboxFlag.value);
-        if (!valid) {
-          const names = listSandboxProviders()
-            .map((p) => p.name)
-            .join(", ");
-          yield* Effect.fail(
-            new InitError({
-              message: `Unknown sandbox provider "${sandboxFlag.value}". Available: ${names}`,
-            }),
-          );
-        }
+        const names = listSandboxProviders()
+          .map((p) => p.name)
+          .join(", ");
+        yield* failInitUnless(
+          getSandboxProvider(sandboxFlag.value) !== undefined,
+          `Unknown sandbox provider "${sandboxFlag.value}". Available: ${names}`,
+        );
       }
 
       if (issueTrackerFlag._tag === "Some") {
-        const valid = getIssueTracker(issueTrackerFlag.value);
-        if (!valid) {
-          const names = listIssueTrackers()
-            .map((t) => t.name)
-            .join(", ");
-          yield* Effect.fail(
-            new InitError({
-              message: `Unknown issue tracker "${issueTrackerFlag.value}". Available: ${names}`,
-            }),
-          );
-        }
+        const names = listIssueTrackers()
+          .map((t) => t.name)
+          .join(", ");
+        yield* failInitUnless(
+          getIssueTracker(issueTrackerFlag.value) !== undefined,
+          `Unknown issue tracker "${issueTrackerFlag.value}". Available: ${names}`,
+        );
+      }
+
+      if (agentFlag._tag === "Some") {
+        const names = listAgents()
+          .map((a) => a.name)
+          .join(", ");
+        yield* failInitUnless(
+          getAgent(agentFlag.value) !== undefined,
+          `Unknown agent "${agentFlag.value}". Available: ${names}`,
+        );
       }
 
       const createLabelChoice = choiceToTriBool(createLabelFlag);
@@ -231,16 +287,10 @@ const initCommand = Command.make(
       );
 
       const isInteractive = process.stdin.isTTY === true;
-      const failIfNonInteractive = (flag: string) =>
-        Effect.fail(
-          new InitError({
-            message: `${flag} is required in non-interactive mode (no TTY detected).`,
-          }),
-        );
 
       // Tri-state confirm: CLI flag wins; otherwise prompt interactively (or
       // fail fast in non-interactive mode naming the missing flag). Cancelling
-      // the prompt is treated as abort — same shape as the select prompts above.
+      // the prompt is treated as abort — same shape as the select prompts below.
       const resolveConfirmFlag = (params: {
         choice: Option.Option<boolean>;
         flag: string;
@@ -248,9 +298,13 @@ const initCommand = Command.make(
         cancelMessage: string;
       }): Effect.Effect<boolean, InitError> =>
         Effect.gen(function* () {
-          if (params.choice._tag === "Some") return params.choice.value;
+          if (params.choice._tag === "Some") {
+            return params.choice.value;
+          }
           if (!isInteractive) {
-            yield* failIfNonInteractive(params.flag);
+            return yield* new InitError({
+              message: nonInteractiveMessage([params.flag]),
+            });
           }
           const confirmed = yield* Effect.promise(() =>
             clack.confirm({
@@ -259,49 +313,68 @@ const initCommand = Command.make(
             }),
           );
           if (clack.isCancel(confirmed)) {
-            yield* Effect.fail(
-              new InitError({ message: params.cancelMessage }),
-            );
+            return yield* new InitError({ message: params.cancelMessage });
           }
-          return confirmed === true;
+          return confirmed;
         });
 
-      // Resolve agent: CLI flag > interactive select
-      const agents = listAgents();
-      let selectedAgent: AgentEntry;
-      if (agentFlag._tag === "Some") {
-        const entry = getAgent(agentFlag.value);
-        if (!entry) {
-          const names = agents.map((a) => a.name).join(", ");
-          yield* Effect.fail(
-            new InitError({
-              message: `Unknown agent "${agentFlag.value}". Available: ${names}`,
-            }),
-          );
+      // Without a TTY, every prompt init would show must be answered by a flag.
+      // Check them all here, before anything is written (the label, .sandcastle/,
+      // zod), and name every missing flag at once, so a scripted init never
+      // stops halfway with a partial scaffold behind it.
+      if (!isInteractive) {
+        const tracker = Option.getOrUndefined(issueTrackerFlag);
+        const missing: string[] = [];
+        if (agentFlag._tag === "None") {
+          missing.push("--agent");
         }
-        selectedAgent = entry!;
-      } else {
-        if (!isInteractive) {
-          yield* failIfNonInteractive("--agent");
+        if (sandboxFlag._tag === "None") {
+          missing.push("--sandbox");
         }
-        const selected = yield* Effect.promise(() =>
-          clack.select({
+        if (tracker === undefined) {
+          missing.push("--issue-tracker");
+        }
+        if (template._tag === "None") {
+          missing.push("--template");
+        }
+        if (tracker === "github-issues" && createLabelChoice._tag === "None") {
+          missing.push("--create-label");
+        }
+        if (
+          template._tag === "Some" &&
+          installTemplateDepsChoice._tag === "None" &&
+          getTemplateDependencies(template.value).includes("zod") &&
+          !(yield* hostHasDependency(cwd, "zod"))
+        ) {
+          missing.push("--install-template-deps");
+        }
+        if (tracker !== "custom" && buildImageChoice._tag === "None") {
+          missing.push("--build-image");
+        }
+        yield* failInitUnless(
+          missing.length === 0,
+          nonInteractiveMessage(missing),
+        );
+      }
+
+      // Each choice below: CLI flag (already validated above) > interactive select.
+      const selectedAgent = getAgent(
+        yield* selectName({
+          flag: agentFlag,
+          flagName: "--agent",
+          isInteractive,
+          cancelMessage: "Agent selection cancelled.",
+          prompt: {
             message: "Select an agent:",
             initialValue: "claude-code",
-            options: agents.map((a) => ({
+            options: listAgents().map((a) => ({
               value: a.name,
               label: a.label,
               hint: `Default model: ${a.defaultModel}`,
             })),
-          }),
-        );
-        if (clack.isCancel(selected)) {
-          yield* Effect.fail(
-            new InitError({ message: "Agent selection cancelled." }),
-          );
-        }
-        selectedAgent = getAgent(selected as string)!;
-      }
+          },
+        }),
+      )!;
 
       // Resolve model: CLI flag > agent default
       const selectedModel =
@@ -309,89 +382,55 @@ const initCommand = Command.make(
           ? modelFlag.value
           : selectedAgent.defaultModel;
 
-      // Resolve sandbox provider: CLI flag > interactive select (no default — user must choose)
-      const sandboxProviders = listSandboxProviders();
-      let selectedSandboxProvider: SandboxProviderEntry;
-      if (sandboxFlag._tag === "Some") {
-        selectedSandboxProvider = getSandboxProvider(sandboxFlag.value)!;
-      } else {
-        if (!isInteractive) {
-          yield* failIfNonInteractive("--sandbox");
-        }
-        const selected = yield* Effect.promise(() =>
-          clack.select({
+      // No default sandbox provider — the user must choose.
+      const selectedSandboxProvider = getSandboxProvider(
+        yield* selectName({
+          flag: sandboxFlag,
+          flagName: "--sandbox",
+          isInteractive,
+          cancelMessage: "Sandbox provider selection cancelled.",
+          prompt: {
             message: "Select a sandbox provider:",
-            options: sandboxProviders.map((p) => ({
+            options: listSandboxProviders().map((p) => ({
               value: p.name,
               label: p.label,
             })),
-          }),
-        );
-        if (clack.isCancel(selected)) {
-          yield* Effect.fail(
-            new InitError({
-              message: "Sandbox provider selection cancelled.",
-            }),
-          );
-        }
-        selectedSandboxProvider = getSandboxProvider(selected as string)!;
-      }
+          },
+        }),
+      )!;
 
-      // Resolve issue tracker: CLI flag > interactive select (already validated above)
-      const issueTrackers = listIssueTrackers();
-      let selectedIssueTracker: IssueTrackerEntry;
-      if (issueTrackerFlag._tag === "Some") {
-        selectedIssueTracker = getIssueTracker(issueTrackerFlag.value)!;
-      } else {
-        if (!isInteractive) {
-          yield* failIfNonInteractive("--issue-tracker");
-        }
-        const selected = yield* Effect.promise(() =>
-          clack.select({
+      const selectedIssueTracker = getIssueTracker(
+        yield* selectName({
+          flag: issueTrackerFlag,
+          flagName: "--issue-tracker",
+          isInteractive,
+          cancelMessage: "Issue tracker selection cancelled.",
+          prompt: {
             message: "Select an issue tracker:",
             initialValue: "github-issues",
-            options: issueTrackers.map((b) => ({
+            options: listIssueTrackers().map((b) => ({
               value: b.name,
               label: b.label,
             })),
-          }),
-        );
-        if (clack.isCancel(selected)) {
-          yield* Effect.fail(
-            new InitError({
-              message: "Issue tracker selection cancelled.",
-            }),
-          );
-        }
-        selectedIssueTracker = getIssueTracker(selected as string)!;
-      }
+          },
+        }),
+      )!;
 
-      // Resolve template: CLI flag > interactive select (already validated above)
-      let selectedTemplate: string;
-      if (template._tag === "Some") {
-        selectedTemplate = template.value;
-      } else {
-        if (!isInteractive) {
-          yield* failIfNonInteractive("--template");
-        }
-        const selected = yield* Effect.promise(() =>
-          clack.select({
-            message: "Select a template:",
-            initialValue: "blank",
-            options: templates.map((tmpl) => ({
-              value: tmpl.name,
-              label: tmpl.name,
-              hint: tmpl.description,
-            })),
-          }),
-        );
-        if (clack.isCancel(selected)) {
-          yield* Effect.fail(
-            new InitError({ message: "Template selection cancelled." }),
-          );
-        }
-        selectedTemplate = selected as string;
-      }
+      const selectedTemplate = yield* selectName({
+        flag: template,
+        flagName: "--template",
+        isInteractive,
+        cancelMessage: "Template selection cancelled.",
+        prompt: {
+          message: "Select a template:",
+          initialValue: "blank",
+          options: templates.map((tmpl) => ({
+            value: tmpl.name,
+            label: tmpl.name,
+            hint: tmpl.description,
+          })),
+        },
+      });
 
       // Offer to create the "Sandcastle" label on the repo (skip for non-GitHub issue trackers).
       // CLI flag > interactive confirm. The flag is only meaningful for the github-issues tracker.
@@ -426,15 +465,25 @@ const initCommand = Command.make(
           createLabel: shouldCreateLabel,
           issueTracker: selectedIssueTracker,
           sandboxProvider: selectedSandboxProvider,
+          imageName: customImageName,
         }).pipe(
           Effect.mapError(
             (e) =>
               new InitError({
-                message: `${e instanceof Error ? e.message : e}`,
+                message: e instanceof Error ? e.message : e,
               }),
           ),
         ),
       );
+
+      // Beads sandboxes open the host's .beads/ with the image's bd, so a
+      // different host bd breaks one side or the other (see beadsVersionWarning).
+      if (selectedIssueTracker.name === "beads") {
+        const warning = beadsVersionWarning(yield* detectHostBdVersion(cwd));
+        if (warning !== undefined) {
+          yield* d.status(warning, "warn");
+        }
+      }
 
       // Detect the host package manager so the zod offer below and the next
       // steps below both use the right install command.
@@ -444,9 +493,12 @@ const initCommand = Command.make(
       // build their <plan> output schema with it) and the host doesn't already
       // declare it, offer to install it. Without this, the very first
       // `npx tsx .sandcastle/main.ts` crashes with ERR_MODULE_NOT_FOUND.
+      const installedDependencies: string[] = [];
       if (getTemplateDependencies(selectedTemplate).includes("zod")) {
         const alreadyInstalled = yield* hostHasDependency(cwd, "zod");
-        if (!alreadyInstalled) {
+        if (alreadyInstalled) {
+          installedDependencies.push("zod");
+        } else {
           const installCmd = addDependencyCommand(packageManager, "zod");
           const shouldInstall = yield* resolveConfirmFlag({
             choice: installTemplateDepsChoice,
@@ -463,6 +515,9 @@ const initCommand = Command.make(
                 return false;
               }
             });
+            if (installed) {
+              installedDependencies.push("zod");
+            }
             yield* installed
               ? d.status(`Installed zod with ${packageManager}.`, "success")
               : d.status(
@@ -494,26 +549,23 @@ const initCommand = Command.make(
 
         if (shouldBuild) {
           const containerfileDir = join(cwd, CONFIG_DIR);
-          if (selectedSandboxProvider.name === "podman") {
-            yield* d.spinner(
-              `Building ${providerLabel} image '${imageName}'...`,
-              podmanBuildImage(imageName, containerfileDir),
-            );
-          } else {
-            yield* d.spinner(
-              `Building ${providerLabel} image '${imageName}'...`,
-              buildImage(imageName, containerfileDir, {
-                buildArgs: defaultUidBuildArgs(),
-              }),
-            );
-          }
+          const build: Effect.Effect<void, DockerError | PodmanError> =
+            selectedSandboxProvider.name === "podman"
+              ? podmanBuildImage(imageName, containerfileDir)
+              : buildImage(imageName, containerfileDir, {
+                  buildArgs: defaultUidBuildArgs(),
+                });
+          yield* d.spinner(
+            `Building ${providerLabel} image '${imageName}'...`,
+            build,
+          );
           yield* d.status(
             "Init complete! Image built successfully.",
             "success",
           );
         } else {
           yield* d.status(
-            `Init complete! Run \`sandcastle ${selectedSandboxProvider.cliNamespace} build-image\` to build the ${providerLabel} image later.`,
+            `Init complete! Run \`${buildImageShellCommand(selectedSandboxProvider, customImageName)}\` to build the ${providerLabel} image later.`,
             "success",
           );
         }
@@ -526,6 +578,7 @@ const initCommand = Command.make(
         selectedIssueTracker,
         selectedAgent,
         packageManager,
+        installedDependencies,
       );
       for (const [i, line] of nextSteps.entries()) {
         yield* d.text(i === 0 ? line : styleText("dim", line));

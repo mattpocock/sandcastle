@@ -6,15 +6,26 @@ import { mkdtemp, mkdir, readdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import {
+  assert,
+  describe,
+  expect,
+  it,
+  beforeEach,
+  afterEach,
+  vi,
+} from "vitest";
 import { AgentError, AgentIdleTimeoutError } from "./errors.js";
-import { SilentDisplay, type DisplayEntry } from "./Display.js";
+import { SilentDisplay } from "./Display.js";
+import type { DisplayEntry } from "./Display.js";
 import {
   createBindMountSandboxProvider,
   createIsolatedSandboxProvider,
-  type SandboxProvider,
-  type BranchStrategy,
-  type NoSandboxProvider,
+} from "./SandboxProvider.js";
+import type {
+  SandboxProvider,
+  BranchStrategy,
+  NoSandboxProvider,
 } from "./SandboxProvider.js";
 import { testIsolated } from "./sandboxes/test-isolated.js";
 import { testStubProvider } from "./sandboxes/test-shared.js";
@@ -26,6 +37,7 @@ import {
   WorktreeDockerSandboxFactory,
   SANDBOX_REPO_DIR,
 } from "./SandboxFactory.js";
+import type { SandboxInfo } from "./SandboxFactory.js";
 
 const execAsync = promisify(exec);
 
@@ -57,10 +69,17 @@ const findCreatedWorktree = async (
   hostDir: string,
 ): Promise<string | undefined> => {
   const worktreesDir = join(hostDir, ".sandcastle", "worktrees");
-  if (!existsSync(worktreesDir)) return undefined;
-  const entries = await readdir(worktreesDir);
-  if (entries.length === 0) return undefined;
-  return join(worktreesDir, entries[0]!);
+  if (!existsSync(worktreesDir)) {
+    return undefined;
+  }
+  const [entry] = await readdir(worktreesDir);
+  return entry === undefined ? undefined : join(worktreesDir, entry);
+};
+
+/** The host worktree path of a sandbox, failing the test if it has none. */
+const worktreePathOf = (info: SandboxInfo): string => {
+  assert.isDefined(info.hostWorktreePath, "sandbox has no host worktree");
+  return info.hostWorktreePath;
 };
 
 /** Get the branch checked out at a worktree directory. */
@@ -69,6 +88,15 @@ const branchAt = async (dir: string): Promise<string> => {
     cwd: dir,
   });
   return stdout.trim();
+};
+
+/** List the `sandcastle/*` temp branches left in the host repo. */
+const sandcastleBranches = async (dir: string): Promise<string[]> => {
+  const { stdout } = await execAsync(
+    'git branch --list "sandcastle/*" --format="%(refname:short)"',
+    { cwd: dir },
+  );
+  return stdout.trim() ? stdout.trim().split("\n") : [];
 };
 
 /** Create a mock sandbox provider that records calls and delegates to a no-op handle. */
@@ -97,7 +125,7 @@ describe("WorktreeDockerSandboxFactory", () => {
   let mockProvider: ReturnType<typeof makeMockProvider>;
 
   const makeLayer = (
-    displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]),
+    displayRef = Ref.unsafeMake<readonly DisplayEntry[]>([]),
     branchStrategy: BranchStrategy = { type: "merge-to-head" },
   ) =>
     Layer.provide(
@@ -123,14 +151,14 @@ describe("WorktreeDockerSandboxFactory", () => {
 
   afterEach(async () => {
     await Promise.all(
-      tempDirs.map((d) => rm(d, { recursive: true, force: true })),
+      tempDirs.map(async (d) => rm(d, { recursive: true, force: true })),
     );
     tempDirs.length = 0;
   });
 
   it("creates a real worktree on the given branch when branch is specified", async () => {
     const layerWithBranch = makeLayer(
-      Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]),
+      Ref.unsafeMake<readonly DisplayEntry[]>([]),
       { type: "branch", branch: "feature/my-branch" },
     );
 
@@ -140,7 +168,7 @@ describe("WorktreeDockerSandboxFactory", () => {
         const factory = yield* SandboxFactory;
         yield* factory.withSandbox((info) =>
           Effect.promise(async () => {
-            observedBranch = await branchAt(info.hostWorktreePath!);
+            observedBranch = await branchAt(worktreePathOf(info));
           }),
         );
       }).pipe(Effect.provide(layerWithBranch)),
@@ -156,7 +184,7 @@ describe("WorktreeDockerSandboxFactory", () => {
         const factory = yield* SandboxFactory;
         yield* factory.withSandbox((info) =>
           Effect.promise(async () => {
-            observedBranch = await branchAt(info.hostWorktreePath!);
+            observedBranch = await branchAt(worktreePathOf(info));
           }),
         );
       }).pipe(Effect.provide(makeLayer())),
@@ -188,7 +216,7 @@ describe("WorktreeDockerSandboxFactory", () => {
           branchStrategy: { type: "merge-to-head" },
         }),
         NodeFileSystem.layer,
-        SilentDisplay.layer(Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([])),
+        SilentDisplay.layer(Ref.unsafeMake<readonly DisplayEntry[]>([])),
       ),
     );
 
@@ -242,7 +270,8 @@ describe("WorktreeDockerSandboxFactory", () => {
     );
 
     expect(observedWorktreePath).toBeDefined();
-    expect(existsSync(observedWorktreePath!)).toBe(false);
+    assert.isDefined(observedWorktreePath);
+    expect(existsSync(observedWorktreePath)).toBe(false);
   });
 
   it("closes provider handle on release", async () => {
@@ -267,17 +296,18 @@ describe("WorktreeDockerSandboxFactory", () => {
               observedWorktreePath = info.hostWorktreePath;
               // Create an uncommitted change inside the worktree
               yield* Effect.promise(() =>
-                writeFile(join(info.hostWorktreePath!, "dirty.txt"), "dirty"),
+                writeFile(join(worktreePathOf(info), "dirty.txt"), "dirty"),
               );
               return yield* Effect.die("boom");
             }),
           );
         }).pipe(Effect.provide(makeLayer())),
       ),
-    ).rejects.toThrow();
+    ).rejects.toThrow("boom");
 
     expect(observedWorktreePath).toBeDefined();
-    expect(existsSync(observedWorktreePath!)).toBe(true);
+    assert.isDefined(observedWorktreePath);
+    expect(existsSync(observedWorktreePath)).toBe(true);
   });
 
   it("attaches preservedWorktreePath to AgentIdleTimeoutError on failure with dirty worktree", async () => {
@@ -289,27 +319,23 @@ describe("WorktreeDockerSandboxFactory", () => {
           Effect.gen(function* () {
             observedWorktreePath = info.hostWorktreePath;
             yield* Effect.promise(() =>
-              writeFile(join(info.hostWorktreePath!, "dirty.txt"), "dirty"),
+              writeFile(join(worktreePathOf(info), "dirty.txt"), "dirty"),
             );
-            return yield* Effect.fail(
-              new AgentIdleTimeoutError({
-                message: "timed out",
-                timeoutMs: 30_000,
-              }),
-            );
+            return yield* new AgentIdleTimeoutError({
+              message: "timed out",
+              timeoutMs: 30_000,
+            });
           }),
         );
       }).pipe(Effect.provide(makeLayer())),
     );
 
     expect(Exit.isFailure(exit)).toBe(true);
-    if (!Exit.isFailure(exit)) throw new Error("unreachable");
+    assert(Exit.isFailure(exit), "expected a failure");
     expect(exit.cause._tag).toBe("Fail");
-    if (exit.cause._tag !== "Fail") throw new Error("unreachable");
-    expect(exit.cause.error).toBeInstanceOf(AgentIdleTimeoutError);
-    expect(
-      (exit.cause.error as AgentIdleTimeoutError).preservedWorktreePath,
-    ).toBe(observedWorktreePath);
+    assert(exit.cause._tag === "Fail", "expected a Fail cause");
+    assert.instanceOf(exit.cause.error, AgentIdleTimeoutError);
+    expect(exit.cause.error.preservedWorktreePath).toBe(observedWorktreePath);
   });
 
   it("attaches preservedWorktreePath to AgentError on failure with dirty worktree", async () => {
@@ -321,30 +347,26 @@ describe("WorktreeDockerSandboxFactory", () => {
           Effect.gen(function* () {
             observedWorktreePath = info.hostWorktreePath;
             yield* Effect.promise(() =>
-              writeFile(join(info.hostWorktreePath!, "dirty.txt"), "dirty"),
+              writeFile(join(worktreePathOf(info), "dirty.txt"), "dirty"),
             );
-            return yield* Effect.fail(
-              new AgentError({ message: "agent failed" }),
-            );
+            return yield* new AgentError({ message: "agent failed" });
           }),
         );
       }).pipe(Effect.provide(makeLayer())),
     );
 
     expect(Exit.isFailure(exit)).toBe(true);
-    if (!Exit.isFailure(exit)) throw new Error("unreachable");
+    assert(Exit.isFailure(exit), "expected a failure");
     expect(exit.cause._tag).toBe("Fail");
-    if (exit.cause._tag !== "Fail") throw new Error("unreachable");
-    expect(exit.cause.error).toBeInstanceOf(AgentError);
-    expect((exit.cause.error as AgentError).preservedWorktreePath).toBe(
-      observedWorktreePath,
-    );
+    assert(exit.cause._tag === "Fail", "expected a Fail cause");
+    assert.instanceOf(exit.cause.error, AgentError);
+    expect(exit.cause.error.preservedWorktreePath).toBe(observedWorktreePath);
   });
 
   it("logs copy-to-sandbox as a spinner when copyToWorktree paths are provided", async () => {
     await writeFile(join(hostRepoDir, "some-file.txt"), "content");
 
-    const ref = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const ref = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     const layerWithCopy = Layer.provide(
       WorktreeDockerSandboxFactory.layer,
       Layer.mergeAll(
@@ -368,10 +390,12 @@ describe("WorktreeDockerSandboxFactory", () => {
     );
 
     const entries = await Effect.runPromise(Ref.get(ref));
-    const spinnerEntry = entries.find(
-      (e) => e._tag === "spinner" && e.message === "Copying to worktree",
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        _tag: "spinner",
+        message: "Copying to worktree",
+      }),
     );
-    expect(spinnerEntry).toBeDefined();
   });
 
   it("removes worktree silently on success with clean worktree", async () => {
@@ -389,7 +413,9 @@ describe("WorktreeDockerSandboxFactory", () => {
       }).pipe(Effect.provide(makeLayer())),
     );
 
-    expect(existsSync(observedWorktreePath!)).toBe(false);
+    assert.isDefined(observedWorktreePath);
+
+    expect(existsSync(observedWorktreePath)).toBe(false);
     expect(stderrSpy).not.toHaveBeenCalled();
     stderrSpy.mockRestore();
   });
@@ -403,7 +429,7 @@ describe("WorktreeDockerSandboxFactory", () => {
           Effect.gen(function* () {
             observedWorktreePath = info.hostWorktreePath;
             yield* Effect.promise(() =>
-              writeFile(join(info.hostWorktreePath!, "dirty.txt"), "dirty"),
+              writeFile(join(worktreePathOf(info), "dirty.txt"), "dirty"),
             );
             return "done";
           }),
@@ -413,7 +439,8 @@ describe("WorktreeDockerSandboxFactory", () => {
 
     expect(result.preservedWorktreePath).toBe(observedWorktreePath);
     expect(result.value).toBe("done");
-    expect(existsSync(observedWorktreePath!)).toBe(true);
+    assert.isDefined(observedWorktreePath);
+    expect(existsSync(observedWorktreePath)).toBe(true);
   });
 
   it("prints uncommitted changes message on success with dirty worktree", async () => {
@@ -427,7 +454,7 @@ describe("WorktreeDockerSandboxFactory", () => {
           Effect.gen(function* () {
             observedWorktreePath = info.hostWorktreePath;
             yield* Effect.promise(() =>
-              writeFile(join(info.hostWorktreePath!, "dirty.txt"), "dirty"),
+              writeFile(join(worktreePathOf(info), "dirty.txt"), "dirty"),
             );
           }),
         );
@@ -452,10 +479,86 @@ describe("WorktreeDockerSandboxFactory", () => {
           });
         }).pipe(Effect.provide(makeLayer())),
       ),
-    ).rejects.toThrow();
+    ).rejects.toThrow("agent failed");
 
     expect(observedWorktreePath).toBeDefined();
-    expect(existsSync(observedWorktreePath!)).toBe(false);
+    assert.isDefined(observedWorktreePath);
+    expect(existsSync(observedWorktreePath)).toBe(false);
+  });
+
+  it("merge-to-head: deletes the temp branch when the run fails with no commits on it", async () => {
+    await expect(
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const factory = yield* SandboxFactory;
+          yield* factory.withSandbox(() =>
+            Effect.fail(new AgentError({ message: "agent failed" })),
+          );
+        }).pipe(Effect.provide(makeLayer())),
+      ),
+    ).rejects.toThrow("agent failed");
+
+    await expect(sandcastleBranches(hostRepoDir)).resolves.toStrictEqual([]);
+  });
+
+  it("merge-to-head: keeps the temp branch, and says so, when the failed run left commits on it", async () => {
+    const stderrSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await expect(
+        Effect.runPromise(
+          Effect.gen(function* () {
+            const factory = yield* SandboxFactory;
+            yield* factory.withSandbox((info) =>
+              Effect.promise(async () =>
+                commitFile(
+                  worktreePathOf(info),
+                  "agent.txt",
+                  "agent",
+                  "agent commit",
+                ),
+              ).pipe(
+                Effect.andThen(
+                  Effect.fail(new AgentError({ message: "agent failed" })),
+                ),
+              ),
+            );
+          }).pipe(Effect.provide(makeLayer())),
+        ),
+      ).rejects.toThrow("agent failed");
+
+      const branches = await sandcastleBranches(hostRepoDir);
+      expect(branches).toHaveLength(1);
+      const output = stderrSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+      expect(output).toContain(`git merge ${branches[0]}`);
+      expect(output).toContain(`git branch -D ${branches[0]}`);
+    } finally {
+      stderrSpy.mockRestore();
+    }
+  });
+
+  it("branch strategy: never deletes the named branch when the run fails", async () => {
+    await expect(
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const factory = yield* SandboxFactory;
+          yield* factory.withSandbox(() =>
+            Effect.fail(new AgentError({ message: "agent failed" })),
+          );
+        }).pipe(
+          Effect.provide(
+            makeLayer(Ref.unsafeMake<readonly DisplayEntry[]>([]), {
+              type: "branch",
+              branch: "feature/keep-me",
+            }),
+          ),
+        ),
+      ),
+    ).rejects.toThrow("agent failed");
+
+    const { stdout } = await execAsync('git branch --list "feature/keep-me"', {
+      cwd: hostRepoDir,
+    });
+    expect(stdout.trim()).not.toBe("");
   });
 
   it("removes worktree when sandbox start fails (e.g. missing image)", async () => {
@@ -476,7 +579,7 @@ describe("WorktreeDockerSandboxFactory", () => {
           branchStrategy: { type: "merge-to-head" },
         }),
         NodeFileSystem.layer,
-        SilentDisplay.layer(Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([])),
+        SilentDisplay.layer(Ref.unsafeMake<readonly DisplayEntry[]>([])),
       ),
     );
 
@@ -487,7 +590,7 @@ describe("WorktreeDockerSandboxFactory", () => {
           yield* factory.withSandbox(() => Effect.void);
         }).pipe(Effect.provide(layer)),
       ),
-    ).rejects.toThrow();
+    ).rejects.toThrow("Image 'sandcastle:test' not found locally");
 
     // No worktree should remain on disk
     const worktree = await findCreatedWorktree(hostRepoDir);
@@ -506,7 +609,7 @@ describe("WorktreeDockerSandboxFactory", () => {
           );
         }).pipe(Effect.provide(makeLayer())),
       ),
-    ).rejects.toThrow();
+    ).rejects.toThrow("agent failed");
 
     const output = stderrSpy.mock.calls.map((c) => c[0]).join(" ");
     expect(output).toContain("no uncommitted changes");
@@ -529,18 +632,16 @@ describe("WorktreeDockerSandboxFactory", () => {
     );
 
     expect(Exit.isFailure(exit)).toBe(true);
-    if (!Exit.isFailure(exit)) throw new Error("unreachable");
+    assert(Exit.isFailure(exit), "expected a failure");
     expect(exit.cause._tag).toBe("Fail");
-    if (exit.cause._tag !== "Fail") throw new Error("unreachable");
-    expect(exit.cause.error).toBeInstanceOf(AgentIdleTimeoutError);
-    expect(
-      (exit.cause.error as AgentIdleTimeoutError).preservedWorktreePath,
-    ).toBeUndefined();
+    assert(exit.cause._tag === "Fail", "expected a Fail cause");
+    assert.instanceOf(exit.cause.error, AgentIdleTimeoutError);
+    expect(exit.cause.error.preservedWorktreePath).toBeUndefined();
   });
 
   describe("head branch strategy", () => {
     const makeHeadLayer = (
-      displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]),
+      displayRef = Ref.unsafeMake<readonly DisplayEntry[]>([]),
     ) => makeLayer(displayRef, { type: "head" });
 
     it("does not create a worktree", async () => {
@@ -631,13 +732,13 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
           branchStrategy: { type: "merge-to-head" },
         }),
         NodeFileSystem.layer,
-        SilentDisplay.layer(Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([])),
+        SilentDisplay.layer(Ref.unsafeMake<readonly DisplayEntry[]>([])),
       ),
     );
 
   afterEach(async () => {
     await Promise.all(
-      tempDirs.map((d) => rm(d, { recursive: true, force: true })),
+      tempDirs.map(async (d) => rm(d, { recursive: true, force: true })),
     );
     tempDirs.length = 0;
   });
@@ -748,17 +849,45 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
     expect(contentB).toBe('{"b":2}');
   });
 
+  it("copies gitignored copyToWorktree files from the host repo, not the fresh worktree", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
+    tempDirs.push(hostDir);
+    await initRepoWithCommit(hostDir);
+    await commitFile(hostDir, ".gitignore", "secret.txt\n", "ignore secret");
+    // Gitignored, so it exists only in the host repo, never in a fresh worktree
+    await writeFile(join(hostDir, "secret.txt"), "host secret");
+
+    let fileContent = "";
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const factory = yield* SandboxFactory;
+        yield* factory.withSandbox((_, sandbox) =>
+          Effect.gen(function* () {
+            const result = yield* sandbox.exec("cat secret.txt");
+            fileContent = result.stdout.trim();
+          }),
+        );
+      }).pipe(Effect.provide(makeIsolatedLayer(hostDir, ["secret.txt"]))),
+    );
+
+    expect(fileContent).toBe("host secret");
+  });
+
   it("skips missing copyToWorktree paths without error", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
     tempDirs.push(hostDir);
     await initRepoWithCommit(hostDir);
 
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const factory = yield* SandboxFactory;
-        yield* factory.withSandbox(() => Effect.void);
-      }).pipe(Effect.provide(makeIsolatedLayer(hostDir, ["nonexistent.txt"]))),
-    );
+    await expect(
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const factory = yield* SandboxFactory;
+          yield* factory.withSandbox(() => Effect.void);
+        }).pipe(
+          Effect.provide(makeIsolatedLayer(hostDir, ["nonexistent.txt"])),
+        ),
+      ),
+    ).resolves.toBeUndefined();
   });
 
   it("isolated provider does not have a branchStrategy property", () => {
@@ -797,7 +926,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
           branchStrategy: { type: "branch", branch: "feature/my-branch" },
         }),
         NodeFileSystem.layer,
-        SilentDisplay.layer(Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([])),
+        SilentDisplay.layer(Ref.unsafeMake<readonly DisplayEntry[]>([])),
       ),
     );
 
@@ -807,7 +936,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
         const factory = yield* SandboxFactory;
         yield* factory.withSandbox((info) =>
           Effect.promise(async () => {
-            observedBranch = await branchAt(info.hostWorktreePath!);
+            observedBranch = await branchAt(worktreePathOf(info));
           }),
         );
       }).pipe(Effect.provide(layer)),
@@ -833,7 +962,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
     );
 
     expect(receivedInfo?.hostWorktreePath).toBeDefined();
-    expect(receivedInfo!.hostWorktreePath).toContain(
+    expect(receivedInfo?.hostWorktreePath).toContain(
       join(hostDir, ".sandcastle", "worktrees"),
     );
   });
@@ -855,7 +984,9 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
       }).pipe(Effect.provide(makeIsolatedLayer(hostDir))),
     );
 
-    expect(existsSync(observedWorktreePath!)).toBe(false);
+    assert.isDefined(observedWorktreePath);
+
+    expect(existsSync(observedWorktreePath)).toBe(false);
   });
 
   it("preserves worktree on failure with dirty worktree", async () => {
@@ -872,16 +1003,18 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
             Effect.gen(function* () {
               observedWorktreePath = info.hostWorktreePath;
               yield* Effect.promise(() =>
-                writeFile(join(info.hostWorktreePath!, "dirty.txt"), "dirty"),
+                writeFile(join(worktreePathOf(info), "dirty.txt"), "dirty"),
               );
               return yield* Effect.die("boom");
             }),
           );
         }).pipe(Effect.provide(makeIsolatedLayer(hostDir))),
       ),
-    ).rejects.toThrow();
+    ).rejects.toThrow("boom");
 
-    expect(existsSync(observedWorktreePath!)).toBe(true);
+    assert.isDefined(observedWorktreePath);
+
+    expect(existsSync(observedWorktreePath)).toBe(true);
   });
 
   it("removes worktree when isolated sandbox start fails", async () => {
@@ -906,7 +1039,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
           branchStrategy: { type: "merge-to-head" },
         }),
         NodeFileSystem.layer,
-        SilentDisplay.layer(Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([])),
+        SilentDisplay.layer(Ref.unsafeMake<readonly DisplayEntry[]>([])),
       ),
     );
 
@@ -917,11 +1050,13 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
           yield* factory.withSandbox(() => Effect.void);
         }).pipe(Effect.provide(layer)),
       ),
-    ).rejects.toThrow();
+    ).rejects.toThrow("isolated sandbox unavailable");
 
     // No worktree should remain
     const worktree = await findCreatedWorktree(hostDir);
     expect(worktree).toBeUndefined();
+    // ...and no merge-to-head temp branch either
+    await expect(sandcastleBranches(hostDir)).resolves.toStrictEqual([]);
   });
 
   it("provides applyToHost callback that syncs commits to worktree", async () => {
@@ -944,8 +1079,10 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
               'echo "new content" > new-file.txt && git add new-file.txt && git commit -m "sandbox commit"',
             );
             commitMade = true;
-            if (!info.applyToHost)
-              throw new Error("applyToHost not provided for isolated sandbox");
+            assert.isDefined(
+              info.applyToHost,
+              "applyToHost not provided for isolated sandbox",
+            );
             yield* info.applyToHost();
           }),
         );
@@ -980,13 +1117,13 @@ describe("WorktreeDockerSandboxFactory — no-sandbox provider", () => {
           branchStrategy,
         }),
         NodeFileSystem.layer,
-        SilentDisplay.layer(Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([])),
+        SilentDisplay.layer(Ref.unsafeMake<readonly DisplayEntry[]>([])),
       ),
     );
 
   afterEach(async () => {
     await Promise.all(
-      tempDirs.map((d) => rm(d, { recursive: true, force: true })),
+      tempDirs.map(async (d) => rm(d, { recursive: true, force: true })),
     );
     tempDirs.length = 0;
   });
@@ -1041,7 +1178,8 @@ describe("WorktreeDockerSandboxFactory — no-sandbox provider", () => {
     expect(observedWorktreePath).toContain(
       join(hostDir, ".sandcastle", "worktrees"),
     );
-    expect(existsSync(observedWorktreePath!)).toBe(false);
+    assert.isDefined(observedWorktreePath);
+    expect(existsSync(observedWorktreePath)).toBe(false);
   });
 
   it("worktree mode: removes worktree when sandbox start fails", async () => {
@@ -1068,7 +1206,7 @@ describe("WorktreeDockerSandboxFactory — no-sandbox provider", () => {
           branchStrategy: { type: "merge-to-head" },
         }),
         NodeFileSystem.layer,
-        SilentDisplay.layer(Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([])),
+        SilentDisplay.layer(Ref.unsafeMake<readonly DisplayEntry[]>([])),
       ),
     );
 
@@ -1079,9 +1217,192 @@ describe("WorktreeDockerSandboxFactory — no-sandbox provider", () => {
           yield* factory.withSandbox(() => Effect.void);
         }).pipe(Effect.provide(layer)),
       ),
-    ).rejects.toThrow();
+    ).rejects.toThrow("no-sandbox create failed");
 
     const worktree = await findCreatedWorktree(hostDir);
     expect(worktree).toBeUndefined();
+    await expect(sandcastleBranches(hostDir)).resolves.toStrictEqual([]);
+  });
+});
+
+describe("WorktreeDockerSandboxFactory — interruption preserves the worktree", () => {
+  const tempDirs: string[] = [];
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await Promise.all(
+      tempDirs.map(async (d) => rm(d, { recursive: true, force: true })),
+    );
+    tempDirs.length = 0;
+  });
+
+  const makeHostRepo = async () => {
+    const dir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
+    tempDirs.push(dir);
+    await initRepoWithCommit(dir);
+    return dir;
+  };
+
+  const bindMountProvider = (): SandboxProvider =>
+    testStubProvider({ name: "test-provider", worktreePath: "/w" }).provider;
+  const providers: [string, () => SandboxProvider][] = [
+    ["bind-mount", bindMountProvider],
+    ["isolated", () => testIsolated()],
+    ["no-sandbox", () => noSandbox()],
+  ];
+
+  const makeLayer = (
+    hostDir: string,
+    sandboxProvider: SandboxProvider,
+    signal?: AbortSignal,
+  ) =>
+    Layer.provide(
+      WorktreeDockerSandboxFactory.layer,
+      Layer.mergeAll(
+        Layer.succeed(SandboxConfig, {
+          env: {},
+          hostRepoDir: hostDir,
+          sandboxProvider,
+          branchStrategy: { type: "merge-to-head" },
+          signal,
+        }),
+        NodeFileSystem.layer,
+        SilentDisplay.layer(Ref.unsafeMake<readonly DisplayEntry[]>([])),
+      ),
+    );
+
+  it.each(providers)(
+    "%s: keeps a clean worktree when the run is aborted via signal",
+    async (label, makeProvider) => {
+      const hostDir = await makeHostRepo();
+      const ac = new AbortController();
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      let observedWorktreePath: string | undefined;
+      await expect(
+        Effect.runPromise(
+          Effect.gen(function* () {
+            const factory = yield* SandboxFactory;
+            yield* factory.withSandbox((info) =>
+              Effect.gen(function* () {
+                observedWorktreePath = info.hostWorktreePath;
+                ac.abort("user cancelled");
+                return yield* Effect.die("aborted");
+              }),
+            );
+          }).pipe(
+            Effect.provide(makeLayer(hostDir, makeProvider(), ac.signal)),
+          ),
+        ),
+      ).rejects.toThrow("aborted");
+
+      expect(observedWorktreePath).toBeDefined();
+      assert.isDefined(observedWorktreePath);
+      expect(existsSync(observedWorktreePath)).toBe(true);
+      expect(errors).toHaveBeenCalledWith(
+        `\nWorktree preserved at ${observedWorktreePath}`,
+      );
+    },
+  );
+
+  it("still removes a clean worktree when the signal fires after the run succeeded", async () => {
+    const hostDir = await makeHostRepo();
+    const ac = new AbortController();
+
+    let observedWorktreePath: string | undefined;
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const factory = yield* SandboxFactory;
+        yield* factory.withSandbox((info) =>
+          Effect.sync(() => {
+            observedWorktreePath = info.hostWorktreePath;
+            ac.abort("too late");
+          }),
+        );
+      }).pipe(
+        Effect.provide(makeLayer(hostDir, bindMountProvider(), ac.signal)),
+      ),
+    );
+
+    assert.isDefined(observedWorktreePath);
+
+    expect(existsSync(observedWorktreePath)).toBe(false);
+  });
+
+  it("still removes a clean worktree on a plain failure (no abort)", async () => {
+    const hostDir = await makeHostRepo();
+    const ac = new AbortController();
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    let observedWorktreePath: string | undefined;
+    await expect(
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const factory = yield* SandboxFactory;
+          yield* factory.withSandbox((info) =>
+            Effect.gen(function* () {
+              observedWorktreePath = info.hostWorktreePath;
+              return yield* Effect.die("boom");
+            }),
+          );
+        }).pipe(
+          Effect.provide(makeLayer(hostDir, bindMountProvider(), ac.signal)),
+        ),
+      ),
+    ).rejects.toThrow("boom");
+
+    assert.isDefined(observedWorktreePath);
+
+    expect(existsSync(observedWorktreePath)).toBe(false);
+    expect(errors).toHaveBeenCalledWith(
+      "\nWorktree removed (no uncommitted changes)",
+    );
+  });
+
+  it.each(providers)(
+    "%s: prints where the worktree is kept when the process gets SIGINT",
+    async (label, makeProvider) => {
+      const hostDir = await makeHostRepo();
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+      vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+
+      let observedWorktreePath: string | undefined;
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const factory = yield* SandboxFactory;
+          yield* factory.withSandbox((info) =>
+            Effect.sync(() => {
+              observedWorktreePath = info.hostWorktreePath;
+              process.emit("SIGINT");
+            }),
+          );
+        }).pipe(Effect.provide(makeLayer(hostDir, makeProvider()))),
+      );
+
+      expect(errors).toHaveBeenCalledWith(
+        `\nWorktree preserved at ${observedWorktreePath}`,
+      );
+      expect(errors).toHaveBeenCalledWith(
+        `  To clean up: git worktree remove --force ${observedWorktreePath}`,
+      );
+    },
+  );
+
+  it("does not print the SIGINT guidance once the worktree is released", async () => {
+    const hostDir = await makeHostRepo();
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const factory = yield* SandboxFactory;
+        yield* factory.withSandbox(() => Effect.void);
+      }).pipe(Effect.provide(makeLayer(hostDir, bindMountProvider()))),
+    );
+    process.emit("SIGINT");
+
+    expect(errors).not.toHaveBeenCalledWith(
+      expect.stringContaining("Worktree preserved"),
+    );
   });
 });

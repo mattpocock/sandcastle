@@ -19,6 +19,7 @@ import type {
   ExecResult,
 } from "../SandboxProvider.js";
 import { BoundedTail, MAX_TAIL_CHARS } from "../boundedTail.js";
+import { planWindowsExec } from "./windowsCommand.js";
 
 export interface NoSandboxOptions {
   /** Environment variables injected by this provider. Merged at launch time. */
@@ -46,14 +47,14 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
   name: "no-sandbox",
   env: options?.env ?? {},
   create: async (createOptions): Promise<NoSandboxHandle> => {
-    const worktreePath = createOptions.worktreePath;
+    const { worktreePath } = createOptions;
     const processEnv = { ...process.env, ...createOptions.env };
     const maxOutputTailChars = options?.maxOutputTailChars ?? MAX_TAIL_CHARS;
 
     const handle: NoSandboxHandle = {
       worktreePath,
 
-      exec: (
+      exec: async (
         command: string,
         opts?: {
           onLine?: (line: string) => void;
@@ -64,50 +65,61 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
       ): Promise<ExecResult> => {
         // sudo is a no-op for no-sandbox — the user is already on the host
         const cwd = opts?.cwd ?? worktreePath;
-        const isWindows = process.platform === "win32";
-        // PowerShell and cmd.exe don't ship `sh`, so on Windows route the
-        // command string through cmd.exe instead. `/d` skips AutoRun, `/s`
-        // preserves the quoted command verbatim, `/c` runs it and exits.
-        // `windowsVerbatimArguments` keeps Node from re-quoting our args.
-        const shellCmd = isWindows ? "cmd.exe" : "sh";
-        const shellArgs = isWindows
-          ? ["/d", "/s", "/c", command]
-          : ["-c", command];
+        // Windows has no `sh`, and cmd.exe doesn't understand the POSIX
+        // quoting in Sandcastle's commands (#940): run simple commands as a
+        // direct spawn of their argv, and only the rest through cmd.exe.
+        const plan =
+          process.platform === "win32"
+            ? await planWindowsExec(command, processEnv, cwd)
+            : {
+                file: "sh",
+                args: ["-c", command],
+                windowsVerbatimArguments: false,
+                env: processEnv,
+              };
 
         return new Promise((resolve, reject) => {
-          const proc = spawn(shellCmd, shellArgs, {
+          const spawnOptions = {
             cwd,
-            env: processEnv,
-            stdio: [
-              opts?.stdin !== undefined ? "pipe" : "ignore",
-              "pipe",
-              "pipe",
-            ],
-            windowsVerbatimArguments: isWindows,
-          });
+            env: plan.env,
+            windowsVerbatimArguments: plan.windowsVerbatimArguments,
+          };
+          const stdin = opts?.stdin;
+          // Two literal `stdio` tuples, so the types know stdout and stderr
+          // are always piped.
+          const proc =
+            stdin === undefined
+              ? spawn(plan.file, plan.args, {
+                  ...spawnOptions,
+                  stdio: ["ignore", "pipe", "pipe"],
+                })
+              : spawn(plan.file, plan.args, {
+                  ...spawnOptions,
+                  stdio: ["pipe", "pipe", "pipe"],
+                });
 
-          if (opts?.stdin !== undefined) {
-            proc.stdin!.write(opts.stdin);
-            proc.stdin!.end();
+          if (stdin !== undefined) {
+            proc.stdin?.write(stdin);
+            proc.stdin?.end();
           }
 
-          proc.on("error", (error) => {
+          proc.on("error", (error: Error) => {
             reject(new Error(`exec failed: ${error.message}`));
           });
 
           if (opts?.onLine) {
-            const onLine = opts.onLine;
+            const { onLine } = opts;
             const stdoutTail = new BoundedTail(maxOutputTailChars, "\n");
             const stderrTail = new BoundedTail(maxOutputTailChars, "");
-            const rl = createInterface({ input: proc.stdout! });
+            const rl = createInterface({ input: proc.stdout });
             rl.on("line", (line) => {
               stdoutTail.push(line);
               onLine(line);
             });
-            proc.stderr!.on("data", (chunk: Buffer) => {
+            proc.stderr.on("data", (chunk: Buffer) => {
               stderrTail.push(chunk.toString());
             });
-            proc.on("close", (code) => {
+            proc.on("close", (code: number | null) => {
               resolve({
                 stdout: stdoutTail.toString(),
                 stderr: stderrTail.toString(),
@@ -117,13 +129,13 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
           } else {
             const stdoutChunks: string[] = [];
             const stderrChunks: string[] = [];
-            proc.stdout!.on("data", (chunk: Buffer) => {
+            proc.stdout.on("data", (chunk: Buffer) => {
               stdoutChunks.push(chunk.toString());
             });
-            proc.stderr!.on("data", (chunk: Buffer) => {
+            proc.stderr.on("data", (chunk: Buffer) => {
               stderrChunks.push(chunk.toString());
             });
-            proc.on("close", (code) => {
+            proc.on("close", (code: number | null) => {
               resolve({
                 stdout: stdoutChunks.join(""),
                 stderr: stderrChunks.join(""),

@@ -13,7 +13,9 @@ describe("shutdownRegistry", () => {
     const spy = vi
       .spyOn(process, "exit")
       .mockImplementation((() => undefined) as never);
-    restoreExit = () => spy.mockRestore();
+    restoreExit = () => {
+      spy.mockRestore();
+    };
     return spy;
   };
 
@@ -30,7 +32,9 @@ describe("shutdownRegistry", () => {
     expect(process.listenerCount("SIGTERM")).toBe(sigtermBefore + 1);
     expect(process.listenerCount("exit")).toBe(exitBefore + 1);
 
-    unregisters.forEach((u) => u());
+    unregisters.forEach((u) => {
+      u();
+    });
 
     expect(process.listenerCount("SIGINT")).toBe(sigintBefore);
     expect(process.listenerCount("SIGTERM")).toBe(sigtermBefore);
@@ -45,7 +49,7 @@ describe("shutdownRegistry", () => {
 
     process.emit("SIGINT");
 
-    expect(calls).toEqual(["a", "b"]);
+    expect(calls).toStrictEqual(["a", "b"]);
     expect(exit).toHaveBeenCalledTimes(1);
     expect(exit).toHaveBeenCalledWith(1);
 
@@ -60,7 +64,7 @@ describe("shutdownRegistry", () => {
 
     process.emit("SIGTERM");
 
-    expect(calls).toEqual(["x"]);
+    expect(calls).toStrictEqual(["x"]);
     u1();
   });
 
@@ -70,7 +74,7 @@ describe("shutdownRegistry", () => {
 
     process.emit("exit", 0);
 
-    expect(calls).toEqual(["e"]);
+    expect(calls).toStrictEqual(["e"]);
     u1();
   });
 
@@ -98,7 +102,7 @@ describe("shutdownRegistry", () => {
     gone();
     process.emit("SIGINT");
 
-    expect(calls).toEqual(["stay"]);
+    expect(calls).toStrictEqual(["stay"]);
     stay();
   });
 
@@ -112,7 +116,7 @@ describe("shutdownRegistry", () => {
 
     process.emit("SIGINT");
 
-    expect(calls).toEqual(["ran"]);
+    expect(calls).toStrictEqual(["ran"]);
     u1();
     u2();
   });

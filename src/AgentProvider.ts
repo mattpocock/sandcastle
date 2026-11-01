@@ -1,44 +1,99 @@
-import { mkdir, readFile, rm, writeFile, access } from "node:fs/promises";
-import { dirname, join, posix } from "node:path";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { dirname, join, posix, relative } from "node:path";
 import { tmpdir } from "node:os";
 import {
   claudeHostSessionPath,
   claudeSandboxSessionPath,
   claudeSubagentsDirOnHost,
+  copilotHostSessionsDir,
+  copilotSessionPath,
+  cursorChatDirName,
+  cursorHostChatsDir,
   encodePiSessionDir,
   findClaudeSessionOnHost,
   findCodexSessionOnHost,
   findPiSessionOnHost,
+  homeDir,
   listClaudeSubagentSessionsInSandbox,
-  locateCodexHostSession,
-  locateCodexSandboxSession,
-  locatePiHostSession,
-  locatePiSandboxSession,
+  locateSandboxSessionFile,
+  makeSessionFileStorage,
+  opencodeHostDatabase,
+  opencodeHostSessionsDir,
+  pathExists,
   piSessionDirPath,
+  requireHostSessionPath,
   transferClaudeSession,
   transferCodexSession,
+  transferCopilotSession,
   transferPiSession,
-  type HostSessionLookup,
 } from "./SessionStore.js";
+import type { HostSessionLookup } from "./SessionStore.js";
 import type { BindMountSandboxHandle } from "./SandboxProvider.js";
-
-const fileExists = async (path: string): Promise<boolean> => {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
-};
+import type { ContextWindow } from "./ContextWindow.js";
+import { ForkNotSupportedError } from "./errors.js";
 
 export type ParsedStreamEvent =
   | { type: "text"; text: string }
+  /**
+   * The input side of ONE model call (cache included), emitted once per call.
+   * The Orchestrator keeps the last one per iteration; see ContextWindow.
+   */
+  | { type: "context_window"; contextWindow: ContextWindow }
   | { type: "result"; result: string }
   | { type: "tool_call"; name: string; args: string }
   | { type: "session_id"; sessionId: string }
-  | { type: "usage"; usage: IterationUsage };
+  | { type: "usage"; usage: IterationUsage }
+  /**
+   * The agent reported a failure in its own stream (an API rejection, a
+   * failed turn). Some agents exit 0 after one, so the Orchestrator fails the
+   * run on it whatever the exit code.
+   */
+  | { type: "error"; message: string };
 
-const shellEscape = (s: string): string => "'" + s.replace(/'/g, "'\\''") + "'";
+/** @internal Single-quote a string for safe use in a POSIX shell command. */
+export const shellEscape = (s: string): string =>
+  `'${s.replaceAll("'", String.raw`'\''`)}'`;
+
+/**
+ * Build a `context_window` event from ONE model call's input-side buckets
+ * (uncached input plus each cache bucket the agent reports separately).
+ * Returns nothing when the input is missing or the call reports zero tokens,
+ * so a malformed or failed call cannot replace a real figure.
+ */
+const contextWindowEvent = (
+  input: unknown,
+  ...cacheBuckets: unknown[]
+): ParsedStreamEvent[] => {
+  if (typeof input !== "number") return [];
+  let tokens = input;
+  for (const n of cacheBuckets) if (typeof n === "number") tokens += n;
+  return tokens > 0
+    ? [{ type: "context_window", contextWindow: { tokens } }]
+    : [];
+};
+
+/**
+ * Claude Code: each `assistant` line carries its API call's `message.usage`
+ * (lines split from one call repeat it), so the last one is the last call.
+ * Subagent lines (`parent_tool_use_id` set) belong to another context and are
+ * skipped. The `result` line's usage is summed over every call of the turn
+ * and is deliberately never used.
+ */
+const parseClaudeContextWindow = (line: string): ParsedStreamEvent[] => {
+  if (!line.startsWith("{")) return [];
+  try {
+    const obj = JSON.parse(line);
+    if (obj.type !== "assistant" || obj.parent_tool_use_id) return [];
+    const u = obj.message?.usage;
+    return contextWindowEvent(
+      u?.input_tokens,
+      u?.cache_creation_input_tokens,
+      u?.cache_read_input_tokens,
+    );
+  } catch {
+    return [];
+  }
+};
 
 /** Maps allowlisted tool names to the input field containing the display arg */
 const TOOL_ARG_FIELDS: Record<string, string> = {
@@ -48,63 +103,118 @@ const TOOL_ARG_FIELDS: Record<string, string> = {
   Agent: "description",
 };
 
+/** `value.message` when `value` is an object whose `message` is a string. */
+const messageField = (value: unknown): string | undefined =>
+  typeof value === "object" &&
+  value !== null &&
+  "message" in value &&
+  typeof value.message === "string"
+    ? value.message
+    : undefined;
+
 /**
  * Extract an error message from a parsed JSON error event.
  * Handles { error: "string" }, { error: { message: "string" } },
  * { error: { data: { message: "string" } } }, and { message: "string" }.
  */
-const extractErrorMessage = (obj: any): string | undefined => {
-  const err = obj.error;
-  if (typeof err === "string") return err;
-  if (typeof err === "object" && err !== null) {
-    if (typeof err.message === "string") return err.message;
-    if (typeof err.data?.message === "string") return err.data.message;
+const extractErrorMessage = (obj: unknown): string | undefined => {
+  if (typeof obj !== "object" || obj === null) {
+    return undefined;
   }
-  if (typeof obj.message === "string") return obj.message;
-  return undefined;
+  const err = "error" in obj ? obj.error : undefined;
+  if (typeof err === "string") {
+    return err;
+  }
+  if (typeof err === "object" && err !== null) {
+    const nested =
+      messageField(err) ?? ("data" in err ? messageField(err.data) : undefined);
+    if (nested !== undefined) {
+      return nested;
+    }
+  }
+  return messageField(obj);
 };
+
+/** A content block of a Claude `assistant` stream-json event. */
+interface ClaudeContentBlock {
+  type: string;
+  text?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+}
+
+/** The tool_call event for an allowlisted tool_use block, if it is one. */
+const toolCallFromClaudeBlock = (
+  block: ClaudeContentBlock,
+): ParsedStreamEvent | undefined => {
+  if (
+    block.type !== "tool_use" ||
+    typeof block.name !== "string" ||
+    block.input === undefined
+  ) {
+    return undefined;
+  }
+  const argField = TOOL_ARG_FIELDS[block.name];
+  if (argField === undefined) {
+    return undefined; // not allowlisted
+  }
+  const argValue = block.input[argField];
+  if (typeof argValue !== "string") {
+    return undefined; // missing/wrong arg field
+  }
+  return { type: "tool_call", name: block.name, args: argValue };
+};
+
+/** Joins each run of consecutive text events into one text event. */
+const mergeAdjacentText = (
+  events: readonly ParsedStreamEvent[],
+): ParsedStreamEvent[] => {
+  const merged: ParsedStreamEvent[] = [];
+  for (const event of events) {
+    const last = merged.at(-1);
+    if (event.type === "text" && last?.type === "text") {
+      merged[merged.length - 1] = {
+        type: "text",
+        text: last.text + event.text,
+      };
+    } else {
+      merged.push(event);
+    }
+  }
+  return merged;
+};
+
+/**
+ * Turns a Claude assistant message's content blocks into events, in order:
+ * consecutive text blocks are joined into one text event, and allowlisted
+ * tool_use blocks become tool_call events. Other blocks are dropped.
+ */
+const parseClaudeAssistantContent = (
+  content: readonly ClaudeContentBlock[],
+): ParsedStreamEvent[] =>
+  mergeAdjacentText(
+    content.flatMap((block): ParsedStreamEvent[] => {
+      if (block.type === "text" && typeof block.text === "string") {
+        return [{ type: "text", text: block.text }];
+      }
+      const toolCall = toolCallFromClaudeBlock(block);
+      return toolCall === undefined ? [] : [toolCall];
+    }),
+  );
 
 const parseStreamJsonLine = (line: string): ParsedStreamEvent[] => {
   if (!line.startsWith("{")) return [];
   try {
     const obj = JSON.parse(line);
     if (obj.type === "assistant" && Array.isArray(obj.message?.content)) {
-      const events: ParsedStreamEvent[] = [];
-      const texts: string[] = [];
-      for (const block of obj.message.content as {
-        type: string;
-        text?: string;
-        name?: string;
-        input?: Record<string, unknown>;
-      }[]) {
-        if (block.type === "text" && typeof block.text === "string") {
-          texts.push(block.text);
-        } else if (
-          block.type === "tool_use" &&
-          typeof block.name === "string" &&
-          block.input !== undefined
-        ) {
-          const argField = TOOL_ARG_FIELDS[block.name];
-          if (argField === undefined) continue; // not allowlisted
-          const argValue = block.input[argField];
-          if (typeof argValue !== "string") continue; // missing/wrong arg field
-          if (texts.length > 0) {
-            events.push({ type: "text", text: texts.join("") });
-            texts.length = 0;
-          }
-          events.push({
-            type: "tool_call",
-            name: block.name,
-            args: argValue,
-          });
-        }
-      }
-      if (texts.length > 0) {
-        events.push({ type: "text", text: texts.join("") });
-      }
-      return events;
+      return parseClaudeAssistantContent(
+        obj.message.content as ClaudeContentBlock[],
+      );
     }
     if (obj.type === "result" && typeof obj.result === "string") {
+      if (obj.is_error === true) {
+        return [{ type: "error", message: obj.result }];
+      }
       return [{ type: "result", result: obj.result }];
     }
     if (
@@ -127,63 +237,102 @@ const parseStreamJsonLine = (line: string): ParsedStreamEvent[] => {
  */
 const CURSOR_PRINT_PROMPT_MAX_BYTES = 120 * 1024;
 
-function assertCursorPrintPromptFitsArgv(prompt: string): void {
+const assertCursorPrintPromptFitsArgv = (prompt: string): void => {
   const n = Buffer.byteLength(prompt, "utf8");
   if (n > CURSOR_PRINT_PROMPT_MAX_BYTES) {
     throw new Error(
       `Cursor print-mode prompt is ${n} bytes (max ${CURSOR_PRINT_PROMPT_MAX_BYTES} bytes). The Cursor CLI accepts the prompt only as a command-line argument; shorten the prompt or split the work. Other Sandcastle providers use stdin for large prompts.`,
     );
   }
-}
+};
+
+/** Reads `<kind>ToolCall.args[field]` when it is a string. */
+const cursorToolCallArg = (
+  toolCall: unknown,
+  field: string,
+): string | undefined => {
+  if (typeof toolCall !== "object" || toolCall === null) {
+    return undefined;
+  }
+  const args: unknown = Reflect.get(toolCall, "args");
+  if (typeof args !== "object" || args === null) {
+    return undefined;
+  }
+  const value: unknown = Reflect.get(args, field);
+  return typeof value === "string" ? value : undefined;
+};
+
+/**
+ * Cursor's typed tool calls: `<kind>ToolCall` → display name and the arg it
+ * shows. Newer Cursor CLIs (verified 2026-10-31, composer-2) run shell
+ * commands as `shellToolCall` and write files as `editToolCall`.
+ */
+const CURSOR_TYPED_TOOL_CALLS: readonly {
+  readonly kind: string;
+  readonly name: string;
+  readonly field: string;
+}[] = [
+  { kind: "readToolCall", name: "Read", field: "path" },
+  { kind: "writeToolCall", name: "Write", field: "path" },
+  { kind: "editToolCall", name: "Edit", field: "path" },
+  { kind: "shellToolCall", name: "Bash", field: "command" },
+];
+
+/** Cursor's older `function` tool call: `{ name, arguments: "<json>" }`. */
+const parseCursorFunctionToolCall = (fn: unknown): ParsedStreamEvent[] => {
+  if (typeof fn !== "object" || fn === null) {
+    return [];
+  }
+  const name: unknown = Reflect.get(fn, "name");
+  if (typeof name !== "string") {
+    return [];
+  }
+  const rawArguments: unknown = Reflect.get(fn, "arguments");
+  const rawArgs = typeof rawArguments === "string" ? rawArguments : "";
+  if (rawArgs === "") {
+    return [{ type: "tool_call", name, args: "" }];
+  }
+  try {
+    const parsedArgs = JSON.parse(rawArgs) as unknown;
+    const command: unknown =
+      typeof parsedArgs === "object" && parsedArgs !== null
+        ? Reflect.get(parsedArgs, "command")
+        : undefined;
+    if (typeof command === "string") {
+      return [{ type: "tool_call", name: "Bash", args: command }];
+    }
+  } catch {
+    // Use raw arguments string for display.
+  }
+  return [{ type: "tool_call", name, args: rawArgs }];
+};
 
 /** Cursor stream-json emits top-level `tool_call` events (see Cursor CLI output-format docs). */
 const parseCursorToolCallStarted = (
   obj: Record<string, unknown>,
 ): ParsedStreamEvent[] => {
-  if (obj.type !== "tool_call" || obj.subtype !== "started") return [];
+  if (obj.type !== "tool_call" || obj.subtype !== "started") {
+    return [];
+  }
   const toolCall = obj.tool_call;
-  if (!toolCall || typeof toolCall !== "object") return [];
-
-  const tc = toolCall as Record<string, unknown>;
-
-  const readToolCall = tc.readToolCall as
-    | { args?: { path?: unknown } }
-    | undefined;
-  if (readToolCall?.args && typeof readToolCall.args.path === "string") {
-    return [{ type: "tool_call", name: "Read", args: readToolCall.args.path }];
+  if (typeof toolCall !== "object" || toolCall === null) {
+    return [];
   }
-
-  const writeToolCall = tc.writeToolCall as
-    | { args?: { path?: unknown } }
-    | undefined;
-  if (writeToolCall?.args && typeof writeToolCall.args.path === "string") {
-    return [
-      { type: "tool_call", name: "Write", args: writeToolCall.args.path },
-    ];
-  }
-
-  const fn = tc.function as { name?: unknown; arguments?: unknown } | undefined;
-  if (fn && typeof fn.name === "string") {
-    const rawArgs = typeof fn.arguments === "string" ? fn.arguments : "";
-    if (rawArgs) {
-      try {
-        const parsedArgs = JSON.parse(rawArgs) as Record<string, unknown>;
-        if (typeof parsedArgs.command === "string") {
-          return [
-            { type: "tool_call", name: "Bash", args: parsedArgs.command },
-          ];
-        }
-      } catch {
-        // Use raw arguments string for display.
-      }
-      return [{ type: "tool_call", name: fn.name, args: rawArgs }];
+  for (const { kind, name, field } of CURSOR_TYPED_TOOL_CALLS) {
+    const args = cursorToolCallArg(Reflect.get(toolCall, kind), field);
+    if (args !== undefined) {
+      return [{ type: "tool_call", name, args }];
     }
-    return [{ type: "tool_call", name: fn.name, args: "" }];
   }
-
-  return [];
+  return parseCursorFunctionToolCall(Reflect.get(toolCall, "function"));
 };
 
+/**
+ * Cursor emits no `context_window` events on purpose. Its only token figures
+ * are on the `result` line, summed over every model call of the turn (verified
+ * 2026-10-31: `cacheReadTokens` grew ~5.5x with five calls over the same
+ * content). With no per-call figure, no line beats a wrong one.
+ */
 const parseCursorStreamLine = (line: string): ParsedStreamEvent[] => {
   if (!line.startsWith("{")) return [];
   let obj: Record<string, unknown>;
@@ -207,7 +356,7 @@ export interface AgentCommandOptions {
   readonly resumeSession?: string;
   /**
    * When true alongside `resumeSession`, the agent should fork the session
-   * instead of mutating it — Claude's `--fork-session`, Codex's
+   * instead of mutating it — Claude's `--fork-session`, pi's `--fork`, Codex's
    * `codex exec fork`. The parent session JSONL is left intact and the agent
    * writes a new session under a fresh id.
    */
@@ -259,6 +408,12 @@ export interface AgentSessionStorage {
    * directory that was searched (for not-found errors).
    */
   findByIdOnHost(sessionId: string): Promise<HostSessionLookup>;
+  /**
+   * `false` when the agent's CLI can resume a session but has no native fork:
+   * `.fork()` then throws `ForkNotSupportedError` before any sandbox starts.
+   * Omitted means the agent forks.
+   */
+  readonly canFork?: boolean;
 }
 
 export interface AgentProvider {
@@ -273,6 +428,12 @@ export interface AgentProvider {
   parseStreamLine(line: string): ParsedStreamEvent[];
   /** Parse token usage from the captured session JSONL content. Only implemented by Claude Code. */
   parseSessionUsage?(content: string): IterationUsage | undefined;
+  /**
+   * Parse the last model call's context window from the captured session
+   * JSONL. For agents whose stream has no per-call figure (codex). Overrides
+   * the stream's `context_window` events when it returns a value.
+   */
+  parseSessionContextWindow?(content: string): ContextWindow | undefined;
 }
 
 export const DEFAULT_MODEL = "claude-opus-4-8";
@@ -295,7 +456,7 @@ const readSandboxFile = async (
   );
   await handle.copyFileOut(sandboxPath, tmpPath);
   try {
-    return await readFile(tmpPath, "utf-8");
+    return await readFile(tmpPath, "utf8");
   } finally {
     await rm(tmpPath, { force: true }).catch(() => {});
   }
@@ -360,11 +521,11 @@ const makeClaudeSessionStorage = (
     hostSessionFilePath: (cwd, id) =>
       claudeHostSessionPath(cwd, id, hostProjectsDir),
     existsOnHost: (cwd, id) =>
-      fileExists(claudeHostSessionPath(cwd, id, hostProjectsDir)),
+      pathExists(claudeHostSessionPath(cwd, id, hostProjectsDir)),
     readHostSession: async (cwd, id) => {
       const path = claudeHostSessionPath(cwd, id, hostProjectsDir);
-      if (!(await fileExists(path))) return undefined;
-      return readFile(path, "utf-8");
+      if (!(await pathExists(path))) return undefined;
+      return readFile(path, "utf8");
     },
     captureToHost: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
       // Main session: failure is fatal — the user expects their session.
@@ -409,10 +570,10 @@ const makeClaudeSessionStorage = (
             ),
             tag: "claude-sub",
           });
-        } catch (err) {
+        } catch (error) {
           console.error(
             `sandcastle: failed to capture Claude subagent transcript ${sandboxSubagentPath}: ${
-              err instanceof Error ? err.message : String(err)
+              error instanceof Error ? error.message : String(error)
             }`,
           );
         }
@@ -424,7 +585,7 @@ const makeClaudeSessionStorage = (
         sessionId,
         hostProjectsDir,
       );
-      const jsonl = await readFile(hostPath, "utf-8");
+      const jsonl = await readFile(hostPath, "utf8");
       const rewritten = transferClaudeSession(jsonl, hostCwd, sandboxCwd);
       const sandboxPath = claudeSandboxSessionPath(
         sandboxCwd,
@@ -437,6 +598,11 @@ const makeClaudeSessionStorage = (
   };
 };
 
+/**
+ * Codex sessions live at YYYY/MM/DD/rollout-*-<id>.jsonl — the path is not
+ * derivable from (cwd, id) alone, so we cache the path written by
+ * captureToHost for hostSessionFilePath to surface on the IterationResult.
+ */
 const makeCodexSessionStorage = (
   options?: CodexOptions,
 ): AgentSessionStorage => {
@@ -444,10 +610,6 @@ const makeCodexSessionStorage = (
   const sandboxSessionsDir =
     options?.sessionStorage?.sandboxSessionsDir ??
     posix.join("/home/agent", ".codex", "sessions");
-
-  // Codex sessions live at YYYY/MM/DD/rollout-*-<id>.jsonl — the path is not
-  // derivable from (cwd, id) alone, so we cache the path written by
-  // captureToHost for hostSessionFilePath to surface on the IterationResult.
   const capturedPaths = new Map<string, string>();
 
   return {
@@ -459,28 +621,31 @@ const makeCodexSessionStorage = (
     readHostSession: async (_cwd, id) => {
       const found = await findCodexSessionOnHost(id, hostSessionsDir);
       if (!found.path) return undefined;
-      return readFile(found.path, "utf-8");
+      return readFile(found.path, "utf8");
     },
     captureToHost: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
-      const located = await locateCodexSandboxSession(
-        sessionId,
+      const located = await locateSandboxSessionFile(
         handle,
         sandboxSessionsDir,
+        `rollout-*-${sessionId}.jsonl`,
       );
       const jsonl = await readSandboxFile(handle, located.path, "codex-cap");
       const rewritten = transferCodexSession(jsonl, sandboxCwd, hostCwd);
-      const root =
-        hostSessionsDir ?? join(process.env.HOME ?? "~", ".codex", "sessions");
+      const root = hostSessionsDir ?? join(homeDir(), ".codex", "sessions");
       const target = join(root, located.relativePath);
       await mkdir(dirname(target), { recursive: true });
       await writeFile(target, rewritten);
       capturedPaths.set(sessionId, target);
     },
     resumeIntoSandbox: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
-      const located = await locateCodexHostSession(sessionId, hostSessionsDir);
-      const jsonl = await readFile(located.path, "utf-8");
+      const found = await findCodexSessionOnHost(sessionId, hostSessionsDir);
+      const path = requireHostSessionPath(found, sessionId);
+      const jsonl = await readFile(path, "utf8");
       const rewritten = transferCodexSession(jsonl, hostCwd, sandboxCwd);
-      const target = posix.join(sandboxSessionsDir, located.relativePath);
+      const target = posix.join(
+        sandboxSessionsDir,
+        ...relative(found.searchedRoot, path).split(/[\\/]/u),
+      );
       await writeSandboxFile(handle, target, rewritten, "codex-res");
     },
     findByIdOnHost: (id) => findCodexSessionOnHost(id, hostSessionsDir),
@@ -491,46 +656,64 @@ const makeCodexSessionStorage = (
 // Pi agent provider
 // ---------------------------------------------------------------------------
 
+/**
+ * Where a captured pi session lands on the host. Pi resolves `--session <id>`
+ * against the *current project's* encoded directory first; a transferred file
+ * in any other directory hits the "fork session?" prompt, which hangs in
+ * print/json mode. So we land the file in `--<enc-host-cwd>--/<filename>`, not
+ * the sandbox's encoded dir.
+ */
+const piHostCaptureTarget = (
+  hostCwd: string,
+  sandboxPath: string,
+  hostSessionsDir: string | undefined,
+): string =>
+  join(piSessionDirPath(hostCwd, hostSessionsDir), posix.basename(sandboxPath));
+
+// Pi names its JSONL `<timestamp>_<id>.jsonl`, so the file is not derivable
+// from (cwd, id). captureToHost remembers what it wrote, so the iteration's
+// sessionFilePath is the JSONL itself. Before capture (the resume precheck's
+// not-found message) the best we can name is the directory.
 const makePiSessionStorage = (options?: PiOptions): AgentSessionStorage => {
   const hostSessionsDir = options?.sessionStorage?.hostSessionsDir;
   const sandboxSessionsDir =
     options?.sessionStorage?.sandboxSessionsDir ??
     posix.join("/home/agent", ".pi", "agent", "sessions");
-
+  const capturedPaths = new Map<string, string>();
   return {
-    hostSessionFilePath: (cwd, _id) => piSessionDirPath(cwd, hostSessionsDir),
+    hostSessionFilePath: (cwd, id) =>
+      capturedPaths.get(id) ?? piSessionDirPath(cwd, hostSessionsDir),
     existsOnHost: async (_cwd, id) => {
       const found = await findPiSessionOnHost(id, hostSessionsDir);
       return found.path !== undefined;
     },
     readHostSession: async (_cwd, id) => {
-      const found = await findPiSessionOnHost(id, hostSessionsDir);
-      if (!found.path) return undefined;
-      return readFile(found.path, "utf-8");
+      const { path } = await findPiSessionOnHost(id, hostSessionsDir);
+      return path === undefined ? undefined : readFile(path, "utf8");
     },
     captureToHost: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
-      const located = await locatePiSandboxSession(
-        sessionId,
+      const located = await locateSandboxSessionFile(
         handle,
         sandboxSessionsDir,
+        `*_${sessionId}.jsonl`,
       );
       const jsonl = await readSandboxFile(handle, located.path, "pi-cap");
       const rewritten = transferPiSession(jsonl, sandboxCwd, hostCwd);
-      // Pi resolves `--session <id>` against the *current project's* encoded
-      // directory first; a transferred file in any other directory hits the
-      // "fork session?" prompt, which hangs in print/json mode. So we land
-      // the file in `--<enc-host-cwd>--/<filename>`, not the sandbox's
-      // encoded dir.
-      const filename = posix.basename(located.path);
-      const target = join(piSessionDirPath(hostCwd, hostSessionsDir), filename);
+      const target = piHostCaptureTarget(
+        hostCwd,
+        located.path,
+        hostSessionsDir,
+      );
       await mkdir(dirname(target), { recursive: true });
       await writeFile(target, rewritten);
+      capturedPaths.set(sessionId, target);
     },
     resumeIntoSandbox: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
-      const located = await locatePiHostSession(sessionId, hostSessionsDir);
-      const jsonl = await readFile(located.path, "utf-8");
+      const found = await findPiSessionOnHost(sessionId, hostSessionsDir);
+      const path = requireHostSessionPath(found, sessionId);
+      const jsonl = await readFile(path, "utf8");
       const rewritten = transferPiSession(jsonl, hostCwd, sandboxCwd);
-      const filename = located.relativePath.split(/[\\/]/).pop()!;
+      const filename = posix.basename(path.replaceAll("\\", "/"));
       const target = posix.join(
         sandboxSessionsDir,
         encodePiSessionDir(sandboxCwd),
@@ -540,6 +723,57 @@ const makePiSessionStorage = (options?: PiOptions): AgentSessionStorage => {
     },
     findByIdOnHost: (id) => findPiSessionOnHost(id, hostSessionsDir),
   };
+};
+
+/** A message in pi's `agent_end` event. */
+interface PiAgentEndMessage {
+  role: string;
+  content: { type: string; text?: string }[];
+  stopReason?: string;
+  errorMessage?: string;
+}
+
+/** The last assistant message, or null if there is none. */
+const lastAssistantMessage = (
+  messages: readonly (PiAgentEndMessage | null)[],
+): PiAgentEndMessage | null => {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg?.role === "assistant") {
+      return msg;
+    }
+  }
+  return null;
+};
+
+/**
+ * Reads pi's final answer from its `agent_end` messages: the last assistant
+ * message's text as a result, or an error if that message stopped on error.
+ */
+const parsePiAgentEnd = (
+  messages: readonly (PiAgentEndMessage | null)[],
+): ParsedStreamEvent[] => {
+  const msg = lastAssistantMessage(messages);
+  if (msg === null) {
+    return [];
+  }
+  // When the model call fails (e.g. an API 400), pi puts the error on
+  // the last assistant message and still exits 0.
+  if (msg.stopReason === "error") {
+    return [
+      {
+        type: "error",
+        message:
+          typeof msg.errorMessage === "string" && msg.errorMessage
+            ? msg.errorMessage
+            : 'pi stopped with stopReason "error"',
+      },
+    ];
+  }
+  const texts = msg.content.flatMap((block) =>
+    block.type === "text" && typeof block.text === "string" ? [block.text] : [],
+  );
+  return texts.length > 0 ? [{ type: "result", result: texts.join("") }] : [];
 };
 
 const parsePiStreamLine = (line: string): ParsedStreamEvent[] => {
@@ -553,6 +787,12 @@ const parsePiStreamLine = (line: string): ParsedStreamEvent[] => {
     if (obj.type === "session" && typeof obj.id === "string") {
       return [{ type: "session_id", sessionId: obj.id }];
     }
+    // Each assistant message_end is one model call with its own usage. Not
+    // agent_end, whose messages[] repeat every call's usage.
+    if (obj.type === "message_end" && obj.message?.role === "assistant") {
+      const u = obj.message.usage;
+      return contextWindowEvent(u?.input, u?.cacheRead, u?.cacheWrite);
+    }
     if (obj.type === "message_update" && obj.assistantMessageEvent) {
       const evt = obj.assistantMessageEvent as {
         type: string;
@@ -564,8 +804,14 @@ const parsePiStreamLine = (line: string): ParsedStreamEvent[] => {
       return [];
     }
     if (obj.type === "tool_execution_start") {
-      const toolName = obj.toolName;
-      if (typeof toolName !== "string") return [];
+      const rawName = obj.toolName;
+      if (typeof rawName !== "string") return [];
+      // Pi's built-in tools are lowercase (`bash`); match the shared allowlist
+      // case-insensitively and display its canonical name (`Bash`).
+      const toolName = Object.keys(TOOL_ARG_FIELDS).find(
+        (name) => name.toLowerCase() === rawName.toLowerCase(),
+      );
+      if (toolName === undefined) return [];
       const argField = TOOL_ARG_FIELDS[toolName];
       if (argField === undefined) return [];
       const args = obj.args as Record<string, unknown> | undefined;
@@ -575,33 +821,13 @@ const parsePiStreamLine = (line: string): ParsedStreamEvent[] => {
       return [{ type: "tool_call", name: toolName, args: argValue }];
     }
     // Pi emits agent_error / error events on stdout (not stderr) for auth
-    // failures, rate limits, and API errors. Capture them as result events so
-    // the Orchestrator's stderr-empty fallback can surface them to the user.
+    // failures, rate limits, and API errors.
     if (obj.type === "agent_error" || obj.type === "error") {
       const msg = extractErrorMessage(obj);
-      return msg ? [{ type: "result", result: msg }] : [];
+      return msg ? [{ type: "error", message: msg }] : [];
     }
     if (obj.type === "agent_end" && Array.isArray(obj.messages)) {
-      const messages = obj.messages as {
-        role: string;
-        content: { type: string; text?: string }[];
-      }[];
-      for (let i = messages.length - 1; i >= 0; i--) {
-        const msg = messages[i];
-        if (msg?.role === "assistant") {
-          const texts: string[] = [];
-          for (const block of msg.content) {
-            if (block.type === "text" && typeof block.text === "string") {
-              texts.push(block.text);
-            }
-          }
-          if (texts.length > 0) {
-            return [{ type: "result", result: texts.join("") }];
-          }
-          break;
-        }
-      }
-      return [];
+      return parsePiAgentEnd(obj.messages as (PiAgentEndMessage | null)[]);
     }
   } catch {
     // Not valid JSON — skip
@@ -611,7 +837,12 @@ const parsePiStreamLine = (line: string): ParsedStreamEvent[] => {
 
 /** Options for the pi agent provider. */
 export interface PiOptions {
-  /** Reasoning effort level. Maps to the CLI's --thinking flag. */
+  /**
+   * Reasoning effort level. Maps to the CLI's --thinking flag. When omitted,
+   * no flag is passed and pi uses its own default (`medium`), which some
+   * models reject: with pi 0.73.1, `anthropic/claude-haiku-5-5` returns a 400.
+   * Pass `"off"` for those.
+   */
   readonly thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
   /** Environment variables injected by this agent provider. */
   readonly env?: Record<string, string>;
@@ -636,6 +867,7 @@ export const pi = (
   buildPrintCommand({
     prompt,
     resumeSession,
+    forkSession,
   }: AgentCommandOptions): PrintCommand {
     const thinkingFlag = options?.thinking
       ? ` --thinking ${options.thinking}`
@@ -643,8 +875,11 @@ export const pi = (
     // Pi persists print-mode sessions by default; `--session <id>` resolves an
     // existing session and appends to it in place. Drop the legacy
     // `--no-session` flag so fresh runs also persist and can be resumed later.
+    // `--fork <id>` instead copies the session into a new file under a fresh
+    // id (reported on the stream's `session` header line), leaving the parent
+    // untouched. Pi rejects `--fork` combined with `--session`.
     const sessionFlag = resumeSession
-      ? ` --session ${shellEscape(resumeSession)}`
+      ? ` --${forkSession ? "fork" : "session"} ${shellEscape(resumeSession)}`
       : "";
     return {
       command: `pi -p --mode json --model ${shellEscape(model)}${thinkingFlag}${sessionFlag}`,
@@ -689,6 +924,39 @@ const parseCodexUsage = (usage: unknown): IterationUsage | undefined => {
   };
 };
 
+/**
+ * Codex's `exec --json` stream has no per-request usage: `turn.completed`
+ * sums every request of the session (#898). The rollout JSONL does: each
+ * `token_count` event has `last_token_usage` (one request; its `input_tokens`
+ * already includes cached and cache-write tokens) and the model's
+ * `model_context_window`. The last one is the last request.
+ */
+const parseCodexSessionContextWindow = (
+  content: string,
+): ContextWindow | undefined => {
+  const lines = content.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]!;
+    if (!line.startsWith("{")) continue;
+    try {
+      const obj = JSON.parse(line);
+      if (obj.type !== "event_msg" || obj.payload?.type !== "token_count") {
+        continue;
+      }
+      const { info } = obj.payload;
+      const tokens = info?.last_token_usage?.input_tokens;
+      if (typeof tokens !== "number" || tokens <= 0) continue;
+      const limit = info.model_context_window;
+      return typeof limit === "number" && limit > 0
+        ? { tokens, limit }
+        : { tokens };
+    } catch {
+      // Not valid JSON — skip
+    }
+  }
+  return undefined;
+};
+
 const parseCodexStreamLine = (line: string): ParsedStreamEvent[] => {
   if (!line.startsWith("{")) return [];
   try {
@@ -704,7 +972,7 @@ const parseCodexStreamLine = (line: string): ParsedStreamEvent[] => {
       obj.item?.type === "agent_message" &&
       typeof obj.item.text === "string"
     ) {
-      const text = obj.item.text;
+      const { text } = obj.item;
       return [
         { type: "text", text },
         { type: "result", result: text },
@@ -726,6 +994,12 @@ const parseCodexStreamLine = (line: string): ParsedStreamEvent[] => {
     if (obj.type === "error") {
       const msg = extractErrorMessage(obj);
       return msg ? [{ type: "result", result: msg }] : [];
+    }
+
+    // turn.failed is codex's terminal failure for the turn.
+    if (obj.type === "turn.failed") {
+      const msg = extractErrorMessage(obj);
+      return [{ type: "error", message: msg ?? "codex turn failed" }];
     }
 
     // turn.completed carries token usage for the turn.
@@ -809,6 +1083,10 @@ export const codex = (
   parseStreamLine(line: string): ParsedStreamEvent[] {
     return parseCodexStreamLine(line);
   },
+
+  parseSessionContextWindow(content: string): ContextWindow | undefined {
+    return parseCodexSessionContextWindow(content);
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -819,28 +1097,72 @@ export const codex = (
 export interface CursorOptions {
   /** Environment variables injected by this agent provider. */
   readonly env?: Record<string, string>;
+  /** When false, session capture is disabled. Default: true. */
+  readonly captureSessions?: boolean;
+  /** Override Cursor `chats` directories for tests or non-standard installs. */
+  readonly sessionStorage?: {
+    readonly hostChatsDir?: string;
+    readonly sandboxChatsDir?: string;
+  };
 }
+
+/**
+ * A Cursor chat is one SQLite `store.db` under the chat dir of the cwd it ran
+ * in, so it moves as a single binary file, unrewritten. The CLI resumes
+ * (`--resume <id>`) but has no fork flag, so the provider declares
+ * `canFork: false` (ADR 0021).
+ */
+const makeCursorSessionStorage = (
+  options?: CursorOptions,
+): AgentSessionStorage => {
+  const hostDir = options?.sessionStorage?.hostChatsDir ?? cursorHostChatsDir();
+  const sandboxDir =
+    options?.sessionStorage?.sandboxChatsDir ?? "/home/agent/.cursor/chats";
+  return {
+    ...makeSessionFileStorage({
+      hostRoot: hostDir,
+      hostPath: (cwd, id) =>
+        join(hostDir, cursorChatDirName(cwd), id, "store.db"),
+      hostPathsById: (id, chatDirs) =>
+        chatDirs.map((chatDir) => join(hostDir, chatDir, id, "store.db")),
+      sandboxPath: (cwd, id) =>
+        posix.join(sandboxDir, cursorChatDirName(cwd), id, "store.db"),
+    }),
+    canFork: false,
+  };
+};
 
 export const cursor = (
   model: string,
   options?: CursorOptions,
-): AgentProvider => ({
+): AgentProvider & { readonly sessionStorage: AgentSessionStorage } => ({
   name: "cursor",
   env: options?.env ?? {},
-  captureSessions: false,
+  captureSessions: options?.captureSessions ?? true,
+  sessionStorage: makeCursorSessionStorage(options),
 
-  // Cursor has no filesystem-backed session storage (captureSessions: false, no
-  // sessionStorage), so it is non-resumable per ADR 0012/0016. resumeSession is
-  // ignored here — like pi and opencode — rather than wired to --resume.
   buildPrintCommand({
     prompt,
     dangerouslySkipPermissions,
+    resumeSession,
+    forkSession,
   }: AgentCommandOptions): PrintCommand {
+    if (resumeSession !== undefined && forkSession === true) {
+      throw new ForkNotSupportedError({
+        message:
+          "cursor cannot fork a session: its CLI resumes but has no fork. Use resume() to continue the session in place.",
+        agentProvider: "cursor",
+      });
+    }
     assertCursorPrintPromptFitsArgv(prompt);
     const forceFlag = dangerouslySkipPermissions ? " --force" : "";
-
+    // `--resume` takes an optional value, so the id is bound with `=`.
+    const resumeFlag =
+      resumeSession === undefined
+        ? ""
+        : ` --resume=${shellEscape(resumeSession)}`;
     return {
-      command: `agent --print --output-format stream-json --model ${shellEscape(model)} ${forceFlag} ${shellEscape(prompt)}`,
+      command: `agent --print --output-format stream-json --model ${shellEscape(model)} ${forceFlag}${resumeFlag} ${shellEscape(prompt)}`,
     };
   },
 
@@ -866,11 +1188,17 @@ const parseOpenCodeStreamLine = (line: string): ParsedStreamEvent[] => {
   if (!line.startsWith("{")) return [];
   try {
     const obj = JSON.parse(line);
-    const part = obj.part;
+    const { part } = obj;
 
     // step_start carries the session ID for the run.
     if (obj.type === "step_start" && typeof obj.sessionID === "string") {
       return [{ type: "session_id", sessionId: obj.sessionID }];
+    }
+
+    // step_finish is one model call; part.tokens is that call's usage.
+    if (obj.type === "step_finish" && part?.tokens) {
+      const t = part.tokens;
+      return contextWindowEvent(t.input, t.cache?.read, t.cache?.write);
     }
 
     // text event → assistant text. Emit both text (for streaming display) and
@@ -895,24 +1223,23 @@ const parseOpenCodeStreamLine = (line: string): ParsedStreamEvent[] => {
         | { status?: string; input?: Record<string, unknown> }
         | undefined;
       if (state?.status !== "completed") return [];
-      const input = state.input;
+      const { input } = state;
       if (!input) return [];
       const argField = OPENCODE_TOOL_ARG_FIELDS[part.tool];
-      const argValue = argField !== undefined ? input[argField] : undefined;
+      const argValue = argField === undefined ? undefined : input[argField];
       const args =
         typeof argValue === "string" ? argValue : JSON.stringify(input);
       return [{ type: "tool_call", name: part.tool, args }];
     }
 
     // OpenCode emits error events on stdout (not stderr) for auth failures,
-    // rate limits, and API errors. Capture them as result events so the
-    // Orchestrator's stderr-empty fallback can surface them to the user.
+    // rate limits, and API errors, and still exits 0 (opencode 1.3.13).
     if (obj.type === "error") {
       const msg = extractErrorMessage(obj);
-      return msg ? [{ type: "result", result: msg }] : [];
+      return msg ? [{ type: "error", message: msg }] : [];
     }
 
-    // step_finish, tool output, etc. → skip
+    // tool output, etc. → skip
   } catch {
     // Not valid JSON — skip
   }
@@ -931,19 +1258,56 @@ export interface OpenCodeOptions {
   readonly agent?: string;
   /** Environment variables injected by this agent provider. */
   readonly env?: Record<string, string>;
+  /** When false, session capture is disabled. Default: true. */
+  readonly captureSessions?: boolean;
+  /** Override where session exports live, for tests or non-standard installs. */
+  readonly sessionStorage?: {
+    readonly hostSessionsDir?: string;
+    readonly sandboxExportDir?: string;
+  };
 }
+
+/**
+ * OpenCode's sessions live in its SQLite database, so a session moves as the
+ * JSON of `opencode export <id>`, its documented interchange format: exported
+ * in the sandbox after a run, and `opencode import`ed from the sandbox repo
+ * before a resume (ADR 0022). The import keeps the session id and re-homes the
+ * session to the importing project, so no rewrite is needed.
+ */
+const makeOpenCodeSessionStorage = (
+  options?: OpenCodeOptions,
+): AgentSessionStorage => {
+  const hostDir =
+    options?.sessionStorage?.hostSessionsDir ?? opencodeHostSessionsDir();
+  const exportDir = options?.sessionStorage?.sandboxExportDir ?? "/tmp";
+  const hostPath = (id: string): string => join(hostDir, `${id}.json`);
+  return makeSessionFileStorage({
+    hostRoot: hostDir,
+    hostPath: (_cwd, id) => hostPath(id),
+    // A no-sandbox run resumes from OpenCode's own database, which can't be
+    // queried by id from here; OpenCode reports an unknown id itself.
+    hostPathsById: (id) => [hostPath(id), opencodeHostDatabase()],
+    sandboxPath: (_cwd, id) => posix.join(exportDir, `${id}.json`),
+    sandboxExport: (id, path) =>
+      `opencode export ${shellEscape(id)} > ${shellEscape(path)}`,
+    sandboxImport: (_id, path) => `opencode import ${shellEscape(path)}`,
+  });
+};
 
 export const opencode = (
   model: string,
   options?: OpenCodeOptions,
-): AgentProvider => ({
+): AgentProvider & { readonly sessionStorage: AgentSessionStorage } => ({
   name: "opencode",
   env: options?.env ?? {},
-  captureSessions: false,
+  captureSessions: options?.captureSessions ?? true,
+  sessionStorage: makeOpenCodeSessionStorage(options),
 
   buildPrintCommand({
     prompt,
     dangerouslySkipPermissions,
+    resumeSession,
+    forkSession,
   }: AgentCommandOptions): PrintCommand {
     const variantFlag = options?.variant
       ? ` --variant ${shellEscape(options.variant)}`
@@ -954,8 +1318,14 @@ export const opencode = (
     const permissionsFlag = dangerouslySkipPermissions
       ? " --dangerously-skip-permissions"
       : "";
+    // `--fork` copies the session to a new id before continuing, leaving the
+    // parent untouched; it needs `--session`.
+    const sessionFlags =
+      resumeSession === undefined
+        ? ""
+        : ` --session ${shellEscape(resumeSession)}${forkSession === true ? " --fork" : ""}`;
     return {
-      command: `opencode run --format json --model ${shellEscape(model)}${variantFlag}${agentFlag}${permissionsFlag} ${shellEscape(prompt)}`,
+      command: `opencode run --format json --model ${shellEscape(model)}${variantFlag}${agentFlag}${permissionsFlag}${sessionFlags} ${shellEscape(prompt)}`,
     };
   },
 
@@ -977,14 +1347,14 @@ export const opencode = (
  */
 const COPILOT_PRINT_PROMPT_MAX_BYTES = 120 * 1024;
 
-function assertCopilotPrintPromptFitsArgv(prompt: string): void {
+const assertCopilotPrintPromptFitsArgv = (prompt: string): void => {
   const n = Buffer.byteLength(prompt, "utf8");
   if (n > COPILOT_PRINT_PROMPT_MAX_BYTES) {
     throw new Error(
       `Copilot print-mode prompt is ${n} bytes (max ${COPILOT_PRINT_PROMPT_MAX_BYTES} bytes). This provider passes the prompt as a command-line argument; shorten the prompt or split the work. Other Sandcastle providers use stdin for large prompts.`,
     );
   }
-}
+};
 
 /**
  * Parse one line of `copilot --output-format json` JSONL output.
@@ -1004,11 +1374,14 @@ function assertCopilotPrintPromptFitsArgv(prompt: string): void {
  *   Mapped to `tool_call` events for allowlisted tools. Copilot uses lowercase
  *   `bash`; we normalise to the existing `Bash` allowlist entry.
  *
+ * - `session.usage_checkpoint` — `{ data: { accountingSnapshot } }`
+ *   `lastCallInputTokens` becomes a `context_window` event.
+ *
  * - `result` — `{ sessionId, exitCode, usage }`
  *   Terminal event. We surface `sessionId` as a `session_id` event.
  *
- * - `error` / `agent_error` — defensive: surface as a `result` event the same
- *   way Pi/Codex do, so the Orchestrator's stderr-empty fallback can show it.
+ * - `error` / `agent_error` — defensive: surface as an `error` event the same
+ *   way Pi/OpenCode do, so the Orchestrator fails the run with its message.
  */
 const parseCopilotStreamLine = (line: string): ParsedStreamEvent[] => {
   if (!line.startsWith("{")) return [];
@@ -1049,15 +1422,23 @@ const parseCopilotStreamLine = (line: string): ParsedStreamEvent[] => {
       return [{ type: "result", result: obj.data.content }];
     }
 
+    // usage_checkpoint comes once near the end of a run. Use the last call's
+    // input, never modelMetrics[...].usage.inputTokens, which sums all calls.
+    if (obj.type === "session.usage_checkpoint") {
+      return contextWindowEvent(
+        obj.data?.accountingSnapshot?.lastCallInputTokens,
+      );
+    }
+
     // Terminal result event carries the session id
     if (obj.type === "result" && typeof obj.sessionId === "string") {
       return [{ type: "session_id", sessionId: obj.sessionId }];
     }
 
-    // Defensive: surface error events as result events (matches Pi/Codex)
+    // Defensive: surface error events as error events (matches Pi/OpenCode)
     if (obj.type === "error" || obj.type === "agent_error") {
       const msg = extractErrorMessage(obj);
-      return msg ? [{ type: "result", result: msg }] : [];
+      return msg ? [{ type: "error", message: msg }] : [];
     }
   } catch {
     // Not valid JSON — skip
@@ -1071,31 +1452,73 @@ export interface CopilotOptions {
   readonly effort?: "low" | "medium" | "high";
   /** Environment variables injected by this agent provider. */
   readonly env?: Record<string, string>;
+  /** When false, session capture is disabled. Default: true. */
+  readonly captureSessions?: boolean;
+  /** Override Copilot `session-state` directories for tests or non-standard installs. */
+  readonly sessionStorage?: {
+    readonly hostSessionsDir?: string;
+    readonly sandboxSessionsDir?: string;
+  };
 }
+
+/**
+ * Copilot's session is one `events.jsonl` keyed by id alone, so it moves as a
+ * single file. The CLI resumes (`--resume=<id>`) but has no fork flag, so the
+ * provider declares `canFork: false` (ADR 0021).
+ */
+const makeCopilotSessionStorage = (
+  options?: CopilotOptions,
+): AgentSessionStorage => {
+  const hostDir =
+    options?.sessionStorage?.hostSessionsDir ?? copilotHostSessionsDir();
+  const sandboxDir =
+    options?.sessionStorage?.sandboxSessionsDir ??
+    "/home/agent/.copilot/session-state";
+  const hostPath = (id: string): string => join(hostDir, id, "events.jsonl");
+  return {
+    ...makeSessionFileStorage({
+      hostRoot: hostDir,
+      hostPath: (_cwd, id) => hostPath(id),
+      hostPathsById: (id) => [hostPath(id)],
+      sandboxPath: (_cwd, id) => copilotSessionPath(sandboxDir, id),
+      rewrite: transferCopilotSession,
+    }),
+    canFork: false,
+  };
+};
 
 export const copilot = (
   model: string,
   options?: CopilotOptions,
-): AgentProvider => ({
+): AgentProvider & { readonly sessionStorage: AgentSessionStorage } => ({
   name: "copilot",
   env: options?.env ?? {},
-  captureSessions: false,
+  captureSessions: options?.captureSessions ?? true,
+  sessionStorage: makeCopilotSessionStorage(options),
 
-  // Copilot CLI does expose `--resume <id>`, but its session state is indexed by
-  // a SQLite database alongside the JSONL files in ~/.copilot/session-state/, so
-  // transferring a single session file between host and sandbox is not enough to
-  // make resume work (see ADR 0016). Until the round-trip is verified end-to-end,
-  // copilot is non-resumable: captureSessions is false, there is no sessionStorage,
-  // and resumeSession is ignored here — like cursor, pi, and opencode.
   buildPrintCommand({
     prompt,
     dangerouslySkipPermissions,
+    resumeSession,
+    forkSession,
   }: AgentCommandOptions): PrintCommand {
+    if (resumeSession !== undefined && forkSession === true) {
+      throw new ForkNotSupportedError({
+        message:
+          "copilot cannot fork a session: its CLI resumes but has no fork. Use resume() to continue the session in place.",
+        agentProvider: "copilot",
+      });
+    }
     assertCopilotPrintPromptFitsArgv(prompt);
     const allowAll = dangerouslySkipPermissions ? " --allow-all-tools" : "";
     const effortFlag = options?.effort ? ` --effort ${options.effort}` : "";
+    // `--resume` takes an optional value, so the id is bound with `=`.
+    const resumeFlag =
+      resumeSession === undefined
+        ? ""
+        : ` --resume=${shellEscape(resumeSession)}`;
     return {
-      command: `copilot -p ${shellEscape(prompt)} --output-format json --model ${shellEscape(model)}${allowAll}${effortFlag}`,
+      command: `copilot -p ${shellEscape(prompt)} --output-format json --model ${shellEscape(model)}${allowAll}${effortFlag}${resumeFlag}`,
     };
   },
 
@@ -1152,11 +1575,12 @@ export const claudeCode = (
     // permissionMode and --dangerously-skip-permissions are mutually exclusive
     // on Claude's CLI; an explicit mode on the provider takes precedence over
     // Sandcastle's default bypass.
+    const skipPermissionsFlag = dangerouslySkipPermissions
+      ? " --dangerously-skip-permissions"
+      : "";
     const permissionFlag = options?.permissionMode
       ? ` --permission-mode ${options.permissionMode}`
-      : dangerouslySkipPermissions
-        ? " --dangerously-skip-permissions"
-        : "";
+      : skipPermissionsFlag;
     const effortFlag = options?.effort ? ` --effort ${options.effort}` : "";
     const resumeFlag = resumeSession
       ? ` --resume ${shellEscape(resumeSession)}`
@@ -1172,7 +1596,7 @@ export const claudeCode = (
   },
 
   parseStreamLine(line: string): ParsedStreamEvent[] {
-    return parseStreamJsonLine(line);
+    return [...parseStreamJsonLine(line), ...parseClaudeContextWindow(line)];
   },
 
   parseSessionUsage(content: string): IterationUsage | undefined {

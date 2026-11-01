@@ -7,13 +7,14 @@ import { describe, expect, it } from "vitest";
 import { resolvePrompt } from "./PromptResolver.js";
 import { PromptError } from "./errors.js";
 
-const run = <A, E>(effect: Effect.Effect<A, E, NodeContext.NodeContext>) =>
-  Effect.runPromise(effect.pipe(Effect.provide(NodeContext.layer)));
+const run = async <A, E>(
+  effect: Effect.Effect<A, E, NodeContext.NodeContext>,
+) => Effect.runPromise(effect.pipe(Effect.provide(NodeContext.layer)));
 
 describe("PromptResolver", () => {
   it("returns inline prompt when prompt is provided", async () => {
     const result = await run(resolvePrompt({ prompt: "do some work" }));
-    expect(result).toEqual({ text: "do some work", source: "inline" });
+    expect(result).toStrictEqual({ text: "do some work", source: "inline" });
   });
 
   it("reads prompt from promptFile when provided", async () => {
@@ -22,7 +23,10 @@ describe("PromptResolver", () => {
     await writeFile(promptPath, "prompt from file");
 
     const result = await run(resolvePrompt({ promptFile: promptPath }));
-    expect(result).toEqual({ text: "prompt from file", source: "template" });
+    expect(result).toStrictEqual({
+      text: "prompt from file",
+      source: "template",
+    });
   });
 
   it("errors when both prompt and promptFile are provided", async () => {
@@ -32,12 +36,25 @@ describe("PromptResolver", () => {
       ),
     );
     expect(error).toBeInstanceOf(PromptError);
-    expect(error.message).toContain("both");
+    expect(error.message).toBe("Cannot provide both prompt and promptFile");
   });
 
   it("errors when neither prompt nor promptFile is provided", async () => {
     const error = await run(resolvePrompt({}).pipe(Effect.flip));
     expect(error).toBeInstanceOf(PromptError);
     expect(error.message).toContain("prompt");
+  });
+
+  it("fails with a PromptError naming the file when promptFile can't be read", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "prompt-resolver-"));
+    const promptPath = join(dir, "missing.md");
+
+    const error = await run(
+      resolvePrompt({ promptFile: promptPath }).pipe(Effect.flip),
+    );
+    expect(error).toBeInstanceOf(PromptError);
+    expect(error.message).toContain(
+      `Failed to read prompt from ${promptPath}: `,
+    );
   });
 });

@@ -4,6 +4,19 @@ on:
   push:
     branches:
       - main
+  # pull_request, not pull_request_target: a fork PR's code runs here with no
+  # secrets and a read-only token (see the agent workflows, moved off
+  # pull_request_target in 8976368).
+  pull_request:
+
+permissions:
+  contents: read
+
+# A new push to a PR cancels that PR's in-flight run. Runs on main are never
+# cancelled: each push to main gets its own group.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   ci:
@@ -14,5 +27,39 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
+      - run: npm run typecheck
+      # Tests import from dist, so build before test. Lint too: the scripts
+      # in .sandcastle/ and .factory/ import @ai-hero/sandcastle, whose types
+      # come from dist, so without it type-aware rules see them as any.
       - run: npm run build
+      # api-report/ must match the built .d.ts: a public API change shows up
+      # in the PR as a report diff, which CODEOWNERS routes to Matt.
+      - run: npm run api:report -- --check
+      - run: npm run lint
       - run: npm test
+
+  # Real cmd.exe and Windows argv rules for noSandbox (#940). Only the
+  # Windows test files run here: most of the suite assumes a POSIX host
+  # (sh, /tmp, POSIX path joins), and `npm run build`'s postbuild uses rm/cp.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npx vitest run tests/no-sandbox.windows.test.ts src/sandboxes/no-sandbox.test.ts
+
+  # The end-to-end tests (tests/) on Windows. They run from src through the
+  # vitest alias, so no build is needed.
+  e2e-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npx vitest run --project e2e

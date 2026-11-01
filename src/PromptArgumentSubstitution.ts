@@ -24,6 +24,13 @@ export const BUILT_IN_PROMPT_ARG_KEYS = [
 const PLACEHOLDER_PATTERN = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
 
 /**
+ * The key of every `{{KEY}}` placeholder in `text`, in order, repeats
+ * included. The capture group is required, so the `?? ""` never applies.
+ */
+const placeholderKeys = (text: string): string[] =>
+  [...text.matchAll(PLACEHOLDER_PATTERN)].map((m) => m[1] ?? "");
+
+/**
  * Validates that the user has not provided any built-in prompt argument keys.
  * Fails with a PromptError if any built-in key is found in `args`.
  */
@@ -35,7 +42,9 @@ const PLACEHOLDER_PATTERN = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
 export const validateNoArgsWithInlinePrompt = (
   args: PromptArgs,
 ): Effect.Effect<void, PromptError> => {
-  if (Object.keys(args).length === 0) return Effect.void;
+  if (Object.keys(args).length === 0) {
+    return Effect.void;
+  }
   return Effect.fail(
     new PromptError({
       message:
@@ -59,6 +68,19 @@ export const validateNoBuiltInArgOverride = (
   return Effect.void;
 };
 
+const HTML_COMMENT_PATTERN = /<!--[\s\S]*?(?:-->|$)/g;
+
+const markShellBlocks = (prompt: string): string => {
+  const commentRanges = [...prompt.matchAll(HTML_COMMENT_PATTERN)].map(
+    (m) => [m.index, m.index + m[0].length] as const,
+  );
+  return prompt.replaceAll(SHELL_BLOCK_PATTERN, (block, command, offset) =>
+    commentRanges.some(([start, end]) => offset >= start && offset < end)
+      ? block
+      : `!${SHELL_BLOCK_MARKER}\`${command}\``,
+  );
+};
+
 export const substitutePromptArgs = (
   prompt: string,
   args: PromptArgs,
@@ -66,10 +88,13 @@ export const substitutePromptArgs = (
 ): Effect.Effect<string, PromptError, Display> => {
   // Mark shell blocks written in the raw template so the preprocessor can
   // distinguish them from `!`...`` patterns that arrive via arg substitution.
-  // Strip any markers already present in raw input so they can't be forged.
-  const markedPrompt = prompt
-    .replaceAll(SHELL_BLOCK_MARKER, "")
-    .replace(SHELL_BLOCK_PATTERN, `!${SHELL_BLOCK_MARKER}\`$1\``);
+  // Shell blocks inside HTML comments stay unmarked, so commented-out examples
+  // never run. Comment ranges come from the raw template, so an arg value
+  // can't open or close one. Strip any markers already present in raw input
+  // so they can't be forged.
+  const markedPrompt = markShellBlocks(
+    prompt.replaceAll(SHELL_BLOCK_MARKER, ""),
+  );
   const sanitizedArgs: PromptArgs = Object.fromEntries(
     Object.entries(args).map(([key, value]) => [
       key,
@@ -78,9 +103,9 @@ export const substitutePromptArgs = (
         : value,
     ]),
   );
-  const matches = [...markedPrompt.matchAll(PLACEHOLDER_PATTERN)];
+  const keys = placeholderKeys(markedPrompt);
 
-  if (matches.length === 0 && Object.keys(sanitizedArgs).length === 0) {
+  if (keys.length === 0 && Object.keys(sanitizedArgs).length === 0) {
     return Effect.succeed(markedPrompt);
   }
 
@@ -88,26 +113,22 @@ export const substitutePromptArgs = (
     const display = yield* Display;
 
     // Collect all keys referenced in the prompt
-    const referencedKeys = new Set(matches.map((m) => m[1]!));
+    const referencedKeys = new Set(keys);
 
     // Check for missing keys (placeholder in prompt but no matching arg, or
     // a present-but-nullish value supplied by an untyped caller — e.g. an
     // orchestrator building args from JSON.parse).
     for (const key of referencedKeys) {
       if (!(key in sanitizedArgs)) {
-        return yield* Effect.fail(
-          new PromptError({
-            message: `Prompt argument "{{${key}}}" has no matching value in promptArgs`,
-          }),
-        );
+        return yield* new PromptError({
+          message: `Prompt argument "{{${key}}}" has no matching value in promptArgs`,
+        });
       }
       const value = sanitizedArgs[key];
-      if (value == null) {
-        return yield* Effect.fail(
-          new PromptError({
-            message: `Prompt argument "{{${key}}}" has value ${value === null ? "null" : "undefined"} in promptArgs`,
-          }),
-        );
+      if (value === null || value === undefined) {
+        return yield* new PromptError({
+          message: `Prompt argument "{{${key}}}" has value ${value === null ? "null" : "undefined"} in promptArgs`,
+        });
       }
     }
 
@@ -123,8 +144,10 @@ export const substitutePromptArgs = (
     }
 
     // Replace all placeholders with their values
-    const result = markedPrompt.replace(PLACEHOLDER_PATTERN, (_match, key) =>
-      sanitizedArgs[key as string]!.toString(),
+    // Every key was checked above to have a non-null value.
+    const result = markedPrompt.replaceAll(
+      PLACEHOLDER_PATTERN,
+      (_match, key: string) => String(sanitizedArgs[key]),
     );
 
     return result;

@@ -28,7 +28,7 @@ export const resolvePrompt = (
   if (prompt !== undefined && promptFile !== undefined) {
     return Effect.fail(
       new PromptError({
-        message: "Cannot provide both --prompt and --prompt-file",
+        message: "Cannot provide both prompt and promptFile",
       }),
     );
   }
@@ -49,12 +49,11 @@ export const resolvePrompt = (
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const text = yield* fs.readFileString(promptFile).pipe(
-      Effect.catchAll((e) =>
-        Effect.fail(
+      Effect.mapError(
+        (e) =>
           new PromptError({
-            message: `Failed to read prompt from ${promptFile}: ${e}`,
+            message: `Failed to read prompt from ${promptFile}: ${String(e)}`,
           }),
-        ),
       ),
     );
     return { text, source: "template" as const };

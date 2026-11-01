@@ -1,13 +1,22 @@
 import { Effect, Ref } from "effect";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Display, SilentDisplay } from "./Display.js";
-import type { DisplayEntry } from "./Display.js";
+import {
+  afterEach,
+  assert,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+import { SilentDisplay } from "./Display.js";
+import type { DisplayEntry, Display } from "./Display.js";
 import {
   AgentError,
   AgentIdleTimeoutError,
   ConfigDirError,
   CopyError,
   DockerError,
+  ImageNotFoundError,
   ExecError,
   ExecHostError,
   InitError,
@@ -40,6 +49,18 @@ describe("formatErrorMessage", () => {
   it("CopyError includes message", () => {
     const msg = formatErrorMessage(new CopyError({ message: "disk full" }));
     expect(msg).toContain("disk full");
+  });
+
+  it("ImageNotFoundError shows its message without a daemon hint", () => {
+    const msg = formatErrorMessage(
+      new ImageNotFoundError({
+        message:
+          "Docker image 'sandcastle:nope' does not exist, so there is nothing to remove.",
+      }),
+    );
+    expect(msg).toBe(
+      "Docker image 'sandcastle:nope' does not exist, so there is nothing to remove.",
+    );
   });
 
   it("DockerError includes message and Docker hint", () => {
@@ -124,12 +145,12 @@ describe("formatErrorMessage", () => {
     const msg = formatErrorMessage(
       new AgentIdleTimeoutError({
         message:
-          "Agent idle for 1200 seconds — no output received. Consider increasing the idle timeout with --idle-timeout.",
+          "Agent idle for 1200 seconds — no output received. Increase the idleTimeoutSeconds option to allow longer silences.",
         timeoutMs: 1_200_000,
       }),
     );
     expect(msg).toContain("1200");
-    expect(msg).toContain("--idle-timeout");
+    expect(msg).toContain("idleTimeoutSeconds");
   });
 });
 
@@ -150,62 +171,57 @@ describe("withFriendlyErrors", () => {
 
   const runWithDisplay = async (
     effect: Effect.Effect<unknown, never, Display>,
-  ): Promise<ReadonlyArray<DisplayEntry>> => {
-    const ref = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+  ): Promise<readonly DisplayEntry[]> => {
+    const ref = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     await Effect.runPromise(Effect.provide(effect, SilentDisplay.layer(ref)));
     return Effect.runSync(Ref.get(ref));
   };
 
-  const statusOf = (entries: ReadonlyArray<DisplayEntry>) =>
-    entries.find((e) => e._tag === "status") as
-      | Extract<DisplayEntry, { _tag: "status" }>
-      | undefined;
+  const statusOf = (entries: readonly DisplayEntry[]) =>
+    entries.find((e) => e._tag === "status");
 
   it("routes DockerError through Display as error severity", async () => {
     const entries = await runWithDisplay(
-      withFriendlyErrors(
-        Effect.fail(new DockerError({ message: "daemon not running" })),
+      Effect.fail(new DockerError({ message: "daemon not running" })).pipe(
+        withFriendlyErrors,
       ),
     );
     const s = statusOf(entries);
-    expect(s).toBeDefined();
-    expect(s!.severity).toBe("error");
-    expect(s!.message).toContain("daemon not running");
+    assert.isDefined(s);
+    expect(s.severity).toBe("error");
+    expect(s.message).toContain("daemon not running");
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 
   it("routes ConfigDirError through Display with its message", async () => {
     const entries = await runWithDisplay(
-      withFriendlyErrors(
-        Effect.fail(
-          new ConfigDirError({
-            message: "No .sandcastle/ found. Run `sandcastle init` first.",
-          }),
-        ),
-      ),
+      Effect.fail(
+        new ConfigDirError({
+          message: "No .sandcastle/ found. Run `sandcastle init` first.",
+        }),
+      ).pipe(withFriendlyErrors),
     );
-    expect(statusOf(entries)!.message).toContain("No .sandcastle/");
+    expect(statusOf(entries)?.message).toContain("No .sandcastle/");
   });
 
   it("routes AgentIdleTimeoutError through Display with timeout seconds", async () => {
     const entries = await runWithDisplay(
-      withFriendlyErrors(
-        Effect.fail(
-          new AgentIdleTimeoutError({
-            message:
-              "Agent idle for 600 seconds — no output received. Consider increasing the idle timeout with --idle-timeout.",
-            timeoutMs: 600_000,
-          }),
-        ),
-      ),
+      Effect.fail(
+        new AgentIdleTimeoutError({
+          message:
+            "Agent idle for 600 seconds — no output received. Increase the idleTimeoutSeconds option to allow longer silences.",
+          timeoutMs: 600_000,
+        }),
+      ).pipe(withFriendlyErrors),
     );
     const s = statusOf(entries);
-    expect(s!.message).toContain("600");
-    expect(s!.severity).toBe("error");
+    assert.isDefined(s);
+    expect(s.message).toContain("600");
+    expect(s.severity).toBe("error");
   });
 
   it("passes through successful effects unchanged", async () => {
-    const ref = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const ref = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     const result = await Effect.runPromise(
       withFriendlyErrors(Effect.succeed("ok")).pipe(
         Effect.provide(SilentDisplay.layer(ref)),

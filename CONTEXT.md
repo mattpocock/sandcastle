@@ -137,7 +137,7 @@ The preprocessing step that evaluates **shell expressions** in a **prompt**, rep
 _Avoid_: "prompt preprocessing" (too generic), "command expansion"
 
 **Shell expression**:
-A `` !`command` `` marker in a **prompt** that evaluates a shell command inside the **sandbox**.
+A `` !`command` `` marker in a **prompt** that evaluates a shell command inside the **sandbox**. A marker inside an HTML comment (`<!-- … -->`) is not a shell expression and never runs.
 _Avoid_: "command" (overloaded), "inline command", "prompt command"
 
 **Built-in prompt argument**:
@@ -187,7 +187,7 @@ A provider-namespaced CLI command that removes the image (e.g. `sandcastle docke
 _Avoid_: "cleanup-sandbox" (old name)
 
 **Agent session**:
-The **agent**'s persisted conversation record. Storage shape and location are owned by the **agent provider** -- Claude Code writes a `<session-id>.jsonl` under `~/.claude/projects/<encoded-cwd>/`; other agents use their own conventions (e.g. `~/.codex/sessions/`, `~/.pi/agent/sessions/`, OpenCode's SQLite store). Resumable when the **agent provider** declares session-storage support; the resume mechanism is the agent's native flag (e.g. `claude --resume`, `codex exec resume`, `pi --session`).
+The **agent**'s persisted conversation record. Storage shape and location are owned by the **agent provider** -- Claude Code writes a `<session-id>.jsonl` under `~/.claude/projects/<encoded-cwd>/`; other agents use their own conventions (e.g. `~/.codex/sessions/`, `~/.pi/agent/sessions/`, OpenCode's SQLite store, which Sandcastle moves as `opencode export` JSON). Resumable when the **agent provider** declares session-storage support; the resume mechanism is the agent's native flag (e.g. `claude --resume`, `codex exec resume`, `pi --session`, `opencode run --session`).
 _Avoid_: "chat history", "transcript"
 
 **Session resume**:
@@ -195,7 +195,7 @@ Continuing an **agent session** by appending new turns to the same session recor
 _Avoid_: "continue", "follow-up"
 
 **Session fork**:
-Branching an **agent session** into a new record with a new session ID, leaving the parent record byte-for-byte unchanged. Uses the **agent**'s native fork flag (`claude --fork-session`, `codex exec fork`). Exposed as `RunResult.fork()`. Isolates the session only -- not the **source branch** or **sandbox**.
+Branching an **agent session** into a new record with a new session ID, leaving the parent record byte-for-byte unchanged. Uses the **agent**'s native fork flag (`claude --fork-session`, `codex exec fork`). Exposed as `RunResult.fork()`. Isolates the session only -- not the **source branch** or **sandbox**. An **agent provider** whose CLI resumes but has no fork flag declares `canFork: false`, and `.fork()` throws `ForkNotSupportedError` for it (ADR 0021).
 _Avoid_: "branch" (overloaded with git branches), "copy session"
 
 ### Display

@@ -14,7 +14,9 @@ vi.mock("node:child_process", async () => {
   };
 });
 
-import { execFile, execFileSync } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import { writeFileSync, mkdtempSync, unlinkSync, rmdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
@@ -43,7 +45,7 @@ describe("podman()", () => {
 
   it("has a create function", () => {
     const provider = podman();
-    expect(typeof provider.create).toBe("function");
+    expect(provider.create).toBeTypeOf("function");
   });
 
   it("accepts selinuxLabel option", () => {
@@ -100,7 +102,7 @@ describe("podman()", () => {
 
   it("resolves relative sandboxPath against sandbox repo dir", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -145,7 +147,7 @@ describe("podman()", () => {
 
   it("formats readonly SELinux mounts as :ro,z", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -175,7 +177,7 @@ describe("podman()", () => {
 
   it("formats writable SELinux mounts as :z", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -205,7 +207,7 @@ describe("podman()", () => {
 
   it("formats readonly mounts without SELinux as :ro", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -235,7 +237,7 @@ describe("podman()", () => {
 
   it("formats mounts with no options when writable and no SELinux", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -267,7 +269,7 @@ describe("podman()", () => {
 
   it("passes --userns=keep-id by default", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -293,7 +295,7 @@ describe("podman()", () => {
 
   it("passes custom containerUid/containerGid to --userns and --user", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -321,7 +323,7 @@ describe("podman()", () => {
 
   it("allows disabling userns via option", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -408,7 +410,7 @@ describe("podman()", () => {
 
   it("passes --network flag when network is a string", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -436,7 +438,7 @@ describe("podman()", () => {
 
   it("passes multiple --network flags when network is an array", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -467,7 +469,7 @@ describe("podman()", () => {
 
   it("passes --group-add flags to podman run, stringifying numeric GIDs", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -498,7 +500,7 @@ describe("podman()", () => {
 
   it("does not pass --group-add flag when groups is omitted", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -524,7 +526,7 @@ describe("podman()", () => {
 
   it("passes --device flags to podman run in order", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -555,7 +557,7 @@ describe("podman()", () => {
 
   it("does not pass --device flag when devices is omitted", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -581,7 +583,7 @@ describe("podman()", () => {
 
   it("passes --cpus flag to podman run when cpus is provided", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -609,7 +611,7 @@ describe("podman()", () => {
 
   it("does not pass --cpus flag when cpus is omitted", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -635,7 +637,7 @@ describe("podman()", () => {
 
   it("does not pass --network flag when network is omitted", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -661,7 +663,7 @@ describe("podman()", () => {
 
   it("does not run chown after container start", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -688,7 +690,7 @@ describe("podman()", () => {
 
   it("copyFileIn calls podman cp with correct arguments", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -724,7 +726,7 @@ describe("podman()", () => {
 
   it("copyFileOut calls podman cp with correct arguments", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -760,7 +762,7 @@ describe("podman()", () => {
 
   it("copyFileIn rejects when podman cp fails", async () => {
     mockExecFile.mockImplementation((_command, args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       if (Array.isArray(args) && args[0] === "cp") {
         callback(new Error("no such file"));
       } else {
@@ -793,7 +795,7 @@ describe("podman()", () => {
     writeFileSync(tmpFile, "{}");
 
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -843,7 +845,7 @@ describe("podman()", () => {
 
   it("does not run mkdir+chown when there are no file mounts", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -889,7 +891,7 @@ describe("podman()", () => {
   it("includes timeout on signal handler cleanup", async () => {
     // Allow image inspect + podman run to succeed
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -906,7 +908,7 @@ describe("podman()", () => {
 
     // Trigger a registered exit handler
     const exitListeners = process.listeners("exit");
-    const sandcastleListener = exitListeners[exitListeners.length - 1];
+    const sandcastleListener = exitListeners.at(-1);
     sandcastleListener!(0);
 
     // Check that execFileSync was called with timeout option
@@ -920,9 +922,74 @@ describe("podman()", () => {
     await handle.close();
   });
 
+  // PID 1 is `sleep infinity`, which ignores SIGTERM, so a plain `rm -f`
+  // waits out the 10 s StopTimeout. The shutdown teardown's 5 s timeout then
+  // kills it mid-stop and podman leaves the container in `Stopping`.
+  it("kills the container without a stop grace period on signal handler cleanup", async () => {
+    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+      const callback = rest.at(-1);
+      callback(null, "", "");
+      return undefined as any;
+    });
+
+    const provider = podman();
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    const exitListeners = process.listeners("exit");
+    exitListeners.at(-1)!(0);
+
+    const rmCall = mockExecFileSync.mock.calls.find(
+      ([cmd, args]) =>
+        cmd === "podman" && Array.isArray(args) && args[0] === "rm",
+    );
+    expect(rmCall).toBeDefined();
+    expect(rmCall![1]).toEqual(
+      expect.arrayContaining(["rm", "-f", "--time", "0"]),
+    );
+
+    await handle.close();
+  });
+
+  it("kills the container without a stop grace period on close", async () => {
+    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+      const callback = rest.at(-1);
+      callback(null, "", "");
+      return undefined as any;
+    });
+
+    const provider = podman();
+    const handle = await provider.create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    });
+
+    mockExecFile.mockClear();
+    await handle.close();
+
+    const rmCall = mockExecFile.mock.calls.find(
+      ([cmd, args]) =>
+        cmd === "podman" && Array.isArray(args) && args[0] === "rm",
+    );
+    expect(rmCall).toBeDefined();
+    expect(rmCall![1]).toEqual(
+      expect.arrayContaining(["rm", "-f", "--time", "0"]),
+    );
+  });
+
   it("shares a single SIGINT listener across many concurrent sandboxes", async () => {
     mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
-      const callback = rest[rest.length - 1];
+      const callback = rest.at(-1);
       callback(null, "", "");
       return undefined as any;
     });
@@ -951,7 +1018,9 @@ describe("podman()", () => {
     expect(process.listenerCount("SIGTERM")).toBe(sigtermBefore + 1);
     expect(process.listenerCount("exit")).toBe(exitBefore + 1);
 
-    for (const h of handles) await h.close();
+    for (const h of handles) {
+      await h.close();
+    }
 
     expect(process.listenerCount("SIGINT")).toBe(sigintBefore);
     expect(process.listenerCount("SIGTERM")).toBe(sigtermBefore);
@@ -974,5 +1043,74 @@ describe("defaultImageName()", () => {
 
   it("falls back to 'local' for empty path", () => {
     expect(defaultImageName("")).toBe("sandcastle:local");
+  });
+});
+
+describe("podman() exec with sudo", () => {
+  const fakeProc = () => {
+    const proc = new EventEmitter() as EventEmitter & {
+      stdout: PassThrough;
+      stderr: PassThrough;
+    };
+    proc.stdout = new PassThrough();
+    proc.stderr = new PassThrough();
+    setImmediate(() => {
+      proc.stdout.end();
+      proc.stderr.end();
+      proc.emit("close", 0);
+    });
+    return proc;
+  };
+
+  const createHandle = async () => {
+    mockExecFile.mockImplementation((_command, _args, ...rest: any[]) => {
+      const callback = rest.at(-1);
+      callback(null, "", "");
+      return undefined as any;
+    });
+    vi.mocked(spawn).mockImplementation(() => fakeProc() as any);
+    return (await podman().create({
+      worktreePath: "/tmp/worktree",
+      hostRepoPath: "/tmp/repo",
+      mounts: [
+        { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+      ],
+      env: {},
+    })) as BindMountSandboxHandle;
+  };
+
+  afterEach(() => {
+    vi.mocked(spawn).mockReset();
+  });
+
+  it("runs the whole command as root via --user 0:0, without a sudo binary", async () => {
+    const handle = await createHandle();
+
+    await handle.exec("id -u > /tmp/x && id -u >> /tmp/x", { sudo: true });
+
+    const [cmd, args] = vi.mocked(spawn).mock.calls.at(-1)!;
+    expect(cmd).toBe("podman");
+    const execArgs = args as string[];
+    expect(execArgs[0]).toBe("exec");
+    expect(execArgs[execArgs.indexOf("--user") + 1]).toBe("0:0");
+    expect(execArgs.slice(-2)).toEqual([
+      "-c",
+      "id -u > /tmp/x && id -u >> /tmp/x",
+    ]);
+    expect(execArgs.some((a) => a.includes("sudo"))).toBe(false);
+
+    await handle.close();
+  });
+
+  it("runs as the container's default user when sudo is not set", async () => {
+    const handle = await createHandle();
+
+    await handle.exec("id -u");
+
+    const execArgs = vi.mocked(spawn).mock.calls.at(-1)![1] as string[];
+    expect(execArgs).not.toContain("--user");
+    expect(execArgs.slice(-2)).toEqual(["-c", "id -u"]);
+
+    await handle.close();
   });
 });

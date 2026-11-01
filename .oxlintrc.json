@@ -1,0 +1,287 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+
+  // The straitjacket. Every category below is an error. Code that broke a rule
+  // when this landed sits in scripts/lint-baseline.json, which
+  // scripts/lint-ratchet.ts keeps shrink-only. Never add a rule-off override
+  // for a source file here and never write a disable comment: lower the
+  // baseline instead. See .sandcastle/CODING_STANDARDS.md, "The lint ratchet".
+  //
+  // Categories left off:
+  // - restriction: bans ordinary language features (optional chaining,
+  //   async/await, `undefined`); its useful rules are cherry-picked below.
+  // - nursery: unstable rules that change between oxlint releases.
+  "plugins": [
+    "eslint",
+    "typescript",
+    "unicorn",
+    "oxc",
+    "import",
+    "promise",
+    "node",
+    "vitest"
+  ],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "pedantic": "error",
+    "perf": "error",
+    "style": "error"
+  },
+  "options": {
+    "typeAware": true,
+    "reportUnusedDisableDirectives": "error"
+  },
+  "ignorePatterns": ["dist/**", "node_modules/**"],
+
+  "rules": {
+    // --- Cherry-picked from `restriction` ---------------------------------
+    "eslint/complexity": ["error", { "max": 15, "variant": "modified" }],
+    "eslint/no-alert": "error",
+    "eslint/no-bitwise": "error",
+    "eslint/no-div-regex": "error",
+    "eslint/no-empty": "error",
+    "eslint/no-empty-function": "error",
+    "eslint/no-eq-null": "error",
+    "eslint/no-implicit-globals": "error",
+    "eslint/no-param-reassign": "error",
+    "eslint/no-proto": "error",
+    "eslint/no-regex-spaces": "error",
+    "eslint/no-sequences": "error",
+    "eslint/no-var": "error",
+    "eslint/unicode-bom": "error",
+    "import/no-amd": "error",
+    "import/no-commonjs": "error",
+    "import/no-cycle": "error",
+    "import/no-dynamic-require": "error",
+    "import/no-webpack-loader-syntax": "error",
+    "node/handle-callback-err": "error",
+    "node/no-new-require": "error",
+    "node/no-path-concat": "error",
+    "oxc/bad-bitwise-operator": "error",
+    "oxc/no-const-enum": "error",
+    "promise/catch-or-return": "error",
+    "typescript/no-dynamic-delete": "error",
+    "typescript/no-empty-object-type": "error",
+    "typescript/no-explicit-any": "error",
+    "typescript/no-import-type-side-effects": "error",
+    "typescript/no-invalid-void-type": "error",
+    "typescript/no-namespace": "error",
+    "typescript/no-non-null-asserted-nullish-coalescing": "error",
+    "typescript/no-non-null-assertion": "error",
+    "typescript/no-require-imports": "error",
+    "typescript/no-var-requires": "error",
+    "typescript/prefer-literal-enum-member": "error",
+    "typescript/promise-function-async": "error",
+    "typescript/use-unknown-in-catch-callback-variable": "error",
+    "unicorn/no-abusive-eslint-disable": "error",
+    "unicorn/no-array-for-each": "error",
+    "unicorn/no-length-as-slice-end": "error",
+    "unicorn/no-magic-array-flat-depth": "error",
+    "unicorn/no-process-exit": "error",
+    "unicorn/no-useless-error-capture-stack-trace": "error",
+    "unicorn/prefer-modern-math-apis": "error",
+    "unicorn/prefer-module": "error",
+    "unicorn/prefer-node-protocol": "error",
+    "unicorn/prefer-number-properties": "error",
+
+    // --- Effect -------------------------------------------------------------
+    // An Effect is run once, at the edge: the public promise API and the CLI
+    // entry. Everywhere else composes Effects and hands them back. The entry
+    // points are named in the first override at the bottom, mirrored in
+    // ENTRY_POINTS in scripts/lint-ratchet.ts (which checks they agree). The
+    // Effect language service (tsconfig.json `plugins`, run by `npm run lint`)
+    // covers the rest: floating Effects, `any`/`unknown` in error channels,
+    // run-inside-run, global Error in failures.
+    "eslint/no-restricted-properties": [
+      "error",
+      {
+        "object": "Effect",
+        "property": "runPromise",
+        "message": "Run Effects only at an entry point (the public promise API or the CLI). Compose and return the Effect instead."
+      },
+      {
+        "object": "Effect",
+        "property": "runPromiseExit",
+        "message": "Run Effects only at an entry point (the public promise API or the CLI). Compose and return the Effect instead."
+      },
+      {
+        "object": "Effect",
+        "property": "runSync",
+        "message": "Run Effects only at an entry point (the public promise API or the CLI). Compose and return the Effect instead."
+      },
+      {
+        "object": "Effect",
+        "property": "runSyncExit",
+        "message": "Run Effects only at an entry point (the public promise API or the CLI). Compose and return the Effect instead."
+      },
+      {
+        "object": "Effect",
+        "property": "runFork",
+        "message": "Run Effects only at an entry point (the public promise API or the CLI). Compose and return the Effect instead."
+      },
+      {
+        "object": "Effect",
+        "property": "runCallback",
+        "message": "Run Effects only at an entry point (the public promise API or the CLI). Compose and return the Effect instead."
+      }
+    ],
+
+    // --- Configured, not off ----------------------------------------------
+    "eslint/one-var": ["error", "never"],
+    // `value || fallback` on strings deliberately treats "" as missing.
+    "typescript/prefer-nullish-coalescing": [
+      "error",
+      { "ignorePrimitives": { "string": true } }
+    ],
+    // 10 (the default) blocks extracting a helper that names its steps; 20
+    // still flags a function doing too much, and complexity 15 caps branching.
+    "eslint/max-statements": ["error", { "max": 20 }],
+    "unicorn/filename-case": [
+      "error",
+      { "cases": { "camelCase": true, "pascalCase": true, "kebabCase": true } }
+    ],
+
+    // --- Off: they fight prettier ------------------------------------------
+    "unicorn/number-literal-case": "off",
+    "unicorn/empty-brace-spaces": "off",
+    "unicorn/no-nested-ternary": "off",
+
+    // --- Off: they duplicate or contradict another enabled rule -------------
+    // import/no-duplicates covers it, and lets `import type` stand apart.
+    "eslint/no-duplicate-imports": "off",
+    // typescript/require-await is the type-aware version.
+    "eslint/require-await": "off",
+    // unicorn/no-negated-condition is the same rule.
+    "eslint/no-negated-condition": "off",
+    // typescript/no-extraneous-class is the same rule.
+    "unicorn/no-static-only-class": "off",
+    // Fights `noPropertyAccessFromIndexSignature`, which wants brackets.
+    "typescript/dot-notation": "off",
+    // `let x;` then assign is fine.
+    "eslint/init-declarations": "off",
+    // The repo exports by name. These contradict each other and the repo.
+    "import/no-named-export": "off",
+    "import/prefer-default-export": "off",
+    "import/group-exports": "off",
+    "import/exports-last": "off",
+    // vitest/prefer-strict-boolean-matchers wants `toBe(true)`.
+    "vitest/prefer-to-be-truthy": "off",
+    "vitest/prefer-to-be-falsy": "off",
+    // vitest/prefer-called-times wants `toHaveBeenCalledTimes(1)`.
+    "vitest/prefer-called-once": "off",
+    // The repo does not enable vitest globals, so imports are required.
+    "vitest/no-importing-vitest-globals": "off",
+
+    // --- Off: they fight Effect ---------------------------------------------
+    // `Effect.gen(function* () {...})` is the idiom; it is never named.
+    "eslint/func-names": "off",
+    // `Context.Tag(...)`, `Data.TaggedError(...)` are capitalised factories.
+    "eslint/new-cap": "off",
+    // `_tag` is Effect's discriminant.
+    "eslint/no-underscore-dangle": "off",
+    // Effect code is nested calls: `pipe(Effect.gen(...), Effect.map(...))`.
+    "unicorn/max-nested-calls": "off",
+    // `Effect.async((resume) => ...)` and Node streams take callbacks.
+    "promise/prefer-await-to-callbacks": "off",
+    // `import * as Option from "effect/Option"` is idiomatic.
+    "import/no-namespace": "off",
+    // Effect and SDK types are not deeply readonly; unfixable at the call site.
+    "typescript/prefer-readonly-parameter-types": "off",
+
+    // --- Off: they fight correct code ----------------------------------------
+    // `process.stdout.isTTY === true` is right: isTTY is `true | undefined`.
+    "typescript/no-unnecessary-boolean-literal-compare": "off",
+    // `typeof X === "undefined"` is the only safe test for a build-time global.
+    "unicorn/no-typeof-undefined": "off",
+    // Flags TypeScript declaration merging (a const and a type of one name).
+    "eslint/no-redeclare": "off",
+    // Flags an ambient `.d.ts` shim class.
+    "typescript/no-extraneous-class": "off",
+    // Fires on exhaustive switches; clashes with Effect missingReturnYieldStar.
+    "typescript/consistent-return": "off",
+    // Explicit `undefined` documents intent (`resolve(undefined)`, `return undefined`).
+    "unicorn/no-useless-undefined": "off",
+    // `.then()` without await is a deliberate fire-and-forget.
+    "promise/prefer-await-to-then": "off",
+    // The CLI and the agent workflow scripts exit on purpose.
+    "unicorn/no-process-exit": "off",
+    // errors.ts is one file of small tagged error classes, by design.
+    "eslint/max-classes-per-file": "off",
+    // Low value: a test file without a top-level describe is still clear.
+    "vitest/require-top-level-describe": "off",
+
+    // --- Off: wrong for this codebase ---------------------------------------
+    // A Node CLI imports Node.
+    "import/no-nodejs-modules": "off",
+    // Bans every ternary; no-nested-ternary keeps the useful half.
+    "eslint/no-ternary": "off",
+    // Object key order carries meaning (CLI option order, test fixtures).
+    "eslint/sort-keys": "off",
+    // Import order is not reviewed; sorting churns every open PR.
+    "eslint/sort-imports": "off",
+    // Ports, timeouts and exit codes read better inline than as constants.
+    "eslint/no-magic-numbers": "off",
+    // `e`, `i`, `_` are idiomatic.
+    "eslint/id-length": "off",
+    // Comment casing and placement are not worth a rule.
+    "eslint/capitalized-comments": "off",
+    "eslint/no-inline-comments": "off",
+    // `continue` in a loop is clearer than nesting.
+    "eslint/no-continue": "off",
+    // JSON and third-party APIs speak `null`.
+    "unicorn/no-null": "off",
+    // Tests that assert in a callback cannot know the count up front.
+    "vitest/prefer-expect-assertions": "off",
+    // `beforeEach` setup is fine.
+    "vitest/no-hooks": "off",
+    "vitest/require-hook": "off",
+    // Describe titles name modules (`Orchestrator`), so are capitalised.
+    "vitest/prefer-lowercase-title": "off",
+    "vitest/prefer-describe-function-title": "off"
+  },
+
+  "overrides": [
+    {
+      // Effect entry points: the public promise API and the CLI. Keep in
+      // sync with ENTRY_POINTS in scripts/lint-ratchet.ts (it checks).
+      "files": [
+        "src/main.ts",
+        "src/run.ts",
+        "src/interactive.ts",
+        "src/createSandbox.ts",
+        "src/createWorktree.ts",
+        "src/sandboxes/*.ts"
+      ],
+      "rules": { "eslint/no-restricted-properties": "off" }
+    },
+    {
+      // Tests. Only rules that are wrong for a test file are loosened.
+      "files": [
+        "**/*.test.ts",
+        "tests/**/*.ts",
+        "src/testSetup.ts",
+        "src/testSandbox.ts"
+      ],
+      "rules": {
+        // Tests run Effects; that is how they observe them.
+        "eslint/no-restricted-properties": "off",
+        // A describe block is one long function by design.
+        "eslint/max-lines-per-function": "off",
+        "eslint/max-statements": "off",
+        "eslint/max-lines": "off",
+        "vitest/max-expects": "off",
+        // Fixture setup on disk is synchronous on purpose.
+        "node/no-sync": "off",
+        // No-op stubs and fake async sources.
+        "eslint/no-empty-function": "off",
+        "promise/avoid-new": "off",
+        // Helpers sit next to the tests that use them.
+        "unicorn/consistent-function-scoping": "off",
+        // Stubs return promises without awaiting: promise-function-async
+        // wants them async, this wants an await, and no fix satisfies both.
+        "typescript/require-await": "off"
+      }
+    }
+  ]
+}

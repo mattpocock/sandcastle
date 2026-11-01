@@ -1,9 +1,10 @@
 import { exec } from "node:child_process";
-import { mkdtemp, readdir, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 
 const execAsync = promisify(exec);
 
@@ -26,8 +27,30 @@ const commitFile = async (
 
 const cliPath = join(import.meta.dirname, "..", "dist", "main.js");
 
-const runCli = (args: string, cwd: string) =>
+const runCli = async (args: string, cwd: string) =>
   execAsync(`node ${cliPath} ${args}`, { cwd });
+
+/** Runs the CLI, fails the test unless it exits non-zero, and returns its
+ *  combined stdout and stderr. */
+const runCliExpectingFailure = async (
+  args: string,
+  cwd: string,
+): Promise<string> => {
+  try {
+    await runCli(args, cwd);
+  } catch (error) {
+    assert(
+      error instanceof Error &&
+        "stdout" in error &&
+        typeof error.stdout === "string" &&
+        "stderr" in error &&
+        typeof error.stderr === "string",
+      "expected an exec error carrying stdout and stderr",
+    );
+    return error.stdout + error.stderr;
+  }
+  return expect.fail(`Expected \`sandcastle ${args}\` to fail`);
+};
 
 describe("sandcastle CLI", () => {
   it("shows help with --help flag", async () => {
@@ -58,14 +81,8 @@ describe("sandcastle CLI", () => {
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
-    try {
-      await runCli("docker build-image", hostDir);
-      expect.fail("Expected command to fail");
-    } catch (err: unknown) {
-      const { stdout, stderr } = err as { stdout: string; stderr: string };
-      const output = stdout + stderr;
-      expect(output).toContain("No .sandcastle/ found");
-    }
+    const output = await runCliExpectingFailure("docker build-image", hostDir);
+    expect(output).toContain("No .sandcastle/ found");
   });
 
   it("init --help shows --template flag", async () => {
@@ -92,51 +109,38 @@ describe("sandcastle CLI", () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
 
-    try {
-      await runCli("init --sandbox nonexistent", hostDir);
-      expect.fail("Expected command to fail");
-    } catch (err: unknown) {
-      const { stdout, stderr } = err as { stdout: string; stderr: string };
-      const output = stdout + stderr;
-      expect(output).toContain("nonexistent");
-      expect(output).toContain("docker");
-      expect(output).toContain("podman");
-    }
+    const output = await runCliExpectingFailure(
+      "init --sandbox nonexistent",
+      hostDir,
+    );
+    expect(output).toContain("nonexistent");
+    expect(output).toContain("docker");
+    expect(output).toContain("podman");
   });
 
   it("init --template nonexistent produces error listing available templates", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
 
-    try {
-      await runCli("init --agent claude-code --template nonexistent", hostDir);
-      expect.fail("Expected command to fail");
-    } catch (err: unknown) {
-      const { stdout, stderr } = err as { stdout: string; stderr: string };
-      const output = stdout + stderr;
-      expect(output).toContain("nonexistent");
-      expect(output).toContain("blank");
-      expect(output).toContain("simple-loop");
-    }
+    const output = await runCliExpectingFailure(
+      "init --agent claude-code --template nonexistent",
+      hostDir,
+    );
+    expect(output).toContain("nonexistent");
+    expect(output).toContain("blank");
+    expect(output).toContain("simple-loop");
   });
 
   it("old top-level build-image command no longer works", async () => {
-    try {
-      await runCli("build-image", process.cwd());
-      expect.fail("Expected command to fail");
-    } catch (err: unknown) {
-      // Command should fail since build-image is no longer a top-level command
-      expect(err).toBeDefined();
-    }
+    await expect(runCli("build-image", process.cwd())).rejects.toBeInstanceOf(
+      Error,
+    );
   });
 
   it("old top-level remove-image command no longer works", async () => {
-    try {
-      await runCli("remove-image", process.cwd());
-      expect.fail("Expected command to fail");
-    } catch (err: unknown) {
-      expect(err).toBeDefined();
-    }
+    await expect(runCli("remove-image", process.cwd())).rejects.toBeInstanceOf(
+      Error,
+    );
   });
 
   it("--help shows podman namespace", async () => {
@@ -163,29 +167,20 @@ describe("sandcastle CLI", () => {
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
-    try {
-      await runCli("podman build-image", hostDir);
-      expect.fail("Expected command to fail");
-    } catch (err: unknown) {
-      const { stdout, stderr } = err as { stdout: string; stderr: string };
-      const output = stdout + stderr;
-      expect(output).toContain("No .sandcastle/ found");
-    }
+    const output = await runCliExpectingFailure("podman build-image", hostDir);
+    expect(output).toContain("No .sandcastle/ found");
   });
 
   it("init --agent nonexistent produces error listing available agents", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
 
-    try {
-      await runCli("init --agent nonexistent", hostDir);
-      expect.fail("Expected command to fail");
-    } catch (err: unknown) {
-      const { stdout, stderr } = err as { stdout: string; stderr: string };
-      const output = stdout + stderr;
-      expect(output).toContain("nonexistent");
-      expect(output).toContain("claude-code");
-    }
+    const output = await runCliExpectingFailure(
+      "init --agent nonexistent",
+      hostDir,
+    );
+    expect(output).toContain("nonexistent");
+    expect(output).toContain("claude-code");
   });
 
   it("init --help exposes --issue-tracker flag", async () => {
@@ -212,17 +207,14 @@ describe("sandcastle CLI", () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
 
-    try {
-      await runCli("init --issue-tracker nonexistent", hostDir);
-      expect.fail("Expected command to fail");
-    } catch (err: unknown) {
-      const { stdout, stderr } = err as { stdout: string; stderr: string };
-      const output = stdout + stderr;
-      expect(output).toContain("nonexistent");
-      expect(output).toContain("github-issues");
-      expect(output).toContain("beads");
-      expect(output).toContain("custom");
-    }
+    const output = await runCliExpectingFailure(
+      "init --issue-tracker nonexistent",
+      hostDir,
+    );
+    expect(output).toContain("nonexistent");
+    expect(output).toContain("github-issues");
+    expect(output).toContain("beads");
+    expect(output).toContain("custom");
   });
 
   it("init with full flag set scaffolds non-interactively in a non-TTY env", async () => {
@@ -243,37 +235,123 @@ describe("sandcastle CLI", () => {
     expect(entries).toContain("prompt.md");
   });
 
+  describe("init --issue-tracker beads and the host's bd version", () => {
+    // Every beads sandbox opens the host's .beads/ with the image's bd 1.3.2.
+    // A different host bd breaks one side (an older one can't create issues
+    // once 1.3.2 has migrated the database), so init warns.
+    const initWithHostBd = async (versionLine: string) => {
+      const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+      await initRepo(hostDir);
+      await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+      const binDir = await mkdtemp(join(tmpdir(), "cli-fake-bd-"));
+      await writeFile(
+        join(binDir, "bd"),
+        `#!/bin/sh\necho "${versionLine}"\n`,
+        {
+          mode: 0o755,
+        },
+      );
+      const { stdout } = await execAsync(
+        `node ${cliPath} init --agent claude-code --template blank --sandbox docker --issue-tracker beads --build-image false`,
+        {
+          cwd: hostDir,
+          env: { ...process.env, PATH: `${binDir}:${process.env.PATH ?? ""}` },
+        },
+      );
+      const dockerfile = await readFile(
+        join(hostDir, ".sandcastle", "Dockerfile"),
+        "utf8",
+      );
+      return { stdout, dockerfile };
+    };
+
+    it.skipIf(process.platform === "win32")(
+      "warns when the host bd is older than the image's",
+      async () => {
+        const { stdout, dockerfile } = await initWithHostBd(
+          "bd version 1.0.0 (72170267: HEAD@72170267e00a)",
+        );
+        expect(dockerfile).toContain("ARG BEADS_VERSION=1.3.2");
+        expect(stdout).toContain("bd 1.0.0");
+        expect(stdout).toContain("can no longer create issues");
+      },
+    );
+
+    it.skipIf(process.platform === "win32")(
+      "says nothing when the host bd matches the image's",
+      async () => {
+        const { stdout } = await initWithHostBd(
+          "bd version 1.3.2 (0123abcd: HEAD@0123abcd)",
+        );
+        expect(stdout).toContain("Init complete");
+        expect(stdout).not.toContain("Your host runs bd");
+      },
+    );
+  });
+
   it("init without --agent fails fast with a clear non-interactive error message", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
 
-    try {
-      await runCli("init --template blank --sandbox docker", hostDir);
-      expect.fail("Expected command to fail");
-    } catch (err: unknown) {
-      const { stdout, stderr } = err as { stdout: string; stderr: string };
-      const output = stdout + stderr;
-      expect(output).toContain("--agent");
-      expect(output).toContain("non-interactive");
-    }
+    const output = await runCliExpectingFailure(
+      "init --template blank --sandbox docker",
+      hostDir,
+    );
+    expect(output).toContain("--agent");
+    expect(output).toContain("non-interactive");
   });
 
   it("init --issue-tracker github-issues without --create-label fails fast in non-interactive mode", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
 
-    try {
-      await runCli(
-        "init --agent claude-code --template blank --sandbox docker --issue-tracker github-issues",
-        hostDir,
-      );
-      expect.fail("Expected command to fail");
-    } catch (err: unknown) {
-      const { stdout, stderr } = err as { stdout: string; stderr: string };
-      const output = stdout + stderr;
-      expect(output).toContain("--create-label");
-      expect(output).toContain("non-interactive");
-    }
+    const output = await runCliExpectingFailure(
+      "init --agent claude-code --template blank --sandbox docker --issue-tracker github-issues",
+      hostDir,
+    );
+    expect(output).toContain("--create-label");
+    expect(output).toContain("non-interactive");
+  });
+
+  it("init without --build-image fails before writing .sandcastle/ in non-interactive mode", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    const output = await runCliExpectingFailure(
+      "init --agent claude-code --template blank --sandbox docker --issue-tracker github-issues --create-label false",
+      hostDir,
+    );
+    expect(output).toContain("--build-image");
+    expect(output).toContain("non-interactive");
+    expect(existsSync(join(hostDir, ".sandcastle"))).toBe(false);
+  });
+
+  it("init without --install-template-deps fails before writing .sandcastle/ when the template needs zod", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    const output = await runCliExpectingFailure(
+      "init --agent claude-code --template parallel-planner --sandbox docker --issue-tracker beads --build-image false",
+      hostDir,
+    );
+    expect(output).toContain("--install-template-deps");
+    expect(output).toContain("non-interactive");
+    expect(existsSync(join(hostDir, ".sandcastle"))).toBe(false);
+  });
+
+  it("init names every missing flag at once in non-interactive mode", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    const output = await runCliExpectingFailure(
+      "init --template blank --sandbox docker --issue-tracker github-issues",
+      hostDir,
+    );
+    expect(output).toContain("--agent");
+    expect(output).toContain("--create-label");
+    expect(output).toContain("--build-image");
+    expect(output).toContain("non-interactive");
+    expect(existsSync(join(hostDir, ".sandcastle"))).toBe(false);
   });
 
   it("init --issue-tracker custom ignores --build-image and scaffolds without trying to build", async () => {

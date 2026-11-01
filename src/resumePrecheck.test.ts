@@ -1,9 +1,25 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { claudeCode, codex, copilot, pi } from "./AgentProvider.js";
-import { assertResumeSessionExists } from "./resumePrecheck.js";
+import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
+import { claudeCode, codex, pi } from "./AgentProvider.js";
+import type { AgentProvider } from "./AgentProvider.js";
+import {
+  assertForkSupported,
+  assertResumeSessionExists,
+} from "./resumePrecheck.js";
+
+/** A provider stub: no session storage unless one is given. */
+const stubProvider = (
+  sessionStorage?: AgentProvider["sessionStorage"],
+): AgentProvider => ({
+  name: "stub-agent",
+  env: {},
+  captureSessions: false,
+  sessionStorage,
+  buildPrintCommand: () => ({ command: "true" }),
+  parseStreamLine: () => [],
+});
 
 const SESSION_ID = "9ba1c695-2222-4444-8888-e7e847bf34dd";
 
@@ -110,7 +126,8 @@ describe("assertResumeSessionExists", () => {
       const sessionDir = provider.sessionStorage.hostSessionFilePath(
         hostRepoDir,
         SESSION_ID,
-      )!;
+      );
+      assert.isDefined(sessionDir);
       await mkdir(sessionDir, { recursive: true });
       await writeFile(
         join(sessionDir, `2026-05-29T08-00-00_${SESSION_ID}.jsonl`),
@@ -198,7 +215,8 @@ describe("assertResumeSessionExists", () => {
       const sessionPath = provider.sessionStorage.hostSessionFilePath(
         hostRepoDir,
         SESSION_ID,
-      )!;
+      );
+      assert.isDefined(sessionPath);
       await mkdir(join(sessionPath, ".."), { recursive: true });
       await writeFile(sessionPath, "{}");
 
@@ -216,11 +234,39 @@ describe("assertResumeSessionExists", () => {
   it("throws when the provider does not support resume (no sessionStorage)", async () => {
     await expect(
       assertResumeSessionExists({
-        provider: copilot("claude-sonnet-4.5"),
+        provider: stubProvider(),
         sandboxTag: "none",
         hostRepoDir: "/some/host/repo",
         resumeSession: SESSION_ID,
       }),
-    ).rejects.toThrow("copilot does not support resumeSession");
+    ).rejects.toThrow("stub-agent does not support resumeSession");
+  });
+});
+
+describe("assertForkSupported", () => {
+  /** What assertForkSupported threw, or undefined. */
+  const thrownBy = (provider: AgentProvider): unknown => {
+    try {
+      assertForkSupported(provider);
+    } catch (error) {
+      return error;
+    }
+    return undefined;
+  };
+
+  it("throws ForkNotSupportedError naming the provider when it cannot fork", () => {
+    const { sessionStorage } = claudeCode("claude-opus-4-8");
+    const error = thrownBy(stubProvider({ ...sessionStorage, canFork: false }));
+    expect(error).toBeInstanceOf(Error);
+    expect(error).toMatchObject({
+      _tag: "ForkNotSupportedError",
+      name: "ForkNotSupportedError",
+      agentProvider: "stub-agent",
+    });
+    expect(String(error)).toContain("stub-agent cannot fork");
+  });
+
+  it("passes for providers that fork (canFork omitted)", () => {
+    expect(thrownBy(claudeCode("claude-opus-4-8"))).toBeUndefined();
   });
 });

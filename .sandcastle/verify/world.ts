@@ -1,7 +1,7 @@
 /**
  * A world: one run's isolated playground. A scratch git project with a local
  * bare remote, the Sandcastle under test packed and installed into it, and a
- * HOME of its own, all under $TMPDIR/sandcastle-verify/<run id>/.
+ * HOME and a TMPDIR of its own, all under $TMPDIR/sandcastle-verify/<run id>/.
  */
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -15,7 +15,9 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { classifyEnv, type EnvLeak } from "./envLeaks.ts";
+import type { WorldSpan } from "./attribution.ts";
+import { classifyEnv } from "./envLeaks.ts";
+import type { EnvLeak } from "./envLeaks.ts";
 import { redact, REPO_ROOT, secretsIn, sh } from "./lib.ts";
 
 export const WORLDS_ROOT = join(tmpdir(), "sandcastle-verify");
@@ -37,6 +39,8 @@ export interface World {
   readonly remote: string;
   /** HOME for everything run in the world. */
   readonly home: string;
+  /** TMPDIR for everything run in the world (absent in worlds made before it existed). */
+  readonly tmp?: string;
   readonly logs: string;
   /** The image `sandcastle init` / `build-image` builds by default here. */
   readonly image: string;
@@ -50,7 +54,7 @@ export interface World {
 }
 
 const stamp = (d: Date): string =>
-  d.toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
+  d.toISOString().replaceAll(/[-:]/g, "").replace("T", "-").slice(0, 15);
 
 const must = (
   command: string,
@@ -100,11 +104,20 @@ export const listImages = (): string[] =>
       .map((img) => `${engine}:${img}`),
   );
 
-/** Sandcastle's own temp entries ($TMPDIR/sandcastle-bundle-*, -git-*, -copyin-*). */
-export const listTmpEntries = (): string[] =>
-  readdirSync(tmpdir()).filter((n) =>
-    /^sandcastle-(bundle|git|copyin)-/.test(n),
-  );
+/** Sandcastle's own temp entries (sandcastle-bundle-*, -git-*, -copyin-*) in `dir`. */
+export const listTmpEntries = (dir: string = tmpdir()): string[] =>
+  existsSync(dir)
+    ? readdirSync(dir).filter((n) => /^sandcastle-(bundle|git|copyin)-/.test(n))
+    : [];
+
+/** When `engine` built image `id`, as the engine prints it. */
+export const imageCreated = (
+  engine: Engine,
+  id: string,
+): string | undefined => {
+  const r = sh(engine, ["image", "inspect", id, "--format", "{{.Created}}"]);
+  return r.code === 0 ? r.stdout.trim() || undefined : undefined;
+};
 
 export const remoteRefs = (remote: string): Record<string, string> => {
   const out: Record<string, string> = {};
@@ -116,7 +129,9 @@ export const remoteRefs = (remote: string): Record<string, string> => {
     },
   ).stdout.split("\n")) {
     const [ref, sha] = line.split(" ");
-    if (ref && sha) out[ref] = sha;
+    if (ref && sha) {
+      out[ref] = sha;
+    }
   }
   return out;
 };
@@ -143,7 +158,10 @@ export const createWorld = (): World => {
   const remote = join(dir, "remote.git");
   const home = join(dir, "home");
   const logs = join(dir, "logs");
-  for (const d of [project, home, logs]) mkdirSync(d, { recursive: true });
+  const tmp = join(dir, "tmp");
+  for (const d of [project, home, logs, tmp]) {
+    mkdirSync(d, { recursive: true });
+  }
 
   // The Sandcastle under test, packed as npm would publish it.
   const tgz = must(
@@ -157,11 +175,11 @@ export const createWorld = (): World => {
 
   writeFileSync(
     join(project, "package.json"),
-    JSON.stringify(
+    `${JSON.stringify(
       { name: projectName, private: true, type: "module" },
       null,
       2,
-    ) + "\n",
+    )}\n`,
   );
   writeFileSync(join(project, ".gitignore"), "node_modules\n");
   writeFileSync(join(project, "README.md"), `# ${projectName}\n`);
@@ -194,6 +212,7 @@ export const createWorld = (): World => {
     remote,
     home,
     logs,
+    tmp,
     image: `sandcastle:${projectName}`,
     sandcastleRoot: REPO_ROOT,
     sandcastleCommit: must("git", ["rev-parse", "HEAD"], REPO_ROOT),
@@ -212,11 +231,12 @@ export const createWorld = (): World => {
   return world;
 };
 
-export const saveWorld = (world: World): void =>
+export const saveWorld = (world: World): void => {
   writeFileSync(
     join(world.dir, "world.json"),
-    JSON.stringify(world, null, 2) + "\n",
+    `${JSON.stringify(world, null, 2)}\n`,
   );
+};
 
 /** The world `runId`, which this checkout must have created. */
 export const loadWorld = (runId: string | undefined): World => {
@@ -226,8 +246,9 @@ export const loadWorld = (runId: string | undefined): World => {
     );
   }
   const file = join(WORLDS_ROOT, runId, "world.json");
-  if (!existsSync(file))
+  if (!existsSync(file)) {
     throw new Error(`no world ${runId} under ${WORLDS_ROOT}`);
+  }
   const world = JSON.parse(readFileSync(file, "utf8")) as World;
   if (world.sandcastleRoot !== REPO_ROOT) {
     throw new Error(
@@ -236,6 +257,28 @@ export const loadWorld = (runId: string | undefined): World => {
   }
   return world;
 };
+
+/** The world's TMPDIR. */
+export const worldTmp = (world: World): string =>
+  world.tmp ?? join(world.dir, "tmp");
+
+/**
+ * Every world on this machine, from any checkout, cleaned up or not: the
+ * ledger uses their lifetimes to avoid blaming one world for another's work.
+ */
+export const allWorldSpans = (): WorldSpan[] =>
+  (existsSync(WORLDS_ROOT) ? readdirSync(WORLDS_ROOT) : []).flatMap((id) => {
+    try {
+      const w = JSON.parse(
+        readFileSync(join(WORLDS_ROOT, id, "world.json"), "utf8"),
+      ) as World;
+      return [
+        { runId: w.runId, createdAt: w.createdAt, cleanedAt: w.cleanedAt },
+      ];
+    } catch {
+      return [];
+    }
+  });
 
 /** Every world this checkout created that has not been cleaned up. */
 export const liveWorlds = (): World[] =>
@@ -247,21 +290,26 @@ export const liveWorlds = (): World[] =>
         return undefined;
       }
     })
-    .filter((w): w is World => !!w && !w.cleanedAt);
+    .filter((w): w is World => Boolean(w) && !w.cleanedAt);
 
 // --- Running inside a world ------------------------------------------------------
 
 /**
  * The environment of every process run in a world: this shell's own (keys
- * included, as a user's would be), HOME moved into the world so host writes
- * land where the ledger can see them, and a canary that must never reach a
- * sandbox. Tool config that lives under ~ stays reachable.
+ * included, as a user's would be), HOME and TMPDIR moved into the world so
+ * host writes land where the ledger can tell them from other worlds', and a
+ * canary that must never reach a sandbox. Tool config that lives under ~
+ * stays reachable.
  */
 const worldEnv = (world: World): NodeJS.ProcessEnv => {
   const real = (p: string) => join(REAL_HOME, p);
+  const tmp = worldTmp(world);
   return {
     ...process.env,
     HOME: world.home,
+    TMPDIR: tmp,
+    TMP: tmp,
+    TEMP: tmp,
     DOCKER_CONFIG: process.env.DOCKER_CONFIG ?? real(".docker"),
     XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME ?? real(".config"),
     XDG_DATA_HOME: process.env.XDG_DATA_HOME ?? real(".local/share"),
@@ -274,12 +322,14 @@ const worldEnv = (world: World): NodeJS.ProcessEnv => {
 /** Keys the world's project declares in `.sandcastle/.env` (names only). */
 export const declaredKeys = (world: World): Set<string> => {
   const file = join(world.project, ".sandcastle", ".env");
-  if (!existsSync(file)) return new Set();
+  if (!existsSync(file)) {
+    return new Set();
+  }
   return new Set(
     readFileSync(file, "utf8")
       .split("\n")
       .map((l) => /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(l)?.[1])
-      .filter((k): k is string => !!k),
+      .filter((k): k is string => Boolean(k)),
   );
 };
 
@@ -293,7 +343,9 @@ export interface Observation {
 
 const inspect = (engine: Engine, name: string) => {
   const r = sh(engine, ["inspect", name, "--format", "{{json .}}"]);
-  if (r.code !== 0) return undefined;
+  if (r.code !== 0) {
+    return undefined;
+  }
   const j = JSON.parse(r.stdout) as {
     Config?: { Env?: string[]; Image?: string };
     Mounts?: { Source?: string }[];
@@ -311,8 +363,9 @@ const inspect = (engine: Engine, name: string) => {
 /** A container belongs to `world` when it mounts a path inside the world. */
 export const worldContainer = (world: World, engine: Engine, name: string) => {
   const info = inspect(engine, name);
-  if (!info || !info.mountsWorld.some((s) => s.startsWith(world.dir)))
+  if (!info || !info.mountsWorld.some((s) => s.startsWith(world.dir))) {
     return undefined;
+  }
   return info;
 };
 
@@ -328,6 +381,7 @@ export const runInWorld = async (
   command: string,
   args: readonly string[],
 ): Promise<number> => {
+  mkdirSync(worldTmp(world), { recursive: true });
   const env = worldEnv(world);
   const seq = readdirSync(world.logs).length + 1;
   const log = join(world.logs, `${String(seq).padStart(2, "0")}-${label}.log`);
@@ -349,9 +403,13 @@ export const runInWorld = async (
         .filter(Boolean);
       for (const name of names) {
         const key = `${engine}:${name}`;
-        if (seen.has(key)) continue;
+        if (seen.has(key)) {
+          continue;
+        }
         const info = worldContainer(world, engine, name);
-        if (!info) continue;
+        if (!info) {
+          continue;
+        }
         seen.add(key);
         const obs: Observation = {
           at: new Date().toISOString(),
@@ -366,7 +424,7 @@ export const runInWorld = async (
         };
         appendFileSync(
           join(world.dir, "observed.jsonl"),
-          JSON.stringify(obs) + "\n",
+          `${JSON.stringify(obs)}\n`,
         );
         const verdict =
           obs.leaks.length === 0
@@ -392,24 +450,26 @@ export const runInWorld = async (
       const lines = buf.split("\n");
       buf = lines.pop()!;
       for (const line of lines) {
-        const clean = redact(line).split(world.canary).join("<CANARY>") + "\n";
+        const clean = `${redact(line).split(world.canary).join("<CANARY>")}\n`;
         to.write(clean);
         appendFileSync(log, clean);
       }
     });
     from.on("end", () => {
       if (buf) {
-        const clean = redact(buf) + "\n";
+        const clean = `${redact(buf)}\n`;
         to.write(clean);
         appendFileSync(log, clean);
       }
     });
   };
-  pipe(child.stdout!, process.stdout);
-  pipe(child.stderr!, process.stderr);
+  pipe(child.stdout, process.stdout);
+  pipe(child.stderr, process.stderr);
   const timer = setInterval(observe, 1000);
   const code = await new Promise<number>((resolve) => {
-    child.on("close", (c) => resolve(c ?? 1));
+    child.on("close", (c) => {
+      resolve(c ?? 1);
+    });
     child.on("error", (e) => {
       appendFileSync(log, `[verify] ${e.message}\n`);
       resolve(127);
@@ -424,7 +484,9 @@ export const runInWorld = async (
 /** Read every observation made in the world so far. */
 export const observations = (world: World): Observation[] => {
   const file = join(world.dir, "observed.jsonl");
-  if (!existsSync(file)) return [];
+  if (!existsSync(file)) {
+    return [];
+  }
   return readFileSync(file, "utf8")
     .split("\n")
     .filter(Boolean)

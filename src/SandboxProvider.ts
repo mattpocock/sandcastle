@@ -52,11 +52,11 @@ export interface BindMountCreateOptions {
   /** Host-side path to the original repo root. */
   readonly hostRepoPath: string;
   /** Volume mounts to apply (host:sandbox pairs). */
-  readonly mounts: Array<{
+  readonly mounts: {
     hostPath: string;
     sandboxPath: string;
     readonly?: boolean;
-  }>;
+  }[];
   /** Environment variables to inject into the sandbox. */
   readonly env: Record<string, string>;
 }

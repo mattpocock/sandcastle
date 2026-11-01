@@ -1,5 +1,22 @@
 import type { AgentProvider } from "./AgentProvider.js";
+import { ForkNotSupportedError } from "./errors.js";
 import type { SandboxProvider } from "./SandboxProvider.js";
+
+/**
+ * Fail-fast validation, for a run asked to fork its session, that the agent
+ * provider can fork. One that resumes but has no native fork declares
+ * `sessionStorage.canFork: false` and gets a `ForkNotSupportedError` naming
+ * it. A provider with no `sessionStorage` is left to
+ * `assertResumeSessionExists`, which rejects any resume.
+ */
+export const assertForkSupported = (provider: AgentProvider): void => {
+  if (provider.sessionStorage?.canFork === false) {
+    throw new ForkNotSupportedError({
+      message: `${provider.name} cannot fork a session: its CLI resumes but has no fork. Use resume() to continue the session in place.`,
+      agentProvider: provider.name,
+    });
+  }
+};
 
 /**
  * Fail-fast validation that a resumable agent session exists on the host before

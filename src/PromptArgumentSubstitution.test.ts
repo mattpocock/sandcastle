@@ -1,6 +1,8 @@
-import { Effect, Layer, Ref } from "effect";
+import type { Layer } from "effect";
+import { Effect, Ref } from "effect";
 import { describe, expect, it } from "vitest";
-import { type DisplayEntry, SilentDisplay } from "./Display.js";
+import { SilentDisplay } from "./Display.js";
+import type { DisplayEntry } from "./Display.js";
 import {
   substitutePromptArgs,
   validateNoArgsWithInlinePrompt,
@@ -11,10 +13,16 @@ import { PromptError } from "./errors.js";
 
 describe("PromptArgumentSubstitution", () => {
   const setup = () => {
-    const displayRef = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const displayRef = Ref.unsafeMake<readonly DisplayEntry[]>([]);
     const layer = SilentDisplay.layer(displayRef);
     return { layer, displayRef };
   };
+
+  /** The messages of the warn-level status entries a run displayed. */
+  const warningsIn = (entries: readonly DisplayEntry[]): string[] =>
+    entries.flatMap((e) =>
+      e._tag === "status" && e.severity === "warn" ? [e.message] : [],
+    );
 
   const run = (
     prompt: string,
@@ -25,7 +33,7 @@ describe("PromptArgumentSubstitution", () => {
       substitutePromptArgs(prompt, args).pipe(Effect.provide(layer)),
     );
 
-  const runFail = (
+  const runFail = async (
     prompt: string,
     args: Record<string, string | number | boolean>,
     layer: Layer.Layer<import("./Display.js").Display>,
@@ -113,11 +121,9 @@ describe("PromptArgumentSubstitution", () => {
     const { layer, displayRef } = setup();
     await run("Hello world", { UNUSED: "value" }, layer);
     const entries = await Effect.runPromise(Ref.get(displayRef));
-    const warnings = entries.filter(
-      (e) => e._tag === "status" && e.severity === "warn",
-    );
+    const warnings = warningsIn(entries);
     expect(warnings).toHaveLength(1);
-    expect((warnings[0] as { message: string }).message).toContain("UNUSED");
+    expect(warnings[0]).toContain("UNUSED");
   });
 
   it("passes through a prompt with no placeholders and no args", async () => {
@@ -136,7 +142,7 @@ describe("PromptArgumentSubstitution", () => {
     );
     // Template-authored shell blocks are marked with \x01 so the preprocessor
     // can distinguish them from `!`...`` patterns injected via arg values.
-    expect(result).toBe("Output: !\x01`gh issue view 123`");
+    expect(result).toBe("Output: !\u0001`gh issue view 123`");
   });
 
   it("replaces {{ KEY }} with spaces inside braces", async () => {
@@ -174,9 +180,7 @@ describe("PromptArgumentSubstitution", () => {
     const { layer, displayRef } = setup();
     await run("{{ NAME }}", { NAME: "world" }, layer);
     const entries = await Effect.runPromise(Ref.get(displayRef));
-    const warnings = entries.filter(
-      (e) => e._tag === "status" && e.severity === "warn",
-    );
+    const warnings = warningsIn(entries);
     expect(warnings).toHaveLength(0);
   });
 
@@ -198,9 +202,7 @@ describe("PromptArgumentSubstitution", () => {
     const { layer, displayRef } = setup();
     await run("No placeholders", { FOO: "1", BAR: "2" }, layer);
     const entries = await Effect.runPromise(Ref.get(displayRef));
-    const warnings = entries.filter(
-      (e) => e._tag === "status" && e.severity === "warn",
-    );
+    const warnings = warningsIn(entries);
     expect(warnings).toHaveLength(2);
   });
 
@@ -214,12 +216,10 @@ describe("PromptArgumentSubstitution", () => {
       ).pipe(Effect.provide(layer)),
     );
     const entries = await Effect.runPromise(Ref.get(displayRef));
-    const warnings = entries.filter(
-      (e) => e._tag === "status" && e.severity === "warn",
-    );
+    const warnings = warningsIn(entries);
     // Only USER_ARG should warn — SOURCE_BRANCH and TARGET_BRANCH are silent
     expect(warnings).toHaveLength(1);
-    expect((warnings[0] as { message: string }).message).toContain("USER_ARG");
+    expect(warnings[0]).toContain("USER_ARG");
   });
 
   it("still substitutes silent keys when they appear in the prompt", async () => {

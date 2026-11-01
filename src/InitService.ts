@@ -1,7 +1,8 @@
 import { FileSystem } from "@effect/platform";
-import { Effect } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { InitError } from "./errors.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 
 const GITIGNORE = `.env
@@ -79,13 +80,43 @@ export type PackageManager = (typeof PACKAGE_MANAGERS)[number];
 
 // Lockfiles checked in priority order. bun.lock / bun.lockb are both valid bun
 // lockfiles (text vs binary), so both map to bun.
-const LOCKFILES: ReadonlyArray<readonly [string, PackageManager]> = [
+const LOCKFILES: readonly (readonly [string, PackageManager])[] = [
   ["bun.lockb", "bun"],
   ["bun.lock", "bun"],
   ["pnpm-lock.yaml", "pnpm"],
   ["yarn.lock", "yarn"],
   ["package-lock.json", "npm"],
 ];
+
+const PackageJson = Schema.parseJson(
+  Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+);
+
+/**
+ * The host project's package.json, or None when it is missing, unreadable, or
+ * not a JSON object.
+ */
+const readHostPackageJson = (
+  repoDir: string,
+): Effect.Effect<
+  Option.Option<Record<string, unknown>>,
+  never,
+  FileSystem.FileSystem
+> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const pkgPath = join(repoDir, "package.json");
+    const exists = yield* fs
+      .exists(pkgPath)
+      .pipe(Effect.orElseSucceed(() => false));
+    if (!exists) {
+      return Option.none();
+    }
+    const content = yield* fs
+      .readFileString(pkgPath)
+      .pipe(Effect.orElseSucceed(() => ""));
+    return Schema.decodeUnknownOption(PackageJson)(content);
+  });
 
 /**
  * Detect the host project's package manager. An explicit corepack-style
@@ -98,24 +129,14 @@ export const detectPackageManager = (
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
 
-    const pkgPath = join(repoDir, "package.json");
-    const pkgExists = yield* fs
-      .exists(pkgPath)
-      .pipe(Effect.orElseSucceed(() => false));
-    if (pkgExists) {
-      const content = yield* fs
-        .readFileString(pkgPath)
-        .pipe(Effect.orElseSucceed(() => ""));
-      try {
-        const pkg = JSON.parse(content) as Record<string, unknown>;
-        const field = pkg["packageManager"];
-        if (typeof field === "string") {
-          const name = field.split("@")[0];
-          const match = PACKAGE_MANAGERS.find((pm) => pm === name);
-          if (match) return match;
-        }
-      } catch {
-        // Malformed package.json — fall through to lockfile detection.
+    // A missing or malformed package.json falls through to lockfile detection.
+    const pkg = yield* readHostPackageJson(repoDir);
+    const field = Option.getOrUndefined(pkg)?.["packageManager"];
+    if (typeof field === "string") {
+      const name = field.split("@")[0];
+      const match = PACKAGE_MANAGERS.find((pm) => pm === name);
+      if (match) {
+        return match;
       }
     }
 
@@ -123,7 +144,9 @@ export const detectPackageManager = (
       const exists = yield* fs
         .exists(join(repoDir, file))
         .pipe(Effect.orElseSucceed(() => false));
-      if (exists) return pm;
+      if (exists) {
+        return pm;
+      }
     }
 
     return "npm";
@@ -135,16 +158,30 @@ export const addDependencyCommand = (
   pkg: string,
 ): string => {
   switch (packageManager) {
-    case "pnpm":
+    case "pnpm": {
       return `pnpm add ${pkg}`;
-    case "yarn":
+    }
+    case "yarn": {
       return `yarn add ${pkg}`;
-    case "bun":
+    }
+    case "bun": {
       return `bun add ${pkg}`;
-    case "npm":
+    }
+    case "npm": {
       return `npm install ${pkg}`;
+    }
   }
 };
+
+/** Build the command that runs a package.json script for the given package manager. */
+const runScriptCommand = (
+  packageManager: PackageManager,
+  script: string,
+): string => `${packageManager} run ${script}`;
+
+/** Build the command that installs all dependencies for the given package manager. */
+const installCommand = (packageManager: PackageManager): string =>
+  `${packageManager} install`;
 
 /**
  * Whether the host package.json already declares `pkg` in any of its dependency
@@ -155,32 +192,20 @@ export const hostHasDependency = (
   pkg: string,
 ): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
   Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const pkgPath = join(repoDir, "package.json");
-    const exists = yield* fs
-      .exists(pkgPath)
-      .pipe(Effect.orElseSucceed(() => false));
-    if (!exists) return false;
-    const content = yield* fs
-      .readFileString(pkgPath)
-      .pipe(Effect.orElseSucceed(() => ""));
-    try {
-      const parsed = JSON.parse(content) as Record<string, unknown>;
-      const depMaps = [
-        "dependencies",
-        "devDependencies",
-        "peerDependencies",
-        "optionalDependencies",
-      ];
-      return depMaps.some((key) => {
-        const deps = parsed[key];
-        return (
-          typeof deps === "object" && deps !== null && pkg in (deps as object)
-        );
-      });
-    } catch {
+    const parsed = yield* readHostPackageJson(repoDir);
+    if (Option.isNone(parsed)) {
       return false;
     }
+    const depMaps = [
+      "dependencies",
+      "devDependencies",
+      "peerDependencies",
+      "optionalDependencies",
+    ];
+    return depMaps.some((key) => {
+      const deps = parsed.value[key];
+      return typeof deps === "object" && deps !== null && pkg in deps;
+    });
   });
 
 // ---------------------------------------------------------------------------
@@ -367,9 +392,9 @@ USER \${AGENT_UID}:\${AGENT_GID}
 
 WORKDIR /home/agent
 
-# In worktree sandbox mode, Sandcastle bind-mounts the git worktree at \${SANDBOX_REPO_DIR}
-# and overrides the working directory to \${SANDBOX_REPO_DIR} at container start.
-# Structure your Dockerfile so that \${SANDBOX_REPO_DIR} can serve as the project root.
+# In worktree sandbox mode, Sandcastle bind-mounts the git worktree at ${SANDBOX_REPO_DIR}
+# and overrides the working directory to ${SANDBOX_REPO_DIR} at container start.
+# Structure your Dockerfile so that ${SANDBOX_REPO_DIR} can serve as the project root.
 ENTRYPOINT ["sleep", "infinity"]
 `;
 
@@ -400,9 +425,9 @@ USER \${AGENT_UID}:\${AGENT_GID}
 
 WORKDIR /home/agent
 
-# In worktree sandbox mode, Sandcastle bind-mounts the git worktree at \${SANDBOX_REPO_DIR}
-# and overrides the working directory to \${SANDBOX_REPO_DIR} at container start.
-# Structure your Dockerfile so that \${SANDBOX_REPO_DIR} can serve as the project root.
+# In worktree sandbox mode, Sandcastle bind-mounts the git worktree at ${SANDBOX_REPO_DIR}
+# and overrides the working directory to ${SANDBOX_REPO_DIR} at container start.
+# Structure your Dockerfile so that ${SANDBOX_REPO_DIR} can serve as the project root.
 ENTRYPOINT ["sleep", "infinity"]
 `;
 
@@ -469,8 +494,9 @@ OPENCODE_API_KEY=`,
     dockerfileTemplate: COPILOT_DOCKERFILE,
     envExample: `# GitHub token with the "Copilot Requests" permission
 # (a fine-grained PAT, or any token from \`gh auth login\`).
-# COPILOT_GITHUB_TOKEN takes precedence over GH_TOKEN and GITHUB_TOKEN.
-GITHUB_TOKEN=`,
+# Copilot CLI reads COPILOT_GITHUB_TOKEN first, then GH_TOKEN, then GITHUB_TOKEN,
+# so this key is used even when GH_TOKEN is set for the issue tracker.
+COPILOT_GITHUB_TOKEN=`,
     setupCommand: `copilot -i "$(cat ${SETUP_ISSUE_TRACKER_PATH})"`,
   },
 ];
@@ -492,6 +518,13 @@ export interface IssueTrackerEntry {
   };
   /** Lines to append to `.env.example` for this issue tracker, or empty string if none needed. */
   readonly envExample: string;
+  /**
+   * TypeScript source for a `sandboxOptions` object literal (comment included)
+   * that the scaffolded main file passes to every sandbox provider call, or
+   * undefined to leave the calls bare. For trackers whose state must reach
+   * every sandbox, including worktree sandboxes, which get tracked files only.
+   */
+  readonly sandboxOptions?: string;
 }
 
 const GITHUB_CLI_TOOLS = `# Install GitHub CLI
@@ -501,6 +534,24 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \\
   | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \\
   && apt-get update && apt-get install -y gh \\
   && rm -rf /var/lib/apt/lists/*`;
+
+// The bd release baked into the beads image. 1.0.4 is the first release whose
+// embedded backend lets several bd processes open one database at once (the
+// parallel templates' sandboxes plus the host); 1.3.2 is the release this
+// scaffold was verified with.
+const BEADS_VERSION = "1.3.2";
+
+// Every sandbox, including worktree sandboxes, mounts the host's .beads/ and
+// points bd at it, so all phases share the one issue database.
+const BEADS_SANDBOX_DIR = "/home/agent/host-beads";
+const BEADS_SANDBOX_OPTIONS = `// Beads keeps its database in .beads/, which git ignores, so a worktree
+// sandbox never gets it. Mount the host's .beads/ into every sandbox and point
+// bd at it, so every phase reads and closes issues in the one shared database.
+// Run this file from the repo root (hostPath is relative to the cwd).
+const sandboxOptions = {
+  mounts: [{ hostPath: ".beads", sandboxPath: "${BEADS_SANDBOX_DIR}" }],
+  env: { BEADS_DIR: "${BEADS_SANDBOX_DIR}" },
+};`;
 
 const BEADS_TOOLS = `# Install system dependencies for Beads
 RUN apt-get update && apt-get install -y \\
@@ -512,9 +563,61 @@ RUN apt-get update && apt-get install -y \\
        ln -s "$lib" "\${lib%.72}.74"; \\
      done
 
-RUN curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash
+# Pinned bd release. Every sandbox opens your host's beads database (see
+# sandboxOptions in main), so keep this equal to the host's \`bd version\`.
+ARG BEADS_VERSION=${BEADS_VERSION}
+RUN ARCH=$(dpkg --print-architecture) \\
+  && BEADS_TARBALL="beads_\${BEADS_VERSION}_linux_\${ARCH}.tar.gz" \\
+  && BEADS_URL="https://github.com/gastownhall/beads/releases/download/v\${BEADS_VERSION}" \\
+  && cd /tmp \\
+  && curl -fsSLO "\${BEADS_URL}/\${BEADS_TARBALL}" \\
+  && curl -fsSL "\${BEADS_URL}/checksums.txt" | grep " \${BEADS_TARBALL}$" | sha256sum -c - \\
+  && tar -xzf "\${BEADS_TARBALL}" -C /usr/local/bin bd \\
+  && rm "\${BEADS_TARBALL}" \\
+  && bd version
 
 RUN corepack enable`;
+
+/** `bd version` prints `bd version 1.3.2 (<commit>)`; returns `1.3.2`. */
+export const parseBdVersion = (output: string): string | undefined =>
+  /\bbd version v?(?<version>\d+\.\d+\.\d+)\b/u.exec(output)?.groups?.version;
+
+const compareVersions = (a: string, b: string): number => {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (diff !== 0) {
+      return diff;
+    }
+  }
+  return 0;
+};
+
+/**
+ * What init warns a beads user about the host's bd, or undefined when it
+ * matches the image's. Every beads sandbox opens the host's .beads/ with the
+ * image's pinned bd. A newer bd migrates the database, after which an older
+ * host bd can't create issues (`fk_events_issue`, or "Your bd binary is
+ * stale"). init doesn't pin the image to the host's bd instead: the scaffold's
+ * BEADS_DIR mount is verified on 1.3.2 only, and bd 1.2.2 with it silently
+ * reads an empty database.
+ */
+export const beadsVersionWarning = (
+  hostVersion?: string,
+): string | undefined => {
+  if (hostVersion === BEADS_VERSION) {
+    return undefined;
+  }
+  const shared = `the image installs bd ${BEADS_VERSION}, and every sandbox opens your .beads/ with it`;
+  if (hostVersion === undefined) {
+    return `bd isn't on your PATH, and ${shared}. Use bd ${BEADS_VERSION} on the host too, or an older host bd can no longer create issues once a sandbox has opened the database.`;
+  }
+  if (compareVersions(hostVersion, BEADS_VERSION) < 0) {
+    return `Your host runs bd ${hostVersion}, but ${shared}. bd ${BEADS_VERSION} migrates the database, after which host bd ${hostVersion} can no longer create issues in it. Upgrade the host's bd to ${BEADS_VERSION} before you run.`;
+  }
+  return `Your host runs bd ${hostVersion}, but ${shared}, and an older bd can't safely write a database a newer one has migrated. Set ARG BEADS_VERSION in the Dockerfile to ${hostVersion} and rebuild the image, or use bd ${BEADS_VERSION} on the host.`;
+};
 
 // Sentinels baked into the scaffold for the `custom` issue tracker. The
 // project ships deliberately broken-until-configured; the setup agent finds
@@ -527,7 +630,8 @@ const CUSTOM_TRACKER_TOOLS = `# TODO: install your issue tracker's CLI here. See
 const CUSTOM_ENV_EXAMPLE = `# TODO: add any env vars your issue tracker needs (e.g. an API token).
 # See ${SETUP_ISSUE_TRACKER_PATH}`;
 
-const ISSUE_TRACKER_REGISTRY: IssueTrackerEntry[] = [
+// A non-empty tuple type, so `[0]` (the default) is known to exist.
+const ISSUE_TRACKER_REGISTRY: [IssueTrackerEntry, ...IssueTrackerEntry[]] = [
   {
     name: "github-issues",
     label: "GitHub Issues",
@@ -552,6 +656,7 @@ GH_TOKEN=`,
       ISSUE_TRACKER_TOOLS: BEADS_TOOLS,
     },
     envExample: "",
+    sandboxOptions: BEADS_SANDBOX_OPTIONS,
   },
   {
     name: "custom",
@@ -592,7 +697,11 @@ export interface SandboxProviderEntry {
   readonly cliNamespace: string;
 }
 
-const SANDBOX_PROVIDER_REGISTRY: SandboxProviderEntry[] = [
+// A non-empty tuple type, so `[0]` (the default) is known to exist.
+const SANDBOX_PROVIDER_REGISTRY: [
+  SandboxProviderEntry,
+  ...SandboxProviderEntry[],
+] = [
   {
     name: "docker",
     label: "Docker",
@@ -619,13 +728,16 @@ export const getSandboxProvider = (
 // Next steps
 // ---------------------------------------------------------------------------
 
-export function getNextStepsLines(
+export const getNextStepsLines = (
   template: string,
   mainFilename: string,
   issueTracker: IssueTrackerEntry,
   agent: AgentEntry,
   packageManager: PackageManager,
-): string[] {
+  /** Template dependencies the host already has (declared, or installed by init). */
+  installedDependencies: readonly string[],
+): string[] => {
+  const runStep = `Run \`${runScriptCommand(packageManager, "sandcastle")}\` to start the agent`;
   // The custom issue tracker scaffolds a broken-until-configured project, so
   // its next steps are about running the setup prompt — not the template's
   // normal "set env vars and go" flow. This branch wins over template-specific
@@ -654,63 +766,68 @@ export function getNextStepsLines(
       "2. Read and customize .sandcastle/prompt.md to describe what you want the agent to do",
       `3. Customize .sandcastle/${mainFilename} — it uses the JS API (\`run()\`) to control how the agent runs`,
       `4. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
-      "5. Run `npm run sandcastle` to start the agent",
+      `5. ${runStep}`,
     );
-    return lines;
-  } else {
-    const hasReviewer = template.includes("review");
-    const usesPlanSchema = getTemplateDependencies(template).includes("zod");
-    let step = 1;
-    const lines: string[] = [
-      "Next steps:",
-      `${step++}. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
-    ];
-    if (agent.name === "claude-code") {
-      lines.push(
-        "   To use your Claude subscription instead of an API key, run `claude setup-token` on your host and paste the result into CLAUDE_CODE_OAUTH_TOKEN.",
-      );
-    }
-    lines.push(
-      `${step++}. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
-      `${step++}. Templates use \`copyToWorktree: ["node_modules"]\` to copy your host node_modules into the sandbox for fast startup — the \`npm install\` in the onSandboxReady hook is a safety net for platform-specific binaries. Adjust both if you use a different package manager`,
-    );
-    if (usesPlanSchema) {
-      lines.push(
-        `${step++}. Install a schema validator for the planner's \`<plan>\` output — the template uses Zod (\`${addDependencyCommand(packageManager, "zod")}\`), but Valibot, ArkType, or any Standard Schema library works (https://standardschema.dev)`,
-      );
-    }
-    lines.push(
-      `${step++}. Read and customize the prompt files in .sandcastle/ — they shape what the agent does`,
-    );
-    if (hasReviewer) {
-      lines.push(
-        `${step++}. Customize .sandcastle/CODING_STANDARDS.md with your project's standards — the reviewer agent loads it during review`,
-      );
-    }
-    lines.push(`${step++}. Run \`npm run sandcastle\` to start the agent`);
     return lines;
   }
-}
+  const hasReviewer = template.includes("review");
+  const needsPlanSchema =
+    getTemplateDependencies(template).includes("zod") &&
+    !installedDependencies.includes("zod");
+  let step = 1;
+  const lines: string[] = [
+    "Next steps:",
+    `${step++}. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
+  ];
+  if (agent.name === "claude-code") {
+    lines.push(
+      "   To use your Claude subscription instead of an API key, run `claude setup-token` on your host and paste the result into CLAUDE_CODE_OAUTH_TOKEN.",
+    );
+  }
+  lines.push(
+    `${step++}. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
+    `${step++}. Templates use \`copyToWorktree: ["node_modules"]\` to copy your host node_modules into the sandbox for fast startup — the \`npm install\` in the onSandboxReady hook is a safety net for platform-specific binaries. ${
+      packageManager === "npm"
+        ? "Adjust both if you use a different package manager"
+        : `This project uses ${packageManager}, so change the hook to \`${installCommand(packageManager)}\` and check \`copyToWorktree\` suits it`
+    }`,
+  );
+  if (needsPlanSchema) {
+    lines.push(
+      `${step++}. Install a schema validator for the planner's \`<plan>\` output — the template uses Zod (\`${addDependencyCommand(packageManager, "zod")}\`), but Valibot, ArkType, or any Standard Schema library works (https://standardschema.dev)`,
+    );
+  }
+  lines.push(
+    `${step++}. Read and customize the prompt files in .sandcastle/ — they shape what the agent does`,
+  );
+  if (hasReviewer) {
+    lines.push(
+      `${step++}. Customize .sandcastle/CODING_STANDARDS.md with your project's standards — the reviewer agent loads it during review`,
+    );
+  }
+  lines.push(`${step++}. ${runStep}`);
+  return lines;
+};
 
 // ---------------------------------------------------------------------------
 // Scaffolding helpers
 // ---------------------------------------------------------------------------
 
-function getTemplatesDir(): string {
+const getTemplatesDir = (): string => {
   const thisFile = fileURLToPath(import.meta.url);
   return join(dirname(thisFile), "templates");
-}
+};
 
 const getTemplateDir = (
   templateName: string,
-): Effect.Effect<string, Error, never> =>
+): Effect.Effect<string, InitError> =>
   Effect.gen(function* () {
     const template = TEMPLATES.find((t) => t.name === templateName);
     if (!template) {
       const names = TEMPLATES.map((t) => t.name).join(", ");
-      yield* Effect.fail(
-        new Error(`Unknown template: "${templateName}". Available: ${names}`),
-      );
+      return yield* new InitError({
+        message: `Unknown template: "${templateName}". Available: ${names}`,
+      });
     }
     return join(getTemplatesDir(), templateName);
   });
@@ -730,12 +847,12 @@ const copyTemplateFiles = (
   templateDir: string,
   destDir: string,
   mainFilename: string,
-): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+): Effect.Effect<void, InitError, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const files = yield* fs
       .readDirectory(templateDir)
-      .pipe(Effect.mapError((e) => new Error(e.message)));
+      .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
     yield* Effect.all(
       files
         .filter(
@@ -748,7 +865,9 @@ const copyTemplateFiles = (
           const destName = f === "main.mts" ? mainFilename : f;
           return fs
             .copyFile(join(templateDir, f), join(destDir, destName))
-            .pipe(Effect.mapError((e) => new Error(e.message)));
+            .pipe(
+              Effect.mapError((e) => new InitError({ message: e.message })),
+            );
         }),
       { concurrency: "unbounded" },
     );
@@ -767,36 +886,39 @@ const rewriteMainTs = (
   model: string,
   sandboxProvider: SandboxProviderEntry,
   mainFilename: string,
-): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+  imageName: string | undefined,
+): Effect.Effect<void, InitError, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const mainTsPath = join(configDir, mainFilename);
 
     const exists = yield* fs
       .exists(mainTsPath)
-      .pipe(Effect.mapError((e) => new Error(e.message)));
-    if (!exists) return;
+      .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
+    if (!exists) {
+      return;
+    }
 
     let content = yield* fs
       .readFileString(mainTsPath)
-      .pipe(Effect.mapError((e) => new Error(e.message)));
+      .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
 
     // Templates use main.mts as the canonical filename in comments.
     // When the target is main.ts, rewrite those references.
     if (mainFilename === "main.ts") {
-      content = content.replace(/main\.mts/g, "main.ts");
+      content = content.replaceAll("main.mts", "main.ts");
     }
 
     // Replace factory function name in imports (e.g. claudeCode → pi)
     // and all factory calls with the correct model.
     // Templates always use claudeCode as the placeholder factory.
-    content = content.replace(/\bclaudeCode\b/g, agent.factoryImport);
+    content = content.replaceAll(/\bclaudeCode\b/g, agent.factoryImport);
     // Replace model strings in factory calls: factoryImport("any-model")
     const factoryCallRe = new RegExp(
       `${agent.factoryImport}\\(["']([^"']+)["']\\)`,
       "g",
     );
-    content = content.replace(
+    content = content.replaceAll(
       factoryCallRe,
       `${agent.factoryImport}("${model}")`,
     );
@@ -807,11 +929,75 @@ const rewriteMainTs = (
     // case-sensitive word-boundary replace therefore rewrites the named import,
     // the import subpath, and every factory call site — and is a no-op when
     // docker is selected.
-    content = content.replace(/\bdocker\b/g, sandboxProvider.name);
+    content = content.replaceAll(/\bdocker\b/g, sandboxProvider.name);
+
+    // A custom image name (init --image-name) must reach every sandbox factory
+    // call, or the scaffolded run starts the default-named image instead of
+    // the one init built.
+    if (imageName !== undefined) {
+      content = content.replaceAll(
+        new RegExp(`\\b${sandboxProvider.name}\\(\\)`, "g"),
+        `${sandboxProvider.name}({ imageName: ${JSON.stringify(imageName)} })`,
+      );
+    }
 
     yield* fs
       .writeFileString(mainTsPath, content)
-      .pipe(Effect.mapError((e) => new Error(e.message)));
+      .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
+  });
+
+/**
+ * Pass the issue tracker's `sandboxOptions` (if any) to every sandbox provider
+ * call in a scaffolded main file: declare the options after the provider
+ * import, then rewrite each bare `<provider>()` call to
+ * `<provider>(sandboxOptions)`. Runs after `rewriteMainTs`, so the provider
+ * name is already the selected one.
+ */
+const applyIssueTrackerSandboxOptions = (
+  configDir: string,
+  issueTracker: IssueTrackerEntry,
+  sandboxProvider: SandboxProviderEntry,
+  mainFilename: string,
+): Effect.Effect<void, InitError, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    if (!issueTracker.sandboxOptions) {
+      return;
+    }
+    const fs = yield* FileSystem.FileSystem;
+    const mainTsPath = join(configDir, mainFilename);
+
+    const exists = yield* fs
+      .exists(mainTsPath)
+      .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
+    if (!exists) {
+      return;
+    }
+
+    const content = yield* fs
+      .readFileString(mainTsPath)
+      .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
+
+    const provider = sandboxProvider.name;
+    const importRe = new RegExp(
+      `^import \\{ ${provider} \\} from "@ai-hero/sandcastle/sandboxes/${provider}";$`,
+      "m",
+    );
+    if (!importRe.test(content)) {
+      return yield* new InitError({
+        message: `Cannot apply ${issueTracker.label} sandbox options: ${mainFilename} has no ${provider} import.`,
+      });
+    }
+
+    const updated = content
+      .replace(importRe, (line) => `${line}\n\n${issueTracker.sandboxOptions}`)
+      .replaceAll(
+        new RegExp(`\\b${provider}\\(\\)`, "g"),
+        `${provider}(sandboxOptions)`,
+      );
+
+    yield* fs
+      .writeFileString(mainTsPath, updated)
+      .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
   });
 
 /**
@@ -821,12 +1007,12 @@ const rewriteMainTs = (
  */
 const rewritePromptFiles = (
   configDir: string,
-): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+): Effect.Effect<void, InitError, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const files = yield* fs
       .readDirectory(configDir)
-      .pipe(Effect.mapError((e) => new Error(e.message)));
+      .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
     const mdFiles = files.filter((f) => f.endsWith(".md"));
     yield* Effect.all(
       mdFiles.map((f) =>
@@ -834,12 +1020,16 @@ const rewritePromptFiles = (
           const filePath = join(configDir, f);
           const content = yield* fs
             .readFileString(filePath)
-            .pipe(Effect.mapError((e) => new Error(e.message)));
-          const updated = content.replace(/ --label Sandcastle/g, "");
+            .pipe(
+              Effect.mapError((e) => new InitError({ message: e.message })),
+            );
+          const updated = content.replaceAll(" --label Sandcastle", "");
           if (updated !== content) {
             yield* fs
               .writeFileString(filePath, updated)
-              .pipe(Effect.mapError((e) => new Error(e.message)));
+              .pipe(
+                Effect.mapError((e) => new InitError({ message: e.message })),
+              );
           }
         }),
       ),
@@ -861,10 +1051,13 @@ const isTextFile = (filename: string): boolean => {
     filename === "Dockerfile" ||
     filename === "Containerfile" ||
     filename === ".gitignore"
-  )
+  ) {
     return true;
+  }
   const dotIdx = filename.lastIndexOf(".");
-  if (dotIdx === -1) return false;
+  if (dotIdx === -1) {
+    return false;
+  }
   return TEXT_FILE_EXTENSIONS.has(filename.slice(dotIdx));
 };
 
@@ -875,25 +1068,27 @@ const isTextFile = (filename: string): boolean => {
 const substituteTemplateArgs = (
   configDir: string,
   issueTracker: IssueTrackerEntry,
-): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+): Effect.Effect<void, InitError, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const files = yield* fs
       .readDirectory(configDir)
-      .pipe(Effect.mapError((e) => new Error(e.message)));
-    const textFiles = files.filter(isTextFile);
+      .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
+    const textFiles = files.filter((f) => isTextFile(f));
     yield* Effect.all(
       textFiles.map((f) =>
         Effect.gen(function* () {
           const filePath = join(configDir, f);
           let content = yield* fs
             .readFileString(filePath)
-            .pipe(Effect.mapError((e) => new Error(e.message)));
+            .pipe(
+              Effect.mapError((e) => new InitError({ message: e.message })),
+            );
           const original = content;
           for (const [key, value] of Object.entries(
             issueTracker.templateArgs,
           )) {
-            content = content.replace(
+            content = content.replaceAll(
               new RegExp(`\\{\\{${key}\\}\\}`, "g"),
               value,
             );
@@ -901,7 +1096,9 @@ const substituteTemplateArgs = (
           if (content !== original) {
             yield* fs
               .writeFileString(filePath, content)
-              .pipe(Effect.mapError((e) => new Error(e.message)));
+              .pipe(
+                Effect.mapError((e) => new InitError({ message: e.message })),
+              );
           }
         }),
       ),
@@ -915,7 +1112,19 @@ const substituteTemplateArgs = (
  * the tracker by editing the scaffolded files in place. The build command is
  * provider-parameterized so it names the actual CLI namespace (docker/podman).
  */
-const buildSetupIssueTrackerDoc = (cliNamespace: string): string =>
+/**
+ * The `sandcastle <provider> build-image` command that builds the image the
+ * scaffolded main file runs, including `--image-name` when one was chosen.
+ */
+export const buildImageShellCommand = (
+  sandboxProvider: SandboxProviderEntry,
+  imageName?: string,
+): string =>
+  `sandcastle ${sandboxProvider.cliNamespace} build-image${
+    imageName === undefined ? "" : ` --image-name ${imageName}`
+  }`;
+
+const buildSetupIssueTrackerDoc = (buildCommand: string): string =>
   `# Set up your custom issue tracker
 
 You are a coding agent. Finish wiring up the **custom issue tracker** for this Sandcastle project. It was scaffolded in a deliberately broken-until-configured state: until you complete the steps below, every Sandcastle run hard-fails with a pointer back to this file.
@@ -964,7 +1173,7 @@ Work out, together with the user, the shell commands for:
 Once the files are wired up, build the sandbox image:
 
 \`\`\`
-sandcastle ${cliNamespace} build-image
+${buildCommand}
 \`\`\`
 
 ## 5. Verify
@@ -983,6 +1192,12 @@ export interface ScaffoldOptions {
   createLabel?: boolean;
   issueTracker?: IssueTrackerEntry;
   sandboxProvider?: SandboxProviderEntry;
+  /**
+   * Custom image name (`init --image-name`). When set, every sandbox factory
+   * call in the main file is scaffolded as `<provider>({ imageName })`.
+   * Omit to keep the provider's default, repo-scoped image name.
+   */
+  imageName?: string;
 }
 
 export interface ScaffoldResult {
@@ -997,55 +1212,44 @@ const detectMainFilename = (
   repoDir: string,
 ): Effect.Effect<string, never, FileSystem.FileSystem> =>
   Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const pkgPath = join(repoDir, "package.json");
-    const exists = yield* fs
-      .exists(pkgPath)
-      .pipe(Effect.orElseSucceed(() => false));
-    if (!exists) return "main.mts";
-    const content = yield* fs
-      .readFileString(pkgPath)
-      .pipe(Effect.orElseSucceed(() => ""));
-    try {
-      const pkg = JSON.parse(content) as Record<string, unknown>;
-      return pkg["type"] === "module" ? "main.ts" : "main.mts";
-    } catch {
-      return "main.mts";
-    }
+    const pkg = yield* readHostPackageJson(repoDir);
+    return Option.getOrUndefined(pkg)?.["type"] === "module"
+      ? "main.ts"
+      : "main.mts";
   });
 
 export const scaffold = (
   repoDir: string,
   options: ScaffoldOptions,
-): Effect.Effect<ScaffoldResult, Error, FileSystem.FileSystem> =>
+): Effect.Effect<ScaffoldResult, InitError, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const {
       agent,
       model,
       templateName = "blank",
       createLabel = true,
-      issueTracker = ISSUE_TRACKER_REGISTRY[0]!, // default: github-issues
-      sandboxProvider = SANDBOX_PROVIDER_REGISTRY[0]!, // default: docker
+      issueTracker = ISSUE_TRACKER_REGISTRY[0], // default: github-issues
+      sandboxProvider = SANDBOX_PROVIDER_REGISTRY[0], // default: docker
+      imageName,
     } = options;
     const fs = yield* FileSystem.FileSystem;
     const configDir = join(repoDir, ".sandcastle");
 
     const exists = yield* fs
       .exists(configDir)
-      .pipe(Effect.mapError((e) => new Error(e.message)));
+      .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
     if (exists) {
-      yield* Effect.fail(
-        new Error(
+      return yield* new InitError({
+        message:
           ".sandcastle/ directory already exists. Remove it first if you want to re-initialize.",
-        ),
-      );
+      });
     }
 
     const mainFilename = yield* detectMainFilename(repoDir);
 
     yield* fs
       .makeDirectory(configDir, { recursive: false })
-      .pipe(Effect.mapError((e) => new Error(e.message)));
+      .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
 
     const templateDir = yield* getTemplateDir(templateName);
 
@@ -1054,7 +1258,7 @@ export const scaffold = (
     if (issueTracker.envExample) {
       envExampleParts.push(issueTracker.envExample);
     }
-    const envExampleContent = envExampleParts.join("\n") + "\n";
+    const envExampleContent = `${envExampleParts.join("\n")}\n`;
 
     yield* Effect.all(
       [
@@ -1063,13 +1267,13 @@ export const scaffold = (
             join(configDir, sandboxProvider.containerfileName),
             agent.dockerfileTemplate,
           )
-          .pipe(Effect.mapError((e) => new Error(e.message))),
+          .pipe(Effect.mapError((e) => new InitError({ message: e.message }))),
         fs
           .writeFileString(join(configDir, ".gitignore"), GITIGNORE)
-          .pipe(Effect.mapError((e) => new Error(e.message))),
+          .pipe(Effect.mapError((e) => new InitError({ message: e.message }))),
         fs
           .writeFileString(join(configDir, ".env.example"), envExampleContent)
-          .pipe(Effect.mapError((e) => new Error(e.message))),
+          .pipe(Effect.mapError((e) => new InitError({ message: e.message }))),
         copyTemplateFiles(templateDir, configDir, mainFilename),
       ],
       { concurrency: "unbounded" },
@@ -1080,6 +1284,15 @@ export const scaffold = (
       configDir,
       agent,
       model,
+      sandboxProvider,
+      mainFilename,
+      imageName,
+    );
+
+    // Pass the issue tracker's sandbox options to every sandbox provider call
+    yield* applyIssueTrackerSandboxOptions(
+      configDir,
+      issueTracker,
       sandboxProvider,
       mainFilename,
     );
@@ -1100,9 +1313,11 @@ export const scaffold = (
       yield* fs
         .writeFileString(
           join(configDir, SETUP_ISSUE_TRACKER_DOC),
-          buildSetupIssueTrackerDoc(sandboxProvider.cliNamespace),
+          buildSetupIssueTrackerDoc(
+            buildImageShellCommand(sandboxProvider, imageName),
+          ),
         )
-        .pipe(Effect.mapError((e) => new Error(e.message)));
+        .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
     }
 
     return { mainFilename };

@@ -1,22 +1,39 @@
 /**
  * The ledger: what a world's runs left behind, in five sections. Any LEAK
- * line fails the verdict. Written to <world>/LEDGER.md.
+ * line fails the verdict. Only what can be tied to this world counts: other
+ * worlds and test runs share the machine. Each run writes a new
+ * <world>/LEDGER-<n>.md.
  */
-import { existsSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import {
+  closeSync,
+  existsSync,
+  openSync,
+  readdirSync,
+  readSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join, relative } from "node:path";
+import {
+  attributeImage,
+  ledgerFileName,
+  sharedTmpEntryIsWorlds,
+} from "./attribution.ts";
 import { REPO_ROOT, sh } from "./lib.ts";
 import {
+  allWorldSpans,
   checkoutStatus,
+  imageCreated,
   listContainers,
   listImages,
   listTmpEntries,
   observations,
   remoteRefs,
   worldContainer,
-  type Engine,
-  type World,
+  worldTmp,
 } from "./world.ts";
+import type { Engine, World } from "./world.ts";
 
 interface Section {
   readonly title: string;
@@ -99,7 +116,7 @@ const worktrees = (world: World): Section => {
   return {
     title: "(b) Leftover worktrees",
     leaks,
-    notes: leaks.length ? [] : ["none"],
+    notes: leaks.length > 0 ? [] : ["none"],
   };
 };
 
@@ -115,17 +132,59 @@ const containersAndImages = (world: World): Section => {
     else notes.push(`container ${c} is not this world's (no mount inside it)`);
   }
   notes.push(`containers this world started: ${observed.size}`);
+  const others = allWorldSpans();
+  const now = new Date().toISOString();
   for (const img of listImages()) {
     if (world.baseline.images.includes(img)) continue;
-    const ref = img.slice(img.indexOf(":") + 1, img.lastIndexOf("@"));
-    if (ref.includes(world.runId))
-      notes.push(`image ${img}: this world's, cleanup removes it`);
-    else if (/^(localhost\/)?sandcastle:/.test(ref))
-      leaks.push(`image ${img}: built since the world began, outside its name`);
-    else
-      notes.push(`image ${img}: new since the world began, not attributable`);
+    const engine = img.slice(0, img.indexOf(":")) as Engine;
+    const ref = img.slice(engine.length + 1, img.lastIndexOf("@"));
+    const id = img.slice(img.lastIndexOf("@") + 1);
+    const a = attributeImage(
+      { ref, created: imageCreated(engine, id) },
+      world,
+      others,
+      now,
+    );
+    if (a.kind === "leak") leaks.push(`image ${img}: ${a.detail}`);
+    else if (a.kind === "other-world")
+      notes.push(`image ${img}: other world (${a.detail})`);
+    else notes.push(`image ${img}: ${a.detail}`);
   }
   return { title: "(c) Leftover containers and images", leaks, notes };
+};
+
+/** The first 64 KB of up to 20 files at `path` (a file, or a dir two levels deep). */
+const sampleContents = (path: string): string[] => {
+  const out: string[] = [];
+  const read = (p: string) => {
+    try {
+      const buf = Buffer.alloc(64 * 1024);
+      const fd = openSync(p, "r");
+      const n = readSync(fd, buf, 0, buf.length, 0);
+      closeSync(fd);
+      out.push(buf.subarray(0, n).toString("latin1"));
+    } catch {
+      // unreadable: says nothing either way
+    }
+  };
+  const walk = (p: string, depth: number) => {
+    if (out.length >= 20) return;
+    let st;
+    try {
+      st = statSync(p);
+    } catch {
+      return;
+    }
+    if (st.isFile()) return read(p);
+    if (!st.isDirectory() || depth > 2) return;
+    try {
+      for (const n of readdirSync(p)) walk(join(p, n), depth + 1);
+    } catch {
+      // unreadable
+    }
+  };
+  walk(path, 0);
+  return out;
 };
 
 /** Files under `dir`, relative, skipping noisy caches. */
@@ -145,10 +204,33 @@ const hostFiles = (world: World): Section => {
   for (const line of checkoutStatus()) {
     if (!before.has(line)) leaks.push(`Sandcastle checkout changed: ${line}`);
   }
+  // The world's verbs run with TMPDIR=<world>/tmp: whatever Sandcastle left
+  // there is this world's.
+  const tmp = worldTmp(world);
+  for (const entry of listTmpEntries(tmp))
+    leaks.push(
+      `temp entry ${relative(world.dir, join(tmp, entry))} left behind`,
+    );
+  // The shared $TMPDIR: other worlds and `npm test` write here too, so only
+  // an entry that names this world counts.
+  const others: string[] = [];
   for (const entry of listTmpEntries()) {
-    if (!world.baseline.tmpEntries.includes(entry))
-      leaks.push(`temp entry $TMPDIR/${entry} left behind`);
+    if (world.baseline.tmpEntries.includes(entry)) continue;
+    if (
+      sharedTmpEntryIsWorlds(
+        entry,
+        sampleContents(join(tmpdir(), entry)),
+        world,
+      )
+    )
+      leaks.push(`temp entry $TMPDIR/${entry} left behind (names this world)`);
+    else others.push(entry);
   }
+  notes.push(
+    others.length > 0
+      ? `${others.length} new Sandcastle temp entr${others.length === 1 ? "y" : "ies"} in the shared $TMPDIR, none naming this world (other worlds or test runs): ${others.slice(0, 5).join(", ")}${others.length > 5 ? ", …" : ""}`
+      : "no new Sandcastle temp entries in the shared $TMPDIR",
+  );
   // Anything under the real HOME named after this run came from inside it.
   const found = sh(
     "find",
@@ -182,7 +264,7 @@ const hostFiles = (world: World): Section => {
   for (const f of found) leaks.push(`real HOME: ${f}`);
   const home = filesUnder(world.home);
   notes.push(
-    home.length
+    home.length > 0
       ? `written to the world's HOME (a user's ~ would get these):\n${home.map((f) => `      ~/${f}`).join("\n")}`
       : "nothing written to the world's HOME",
   );
@@ -205,8 +287,10 @@ const envLeaks = (world: World): Section => {
   return { title: "(e) Env vars and keys in the sandbox", leaks, notes };
 };
 
-/** Run the ledger for `world`, write LEDGER.md, return the number of leaks. */
-export const runLedger = (world: World): { text: string; leaks: number } => {
+/** Run the ledger for `world`, write a new LEDGER-<n>.md, return the number of leaks. */
+export const runLedger = (
+  world: World,
+): { text: string; leaks: number; file: string } => {
   const sections = [
     gitState(world),
     worktrees(world),
@@ -229,7 +313,8 @@ export const runLedger = (world: World): { text: string; leaks: number } => {
     lines.push("");
   }
   lines.push(leaks === 0 ? "LEDGER: CLEAN" : `LEDGER: LEAK (${leaks})`);
-  const text = lines.join("\n") + "\n";
-  writeFileSync(join(world.dir, "LEDGER.md"), text);
-  return { text, leaks };
+  const text = `${lines.join("\n")}\n`;
+  const file = join(world.dir, ledgerFileName(readdirSync(world.dir)));
+  writeFileSync(file, text);
+  return { text, leaks, file };
 };

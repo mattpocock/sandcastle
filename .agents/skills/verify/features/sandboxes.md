@@ -34,8 +34,9 @@ Ledger section (e) checks the result against the world's canary and every undecl
 
 - **Entry:** `vercel({ token?, projectId?, teamId?, env?, … })` (`src/sandboxes/vercel.ts:134`).
 - **Peer dependency:** `@vercel/sandbox`, which a world lacks. Add it as a user would: `npm run -s verify -- sh <run> npm install @vercel/sandbox`, then commit.
-- **Auth:** the SDK reads `VERCEL_OIDC_TOKEN` or `VERCEL_TOKEN`. An OIDC token expires (about 12 hours), so a `doctor` "ready" can still fail at create; that failure is UNVERIFIABLE, naming the token.
+- **Auth:** `VERCEL_TOKEN` with `VERCEL_TEAM_ID` and `VERCEL_PROJECT_ID` (all three, read by Sandcastle; a token without the ids fails naming the missing one). With no token, the SDK reads `VERCEL_OIDC_TOKEN`. An OIDC token expires (about 12 hours), so a `doctor` "ready" can still fail at create; that failure is UNVERIFIABLE, naming the token.
 - **Behaviour:**
+  - With no `runtime`, the sandbox starts from Vercel's default image (`vercel/sandbox/universal` in `@vercel/sandbox` 3.x): user `ubuntu`, `HOME=/vercel`, and the `claude` CLI on the PATH. The named runtimes (`node24`, `node22`) ship no agent CLI, so install it in an `onSandboxReady` hook.
   - The repo lands at `/vercel/sandbox/workspace`, synced in and out as in [branch-strategies.md](branch-strategies.md).
   - The default strategy is merge-to-head.
   - `close()` calls `sandbox.stop()`. Nothing stops it on SIGINT.

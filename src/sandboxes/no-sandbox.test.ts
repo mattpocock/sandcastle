@@ -1,20 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { noSandbox } from "./no-sandbox.js";
 
-const itPosix = process.platform === "win32" ? it.skip : it;
-const itWindows = process.platform === "win32" ? it : it.skip;
+const isWindows = process.platform === "win32";
 
 describe("noSandbox", () => {
   it("returns a provider with tag 'none'", () => {
     const provider = noSandbox();
     expect(provider.tag).toBe("none");
     expect(provider.name).toBe("no-sandbox");
-    expect(provider.env).toEqual({});
+    expect(provider.env).toStrictEqual({});
   });
 
   it("merges env from options", () => {
     const provider = noSandbox({ env: { FOO: "bar" } });
-    expect(provider.env).toEqual({ FOO: "bar" });
+    expect(provider.env).toStrictEqual({ FOO: "bar" });
   });
 
   describe("handle", () => {
@@ -41,24 +40,29 @@ describe("noSandbox", () => {
       expect(result.exitCode).toBe(42);
     });
 
-    itPosix("exec supports onLine streaming callback", async () => {
-      const provider = noSandbox();
-      const handle = await provider.create({
-        worktreePath: process.cwd(),
-        env: {},
-      });
+    it.skipIf(isWindows)(
+      "exec supports onLine streaming callback",
+      async () => {
+        const provider = noSandbox();
+        const handle = await provider.create({
+          worktreePath: process.cwd(),
+          env: {},
+        });
 
-      const lines: string[] = [];
-      const result = await handle.exec('echo "line1"; echo "line2"', {
-        onLine: (line) => lines.push(line),
-      });
+        const lines: string[] = [];
+        const result = await handle.exec('echo "line1"; echo "line2"', {
+          onLine: (line) => {
+            lines.push(line);
+          },
+        });
 
-      expect(lines).toEqual(["line1", "line2"]);
-      expect(result.stdout).toContain("line1");
-      expect(result.exitCode).toBe(0);
-    });
+        expect(lines).toStrictEqual(["line1", "line2"]);
+        expect(result.stdout).toContain("line1");
+        expect(result.exitCode).toBe(0);
+      },
+    );
 
-    itPosix("exec respects cwd option", async () => {
+    it.skipIf(isWindows)("exec respects cwd option", async () => {
       const provider = noSandbox();
       const handle = await provider.create({
         worktreePath: "/tmp",
@@ -82,18 +86,21 @@ describe("noSandbox", () => {
       expect(result.exitCode).toBe(0);
     });
 
-    itPosix("exec passes env vars to spawned processes", async () => {
-      const provider = noSandbox();
-      const handle = await provider.create({
-        worktreePath: process.cwd(),
-        env: { MY_TEST_VAR: "sandcastle_test_value" },
-      });
+    it.skipIf(isWindows)(
+      "exec passes env vars to spawned processes",
+      async () => {
+        const provider = noSandbox();
+        const handle = await provider.create({
+          worktreePath: process.cwd(),
+          env: { MY_TEST_VAR: "sandcastle_test_value" },
+        });
 
-      const result = await handle.exec("echo $MY_TEST_VAR");
-      expect(result.stdout.trim()).toBe("sandcastle_test_value");
-    });
+        const result = await handle.exec("echo $MY_TEST_VAR");
+        expect(result.stdout.trim()).toBe("sandcastle_test_value");
+      },
+    );
 
-    itWindows(
+    it.runIf(isWindows)(
       "exec passes env vars to spawned processes (cmd.exe)",
       async () => {
         // Doubles as the regression test for issue #800: `%VAR%` only expands
@@ -111,7 +118,7 @@ describe("noSandbox", () => {
       },
     );
 
-    itPosix(
+    it.skipIf(isWindows)(
       "bounds streamed stdout to the configured tail without dropping live lines",
       async () => {
         const provider = noSandbox({ maxOutputTailChars: 100 });
@@ -123,15 +130,19 @@ describe("noSandbox", () => {
         const lines: string[] = [];
         const result = await handle.exec(
           'for i in $(seq 1 5000); do echo "line-$i"; done',
-          { onLine: (line) => lines.push(line) },
+          {
+            onLine: (line) => {
+              lines.push(line);
+            },
+          },
         );
 
         // The process survives and exits cleanly — no RangeError crash.
         expect(result.exitCode).toBe(0);
         // Every line is delivered live to onLine, regardless of the tail bound.
-        expect(lines.length).toBe(5000);
+        expect(lines).toHaveLength(5000);
         expect(lines[0]).toBe("line-1");
-        expect(lines[lines.length - 1]).toBe("line-5000");
+        expect(lines.at(-1)).toBe("line-5000");
         // The returned stdout is bounded to the configured tail.
         expect(result.stdout.length).toBeLessThanOrEqual(100);
         // ...and it is the tail, so the most recent line is present.
@@ -139,25 +150,28 @@ describe("noSandbox", () => {
       },
     );
 
-    itPosix("bounds streamed stderr to the configured tail", async () => {
-      const provider = noSandbox({ maxOutputTailChars: 100 });
-      const handle = await provider.create({
-        worktreePath: process.cwd(),
-        env: {},
-      });
+    it.skipIf(isWindows)(
+      "bounds streamed stderr to the configured tail",
+      async () => {
+        const provider = noSandbox({ maxOutputTailChars: 100 });
+        const handle = await provider.create({
+          worktreePath: process.cwd(),
+          env: {},
+        });
 
-      // onLine selects the streaming branch; stderr is accumulated there too.
-      const result = await handle.exec(
-        'for i in $(seq 1 5000); do echo "err-$i" >&2; done',
-        { onLine: () => {} },
-      );
+        // onLine selects the streaming branch; stderr is accumulated there too.
+        const result = await handle.exec(
+          'for i in $(seq 1 5000); do echo "err-$i" >&2; done',
+          { onLine: () => {} },
+        );
 
-      expect(result.exitCode).toBe(0);
-      // The returned stderr is bounded to the configured tail...
-      expect(result.stderr.length).toBeLessThanOrEqual(100);
-      // ...and it is the tail, so the most recent output is present.
-      expect(result.stderr).toContain("err-5000");
-    });
+        expect(result.exitCode).toBe(0);
+        // The returned stderr is bounded to the configured tail...
+        expect(result.stderr.length).toBeLessThanOrEqual(100);
+        // ...and it is the tail, so the most recent output is present.
+        expect(result.stderr).toContain("err-5000");
+      },
+    );
 
     it("close is a no-op and does not throw", async () => {
       const provider = noSandbox();

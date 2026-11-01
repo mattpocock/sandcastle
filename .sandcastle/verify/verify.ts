@@ -7,7 +7,7 @@
  *   npm run -s verify -- sandcastle <run> …    the world's installed `sandcastle` CLI
  *   npm run -s verify -- tsx <run> <file> …    a TypeScript file, e.g. .sandcastle/main.ts
  *   npm run -s verify -- sh <run> <cmd> …      any command, inside the world
- *   npm run -s verify -- ledger <run>          what the runs left behind; exit 1 on a leak
+ *   npm run -s verify -- ledger <run>          what the runs left behind (LEDGER-<n>.md); exit 1 on a leak
  *   npm run -s verify -- cleanup <run>|--all   remove the world's containers, images, worktrees
  *   npm run -s verify -- dir <run>             the world's directory
  */
@@ -16,7 +16,7 @@ import { join } from "node:path";
 import {
   AGENT_KEYS,
   AGENTS,
-  cheapModel,
+  cheapAgentCall,
   keysFile,
   loadKeys,
   missingKeys,
@@ -41,9 +41,9 @@ import {
   runInWorld,
   saveWorld,
   worldContainer,
-  type Engine,
-  type World,
+  worldTmp,
 } from "./world.ts";
+import type { Engine, World } from "./world.ts";
 
 loadKeys();
 const TSX = join(REPO_ROOT, "node_modules", ".bin", "tsx");
@@ -80,17 +80,19 @@ const doctor = (world?: World): number => {
     const cmdOk = !need.command || works(need.command);
     const why = [
       ...(cmdOk ? [] : [`\`${need.command!.join(" ")}\` fails`]),
-      ...(missing.length ? [`missing ${missing.join(", ")}`] : []),
+      ...(missing.length > 0 ? [`missing ${missing.join(", ")}`] : []),
     ];
     console.log(
-      `  ${s.padEnd(8)} ${why.length ? `UNVERIFIABLE (${why.join("; ")})` : "ready"}`,
+      `  ${s.padEnd(8)} ${why.length > 0 ? `UNVERIFIABLE (${why.join("; ")})` : "ready"}`,
     );
   }
-  console.log("\nagents (cheapest model; VERIFY_MODEL overrides):");
+  console.log(
+    "\nagents (factory call on the cheapest model; VERIFY_MODEL swaps the model and drops its options):",
+  );
   for (const a of AGENTS) {
     const missing = missingKeys(AGENT_KEYS[a]);
     console.log(
-      `  ${a.padEnd(10)} ${cheapModel(a).padEnd(28)} ${missing.length ? `UNVERIFIABLE (missing ${missing.join(", ")})` : "ready"}`,
+      `  ${a.padEnd(10)} ${cheapAgentCall(a).padEnd(56)} ${missing.length > 0 ? `UNVERIFIABLE (missing ${missing.join(", ")})` : "ready"}`,
     );
   }
   console.log(
@@ -132,19 +134,19 @@ const cleanup = (world: World): void => {
     sh("git", ["worktree", "remove", "--force", p], { cwd: world.project });
     removed.push(`worktree ${p}`);
   }
-  for (const p of [world.project, world.remote, world.home])
+  for (const p of [world.project, world.remote, world.home, worldTmp(world)])
     rmSync(p, { recursive: true, force: true });
   for (const f of sh("ls", [world.dir]).stdout.split("\n")) {
     if (f.endsWith(".tgz")) rmSync(join(world.dir, f), { force: true });
   }
-  removed.push("project, remote, home and packed build");
+  removed.push("project, remote, home, tmp and packed build");
   world.cleanedAt = new Date().toISOString();
   saveWorld(world);
   console.log(
     `cleanup ${world.runId}:\n${removed.map((r) => `  removed ${r}`).join("\n")}`,
   );
   console.log(
-    `  kept the evidence: ${world.dir} (world.json, logs/, observed.jsonl, LEDGER.md)`,
+    `  kept the evidence: ${world.dir} (world.json, logs/, observed.jsonl, LEDGER-*.md)`,
   );
 };
 
@@ -166,8 +168,9 @@ const main = async (): Promise<number> => {
       console.log(world.runId);
       return 0;
     }
-    case "doctor":
+    case "doctor": {
       return doctor(rest[0] ? loadWorld(rest[0]) : undefined);
+    }
     case "sandcastle":
     case "tsx":
     case "sh": {
@@ -194,11 +197,12 @@ const main = async (): Promise<number> => {
         );
       return verb === "tsx"
         ? runInWorld(world, "tsx", TSX, args)
-        : runInWorld(world, "sh", args[0]!, args.slice(1));
+        : runInWorld(world, "sh", args[0], args.slice(1));
     }
     case "ledger": {
-      const { text, leaks } = runLedger(loadWorld(rest[0]));
+      const { text, leaks, file } = runLedger(loadWorld(rest[0]));
       console.log(text);
+      console.error(`[verify] ledger written to ${file}`);
       return leaks === 0 ? 0 : 1;
     }
     case "cleanup": {
@@ -207,14 +211,16 @@ const main = async (): Promise<number> => {
       for (const w of worlds) cleanup(w);
       return 0;
     }
-    case "dir":
+    case "dir": {
       console.log(loadWorld(rest[0]).dir);
       return 0;
-    default:
+    }
+    default: {
       console.error(
         "verbs: world | doctor [run] | sandcastle <run> … | tsx <run> <file> … | sh <run> <cmd> … | ledger <run> | cleanup <run>|--all | dir <run>",
       );
       return 2;
+    }
   }
 };
 

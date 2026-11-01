@@ -7,15 +7,16 @@
  */
 
 import { execSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { readFile, unlink, writeFile, mkdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Writable } from "node:stream";
-import {
-  createIsolatedSandboxProvider,
-  type ExecResult,
-  type IsolatedSandboxHandle,
-  type IsolatedSandboxProvider,
+import { createIsolatedSandboxProvider } from "../SandboxProvider.js";
+import type {
+  ExecResult,
+  IsolatedSandboxHandle,
+  IsolatedSandboxProvider,
 } from "../SandboxProvider.js";
 import { BoundedTail, MAX_TAIL_CHARS } from "../boundedTail.js";
 
@@ -32,9 +33,10 @@ export interface VercelOptions {
   /**
    * Vercel access token.
    *
-   * Falls back to the SDK's default auth behavior, which reads
-   * `VERCEL_OIDC_TOKEN` (recommended for Vercel-hosted environments) or
-   * `VERCEL_TOKEN` from the environment.
+   * Falls back to the `VERCEL_TOKEN` environment variable. A token needs a
+   * team and project id too (`teamId`/`VERCEL_TEAM_ID`,
+   * `projectId`/`VERCEL_PROJECT_ID`). With no token at all, the SDK's OIDC
+   * auth applies, which reads `VERCEL_OIDC_TOKEN`.
    */
   readonly token?: string;
 
@@ -78,7 +80,11 @@ export interface VercelOptions {
 
   /**
    * The runtime of the sandbox (e.g. `"node24"`, `"node22"`, `"python3.13"`).
-   * Defaults to `"node24"`.
+   *
+   * Omit it to get Vercel's default image (`vercel/sandbox/universal` as of
+   * `@vercel/sandbox` 3.x), which ships coding agent CLIs such as `claude`.
+   * The named runtimes ship none: install your agent's CLI in an
+   * `onSandboxReady` hook.
    */
   readonly runtime?: string;
 
@@ -90,11 +96,13 @@ export interface VercelOptions {
 
   /**
    * Vercel project ID to associate sandbox operations with.
+   * Falls back to the `VERCEL_PROJECT_ID` environment variable when a token is used.
    */
   readonly projectId?: string;
 
   /**
    * Vercel team ID to associate sandbox operations with.
+   * Falls back to the `VERCEL_TEAM_ID` environment variable when a token is used.
    */
   readonly teamId?: string;
 
@@ -122,6 +130,68 @@ export interface VercelOptions {
    */
   readonly maxOutputTailChars?: number;
 }
+
+/**
+ * Resolve the auth params for `Sandbox.create()`.
+ *
+ * `@vercel/sandbox` only accepts a token as an explicit param, together with
+ * `teamId` and `projectId` (all three or none); otherwise it falls back to
+ * OIDC. So read `VERCEL_TOKEN`, `VERCEL_TEAM_ID` and `VERCEL_PROJECT_ID`
+ * here, explicit options first.
+ */
+const resolveVercelAuth = (
+  options: VercelOptions | undefined,
+): { token?: string; teamId?: string; projectId?: string } => {
+  const { env } = process;
+  const token = options?.token || env.VERCEL_TOKEN || undefined;
+
+  if (!token) {
+    // No token: the SDK's OIDC flow, which may use team/project ids as hints.
+    return {
+      ...(options?.teamId ? { teamId: options.teamId } : {}),
+      ...(options?.projectId ? { projectId: options.projectId } : {}),
+    };
+  }
+
+  const teamId = options?.teamId || env.VERCEL_TEAM_ID || undefined;
+  const projectId = options?.projectId || env.VERCEL_PROJECT_ID || undefined;
+  const missing = [
+    teamId ? null : "VERCEL_TEAM_ID (or the teamId option)",
+    projectId ? null : "VERCEL_PROJECT_ID (or the projectId option)",
+  ].filter((name): name is string => name !== null);
+
+  if (missing.length > 0) {
+    const source = options?.token ? "the token option" : "VERCEL_TOKEN";
+    throw new Error(
+      `vercel(): ${source} is set, but a Vercel token also needs a team and project id. ` +
+        `Missing: ${missing.join(", ")}.`,
+    );
+  }
+
+  return { token, teamId, projectId };
+};
+
+/**
+ * Run the setup of a sandbox that `create()` has just made. If it fails, stop
+ * the sandbox before rethrowing: no handle exists yet, so neither Sandcastle's
+ * teardown nor `close()` can reach it, and it would run until Vercel's
+ * timeout.
+ */
+const setUpOrStop = async (
+  sandbox: { stop: () => Promise<unknown> },
+  setUp: () => Promise<void>,
+): Promise<void> => {
+  try {
+    await setUp();
+  } catch (error) {
+    try {
+      await sandbox.stop();
+    } catch {
+      // Report the setup error, which says why create() failed.
+    }
+    throw error;
+  }
+};
 
 /**
  * Create a Vercel isolated sandbox provider.
@@ -159,17 +229,25 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
       // Merge provider env with Sandcastle env
       createParams.env = createOptions.env;
 
-      // Auth: pass token and team/project IDs if provided
-      if (options?.token) createParams.token = options.token;
-      if (options?.projectId) createParams.projectId = options.projectId;
-      if (options?.teamId) createParams.teamId = options.teamId;
+      Object.assign(createParams, resolveVercelAuth(options));
 
-      const sandbox = await Sandbox.create(
-        createParams as Parameters<typeof Sandbox.create>[0],
-      );
+      const sandbox = await Sandbox.create(createParams);
 
-      // Ensure worktree directory exists
-      await sandbox.mkDir(VERCEL_REPO_PATH);
+      // Create the worktree folder with its parents: Vercel's default image
+      // has no /vercel/sandbox (its user's home is /vercel), and `mkDir`
+      // isn't recursive.
+      await setUpOrStop(sandbox, async () => {
+        const mkdirResult = await sandbox.runCommand({
+          cmd: "mkdir",
+          args: ["-p", VERCEL_REPO_PATH],
+        });
+        if (mkdirResult.exitCode !== 0) {
+          const stderr = await mkdirResult.stderr();
+          throw new Error(
+            `vercel(): could not create ${VERCEL_REPO_PATH}: ${stderr.trim()}`,
+          );
+        }
+      });
 
       const handle: IsolatedSandboxHandle = {
         worktreePath: VERCEL_REPO_PATH,
@@ -180,16 +258,31 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
             onLine?: (line: string) => void;
             cwd?: string;
             sudo?: boolean;
+            stdin?: string;
           },
         ): Promise<ExecResult> => {
+          let effectiveCommand = command;
+          if (opts?.stdin !== undefined) {
+            // `runCommand` gives a command no stdin unless it is detached:
+            // the command reads EOF. So write stdin to a file in the sandbox
+            // and redirect it in (a file, not an argument, keeps clear of the
+            // per-arg size limit). The redirect opens the file before the
+            // group runs, so the group can delete it straight away and leave
+            // nothing behind.
+            const stdinPath = `/tmp/sandcastle-stdin-${randomUUID()}`;
+            await sandbox.writeFiles([
+              { path: stdinPath, content: Buffer.from(opts.stdin) },
+            ]);
+            effectiveCommand = `{ rm -f ${stdinPath}; ${command}\n} < ${stdinPath}`;
+          }
           if (opts?.onLine) {
-            const onLine = opts.onLine;
+            const { onLine } = opts;
             const stdoutTail = new BoundedTail(maxOutputTailChars, "\n");
             const stderrTail = new BoundedTail(maxOutputTailChars, "");
             let partial = "";
 
             const stdoutWritable = new Writable({
-              write(chunk, _encoding, callback) {
+              write(chunk: Buffer, _encoding, callback) {
                 const text = partial + chunk.toString();
                 const lines = text.split("\n");
                 partial = lines.pop() ?? "";
@@ -210,7 +303,7 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
             });
 
             const stderrWritable = new Writable({
-              write(chunk, _encoding, callback) {
+              write(chunk: Buffer, _encoding, callback) {
                 stderrTail.push(chunk.toString());
                 callback();
               },
@@ -218,7 +311,7 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
 
             const result = await sandbox.runCommand({
               cmd: "sh",
-              args: ["-c", command],
+              args: ["-c", effectiveCommand],
               cwd: opts?.cwd ?? VERCEL_REPO_PATH,
               stdout: stdoutWritable,
               stderr: stderrWritable,
@@ -234,7 +327,7 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
 
           const result = await sandbox.runCommand({
             cmd: "sh",
-            args: ["-c", command],
+            args: ["-c", effectiveCommand],
             cwd: opts?.cwd ?? VERCEL_REPO_PATH,
             ...(opts?.sudo ? { sudo: true } : {}),
           });

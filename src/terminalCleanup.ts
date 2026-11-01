@@ -12,7 +12,7 @@
  */
 
 /** Escape sequence to show the cursor (DECTCEM). */
-export const SHOW_CURSOR = "\x1b[?25h";
+export const SHOW_CURSOR = "\u001B[?25h";
 
 /**
  * Creates a synchronous exit handler that restores terminal state.

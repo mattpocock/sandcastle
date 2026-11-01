@@ -39,7 +39,10 @@
     "postbuild": "rm -rf dist/templates && cp -r src/templates dist/templates && node scripts/check-public-types-effect-free.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsgo --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tests/tsconfig.json",
+    "lint": "tsc --noEmit -p scripts/tsconfig.json && tsx scripts/lint-ratchet.ts",
+    "lint:shrink": "tsx scripts/lint-ratchet.ts --shrink",
+    "lint:report": "tsx scripts/lint-ratchet.ts --report",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepare": "husky",
@@ -48,7 +51,9 @@
     "test-podman": "npm run build && tsx --env-file=.sandcastle/.env .sandcastle/test-podman.ts",
     "test-vercel": "npm run build && tsx --env-file=.sandcastle/.env .sandcastle/test-vercel.ts",
     "verify": "tsx .sandcastle/verify/verify.ts",
-    "verify:world": "npm run build >/dev/null && tsx .sandcastle/verify/verify.ts world"
+    "verify:world": "npm run build >/dev/null && tsx .sandcastle/verify/verify.ts world",
+    "coverage:gate": "tsx scripts/coverage-gate.ts",
+    "api:report": "tsx scripts/api-report.ts"
   },
   "keywords": [
     "cli",
@@ -65,21 +70,27 @@
   "license": "MIT",
   "devDependencies": {
     "@changesets/cli": "^2.30.0",
-    "@daytona/sdk": "^0.164.0",
+    "@daytona/sdk": "^0.227.0",
     "@effect/cli": "^0.74.0",
+    "@effect/language-service": "0.87.5",
     "@effect/platform": "^0.95.0",
     "@effect/platform-node": "^0.105.0",
     "@effect/printer": "^0.48.0",
     "@effect/printer-ansi": "^0.48.0",
+    "@microsoft/api-extractor": "^7.60.1",
     "@types/node": "^25.5.0",
-    "@typescript/native-preview": "^7.0.0-dev.20260317.1",
+    "@typescript/native": "npm:typescript@7.0.2",
+    "@vitest/coverage-v8": "^3.2.4",
+    "dependency-cruiser": "^18.7.0",
     "effect": "^3.20.0",
     "husky": "^9.1.7",
     "lint-staged": "^15.5.1",
+    "oxlint": "1.90.0",
+    "oxlint-tsgolint": "7.0.2005",
     "prettier": "^3.5.3",
     "tsup": "^8.5.1",
     "tsx": "^4.21.0",
-    "typescript": "^6.0.3",
+    "typescript": "npm:@typescript/typescript6@6.0.2",
     "vitest": "^3.2.0",
     "zod": "^4.4.3"
   },
@@ -87,7 +98,7 @@
     "@clack/prompts": "^1.1.0"
   },
   "peerDependencies": {
-    "@daytona/sdk": "^0.164.0",
+    "@daytona/sdk": ">=0.164.0 <1.0.0",
     "@vercel/sandbox": ">=1.0.0"
   },
   "peerDependenciesMeta": {

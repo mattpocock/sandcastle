@@ -14,7 +14,7 @@ declare module "@vercel/sandbox" {
       stderr(): Promise<string>;
     }>;
     writeFiles(
-      files: Array<{ path: string; content: string | Buffer }>,
+      files: { path: string; content: string | Buffer }[],
     ): Promise<void>;
     readFileToBuffer(options: { path: string }): Promise<Buffer | null>;
     stop(): Promise<void>;
