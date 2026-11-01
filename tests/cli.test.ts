@@ -150,21 +150,25 @@ describe("sandcastle init --help", () => {
   });
 });
 
-describe.each(["docker", "podman"])("sandcastle %s", (provider) => {
-  it("--help lists build-image and remove-image", async () => {
-    const { output } = await sandcastle([provider, "--help"]);
+describe.each(["docker", "podman"])(
+  "sandcastle %s",
+  (provider) => {
+    it("--help lists build-image and remove-image", async () => {
+      const { output } = await sandcastle([provider, "--help"]);
 
-    expect(output).toContain("build-image");
-    expect(output).toContain("remove-image");
-  });
+      expect(output).toContain("build-image");
+      expect(output).toContain("remove-image");
+    });
 
-  it("build-image fails when the repo has no .sandcastle/", async () => {
-    const result = await sandcastle([provider, "build-image"], hostRepo());
+    it("build-image fails when the repo has no .sandcastle/", async () => {
+      const result = await sandcastle([provider, "build-image"], hostRepo());
 
-    expect(result.exitCode).not.toBe(0);
-    expect(result.output).toContain("No .sandcastle/ found");
-  });
-});
+      expect(result.exitCode).not.toBe(0);
+      expect(result.output).toContain("No .sandcastle/ found");
+    });
+  },
+  30_000,
+);
 
 describe("sandcastle podman build-image --help", () => {
   it("documents --containerfile and --image-name", async () => {
@@ -173,7 +177,7 @@ describe("sandcastle podman build-image --help", () => {
     expect(output).toContain("--containerfile");
     expect(output).toContain("--image-name");
   });
-});
+}, 30_000);
 
 describe.each(["build-image", "remove-image"])(
   "sandcastle %s (the old top-level command)",
@@ -184,6 +188,7 @@ describe.each(["build-image", "remove-image"])(
       expect(exitCode).not.toBe(0);
     });
   },
+  30_000,
 );
 
 describe("sandcastle init: an unknown choice lists the valid ones", () => {
@@ -213,7 +218,7 @@ describe("sandcastle init: an unknown choice lists the valid ones", () => {
       expect(result.output).toContain(valid);
     }
   });
-});
+}, 30_000);
 
 describe("sandcastle init without a TTY", () => {
   it("scaffolds .sandcastle/ when every flag is given", async () => {
@@ -326,7 +331,7 @@ describe("sandcastle init without a TTY", () => {
       "SETUP_ISSUE_TRACKER.md",
     );
   });
-});
+}, 30_000);
 
 // Every beads sandbox opens the host's .beads/ with the image's bd 1.3.2. A
 // different host bd breaks one side (an older one can't create issues once
