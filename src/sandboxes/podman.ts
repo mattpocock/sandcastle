@@ -20,6 +20,7 @@ import type {
 } from "../SandboxProvider.js";
 import type { MountConfig } from "../MountConfig.js";
 import type { SelinuxLabel } from "../mountUtils.js";
+import type { LinuxCapability } from "../LinuxCapability.js";
 import {
   defaultImageName,
   resolveUserMounts,
@@ -28,6 +29,8 @@ import {
 } from "../mountUtils.js";
 import { BoundedTail, MAX_TAIL_CHARS } from "../boundedTail.js";
 import { registerShutdown } from "../shutdownRegistry.js";
+
+export type { LinuxCapability } from "../LinuxCapability.js";
 
 export interface PodmanOptions {
   /** Podman image name (default: derived from repo directory name). */
@@ -94,6 +97,20 @@ export interface PodmanOptions {
    * When omitted, no `--group-add` flags are added.
    */
   readonly groups?: readonly (string | number)[];
+  /**
+   * Linux capabilities to drop from the container, via `--cap-drop`.
+   *
+   * Names are written without the `CAP_` prefix, as `podman run` accepts them,
+   * and a misspelt name is a type error:
+   *
+   * - `["NET_RAW"]` → `--cap-drop NET_RAW` (no raw sockets, so no `ping`)
+   * - `["NET_RAW", "MKNOD"]` → `--cap-drop NET_RAW --cap-drop MKNOD`
+   * - `["ALL"]` → `--cap-drop ALL` (drop every capability)
+   *
+   * When omitted, no `--cap-drop` flags are added and the container keeps
+   * Podman's default capability set.
+   */
+  readonly capDrop?: readonly LinuxCapability[];
   /**
    * Host devices to expose to the container, via `--device`.
    *
@@ -207,6 +224,10 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
         "--group-add",
         String(g),
       ]);
+      const capDropArgs = (options?.capDrop ?? []).flatMap((cap) => [
+        "--cap-drop",
+        cap,
+      ]);
       const deviceArgs = (options?.devices ?? []).flatMap((d) => [
         "--device",
         d,
@@ -227,6 +248,7 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
             ...usernsArgs,
             ...networkArgs,
             ...groupArgs,
+            ...capDropArgs,
             ...deviceArgs,
             ...cpusArgs,
             "-w",
