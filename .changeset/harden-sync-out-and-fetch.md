@@ -1,5 +1,0 @@
----
-"@ai-hero/sandcastle": patch
----
-
-Security: with an isolated sandbox provider (`vercel()`, `daytona()`, or a custom `createIsolatedSandboxProvider`), a sandboxed agent could make sync-out write files outside the host worktree, because the host trusted the file paths the sandbox reported. This is fixed. Sync-out now refuses an absolute path, a `..` segment, a path inside `.git`, a symlink on the host that leads outside the worktree, and a patch that would create a symlink pointing outside it, and fails with the new `SyncOutPathError` rather than skipping the file. Separately, for every provider, the `git fetch origin` Sandcastle runs when it reuses a worktree (and every other git command it runs on the host) could be made to run a program the repo chose, through a remote helper URL or a program planted on a `PATH` entry inside the repo or relative to it. Host git now ignores those `PATH` entries, runs `git` by absolute path, and only allows the `file`, `git`, `http`, `https` and `ssh` transports unless you set `GIT_ALLOW_PROTOCOL` yourself. Bind-mount providers (`docker()`, `podman()`) were not affected by the sync-out issue.
