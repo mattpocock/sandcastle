@@ -40,10 +40,14 @@ export const PARENT_GIT_SANDBOX_DIR = "/.sandcastle-parent-git";
 export const defaultImageName = (repoDir: string): string => {
   const dirName =
     repoDir
-      .replace(/[\\/]+$/, "")
-      .split(/[\\/]/)
+      .replace(/[\\/]+$/u, "")
+      .split(/[\\/]/u)
       .pop() ?? "local";
-  const sanitized = dirName.toLowerCase().replaceAll(/[^a-z0-9_.-]/g, "-");
+  // One dash per UTF-16 unit, as before the `u` flag, so the default image
+  // name for a directory with an astral character (e.g. an emoji) is unchanged.
+  const sanitized = dirName
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9_.-]/gu, (char) => "-".repeat(char.length));
   return `sandcastle:${sanitized || "local"}`;
 };
 
@@ -162,7 +166,7 @@ export const normalizeMounts = <
     // sandbox paths like /mnt/data or /home/agent/workspace), leave it as-is.
     // Otherwise, normalize it — Windows-style sandboxPaths (from resolveGitMounts
     // setting sandboxPath === hostPath) need remapping.
-    if (/^[A-Za-z]:[/\\]/.test(sandboxPath) || sandboxPath.includes("\\")) {
+    if (/^[A-Za-z]:[/\\]/u.test(sandboxPath) || sandboxPath.includes("\\")) {
       // This is a Windows-style path — remap it
       const normalizedSandboxPath = sandboxPath.replaceAll("\\", "/");
 
@@ -194,7 +198,7 @@ export const normalizeMounts = <
 export const parseGitdirPath = (
   gitdirPath: string,
 ): { parentGitDir: string; worktreeName: string } => {
-  const normalized = gitdirPath.replaceAll("\\", "/").replace(/\/+$/, "");
+  const normalized = gitdirPath.replaceAll("\\", "/").replace(/\/+$/u, "");
   const segments = normalized.split("/");
   const worktreeName = segments.pop() ?? ""; // <name>
   segments.pop(); // "worktrees"
@@ -278,7 +282,7 @@ export const patchGitMountsForWindows = (
     if (content === null) {
       return gitMounts;
     }
-    const gitdirPath = /^gitdir:\s*(.+)$/.exec(content)?.[1];
+    const gitdirPath = /^gitdir:\s*(.+)$/u.exec(content)?.[1];
     if (gitdirPath === undefined) {
       return gitMounts;
     }

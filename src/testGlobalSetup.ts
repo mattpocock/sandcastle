@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 /** The prefixes Sandcastle itself uses — keep in sync with the ledger. */
-export const SANDCASTLE_TMP_ENTRY = /^sandcastle-(bundle|git|copyin)-/;
+export const SANDCASTLE_TMP_ENTRY = /^sandcastle-(bundle|git|copyin)-/u;
 
 export default function setup(): () => void {
   const originalTmpdir = process.env.TMPDIR;
