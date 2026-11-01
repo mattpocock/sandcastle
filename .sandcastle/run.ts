@@ -15,7 +15,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     promptFile: "./.sandcastle/plan-prompt.md",
   });
 
-  const planMatch = plan.stdout.match(/<plan>([\s\S]*?)<\/plan>/);
+  const planMatch = plan.stdout.match(/<plan>([\s\S]*?)<\/plan>/u);
   if (!planMatch) {
     throw new Error(
       `Orchestrator did not produce a <plan> tag.\n\n${plan.stdout}`,
