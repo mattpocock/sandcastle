@@ -292,7 +292,7 @@ export const liveWorlds = (): World[] =>
         return undefined;
       }
     })
-    .filter((w): w is World => Boolean(w) && !w.cleanedAt);
+    .filter((w): w is World => w !== undefined && w.cleanedAt === undefined);
 
 // --- Running inside a world ------------------------------------------------------
 
