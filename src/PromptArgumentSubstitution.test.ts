@@ -2,7 +2,7 @@ import type { Layer } from "effect";
 import { Effect, Ref } from "effect";
 import { describe, expect, it } from "vitest";
 import { SilentDisplay } from "./Display.js";
-import type { DisplayEntry } from "./Display.js";
+import type { Display, DisplayEntry } from "./Display.js";
 import {
   substitutePromptArgs,
   validateNoArgsWithInlinePrompt,
@@ -28,7 +28,7 @@ describe("PromptArgumentSubstitution", () => {
   const run = (
     prompt: string,
     args: Record<string, string | number | boolean>,
-    layer: Layer.Layer<import("./Display.js").Display>,
+    layer: Layer.Layer<Display>,
   ) =>
     Effect.runPromise(
       substitutePromptArgs(prompt, args).pipe(Effect.provide(layer)),
@@ -37,7 +37,7 @@ describe("PromptArgumentSubstitution", () => {
   const runFail = async (
     prompt: string,
     args: Record<string, string | number | boolean>,
-    layer: Layer.Layer<import("./Display.js").Display>,
+    layer: Layer.Layer<Display>,
   ) =>
     Effect.runPromise(
       substitutePromptArgs(prompt, args).pipe(
