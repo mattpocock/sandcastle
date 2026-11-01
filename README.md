@@ -180,8 +180,6 @@ They don't protect against:
 - **Services on your host's localhost.** The network is open, and the sandbox can reach anything listening on `127.0.0.1`, such as a dev server or a local database.
 - **Process listing on macOS.** Seatbelt has no PID namespace. The agent can't signal your processes, and `ps`, `pgrep` and the process-list sysctl are blocked, but your processes aren't hidden the way they are in `bwrap()`'s own PID namespace. Paths outside the sandbox are visible as metadata: the agent can check that a path exists and read its size and timestamps, but not its contents.
 
-A known gap, being fixed before v1: if the Node process running Sandcastle is hard-killed (`SIGKILL`, the OOM killer), a native sandbox's processes may keep running, because nothing is left to kill them. `close()`, a normal exit, `SIGINT` (Ctrl-C) and `SIGTERM` still kill them ([#1295](https://github.com/mattpocock/sandcastle/issues/1295)).
-
 For an image-based sandbox, or a VM boundary on macOS and Windows, use `docker()` or `podman()`. For stronger isolation than a shared kernel, use a remote provider such as `vercel()`, which runs the agent in its own Firecracker microVM.
 
 ## API
