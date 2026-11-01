@@ -260,13 +260,13 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
           // Elevate by running as root through the engine, not a `sudo`
           // prefix: the image needs no sudo binary, and the whole command
           // (`a && b`, not just `a`) runs as root.
-          if (opts?.sudo) {
+          if (opts?.sudo === true) {
             args.push("--user", "0:0");
           }
           if (opts?.stdin !== undefined) {
             args.push("-i");
           }
-          if (opts?.cwd) {
+          if (opts?.cwd !== undefined && opts.cwd !== "") {
             args.push("-w", opts.cwd);
           }
           args.push(containerName, "sh", "-c", command);
@@ -337,13 +337,13 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
             // Allocate a pseudo-terminal when stdin looks like a TTY
             if (
               "isTTY" in opts.stdin &&
-              (opts.stdin as { isTTY?: boolean }).isTTY
+              (opts.stdin as { isTTY?: boolean }).isTTY === true
             ) {
               dockerArgs.push("-it");
             } else {
               dockerArgs.push("-i");
             }
-            if (opts.cwd) {
+            if (opts.cwd !== undefined && opts.cwd !== "") {
               dockerArgs.push("-w", opts.cwd);
             }
             dockerArgs.push(containerName, ...args);
