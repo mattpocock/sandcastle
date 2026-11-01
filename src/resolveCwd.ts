@@ -10,17 +10,30 @@ import { Data, Effect } from "effect";
  */
 export const DEFAULT_STATE_DIR = ".sandcastle";
 
+/** Each state dir an entry point resolved, mapped to the repo it serves. */
+const stateDirRepos = new Map<string, string>();
+
 /**
  * Resolve a `stateDir` option value against an anchor directory.
  *
  * - Relative value → joined to `anchor`.
  * - Absolute value → used verbatim (the anchor is ignored).
  *
- * Mirrors {@link resolveCwd}'s relative/absolute handling, but is a pure sync
- * path computation — it does not stat or validate the result.
+ * Mirrors {@link resolveCwd}'s relative/absolute handling. It does not stat or
+ * validate the result. Every entry point resolves its state dir through here
+ * once, so it also records that the state dir belongs to `anchor` (the host
+ * repo): the host git guard reads that back to recognise the managed worktrees
+ * under it (see {@link stateDirRepo}).
  */
-export const resolveStateDir = (anchor: string, stateDir: string): string =>
-  isAbsolute(stateDir) ? stateDir : join(anchor, stateDir);
+export const resolveStateDir = (anchor: string, stateDir: string): string => {
+  const resolved = isAbsolute(stateDir) ? stateDir : join(anchor, stateDir);
+  stateDirRepos.set(resolve(resolved), resolve(anchor));
+  return resolved;
+};
+
+/** The host repo a resolved state dir belongs to, if an entry point resolved it. */
+export const stateDirRepo = (stateDir: string): string | undefined =>
+  stateDirRepos.get(resolve(stateDir));
 
 /** The provided `cwd` path does not exist or is not a directory. */
 export class CwdError extends Data.TaggedError("CwdError")<{

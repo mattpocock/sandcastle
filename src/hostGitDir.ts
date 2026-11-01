@@ -8,6 +8,7 @@ import { lstat, readFile, realpath } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { Effect } from "effect";
 import { HostGitError } from "./errors.js";
+import { DEFAULT_STATE_DIR, stateDirRepo } from "./resolveCwd.js";
 
 const refusal = (args: readonly string[], message: string): HostGitError =>
   new HostGitError({
@@ -48,13 +49,25 @@ const statOf = (args: readonly string[], p: string) =>
     lstat(p, done);
   });
 
-/** A worktree Sandcastle created: `<repo>/.sandcastle/worktrees/<name>`. */
-const isManagedWorktree = (dir: string): boolean => {
+/**
+ * The repo a worktree Sandcastle created belongs to, or `undefined` for any
+ * other directory. A managed worktree is `<stateDir>/worktrees/<name>`, where
+ * the state dir is one an entry point resolved (custom, nested or absolute) or
+ * the default `<repo>/.sandcastle`.
+ */
+const managedWorktreeRepo = (dir: string): string | undefined => {
   const parent = dirname(resolve(dir));
-  return (
-    basename(parent) === "worktrees" &&
-    basename(dirname(parent)) === ".sandcastle"
-  );
+  if (basename(parent) !== "worktrees") {
+    return undefined;
+  }
+  const stateDir = dirname(parent);
+  const registered = stateDirRepo(stateDir);
+  if (registered !== undefined) {
+    return registered;
+  }
+  return basename(stateDir) === DEFAULT_STATE_DIR
+    ? dirname(stateDir)
+    : undefined;
 };
 
 const GITDIR_LINE = /^gitdir: (?<path>.+)$/u;
@@ -117,8 +130,8 @@ export type GitDirPins = Readonly<Record<string, string>>;
 /**
  * Validates `cwd`'s `.git` before host git runs there, and returns the
  * environment that pins git to it. A normal repo needs no pins. A linked
- * worktree must have git's layout (see `readLinkedWorktree`), a worktree
- * under `.sandcastle/worktrees/` must also belong to the repo it sits in, and
+ * worktree must have git's layout (see `readLinkedWorktree`), a managed
+ * worktree (under its state dir's `worktrees/`) must also belong to its repo, and
  * both are pinned with `GIT_DIR`, `GIT_COMMON_DIR` and `GIT_WORK_TREE` so git
  * never re-reads the pointer files.
  */
@@ -128,10 +141,10 @@ export const resolveGitDirPins = (
 ): Effect.Effect<GitDirPins, HostGitError> =>
   Effect.gen(function* () {
     const dotGit = join(cwd, ".git");
-    const managed = isManagedWorktree(cwd);
+    const managedRepo = managedWorktreeRepo(cwd);
     const stat = yield* statOf(args, dotGit).pipe(Effect.option);
     if (stat._tag === "None" || stat.value.isDirectory()) {
-      if (managed) {
+      if (managedRepo !== undefined) {
         return yield* refusal(args, `${dotGit} is not a worktree's .git file`);
       }
       const none: GitDirPins = {};
@@ -141,9 +154,8 @@ export const resolveGitDirPins = (
       return yield* refusal(args, `${dotGit} is not a regular file`);
     }
     const dirs = yield* readLinkedWorktree(args, cwd);
-    if (managed) {
-      const repoDir = dirname(dirname(dirname(resolve(cwd))));
-      const expected = yield* commonDirOf(args, repoDir);
+    if (managedRepo !== undefined) {
+      const expected = yield* commonDirOf(args, managedRepo);
       if (dirs.commonDir !== expected) {
         return yield* refusal(
           args,

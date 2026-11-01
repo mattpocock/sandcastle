@@ -31,8 +31,12 @@ import {
 const isWindows = process.platform === "win32";
 
 /** The directory name Sandcastle gives a branch's managed worktree. */
-const worktreeDir = (repo: string, branch: string): string =>
-  path.join(repo, ".sandcastle", "worktrees", branch.replaceAll("/", "-"));
+const worktreeDir = (
+  repo: string,
+  branch: string,
+  stateDir = ".sandcastle",
+): string =>
+  path.join(repo, stateDir, "worktrees", branch.replaceAll("/", "-"));
 
 /** Git config for the sandbox's own git: none of the planted programs. */
 const SANDBOX_GIT_ENV = {
@@ -230,68 +234,80 @@ describe.skipIf(isWindows)("host git guard behaviour", () => {
     });
   });
 
-  describe("managed worktrees that no longer belong to their repo", () => {
-    /** A managed worktree for branch "w", made by plain git. */
-    const managedWorktree = (): string => {
-      const worktree = worktreeDir(repo, "w");
-      git(repo, "worktree", "add", "-q", "-b", "w", worktree);
-      return worktree;
-    };
+  // A custom stateDir moves the managed worktrees; the check must follow them.
+  describe.each([
+    { where: "the default .sandcastle", stateDir: undefined },
+    { where: "a custom stateDir", stateDir: ".mytool.local" },
+  ])(
+    "managed worktrees under $where that no longer belong to their repo",
+    ({ stateDir }) => {
+      /** A managed worktree for branch "w", made by plain git. */
+      const managedWorktree = (): string => {
+        const worktree = worktreeDir(repo, "w", stateDir);
+        git(repo, "worktree", "add", "-q", "-b", "w", worktree);
+        return worktree;
+      };
 
-    /** Another repo whose config runs a payload on `git status`. */
-    const fakeGitDir = (): string => {
-      const fake = path.join(root, "fake");
-      mkdirSync(fake);
-      git(fake, "init", "-q");
-      git(fake, "config", "core.fsmonitor", `${touch("redirect")}; false`);
-      return path.join(fake, ".git");
-    };
+      /** Another repo whose config runs a payload on `git status`. */
+      const fakeGitDir = (): string => {
+        const fake = path.join(root, "fake");
+        mkdirSync(fake);
+        git(fake, "init", "-q");
+        git(fake, "config", "core.fsmonitor", `${touch("redirect")}; false`);
+        return path.join(fake, ".git");
+      };
 
-    const reuse = async () =>
-      createWorktree({
-        branchStrategy: { type: "branch", branch: "w" },
-        cwd: repo,
+      const reuse = async () =>
+        createWorktree({
+          branchStrategy: { type: "branch", branch: "w" },
+          cwd: repo,
+          ...(stateDir === undefined ? {} : { stateDir }),
+        });
+
+      it("reuses a worktree that still belongs to the repo", async () => {
+        managedWorktree();
+        const worktree = await reuse();
+        await worktree.close();
+        expect(worktree.worktreePath).toBe(worktreeDir(repo, "w", stateDir));
       });
 
-    it("reuses a worktree that still belongs to the repo", async () => {
-      managedWorktree();
-      const worktree = await reuse();
-      await worktree.close();
-      expect(worktree.worktreePath).toBe(worktreeDir(repo, "w"));
-    });
+      it("refuses a worktree whose .git points at another git dir", async () => {
+        const worktree = managedWorktree();
+        writeFileSync(path.join(worktree, ".git"), `gitdir: ${fakeGitDir()}\n`);
 
-    it("refuses a worktree whose .git points at another git dir", async () => {
-      const worktree = managedWorktree();
-      writeFileSync(path.join(worktree, ".git"), `gitdir: ${fakeGitDir()}\n`);
+        await expect(reuse()).rejects.toThrow(
+          /Refusing to run git on the host/u,
+        );
+        expect(fired()).toStrictEqual(new Set());
+      });
 
-      await expect(reuse()).rejects.toThrow(/Refusing to run git on the host/u);
-      expect(fired()).toStrictEqual(new Set());
-    });
+      it("refuses a worktree whose commondir points at another repo", async () => {
+        const worktree = managedWorktree();
+        // A copy of git's layout inside the fake repo, so only the anchor to
+        // the real repo can tell it apart.
+        const fakeAdmin = path.join(fakeGitDir(), "worktrees", "w");
+        mkdirSync(fakeAdmin, { recursive: true });
+        writeFileSync(path.join(fakeAdmin, "commondir"), "../..\n");
+        writeFileSync(path.join(fakeAdmin, "HEAD"), "ref: refs/heads/w\n");
+        writeFileSync(path.join(worktree, ".git"), `gitdir: ${fakeAdmin}\n`);
 
-    it("refuses a worktree whose commondir points at another repo", async () => {
-      const worktree = managedWorktree();
-      // A copy of git's layout inside the fake repo, so only the anchor to
-      // the real repo can tell it apart.
-      const fakeAdmin = path.join(fakeGitDir(), "worktrees", "w");
-      mkdirSync(fakeAdmin, { recursive: true });
-      writeFileSync(path.join(fakeAdmin, "commondir"), "../..\n");
-      writeFileSync(path.join(fakeAdmin, "HEAD"), "ref: refs/heads/w\n");
-      writeFileSync(path.join(worktree, ".git"), `gitdir: ${fakeAdmin}\n`);
+        await expect(reuse()).rejects.toThrow(/not to/u);
+        expect(fired()).toStrictEqual(new Set());
+      });
 
-      await expect(reuse()).rejects.toThrow(/not to/u);
-      expect(fired()).toStrictEqual(new Set());
-    });
+      it("refuses a worktree whose .git file was replaced by a directory", async () => {
+        const worktree = managedWorktree();
+        rmSync(path.join(worktree, ".git"));
+        git(worktree, "init", "-q");
+        git(worktree, "config", "core.fsmonitor", `${touch("dir")}; false`);
 
-    it("refuses a worktree whose .git file was replaced by a directory", async () => {
-      const worktree = managedWorktree();
-      rmSync(path.join(worktree, ".git"));
-      git(worktree, "init", "-q");
-      git(worktree, "config", "core.fsmonitor", `${touch("dir")}; false`);
-
-      await expect(reuse()).rejects.toThrow(/Refusing to run git on the host/u);
-      expect(fired()).toStrictEqual(new Set());
-    });
-  });
+        await expect(reuse()).rejects.toThrow(
+          /Refusing to run git on the host/u,
+        );
+        expect(fired()).toStrictEqual(new Set());
+      });
+    },
+  );
 
   describe("programs and transports", () => {
     /** Puts `dirs` first on the PATH Sandcastle's host git inherits. */
