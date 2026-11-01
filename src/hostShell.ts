@@ -73,8 +73,12 @@ export const execHostShell = (
 
     let stdout = "";
     let stderr = "";
-    child.stdout?.setEncoding("utf8").on("data", (d: string) => (stdout += d));
-    child.stderr?.setEncoding("utf8").on("data", (d: string) => (stderr += d));
+    child.stdout?.setEncoding("utf8").on("data", (d: string) => {
+      stdout += d;
+    });
+    child.stderr?.setEncoding("utf8").on("data", (d: string) => {
+      stderr += d;
+    });
 
     child.on("error", (err) => {
       exited = true;
