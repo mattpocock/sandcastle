@@ -111,7 +111,9 @@ describe("context window from real agent output", () => {
     );
     // result.usage is summed over the turn's calls (20491 input, 16768 cache read).
     expect(events).toStrictEqual([]);
-    expect(cursor("composer-2").parseSessionContextWindow).toBeUndefined();
+    expect(cursor("composer-2")).not.toHaveProperty(
+      "parseSessionContextWindow",
+    );
   });
 });
 
