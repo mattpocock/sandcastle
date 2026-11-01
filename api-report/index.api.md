@@ -87,6 +87,8 @@ export interface BindMountSandboxHandle {
     interactiveExec?(args: string[], options: InteractiveExecOptions): Promise<{
         exitCode: number;
     }>;
+    readonly sandboxHomedir?: string;
+    readonly sandboxTmpdir?: string;
     readonly worktreePath: string;
 }
 

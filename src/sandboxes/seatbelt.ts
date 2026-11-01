@@ -137,6 +137,17 @@ const prepare = async (
     return { dirs, setup };
   }).pipe(runOnHost);
 
+/**
+ * Seatbelt can't remap paths: commands inside see the private dirs at their
+ * real host paths, so the handle reports those for core to build paths from.
+ */
+const reportedDirs = (
+  dirs: PrivateDirs,
+): Pick<BindMountSandboxHandle, "sandboxHomedir" | "sandboxTmpdir"> => ({
+  sandboxHomedir: dirs.home,
+  sandboxTmpdir: dirs.tmp,
+});
+
 const createHandle = async (
   options: BindMountCreateOptions,
   config: { maxTailChars: number; userMounts: readonly IdentityMount[] },
@@ -155,6 +166,7 @@ const createHandle = async (
 
   return {
     worktreePath: options.worktreePath,
+    ...reportedDirs(dirs),
     exec: async (command, opts) => {
       if (opts?.sudo === true) {
         throw new Error(

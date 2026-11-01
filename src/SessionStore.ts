@@ -88,6 +88,27 @@ export const encodeProjectPath = (cwd: string): string => {
   return `${encoded.slice(0, MAX_PROJECT_DIR_LENGTH)}-${claudePathHash(normalized)}`;
 };
 
+/**
+ * The agent's home and temp dir inside a sandbox, as commands running there
+ * see them. Commands Sandcastle runs inside the sandbox build their paths
+ * from these, never from a literal `/home/agent` or `/tmp`.
+ */
+export interface SandboxDirs {
+  readonly home: string;
+  readonly tmp: string;
+}
+
+/** The Docker image layout, for a handle that doesn't report its dirs. */
+const DEFAULT_SANDBOX_DIRS: SandboxDirs = { home: "/home/agent", tmp: "/tmp" };
+
+/** The home and temp dir a sandbox handle reports, or the image defaults. */
+export const sandboxDirsOf = (
+  handle: Pick<BindMountSandboxHandle, "sandboxHomedir" | "sandboxTmpdir">,
+): SandboxDirs => ({
+  home: handle.sandboxHomedir ?? DEFAULT_SANDBOX_DIRS.home,
+  tmp: handle.sandboxTmpdir ?? DEFAULT_SANDBOX_DIRS.tmp,
+});
+
 /** Absolute host path to a Claude session JSONL file. */
 export const claudeHostSessionPath = (
   cwd: string,
@@ -552,8 +573,11 @@ export interface SessionFileLayout {
     id: string,
     hostRootSubdirs: readonly string[],
   ) => readonly string[];
-  /** Sandbox path of the session file for a cwd (POSIX separators). */
-  readonly sandboxPath: (cwd: string, id: string) => string;
+  /**
+   * Sandbox path of the session file for a cwd (POSIX separators), under the
+   * sandbox's own home or temp dir.
+   */
+  readonly sandboxPath: (cwd: string, id: string, dirs: SandboxDirs) => string;
   /**
    * For an agent whose sessions live in its own database: the sandbox command
    * that writes session `id` to `sandboxPath` before capture, run in the
@@ -588,7 +612,11 @@ const captureSessionFile =
   (layout: SessionFileLayout) =>
   async (transfer: SessionTransfer): Promise<void> => {
     const { hostCwd, sandboxCwd, sessionId, handle } = transfer;
-    const source = layout.sandboxPath(sandboxCwd, sessionId);
+    const source = layout.sandboxPath(
+      sandboxCwd,
+      sessionId,
+      sandboxDirsOf(handle),
+    );
     if (layout.sandboxExport !== undefined) {
       const command = layout.sandboxExport(sessionId, source);
       const result = await handle.exec(command, { cwd: sandboxCwd });
@@ -611,7 +639,11 @@ const resumeSessionFile =
   async (transfer: SessionTransfer): Promise<void> => {
     const { hostCwd, sandboxCwd, sessionId, handle } = transfer;
     const source = layout.hostPath(hostCwd, sessionId);
-    const target = layout.sandboxPath(sandboxCwd, sessionId);
+    const target = layout.sandboxPath(
+      sandboxCwd,
+      sessionId,
+      sandboxDirsOf(handle),
+    );
     const dir = JSON.stringify(posix.dirname(target));
     if (layout.rewrite === undefined) {
       await handle.exec(`mkdir -p ${dir}`);
