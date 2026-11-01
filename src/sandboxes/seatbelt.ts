@@ -244,9 +244,9 @@ const createHandle = async (
  * from paths under it land in the private dir. Both private dirs are removed
  * on close, and every process an `exec` started is killed when it exits, on
  * close, on shutdown and when this Node process is hard-killed (a detached
- * host watchdog per `exec` does that). The toolchain comes from the host `PATH`: each `PATH`
- * dir (never the home dir or an ancestor of it) and the install root of each
- * executable symlinked from one. Add other paths with `mounts`. The network is
+ * host watchdog per `exec` does that). The toolchain comes from the host
+ * `PATH`: each `PATH` dir (never the home dir or an ancestor of it) and the
+ * install root of each executable symlinked from one. Add other paths with `mounts`. The network is
  * open, including the host's localhost. It has no root: `exec` with
  * `sudo: true` rejects.
  *
