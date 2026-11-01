@@ -800,7 +800,7 @@ export const createSandboxFromWorktree = async (
   const mountsToClean: MountEntry[] = [];
 
   if (isTestMode) {
-    sandbox = options._test.buildSandbox!(worktreePath);
+    sandbox = options._test.buildSandbox(worktreePath);
     sandboxRepoDir = worktreePath;
     providerHandle = options._test.bindMountHandle;
   } else {
@@ -1004,7 +1004,7 @@ export const createSandbox = async (
           let sandboxRepoDir: string;
 
           if (isTestMode) {
-            sandbox = options._test.buildSandbox!(worktreePath);
+            sandbox = options._test.buildSandbox(worktreePath);
             sandboxRepoDir = worktreePath;
             providerHandle = options._test.bindMountHandle;
           } else {

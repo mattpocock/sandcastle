@@ -28,7 +28,6 @@ import {
 import type { SandboxProvider, BranchStrategy } from "./SandboxProvider.js";
 import { resolveEnv } from "./EnvResolver.js";
 import { formatErrorMessage } from "./ErrorHandler.js";
-import type { SandboxError } from "./errors.js";
 import { agentStreamEmitterLayer } from "./AgentStreamEmitter.js";
 import type { AgentStreamEvent } from "./AgentStreamEmitter.js";
 import type { SandboxHooks } from "./SandboxLifecycle.js";
@@ -805,10 +804,7 @@ export async function run(
           Effect.tapError((error) =>
             Effect.gen(function* () {
               const d = yield* Display;
-              yield* d.status(
-                formatErrorMessage(error as SandboxError),
-                "error",
-              );
+              yield* d.status(formatErrorMessage(error), "error");
             }),
           ),
         )
