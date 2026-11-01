@@ -1,3 +1,4 @@
+import { inspect } from "node:util";
 import type { Timeouts } from "./run.js";
 
 /** The timeout-shaped options shared by `run()`, `interactive()`, `createSandbox()`, `createWorktree()` and their handles. */
@@ -25,7 +26,7 @@ const assertPositive = (
   // `!(value > 0)` also rejects NaN. Infinity stays allowed (no timeout).
   if (typeof value !== "number" || !(value > 0)) {
     throw new Error(
-      `${name} must be a positive number of ${unit}. Received: ${String(value)}`,
+      `${name} must be a positive number of ${unit}. Received: ${inspect(value)}`,
     );
   }
 };
