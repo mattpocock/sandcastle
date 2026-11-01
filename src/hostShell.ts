@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { registerShutdown } from "./shutdownRegistry.js";
 
 /**
@@ -39,68 +40,106 @@ export const execHostShell = (
       detached: usesProcessGroup,
     });
 
-    let exited = false;
-    const killTree = () => {
-      if (exited || child.pid === undefined) {
-        return;
-      }
-      try {
-        if (usesProcessGroup) {
-          process.kill(-child.pid, "SIGKILL");
-        } else {
-          child.kill("SIGKILL");
-        }
-      } catch {
-        // Already gone.
-      }
-    };
-
-    const abortListeners = signals.map((signal) => {
-      const onAbort = () => {
-        killTree();
-        reject(abortError(command, signal));
-      };
-      signal.addEventListener("abort", onAbort);
-      return { signal, onAbort };
+    const tree = treeKiller(child, usesProcessGroup);
+    const stopListening = onAnyAbort(signals, (signal) => {
+      tree.kill();
+      reject(abortError(command, signal));
     });
-    const unregisterShutdown = registerShutdown(killTree);
-    const cleanup = () => {
-      for (const { signal, onAbort } of abortListeners) {
-        signal.removeEventListener("abort", onAbort);
-      }
+    const unregisterShutdown = registerShutdown(tree.kill);
+    const finish = () => {
+      tree.markExited();
+      stopListening();
       unregisterShutdown();
     };
-
-    let stdout = "";
-    let stderr = "";
-    child.stdout?.setEncoding("utf8").on("data", (d: string) => {
-      stdout += d;
-    });
-    child.stderr?.setEncoding("utf8").on("data", (d: string) => {
-      stderr += d;
-    });
+    const output = collectOutput(child);
 
     child.on("error", (err) => {
-      exited = true;
-      cleanup();
+      finish();
       reject(err);
     });
     child.on("close", (code, killSignal) => {
-      exited = true;
-      cleanup();
+      finish();
       if (code === 0) {
-        resolve({ stdout, stderr });
+        resolve({ stdout: output.stdout, stderr: output.stderr });
         return;
       }
-      reject(
-        Object.assign(new Error(`Command failed: ${command}\n${stderr}`), {
-          code,
-          signal: killSignal,
-          stdout,
-          stderr,
-        }),
-      );
+      reject(commandFailed(command, output, { code, signal: killSignal }));
     });
+  });
+
+/**
+ * Kills the child's process group (or only the shell, on Windows) until it
+ * is marked exited. Errors are swallowed: the process may already be gone.
+ */
+const treeKiller = (child: ChildProcess, usesProcessGroup: boolean) => {
+  let exited = false;
+  const kill = () => {
+    if (exited || child.pid === undefined) {
+      return;
+    }
+    try {
+      if (usesProcessGroup) {
+        process.kill(-child.pid, "SIGKILL");
+      } else {
+        child.kill("SIGKILL");
+      }
+    } catch {
+      // Already gone.
+    }
+  };
+  const markExited = () => {
+    exited = true;
+  };
+  return { kill, markExited };
+};
+
+/** Calls `onAbort` when any of `signals` aborts. Returns a function that stops listening. */
+const onAnyAbort = (
+  signals: readonly AbortSignal[],
+  onAbort: (signal: AbortSignal) => void,
+): (() => void) => {
+  const listeners = signals.map((signal) => {
+    const listener = () => {
+      onAbort(signal);
+    };
+    signal.addEventListener("abort", listener);
+    return { signal, listener };
+  });
+  return () => {
+    for (const { signal, listener } of listeners) {
+      signal.removeEventListener("abort", listener);
+    }
+  };
+};
+
+/** Accumulates the child's stdout and stderr as UTF-8 text. */
+const collectOutput = (
+  child: ChildProcess,
+): { stdout: string; stderr: string } => {
+  const output = { stdout: "", stderr: "" };
+  child.stdout?.setEncoding("utf8").on("data", (d: string) => {
+    output.stdout += d;
+  });
+  child.stderr?.setEncoding("utf8").on("data", (d: string) => {
+    output.stderr += d;
+  });
+  return output;
+};
+
+/** The error for a non-zero exit, shaped like `exec`'s (code, signal, stdout, stderr). */
+const commandFailed = (
+  command: string,
+  output: { readonly stdout: string; readonly stderr: string },
+  exit: {
+    readonly code: number | null;
+    readonly signal: NodeJS.Signals | null;
+  },
+): Error =>
+  Object.assign(new Error(`Command failed: ${command}\n${output.stderr}`), {
+    code: exit.code,
+    signal: exit.signal,
+    stdout: output.stdout,
+    stderr: output.stderr,
   });
 
 const abortError = (command: string, signal: AbortSignal): Error =>
