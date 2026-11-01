@@ -96,6 +96,18 @@ const failInitUnless = (
   ok ? Effect.void : Effect.fail(new InitError({ message }));
 
 /**
+ * The registry entry `selectName` resolved. The flags and prompts only offer
+ * registry names, so a miss is a bug; fail with an InitError naming it.
+ */
+const registryEntry = <T>(
+  entry: T | undefined,
+  what: string,
+): Effect.Effect<T, InitError> =>
+  entry === undefined
+    ? Effect.fail(new InitError({ message: `Unknown ${what}` }))
+    : Effect.succeed(entry);
+
+/**
  * The name the user chose: the CLI flag when given, else an interactive
  * select. Without a TTY a missing flag fails fast, naming the flag; cancelling
  * the prompt aborts init.
@@ -358,23 +370,25 @@ const initCommand = Command.make(
       }
 
       // Each choice below: CLI flag (already validated above) > interactive select.
-      const selectedAgent = getAgent(
-        yield* selectName({
-          flag: agentFlag,
-          flagName: "--agent",
-          isInteractive,
-          cancelMessage: "Agent selection cancelled.",
-          prompt: {
-            message: "Select an agent:",
-            initialValue: "claude-code",
-            options: listAgents().map((a) => ({
-              value: a.name,
-              label: a.label,
-              hint: `Default model: ${a.defaultModel}`,
-            })),
-          },
-        }),
-      )!;
+      const selectedAgent = yield* selectName({
+        flag: agentFlag,
+        flagName: "--agent",
+        isInteractive,
+        cancelMessage: "Agent selection cancelled.",
+        prompt: {
+          message: "Select an agent:",
+          initialValue: "claude-code",
+          options: listAgents().map((a) => ({
+            value: a.name,
+            label: a.label,
+            hint: `Default model: ${a.defaultModel}`,
+          })),
+        },
+      }).pipe(
+        Effect.flatMap((name) =>
+          registryEntry(getAgent(name), `agent "${name}"`),
+        ),
+      );
 
       // Resolve model: CLI flag > agent default
       const selectedModel =
@@ -383,38 +397,42 @@ const initCommand = Command.make(
           : selectedAgent.defaultModel;
 
       // No default sandbox provider — the user must choose.
-      const selectedSandboxProvider = getSandboxProvider(
-        yield* selectName({
-          flag: sandboxFlag,
-          flagName: "--sandbox",
-          isInteractive,
-          cancelMessage: "Sandbox provider selection cancelled.",
-          prompt: {
-            message: "Select a sandbox provider:",
-            options: listSandboxProviders().map((p) => ({
-              value: p.name,
-              label: p.label,
-            })),
-          },
-        }),
-      )!;
+      const selectedSandboxProvider = yield* selectName({
+        flag: sandboxFlag,
+        flagName: "--sandbox",
+        isInteractive,
+        cancelMessage: "Sandbox provider selection cancelled.",
+        prompt: {
+          message: "Select a sandbox provider:",
+          options: listSandboxProviders().map((p) => ({
+            value: p.name,
+            label: p.label,
+          })),
+        },
+      }).pipe(
+        Effect.flatMap((name) =>
+          registryEntry(getSandboxProvider(name), `sandbox provider "${name}"`),
+        ),
+      );
 
-      const selectedIssueTracker = getIssueTracker(
-        yield* selectName({
-          flag: issueTrackerFlag,
-          flagName: "--issue-tracker",
-          isInteractive,
-          cancelMessage: "Issue tracker selection cancelled.",
-          prompt: {
-            message: "Select an issue tracker:",
-            initialValue: "github-issues",
-            options: listIssueTrackers().map((b) => ({
-              value: b.name,
-              label: b.label,
-            })),
-          },
-        }),
-      )!;
+      const selectedIssueTracker = yield* selectName({
+        flag: issueTrackerFlag,
+        flagName: "--issue-tracker",
+        isInteractive,
+        cancelMessage: "Issue tracker selection cancelled.",
+        prompt: {
+          message: "Select an issue tracker:",
+          initialValue: "github-issues",
+          options: listIssueTrackers().map((b) => ({
+            value: b.name,
+            label: b.label,
+          })),
+        },
+      }).pipe(
+        Effect.flatMap((name) =>
+          registryEntry(getIssueTracker(name), `issue tracker "${name}"`),
+        ),
+      );
 
       const selectedTemplate = yield* selectName({
         flag: template,
