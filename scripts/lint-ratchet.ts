@@ -24,7 +24,7 @@
 // and .github/workflows/lint-shrink.yml opens a "shrink baseline" PR after
 // each push to main. It also fails if a baseline grew against origin/main
 // (where that ref exists), and if .oxlintrc.json gains an override beyond
-// the two reviewed ones in scripts/lint-ratchet-config.ts.
+// the three reviewed ones in scripts/lint-ratchet-config.ts.
 //
 //   npm run lint          both ratchets
 //   npm run lint:shrink   lower the baselines to what is found (never raises
@@ -38,7 +38,11 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import { ENTRY_POINTS, TEST_FILES } from "./lint-ratchet-config.ts";
+import {
+  ENTRY_POINTS,
+  TEST_FILES,
+  TOOLING_SCRIPTS,
+} from "./lint-ratchet-config.ts";
 import type { Counts, Violation } from "./lint-ratchet-core.ts";
 import {
   baselineGrowth,
@@ -137,7 +141,7 @@ const OxlintConfig = z.object({
 const sameList = (a: readonly string[], b: readonly string[]): boolean =>
   a.length === b.length && a.every((item, i) => item === b[i]);
 
-/** .oxlintrc.json may only loosen rules for the entry points and tests. */
+/** .oxlintrc.json may only loosen rules for the entry points, tests and tooling. */
 const checkOverrides = async (): Promise<string[]> => {
   const source = await readFile(path.join(ROOT, ".oxlintrc.json"), "utf8");
   const config = OxlintConfig.parse(
@@ -145,11 +149,14 @@ const checkOverrides = async (): Promise<string[]> => {
   );
   return config.overrides
     .filter(
-      (o) => !sameList(o.files, ENTRY_POINTS) && !sameList(o.files, TEST_FILES),
+      (o) =>
+        ![ENTRY_POINTS, TEST_FILES, TOOLING_SCRIPTS].some((reviewed) =>
+          sameList(o.files, reviewed),
+        ),
     )
     .map(
       (o) =>
-        `.oxlintrc.json: the override for ${o.files.join(", ")} is not one of the two reviewed ones (entry points, tests). Lower the baseline instead of turning a rule off.`,
+        `.oxlintrc.json: the override for ${o.files.join(", ")} is not one of the three reviewed ones (entry points, tests, tooling scripts). Lower the baseline instead of turning a rule off.`,
     );
 };
 

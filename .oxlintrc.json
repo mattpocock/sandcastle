@@ -282,6 +282,17 @@
         // wants them async, this wants an await, and no fix satisfies both.
         "typescript/require-await": "off"
       }
+    },
+    {
+      // The repo's own one-shot tooling: lint and coverage scripts, agent
+      // workflows, the verify harness. Keep in sync with TOOLING_SCRIPTS in
+      // scripts/lint-ratchet-config.ts (it checks).
+      "files": ["scripts/**", ".sandcastle/**"],
+      "rules": {
+        // A script that reads a file or runs git and exits has nothing to
+        // run concurrently; sync fs and exec are the plain way to write it.
+        "node/no-sync": "off"
+      }
     }
   ]
 }

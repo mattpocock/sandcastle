@@ -26,6 +26,12 @@ export const TEST_FILES: readonly string[] = [
   "src/testSandbox.ts",
 ];
 
+/** Mirrors the third override in .oxlintrc.json: one-shot tooling scripts. */
+export const TOOLING_SCRIPTS: readonly string[] = [
+  "scripts/**",
+  ".sandcastle/**",
+];
+
 /**
  * The end-to-end tests: the only place a new test may go. Mirrors the `e2e`
  * project in vitest.config.ts. A test file anywhere else, outside
