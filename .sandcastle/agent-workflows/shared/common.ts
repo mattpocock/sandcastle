@@ -82,21 +82,6 @@ export const standardSchema = <T>(
   },
 });
 
-/** Run a schema built by `standardSchema` synchronously, throwing on failure. */
-export const validate = <T>(
-  schema: StandardSchemaV1<unknown, T>,
-  value: unknown,
-): T => {
-  const result = schema["~standard"].validate(value);
-  if (result instanceof Promise) {
-    throw new TypeError("Schema validation must be synchronous");
-  }
-  if (result.issues) {
-    throw new Error(result.issues.map((issue) => issue.message).join("; "));
-  }
-  return result.value;
-};
-
 export const asRecord = (
   value: unknown,
   label: string,
@@ -126,4 +111,19 @@ export const asArray = (value: unknown, label: string): unknown[] => {
     throw new TypeError(`${label} must be an array`);
   }
   return value;
+};
+
+/** Run a schema built by `standardSchema` synchronously, throwing on failure. */
+export const validate = <T>(
+  schema: StandardSchemaV1<unknown, T>,
+  value: unknown,
+): T => {
+  const result = schema["~standard"].validate(value);
+  if (result instanceof Promise) {
+    throw new TypeError("Schema validation must be synchronous");
+  }
+  if (result.issues) {
+    throw new Error(result.issues.map((issue) => issue.message).join("; "));
+  }
+  return result.value;
 };
