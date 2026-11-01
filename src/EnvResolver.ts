@@ -58,8 +58,8 @@ export const resolveEnv = (
     );
 
     const result: Record<string, string> = {};
-    for (const key of Object.keys(sandcastleEnv)) {
-      const value = sandcastleEnv[key] || process.env[key];
+    for (const [key, fileValue] of Object.entries(sandcastleEnv)) {
+      const value = fileValue || (process.env[key] ?? "");
       if (value) {
         result[key] = value;
       }

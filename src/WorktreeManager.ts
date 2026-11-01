@@ -65,7 +65,7 @@ const execGit = (
 export const generateTempBranchName = (name?: string): string => {
   const ts = formatTimestamp(new Date());
   const suffix = randomBranchSuffix();
-  if (name) {
+  if (name !== undefined && name !== "") {
     return `sandcastle/${sanitizeName(name)}/${ts}-${suffix}`;
   }
   return `sandcastle/${ts}-${suffix}`;
@@ -294,8 +294,12 @@ export const create = (
     let branch: string;
     let worktreeName: string;
 
-    if (opts?.branch) {
-      branch = opts.branch;
+    const explicitBranch = opts?.branch;
+    const hasExplicitBranch =
+      explicitBranch !== undefined && explicitBranch !== "";
+
+    if (hasExplicitBranch) {
+      branch = explicitBranch;
       worktreeName = branch.replaceAll("/", "-");
     } else {
       branch = opts?.tempBranch ?? generateTempBranchName(opts?.name);
@@ -304,7 +308,7 @@ export const create = (
 
     const worktreePath = join(worktreesDir, worktreeName);
 
-    if (opts?.branch) {
+    if (hasExplicitBranch) {
       // Proactively detect collision before git produces a confusing error.
       // Match by branch first; fall back to target path (covers mid-rebase
       // detached-HEAD state where the branch field is null).

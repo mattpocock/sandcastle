@@ -168,7 +168,7 @@ export const substitutePromptArgs = (
     // Warn about unused keys (arg provided but no matching placeholder)
     // Skip keys listed in silentKeys (e.g. built-in args)
     for (const key of Object.keys(sanitizedArgs)) {
-      if (!referencedKeys.has(key) && !silentKeys?.has(key)) {
+      if (!referencedKeys.has(key) && silentKeys?.has(key) !== true) {
         yield* display.status(
           `Prompt argument "${key}" was provided but not referenced in the prompt`,
           "warn",
