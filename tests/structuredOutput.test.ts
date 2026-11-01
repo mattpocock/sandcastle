@@ -82,7 +82,9 @@ describe("run() structured output", () => {
 
   beforeEach(() => {
     // The real path: on Windows, tmpdir() can be an 8.3 short name.
-    repo = realpathSync(mkdtempSync(path.join(tmpdir(), "e2e-structured-")));
+    repo = realpathSync.native(
+      mkdtempSync(path.join(tmpdir(), "e2e-structured-")),
+    );
     const git = (...args: string[]): void => {
       execFileSync("git", args, { cwd: repo, stdio: "ignore" });
     };
