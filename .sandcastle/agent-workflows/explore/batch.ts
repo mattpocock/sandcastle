@@ -260,7 +260,10 @@ export const planEffects = (plan: Plan): GitHubEffect[] => {
     .filter((entry) => entry.duplicate_of === null)
     .sort((a, b) => a.number - b.number);
   const duplicates = plan.issues
-    .filter((entry) => entry.duplicate_of !== null)
+    .filter(
+      (entry): entry is PlanEntry & { duplicate_of: number } =>
+        entry.duplicate_of !== null,
+    )
     .sort((a, b) => a.number - b.number);
 
   const effects: GitHubEffect[] = [];
@@ -280,7 +283,7 @@ export const planEffects = (plan: Plan): GitHubEffect[] => {
       {
         kind: "close-duplicate",
         issue: entry.number,
-        duplicateOf: entry.duplicate_of!,
+        duplicateOf: entry.duplicate_of,
       },
     );
   }
