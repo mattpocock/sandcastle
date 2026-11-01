@@ -67,7 +67,8 @@ describe.skipIf(process.platform === "win32").each([
 });
 
 // An isolated provider's handle reaches the Sandbox the same way. This one
-// is a local directory that runs commands in `sh`.
+// is a local directory that runs commands in `sh`, so it doesn't run on
+// Windows either.
 
 /** A local-directory isolated provider whose handle reports `sandboxId`. */
 const localIsolated = (sandboxId: string | undefined) =>
@@ -112,41 +113,44 @@ const localIsolated = (sandboxId: string | undefined) =>
     },
   });
 
-describe("isolated provider sandboxId", () => {
-  let repo = "";
+describe.skipIf(process.platform === "win32")(
+  "isolated provider sandboxId",
+  () => {
+    let repo = "";
 
-  beforeEach(async () => {
-    repo = await mkdtemp(path.join(tmpdir(), "e2e-sandbox-id-isolated-"));
-    const git = (...args: string[]): void => {
-      spawnSync("git", args, { cwd: repo, stdio: "ignore" });
-    };
-    git("init", "-b", "main");
-    git("commit", "--allow-empty", "-m", "init");
-  });
-
-  afterEach(async () => {
-    await rm(repo, { recursive: true, force: true });
-  });
-
-  it("createSandbox() exposes the id the handle reports", async () => {
-    const sandbox = await createSandbox({
-      branch: "w",
-      cwd: repo,
-      sandbox: localIsolated("remote-123"),
+    beforeEach(async () => {
+      repo = await mkdtemp(path.join(tmpdir(), "e2e-sandbox-id-isolated-"));
+      const git = (...args: string[]): void => {
+        spawnSync("git", args, { cwd: repo, stdio: "ignore" });
+      };
+      git("init", "-b", "main");
+      git("commit", "--allow-empty", "-m", "init");
     });
-    await sandbox.close();
 
-    expect(sandbox.sandboxId).toBe("remote-123");
-  }, 30_000);
-
-  it("is undefined when the handle reports none", async () => {
-    const sandbox = await createSandbox({
-      branch: "w",
-      cwd: repo,
-      sandbox: localIsolated(undefined),
+    afterEach(async () => {
+      await rm(repo, { recursive: true, force: true });
     });
-    await sandbox.close();
 
-    expect(sandbox.sandboxId).toBeUndefined();
-  }, 30_000);
-});
+    it("createSandbox() exposes the id the handle reports", async () => {
+      const sandbox = await createSandbox({
+        branch: "w",
+        cwd: repo,
+        sandbox: localIsolated("remote-123"),
+      });
+      await sandbox.close();
+
+      expect(sandbox.sandboxId).toBe("remote-123");
+    }, 30_000);
+
+    it("is undefined when the handle reports none", async () => {
+      const sandbox = await createSandbox({
+        branch: "w",
+        cwd: repo,
+        sandbox: localIsolated(undefined),
+      });
+      await sandbox.close();
+
+      expect(sandbox.sandboxId).toBeUndefined();
+    }, 30_000);
+  },
+);
