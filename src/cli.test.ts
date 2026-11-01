@@ -14,15 +14,11 @@ const initRepo = async (dir: string) => {
   await execAsync('git config user.name "Test"', { cwd: dir });
 };
 
-const commitFile = async (
-  dir: string,
-  name: string,
-  content: string,
-  message: string,
-) => {
-  await writeFile(join(dir, name), content);
-  await execAsync(`git add "${name}"`, { cwd: dir });
-  await execAsync(`git commit -m "${message}"`, { cwd: dir });
+/** Commit hello.txt ("hello") as the repo's initial commit. */
+const commitInitialFile = async (dir: string) => {
+  await writeFile(join(dir, "hello.txt"), "hello");
+  await execAsync('git add "hello.txt"', { cwd: dir });
+  await execAsync('git commit -m "initial commit"', { cwd: dir });
 };
 
 const cliPath = join(import.meta.dirname, "..", "dist", "main.js");
@@ -79,7 +75,7 @@ describe("sandcastle CLI", () => {
   it("docker build-image errors when .sandcastle/ is missing", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+    await commitInitialFile(hostDir);
 
     const output = await runCliExpectingFailure("docker build-image", hostDir);
     expect(output).toContain("No .sandcastle/ found");
@@ -165,7 +161,7 @@ describe("sandcastle CLI", () => {
   it("podman build-image errors when .sandcastle/ is missing", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+    await commitInitialFile(hostDir);
 
     const output = await runCliExpectingFailure("podman build-image", hostDir);
     expect(output).toContain("No .sandcastle/ found");
@@ -220,7 +216,7 @@ describe("sandcastle CLI", () => {
   it("init with full flag set scaffolds non-interactively in a non-TTY env", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+    await commitInitialFile(hostDir);
 
     // vitest workers have no TTY, so this confirms the fully-non-interactive
     // path runs to completion without clack crashing on a missing prompt.
@@ -242,7 +238,7 @@ describe("sandcastle CLI", () => {
     const initWithHostBd = async (versionLine: string) => {
       const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
       await initRepo(hostDir);
-      await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+      await commitInitialFile(hostDir);
       const binDir = await mkdtemp(join(tmpdir(), "cli-fake-bd-"));
       await writeFile(
         join(binDir, "bd"),
