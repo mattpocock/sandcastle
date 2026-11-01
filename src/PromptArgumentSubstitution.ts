@@ -3,7 +3,7 @@ import { Display } from "./Display.js";
 import { PromptError } from "./errors.js";
 import { SHELL_BLOCK_MARKER } from "./PromptPreprocessor.js";
 
-const SHELL_BLOCK_PATTERN = /!`([^`]+)`/g;
+const SHELL_BLOCK_PATTERN = /!`([^`]+)`/gu;
 
 /**
  * A map of named values used for prompt argument substitution.
@@ -21,7 +21,7 @@ export const BUILT_IN_PROMPT_ARG_KEYS = [
   "TARGET_BRANCH",
 ] as const;
 
-const PLACEHOLDER_PATTERN = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
+const PLACEHOLDER_PATTERN = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/gu;
 
 /**
  * The key of every `{{KEY}}` placeholder in `text`, in order, repeats
@@ -101,7 +101,7 @@ export const findMissingPromptArgKeys = (
   return missing;
 };
 
-const HTML_COMMENT_PATTERN = /<!--[\s\S]*?(?:-->|$)/g;
+const HTML_COMMENT_PATTERN = /<!--[\s\S]*?(?:-->|$)/gu;
 
 const markShellBlocks = (prompt: string): string => {
   const commentRanges = [...prompt.matchAll(HTML_COMMENT_PATTERN)].map(

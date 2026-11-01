@@ -27,7 +27,7 @@ const parseEnvFile = (
         value = value.slice(1, -1);
       }
       if (isDoubleQuoted) {
-        value = value.replaceAll(/\\([nrt\\])/g, (_, ch: string) => {
+        value = value.replaceAll(/\\([nrt\\])/gu, (_, ch: string) => {
           const escapes: Record<string, string> = {
             n: "\n",
             r: "\r",

@@ -63,9 +63,9 @@ export const pathExists = async (path: string): Promise<boolean> => {
  * Replaces path separators with hyphens, matching Claude Code's convention.
  */
 export const encodeProjectPath = (cwd: string): string => {
-  const isRoot = cwd === "/" || /^[A-Za-z]:[\\/]?$/.test(cwd);
-  const normalized = isRoot ? cwd : cwd.replace(/[\\/]+$/, "");
-  return normalized.replace(/^([A-Za-z]):/, "$1").replaceAll(/[\\/]/g, "-");
+  const isRoot = cwd === "/" || /^[A-Za-z]:[\\/]?$/u.test(cwd);
+  const normalized = isRoot ? cwd : cwd.replace(/[\\/]+$/u, "");
+  return normalized.replace(/^([A-Za-z]):/u, "$1").replaceAll(/[\\/]/gu, "-");
 };
 
 /** Absolute host path to a Claude session JSONL file. */
@@ -323,8 +323,8 @@ export const transferCodexSession = (
  * `SessionManager` directory encoding (verified against pi 0.73.1).
  */
 export const encodePiSessionDir = (cwd: string): string => {
-  const stripped = cwd.replace(/^[/\\]/, "");
-  const replaced = stripped.replaceAll(/[/\\:]/g, "-");
+  const stripped = cwd.replace(/^[/\\]/u, "");
+  const replaced = stripped.replaceAll(/[/\\:]/gu, "-");
   return `--${replaced}--`;
 };
 
