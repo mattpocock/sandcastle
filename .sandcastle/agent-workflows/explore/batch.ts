@@ -271,8 +271,7 @@ export const planEffects = (plan: Plan): GitHubEffect[] => {
     .sort((a, b) => a.number - b.number);
   const duplicates = plan.issues
     .filter(
-      (entry): entry is PlanEntry & { duplicate_of: number } =>
-        entry.duplicate_of !== null,
+      (e): e is PlanEntry & { duplicate_of: number } => e.duplicate_of !== null,
     )
     .sort((a, b) => a.number - b.number);
 
