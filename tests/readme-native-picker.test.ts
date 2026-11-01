@@ -8,9 +8,9 @@ import { describe, expect, it } from "vitest";
 import { NATIVE_PROVIDERS, skipsHere } from "./helpers/nativeProviders.js";
 
 /**
- * The README's one-line `process.platform` picker for the native sandbox,
- * verbatim. `pickSandbox` below holds the same line, so it typechecks against
- * the public API; the first test keeps the README and this file in step.
+ * The Sandbox providers page's one-line `process.platform` picker for the
+ * native sandbox, verbatim. `pickSandbox` below holds the same line, so it typechecks against
+ * the public API; the first test keeps the page and this file in step.
  */
 const README_PICKER =
   'const sandbox = process.platform === "darwin" ? seatbelt() : bwrap();';
@@ -21,11 +21,15 @@ const pickSandbox = (): BindMountSandboxProvider => {
 };
 
 const thisFile = import.meta.filename;
-const readme = path.resolve(import.meta.dirname, "..", "README.md");
+const page = path.resolve(
+  import.meta.dirname,
+  "..",
+  "docs/guide/sandbox-providers.md",
+);
 
-describe("README: picking the native sandbox with process.platform", () => {
-  it("is the same line in the README and in this typechecked file", () => {
-    expect(readFileSync(readme, "utf8")).toContain(README_PICKER);
+describe("docs/guide/sandbox-providers.md: picking the native sandbox with process.platform", () => {
+  it("is the same line on the page and in this typechecked file", () => {
+    expect(readFileSync(page, "utf8")).toContain(README_PICKER);
     expect(readFileSync(thisFile, "utf8")).toContain(
       README_PICKER.replace("const sandbox = ", "  const sandbox = "),
     );
