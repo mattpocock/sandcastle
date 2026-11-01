@@ -40,7 +40,11 @@ import {
 import type { PromptArgs } from "./PromptArgumentSubstitution.js";
 import { noSandbox } from "./sandboxes/no-sandbox.js";
 import { raceAbortSignal } from "./raceAbortSignal.js";
-import { resolveCwd } from "./resolveCwd.js";
+import {
+  DEFAULT_STATE_DIR,
+  resolveCwd,
+  resolveStateDir,
+} from "./resolveCwd.js";
 import type { Timeouts } from "./run.js";
 import { validateTimeoutOptions } from "./validateTimeouts.js";
 
@@ -74,6 +78,12 @@ export interface InteractiveOptions {
    * or is not a directory.
    */
   readonly cwd?: string;
+  /**
+   * Directory for Sandcastle's gitignored runtime artifacts (`.env`,
+   * `worktrees/`, and the default `logs/`). Relative to `cwd`, or absolute.
+   * Defaults to `.sandcastle`.
+   */
+  readonly stateDir?: string;
   /**
    * An `AbortSignal` that cancels the interactive session when aborted.
    *
@@ -166,6 +176,10 @@ export const interactive = async (
 
   const inner = Effect.gen(function* () {
     const hostRepoDir = yield* resolveCwd(options.cwd);
+    const stateDir = resolveStateDir(
+      hostRepoDir,
+      options.stateDir ?? DEFAULT_STATE_DIR,
+    );
     const d = yield* Display;
 
     // 1. Resolve prompt (from string or file), or skip if neither provided
@@ -177,7 +191,7 @@ export const interactive = async (
     const isInlinePrompt = resolved?.source === "inline";
 
     // 2. Resolve env vars
-    const resolvedEnv = yield* resolveEnv(hostRepoDir);
+    const resolvedEnv = yield* resolveEnv(stateDir);
     const env = mergeProviderEnv({
       resolvedEnv,
       agentProviderEnv: provider.env,
@@ -256,12 +270,12 @@ export const interactive = async (
 
     if (!isHeadMode) {
       worktreeInfo = yield* d.taskLog("Creating worktree", () =>
-        WorktreeManager.pruneStale(hostRepoDir).pipe(
+        WorktreeManager.pruneStale(hostRepoDir, stateDir).pipe(
           Effect.catchAll(() => Effect.void),
           Effect.andThen(
             branch !== undefined && branch !== ""
-              ? WorktreeManager.create(hostRepoDir, { branch })
-              : WorktreeManager.create(hostRepoDir, {
+              ? WorktreeManager.create(hostRepoDir, stateDir, { branch })
+              : WorktreeManager.create(hostRepoDir, stateDir, {
                   name: options.name,
                   tempBranch: resolvedBranch,
                 }),

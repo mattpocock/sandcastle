@@ -10,8 +10,9 @@
  *
  * 1. Checks the working directory's `.git` before running anything: a linked
  *    worktree's `.git` file must lead to `<common dir>/worktrees/<name>`, its
- *    `commondir` back to that common dir, and a worktree under
- *    `.sandcastle/worktrees/` must belong to the repo it sits in. The
+ *    `commondir` back to that common dir, and a managed worktree (under its
+ *    state dir's `worktrees/`, `.sandcastle` by default) must belong to its
+ *    repo. The
  *    validated paths are then pinned with `GIT_DIR`, `GIT_COMMON_DIR` and
  *    `GIT_WORK_TREE`, so git never re-reads the pointer files.
  * 2. Overrides the config keys that run a program, through `GIT_CONFIG_*`

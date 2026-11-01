@@ -121,6 +121,7 @@ describe("Windows .git override temp dir", () => {
       branch: "wt",
       worktreePath,
       hostRepoDir: repo,
+      stateDir: join(repo, ".sandcastle"),
       sandbox: provider(),
     });
     expect(tempDirExists()).toBe(true);

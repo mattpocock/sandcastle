@@ -54,13 +54,15 @@ const hostRepo = (
 
 /**
  * Runs once in a repo holding `files`, and returns the env the sandbox got.
- * The repo is removed when the test finishes, or through `cleanup`.
+ * The repo is removed when the test finishes, or through `cleanup`. `stateDir`
+ * is passed through to run() when given.
  */
 const sandboxEnv = async (
   files: Record<string, string>,
   cleanup: (remove: () => void) => void = (remove) => {
     onTestFinished(remove);
   },
+  stateDir?: string,
 ): Promise<Record<string, string>> => {
   const repo = hostRepo(files, cleanup);
   let env: Record<string, string> | undefined;
@@ -89,6 +91,7 @@ const sandboxEnv = async (
     prompt: "Do the task.",
     branchStrategy: { type: "head" },
     logging: { type: "file", path: path.join(repo, "run.log") },
+    ...(stateDir === undefined ? {} : { stateDir }),
   });
   if (env === undefined) {
     throw new Error("the sandbox was never created");
@@ -205,6 +208,36 @@ const VALUES = [
   { line: String.raw`KEY="a\xb"`, value: String.raw`a\xb` },
   { line: 'KEY="', value: '"' },
 ] as const;
+
+describe("run(): the sandbox env from a custom stateDir", () => {
+  it("reads .env from a custom relative stateDir", async () => {
+    await expect(
+      sandboxEnv(
+        {
+          ".mytool.local/.env": "CUSTOM_KEY=custom-val\n",
+          ".sandcastle/.env": "DEFAULT_KEY=default-val\n",
+        },
+        undefined,
+        ".mytool.local",
+      ),
+    ).resolves.toStrictEqual({ CUSTOM_KEY: "custom-val" });
+  });
+
+  it("reads .env from an absolute stateDir, ignoring the repo dir", async () => {
+    const stateDir = mkdtempSync(path.join(tmpdir(), "e2e-env-state-"));
+    onTestFinished(() => {
+      rmSync(stateDir, { recursive: true, force: true });
+    });
+    writeFileSync(path.join(stateDir, ".env"), "ABS_KEY=abs-val\n");
+    await expect(
+      sandboxEnv(
+        { ".sandcastle/.env": "DEFAULT_KEY=default-val\n" },
+        undefined,
+        stateDir,
+      ),
+    ).resolves.toStrictEqual({ ABS_KEY: "abs-val" });
+  });
+});
 
 describe("run(): how .sandcastle/.env values are read", () => {
   let env: Record<string, string> = {};
