@@ -12,7 +12,7 @@ export const parseDiffLines = (diff: string): Map<string, Set<number>> => {
       continue;
     }
 
-    if (!currentFile) {
+    if (currentFile === undefined || currentFile === "") {
       continue;
     }
 

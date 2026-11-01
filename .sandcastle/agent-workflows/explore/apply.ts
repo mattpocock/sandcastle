@@ -28,7 +28,7 @@ const AGENT_PAT = process.env.AGENT_PAT ?? "";
 
 const summary = (markdown: string): void => {
   const file = process.env.GITHUB_STEP_SUMMARY;
-  if (file) {
+  if (file !== undefined && file !== "") {
     fs.appendFileSync(file, `${markdown}\n`);
   } else {
     console.log(markdown);
@@ -47,9 +47,10 @@ const ghWith = (args: string[], options: { token?: string; input?: string }) =>
     encoding: "utf8",
     input: options.input,
     stdio: ["pipe", "pipe", "pipe"],
-    env: options.token
-      ? { ...process.env, GH_TOKEN: options.token }
-      : undefined,
+    env:
+      options.token !== undefined && options.token !== ""
+        ? { ...process.env, GH_TOKEN: options.token }
+        : undefined,
   });
 
 const outcome = (entry: Plan["issues"][number]): string =>
