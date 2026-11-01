@@ -11,7 +11,7 @@ import {
   resolveGitMounts,
   SANDBOX_REPO_DIR,
 } from "./SandboxFactory.js";
-import type { MountEntry } from "./SandboxFactory.js";
+import type { MountEntry, SandboxService } from "./SandboxFactory.js";
 import { patchGitMountsForWindows, removeMountTempDirs } from "./mountUtils.js";
 import { withSandboxLifecycle, runHostHooks } from "./SandboxLifecycle.js";
 import type { SandboxHooks } from "./SandboxLifecycle.js";
@@ -180,9 +180,7 @@ export interface WorktreeCreateSandboxOptions {
   readonly timeouts?: Timeouts;
   /** @internal Test-only overrides to bypass the sandbox provider. */
   readonly _test?: {
-    readonly buildSandbox?: (
-      sandboxDir: string,
-    ) => import("./SandboxFactory.js").SandboxService;
+    readonly buildSandbox?: (sandboxDir: string) => SandboxService;
   };
 }
 
