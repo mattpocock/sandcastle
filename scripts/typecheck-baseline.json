@@ -8,8 +8,5 @@
   },
   ".sandcastle/verify/verify.ts": {
     "tsc/TS2345": 1
-  },
-  ".sandcastle/verify/world.ts": {
-    "tsc/TS18048": 1
   }
 }

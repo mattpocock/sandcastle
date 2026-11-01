@@ -44,9 +44,6 @@
   "src/errors.test.ts": {
     "ratchet/test-outside-tests": 1
   },
-  "src/InitService.agents.test.ts": {
-    "ratchet/test-outside-tests": 1
-  },
   "src/InitService.packageManager.test.ts": {
     "ratchet/test-outside-tests": 1
   },

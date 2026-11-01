@@ -5,7 +5,6 @@
   },
   ".sandcastle/agent-workflows/explore/apply.ts": {
     "eslint(max-lines-per-function)": 1,
-    "node(no-sync)": 3,
     "typescript(no-unsafe-type-assertion)": 1,
     "unicorn(no-array-sort)": 1
   },
@@ -14,17 +13,7 @@
     "typescript(no-unsafe-type-assertion)": 2,
     "unicorn(no-array-sort)": 3
   },
-  ".sandcastle/agent-workflows/explore/explore.ts": {
-    "node(no-sync)": 2
-  },
-  ".sandcastle/agent-workflows/implement-pr/implement-pr.ts": {
-    "node(no-sync)": 1
-  },
-  ".sandcastle/agent-workflows/review/review.ts": {
-    "node(no-sync)": 1
-  },
   ".sandcastle/agent-workflows/shared/common.ts": {
-    "node(no-sync)": 8,
     "typescript(no-unsafe-type-assertion)": 1
   },
   ".sandcastle/agent-workflows/shared/diff-lines.ts": {
@@ -45,10 +34,6 @@
   ".sandcastle/agent-workflows/shared/run-with-extraction.ts": {
     "eslint(func-style)": 1
   },
-  ".sandcastle/agent-workflows/update-branch/update-branch.ts": {
-    "eslint(func-style)": 1,
-    "node(no-sync)": 3
-  },
   ".sandcastle/run.ts": {
     "eslint(no-await-in-loop)": 3,
     "eslint(no-promise-executor-return)": 1,
@@ -67,21 +52,16 @@
     "eslint(prefer-named-capture-group)": 6,
     "unicorn(no-useless-collection-argument)": 1
   },
-  ".sandcastle/verify/envLeaks.test.ts": {
-    "eslint(require-unicode-regexp)": 1
-  },
   ".sandcastle/verify/ledger.ts": {
     "eslint(curly)": 27,
     "eslint(max-lines-per-function)": 1,
     "eslint(max-lines)": 1,
     "eslint(prefer-named-capture-group)": 1,
-    "node(no-sync)": 15,
     "typescript(no-confusing-void-expression)": 1,
     "typescript(no-unsafe-type-assertion)": 2
   },
   ".sandcastle/verify/lib.ts": {
     "eslint(prefer-named-capture-group)": 4,
-    "node(no-sync)": 4,
     "typescript(no-unsafe-type-assertion)": 1,
     "unicorn(prefer-import-meta-properties)": 1
   },
@@ -90,7 +70,6 @@
     "eslint(curly)": 11,
     "eslint(max-lines-per-function)": 2,
     "eslint(max-statements)": 3,
-    "node(no-sync)": 2,
     "promise(catch-or-return)": 1,
     "promise(prefer-catch)": 1,
     "typescript(no-non-null-assertion)": 1,
@@ -106,7 +85,6 @@
     "eslint(max-params)": 2,
     "eslint(max-statements)": 1,
     "eslint(prefer-named-capture-group)": 2,
-    "node(no-sync)": 27,
     "promise(avoid-new)": 1,
     "typescript(no-unsafe-type-assertion)": 4,
     "typescript(strict-boolean-expressions)": 1,
@@ -124,7 +102,6 @@
     "typescript(no-unsafe-return)": 1
   },
   "scripts/check-no-partially-staged.mjs": {
-    "node(no-sync)": 1,
     "typescript(no-unsafe-assignment)": 1
   },
   "scripts/check-public-types-effect-free.mjs": {
@@ -167,7 +144,6 @@
     "vitest(prefer-import-in-mock)": 1
   },
   "src/cli.test.ts": {
-    "eslint(max-params)": 1,
     "typescript(strict-void-return)": 1
   },
   "src/cli.ts": {
@@ -303,13 +279,6 @@
     "eslint(curly)": 3,
     "eslint(prefer-named-capture-group)": 1
   },
-  "src/ErrorHandler.test.ts": {
-    "ratchet/disable-comment": 2,
-    "typescript(no-unsafe-argument)": 1,
-    "typescript(no-unsafe-call)": 1,
-    "typescript(no-unsafe-member-access)": 1,
-    "typescript(no-unsafe-type-assertion)": 1
-  },
   "src/ErrorHandler.ts": {
     "effect/lazyPromiseInEffectSync": 1,
     "effect/unsafeEffectTypeAssertion": 1,
@@ -324,10 +293,8 @@
   },
   "src/hostShell.ts": {
     "effect/newPromise": 1,
-    "eslint(max-lines-per-function)": 2,
     "promise(avoid-new)": 1,
-    "typescript(promise-function-async)": 1,
-    "typescript(strict-void-return)": 2
+    "typescript(promise-function-async)": 1
   },
   "src/index.ts": {
     "typescript(no-deprecated)": 1
@@ -381,9 +348,6 @@
   "src/interactiveArgCollection.test.ts": {
     "typescript(no-unsafe-type-assertion)": 1,
     "vitest(prefer-import-in-mock)": 1
-  },
-  "src/main.ts": {
-    "typescript(strict-void-return)": 1
   },
   "src/mountUtils.test.ts": {
     "typescript(consistent-type-imports)": 1,
@@ -698,7 +662,6 @@
     "typescript(strict-void-return)": 1
   },
   "src/syncIn.ts": {
-    "eslint(max-lines-per-function)": 3,
     "typescript(promise-function-async)": 5
   },
   "src/syncOut.test.ts": {
@@ -739,17 +702,8 @@
     "eslint(prefer-named-capture-group)": 1,
     "node(no-sync)": 3
   },
-  "src/testSandbox.ts": {
-    "typescript(restrict-template-expressions)": 2
-  },
   "src/TextDeltaBuffer.ts": {
     "effect/globalTimers": 1
-  },
-  "src/validateTimeouts.ts": {
-    "typescript(no-base-to-string)": 1
-  },
-  "src/vercel-sandbox.d.ts": {
-    "typescript(method-signature-style)": 7
   },
   "src/WorktreeManager.test.ts": {
     "eslint(max-params)": 2,
