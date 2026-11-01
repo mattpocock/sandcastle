@@ -153,7 +153,8 @@ const findLastTagContent = (text: string, tag: string): string | undefined => {
  */
 const unwrapFences = (text: string): string => {
   // Match ```json ... ``` or ``` ... ``` (with optional language hint)
-  const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n\s*```\s*$/u.exec(text)?.[1];
+  const fenced = /^```(?:json)?\s*\n(?<body>[\s\S]*?)\n\s*```\s*$/u.exec(text)
+    ?.groups?.body;
   if (fenced !== undefined) {
     return fenced.trim();
   }

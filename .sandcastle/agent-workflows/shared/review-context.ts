@@ -22,6 +22,11 @@ export interface PullRequestContext {
   readonly validReplyIds: Set<string>;
 }
 
+/** The issue a PR body closes (`Closes #12`), or "" when it names none. */
+const linkedIssueNumber = (body: string): string =>
+  /(?:closes|fixes|resolves)\s+#(?<issue>\d+)/iu.exec(body)?.groups?.issue ??
+  "";
+
 export const fetchPullRequestContext = (
   prNumber: string,
 ): PullRequestContext => {
@@ -37,10 +42,7 @@ export const fetchPullRequestContext = (
     }[];
   };
 
-  const issueMatch = (prView.body ?? "").match(
-    /(?:closes|fixes|resolves)\s+#(\d+)/iu,
-  );
-  const issueNumber = issueMatch?.[1] ?? "";
+  const issueNumber = linkedIssueNumber(prView.body ?? "");
   const issueTitle = issueNumber
     ? safeSh(`gh issue view ${issueNumber} --json title --jq .title`).trim()
     : "";

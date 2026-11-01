@@ -16,9 +16,11 @@ export const parseDiffLines = (diff: string): Map<string, Set<number>> => {
       continue;
     }
 
-    const hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/u);
-    if (hunk) {
-      newLine = Number(hunk[1]);
+    const hunkStart = /^@@ -\d+(?:,\d+)? \+(?<start>\d+)(?:,\d+)? @@/u.exec(
+      line,
+    )?.groups?.start;
+    if (hunkStart !== undefined) {
+      newLine = Number(hunkStart);
       continue;
     }
 
