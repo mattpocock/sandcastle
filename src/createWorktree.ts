@@ -249,8 +249,9 @@ export const createWorktree = async (
       );
     }
     // Run host.onWorktreeReady hooks after copyToWorktree, before sandbox creation
-    if (options.hooks?.host?.onWorktreeReady?.length) {
-      yield* runHostHooks(options.hooks.host.onWorktreeReady, info.path);
+    const onWorktreeReady = options.hooks?.host?.onWorktreeReady;
+    if (onWorktreeReady !== undefined && onWorktreeReady.length > 0) {
+      yield* runHostHooks(onWorktreeReady, info.path);
     }
     return { hostRepoDir: repoDir, worktreeInfo: info };
   }).pipe(Effect.provide(NodeContext.layer), Effect.runPromise);
@@ -529,14 +530,17 @@ export const createWorktree = async (
 
     validateTimeoutOptions(opts);
 
-    if (opts.resumeSession && maxIterations > 1) {
+    const isResuming =
+      opts.resumeSession !== undefined && opts.resumeSession !== "";
+
+    if (isResuming && maxIterations > 1) {
       throw new Error(
         "resumeSession cannot be combined with maxIterations > 1. " +
           "Resume applies to iteration 1 only; multi-iteration resume semantics are not supported.",
       );
     }
 
-    if (opts.resumeSession) {
+    if (isResuming) {
       await assertResumeSessionExists({
         provider,
         sandboxTag: sandboxProvider.tag,
