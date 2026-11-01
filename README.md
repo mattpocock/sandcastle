@@ -242,6 +242,9 @@ const result = await run({
     // Optional: expose host devices via --device. Each entry is a full device
     // spec in host[:container[:permissions]] form (e.g. "/dev/kvm").
     devices: ["/dev/kvm"],
+    // Optional: drop Linux capabilities via --cap-drop (podman() takes the same).
+    // Names omit the CAP_ prefix; "ALL" drops every one. Typos are type errors.
+    capDrop: ["NET_RAW"],
     // Optional: limit CPU resources via --cpus. Fractional values allowed (e.g. 1.5).
     // cpus: 2,
   }),
