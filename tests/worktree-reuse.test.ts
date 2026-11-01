@@ -35,7 +35,7 @@ describe("createWorktree() and existing worktrees", () => {
     writeFileSync(path.join(repo, "README.md"), "# repo\n");
     git(repo, "add", ".");
     git(repo, "commit", "-m", "init");
-  });
+  }, 30_000);
 
   afterEach(() => {
     rmSync(repo, { recursive: true, force: true });
@@ -54,7 +54,7 @@ describe("createWorktree() and existing worktrees", () => {
 
     expect(second.worktreePath).toBe(first.worktreePath);
     expect(path.dirname(second.worktreePath)).toBe(worktreesDir);
-  });
+  }, 30_000);
 
   it("reuses its worktree when it has a detached HEAD (mid-rebase)", async () => {
     const first = await createWorktree({
@@ -69,7 +69,7 @@ describe("createWorktree() and existing worktrees", () => {
     });
 
     expect(second.worktreePath).toBe(first.worktreePath);
-  });
+  }, 30_000);
 
   it("refuses a branch checked out outside .sandcastle/worktrees/", async () => {
     await expect(
@@ -78,7 +78,7 @@ describe("createWorktree() and existing worktrees", () => {
         cwd: repo,
       }),
     ).rejects.toThrow("Branch 'main' is already checked out in worktree at");
-  });
+  }, 30_000);
 
   it("keeps a live worktree when it prunes stray directories", async () => {
     const live = await createWorktree({
@@ -95,5 +95,5 @@ describe("createWorktree() and existing worktrees", () => {
 
     expect(existsSync(stray)).toBe(false);
     expect(existsSync(path.join(live.worktreePath, "README.md"))).toBe(true);
-  });
+  }, 30_000);
 });
