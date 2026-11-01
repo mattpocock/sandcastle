@@ -7,10 +7,9 @@ import {
   AgentIdleTimeoutError,
   CopyError,
   ExecError,
-  SyncError,
   WorktreeError,
 } from "./errors.js";
-import type { DockerError, SandboxError, SyncOutPathError } from "./errors.js";
+import type { SandboxError, SyncError, SyncOutPathError } from "./errors.js";
 import type { Timeouts } from "./run.js";
 import * as WorktreeManager from "./WorktreeManager.js";
 import { copyToWorktree } from "./CopyToWorktree.js";
