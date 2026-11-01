@@ -142,7 +142,7 @@
       { "cases": { "camelCase": true, "pascalCase": true, "kebabCase": true } }
     ],
 
-    // --- Off: they fight prettier ------------------------------------------
+    // --- Off: they fight the formatter (Biome) ------------------------------
     "unicorn/number-literal-case": "off",
     "unicorn/empty-brace-spaces": "off",
     "unicorn/no-nested-ternary": "off",

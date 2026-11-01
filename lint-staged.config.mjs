@@ -1,18 +1,7 @@
-import { lstatSync } from "node:fs";
-
-// Prettier refuses to format symbolic links (e.g. the AGENTS.md -> CLAUDE.md
-// and .claude/skills -> ../.agents/skills symlinks), which would otherwise
-// fail the pre-commit hook on any commit that stages them. Filter symlinks
-// out before handing paths to prettier.
-const formattable = (files) =>
-  files.filter((file) => !lstatSync(file).isSymbolicLink());
-
+// Biome formats staged files only (its linter is off; oxlint owns linting).
+// --no-errors-on-unmatched: staged files that biome.json ignores (dist,
+// .changeset, api-report) are skipped instead of failing the hook.
 export default {
-  "*.{ts,tsx,js,jsx,json,md}": (files) => {
-    const real = formattable(files);
-    if (real.length === 0) {
-      return [];
-    }
-    return `prettier --write ${real.map((f) => JSON.stringify(f)).join(" ")}`;
-  },
+  "*.{ts,tsx,js,jsx,mjs,cjs,json,md,yml,yaml}":
+    "biome format --write --no-errors-on-unmatched",
 };
