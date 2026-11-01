@@ -6,7 +6,7 @@ Pull in the issue using `gh issue view`, with comments. If it has a parent PRD, 
 
 Only work on the issue specified.
 
-Work on branch {{BRANCH}}. Make commits, run tests, and close the issue when done.
+Work on branch {{BRANCH}}. Make commits and run tests.
 
 # CONTEXT
 
