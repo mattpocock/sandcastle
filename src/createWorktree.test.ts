@@ -36,6 +36,41 @@ import { testIsolated } from "./sandboxes/test-isolated.js";
 
 const execAsync = promisify(exec);
 
+/**
+ * A bind-mount exec that hands `claude ...` to `onClaude`, streams the lines
+ * it returns to `onLine`, and runs every other command on the host.
+ */
+const execWithFakeClaude =
+  (
+    worktreePath: string,
+    onClaude: (cwd: string) => Promise<string[]>,
+  ): BindMountSandboxHandle["exec"] =>
+  async (command, execOptions) => {
+    const cwd = execOptions?.cwd ?? worktreePath;
+    if (command.startsWith("claude ")) {
+      const streamLines = await onClaude(cwd);
+      for (const line of streamLines) {
+        execOptions?.onLine?.(line);
+      }
+      return { stdout: streamLines.join("\n"), stderr: "", exitCode: 0 };
+    }
+    try {
+      const result = execSync(command, {
+        cwd,
+        encoding: "utf8",
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      return { stdout: result, stderr: "", exitCode: 0 };
+    } catch (e: any) {
+      return {
+        stdout: e?.stdout?.toString() ?? "",
+        stderr: e?.stderr?.toString() ?? "",
+        exitCode:
+          typeof e?.status === "number" && e.status !== null ? e.status : 1,
+      };
+    }
+  };
+
 /** The first iteration of a run, failing the test if there is none. */
 const firstIteration = <T>(result: {
   readonly iterations: readonly T[];
@@ -852,46 +887,23 @@ describe("worktree.run()", () => {
       create: async (options) => {
         const handle: BindMountSandboxHandle = {
           worktreePath: options.worktreePath,
-          exec: async (command, execOptions) => {
-            const cwd = execOptions?.cwd ?? options.worktreePath;
-            if (command.startsWith("claude ")) {
-              const encoded = encodeProjectPath(cwd);
-              const sessionsDir = join(sandboxProjectsDir, encoded);
-              await mkdir(sessionsDir, { recursive: true });
-              await writeFile(
-                join(sessionsDir, `${mockSessionId}.jsonl`),
-                [
-                  JSON.stringify({
-                    type: "system",
-                    subtype: "init",
-                    session_id: mockSessionId,
-                    cwd,
-                  }),
-                  JSON.stringify({
-                    type: "assistant",
-                    message: {
-                      model: "claude-opus-4-8",
-                      usage: {
-                        input_tokens: 50_000,
-                        cache_creation_input_tokens: 0,
-                        cache_read_input_tokens: 0,
-                        output_tokens: 100,
-                      },
-                    },
-                    cwd,
-                  }),
-                ].join("\n"),
-              );
-              const streamLines = [
+          exec: execWithFakeClaude(options.worktreePath, async (cwd) => {
+            const encoded = encodeProjectPath(cwd);
+            const sessionsDir = join(sandboxProjectsDir, encoded);
+            await mkdir(sessionsDir, { recursive: true });
+            await writeFile(
+              join(sessionsDir, `${mockSessionId}.jsonl`),
+              [
                 JSON.stringify({
                   type: "system",
                   subtype: "init",
                   session_id: mockSessionId,
+                  cwd,
                 }),
                 JSON.stringify({
                   type: "assistant",
                   message: {
-                    content: [{ type: "text", text: "ok" }],
+                    model: "claude-opus-4-8",
                     usage: {
                       input_tokens: 50_000,
                       cache_creation_input_tokens: 0,
@@ -899,34 +911,31 @@ describe("worktree.run()", () => {
                       output_tokens: 100,
                     },
                   },
+                  cwd,
                 }),
-                JSON.stringify({ type: "result", result: "ok" }),
-              ].join("\n");
-              if (execOptions?.onLine) {
-                for (const line of streamLines.split("\n")) {
-                  execOptions.onLine(line);
-                }
-              }
-              return { stdout: streamLines, stderr: "", exitCode: 0 };
-            }
-            try {
-              const result = execSync(command, {
-                cwd,
-                encoding: "utf8",
-                stdio: ["pipe", "pipe", "pipe"],
-              });
-              return { stdout: result, stderr: "", exitCode: 0 };
-            } catch (e: any) {
-              return {
-                stdout: e?.stdout?.toString() ?? "",
-                stderr: e?.stderr?.toString() ?? "",
-                exitCode:
-                  typeof e?.status === "number" && e.status !== null
-                    ? e.status
-                    : 1,
-              };
-            }
-          },
+              ].join("\n"),
+            );
+            return [
+              JSON.stringify({
+                type: "system",
+                subtype: "init",
+                session_id: mockSessionId,
+              }),
+              JSON.stringify({
+                type: "assistant",
+                message: {
+                  content: [{ type: "text", text: "ok" }],
+                  usage: {
+                    input_tokens: 50_000,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 0,
+                    output_tokens: 100,
+                  },
+                },
+              }),
+              JSON.stringify({ type: "result", result: "ok" }),
+            ];
+          }),
           copyFileIn: async (hostPath, sandboxPath) => {
             await mkdir(dirname(sandboxPath), { recursive: true });
             await copyFile(hostPath, sandboxPath);
