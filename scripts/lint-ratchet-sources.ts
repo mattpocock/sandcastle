@@ -3,7 +3,8 @@
 //
 // - lint ratchet: oxlint, Effect diagnostics, disable comments,
 //   `toMatchObject({ k: undefined })` in tests
-// - test ratchet: test files outside tests/, dependency-cruiser violations
+// - test ratchet: test files outside tests/, dependency-cruiser violations,
+//   type assertions in tests/
 
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
@@ -11,6 +12,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { isRawGitScanned, spawnsGitDirectly } from "./lint-ratchet-raw-git.ts";
+import { typeAssertionCount } from "./lint-ratchet-test-casts.ts";
 import type { Exemption } from "./lint-ratchet-config.ts";
 import {
   ALLOWED_DIRECTIVES,
@@ -230,6 +232,28 @@ export const collectRawGitSpawns = async (): Promise<Violation[]> => {
         return spawnsGitDirectly(source)
           ? [{ file, rule: "ratchet/raw-git-spawn" }]
           : [];
+      }),
+  );
+  return perFile.flat();
+};
+
+const E2E_DIR_FILE = /^tests\/.*\.[cm]?ts$/u;
+
+/**
+ * A type assertion other than `as const` in tests/, each counted. The rule
+ * is in scripts/lint-ratchet-test-casts.ts.
+ */
+export const collectTestTypeAssertions = async (): Promise<Violation[]> => {
+  const listed = await listFiles();
+  const perFile = await Promise.all(
+    listed
+      .filter((f) => E2E_DIR_FILE.test(f))
+      .map(async (file) => {
+        const source = await readFile(path.join(ROOT, file), "utf8");
+        return Array.from({ length: typeAssertionCount(source, file) }, () => ({
+          file,
+          rule: "ratchet/test-type-assertion",
+        }));
       }),
   );
   return perFile.flat();
