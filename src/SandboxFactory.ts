@@ -273,7 +273,7 @@ const cleanupWorktree = (
 ): Effect.Effect<string | undefined, WorktreeError> => {
   // An interrupted run keeps its worktree, clean or dirty, so the caller can
   // inspect it (ADR-0004). An abort after a successful run is a no-op.
-  if (!Exit.isSuccess(exit) && signal?.aborted) {
+  if (!Exit.isSuccess(exit) && signal?.aborted === true) {
     printWorktreePreservedMessage(
       worktreePath,
       `Worktree preserved at ${worktreePath}`,
@@ -389,6 +389,7 @@ export const WorktreeDockerSandboxFactory = {
         timeouts,
       } = yield* SandboxConfig;
 
+      const onWorktreeReady = hooks?.host?.onWorktreeReady ?? [];
       const isHeadMode = branchStrategy.type === "head";
       const branch =
         branchStrategy.type === "branch" ? branchStrategy.branch : undefined;
@@ -415,7 +416,7 @@ export const WorktreeDockerSandboxFactory = {
             ),
           ),
           Effect.andThen(
-            branch
+            branch !== undefined && branch !== ""
               ? WorktreeManager.create(hostRepoDir, { branch, baseBranch })
               : WorktreeManager.create(hostRepoDir, { name, tempBranch }),
           ),
@@ -468,12 +469,8 @@ export const WorktreeDockerSandboxFactory = {
             // Head mode: use hostRepoDir directly, no worktree.
             if (isHeadMode) {
               return (
-                hooks?.host?.onWorktreeReady?.length
-                  ? runHostHooks(
-                      hooks.host.onWorktreeReady,
-                      hostRepoDir,
-                      signal,
-                    )
+                onWorktreeReady.length > 0
+                  ? runHostHooks(onWorktreeReady, hostRepoDir, signal)
                   : Effect.void
               ).pipe(
                 Effect.andThen(
@@ -527,12 +524,8 @@ export const WorktreeDockerSandboxFactory = {
                   : Effect.void
                 ).pipe(
                   Effect.andThen(
-                    hooks?.host?.onWorktreeReady?.length
-                      ? runHostHooks(
-                          hooks.host.onWorktreeReady,
-                          worktreeInfo.path,
-                          signal,
-                        )
+                    onWorktreeReady.length > 0
+                      ? runHostHooks(onWorktreeReady, worktreeInfo.path, signal)
                       : Effect.void,
                   ),
                   Effect.andThen(
@@ -588,12 +581,8 @@ export const WorktreeDockerSandboxFactory = {
             return Effect.acquireUseRelease(
               pruneAndCreate(),
               (worktreeInfo) =>
-                (hooks?.host?.onWorktreeReady?.length
-                  ? runHostHooks(
-                      hooks.host.onWorktreeReady,
-                      worktreeInfo.path,
-                      signal,
-                    )
+                (onWorktreeReady.length > 0
+                  ? runHostHooks(onWorktreeReady, worktreeInfo.path, signal)
                   : Effect.void
                 ).pipe(
                   Effect.andThen(
@@ -649,8 +638,8 @@ export const WorktreeDockerSandboxFactory = {
             // Head mode: bind-mount host directory directly, no worktree
             const gitPath = join(hostRepoDir, ".git");
             return (
-              hooks?.host?.onWorktreeReady?.length
-                ? runHostHooks(hooks.host.onWorktreeReady, hostRepoDir, signal)
+              onWorktreeReady.length > 0
+                ? runHostHooks(onWorktreeReady, hostRepoDir, signal)
                 : Effect.void
             ).pipe(
               Effect.andThen(resolveGitMounts(gitPath)),
@@ -734,12 +723,8 @@ export const WorktreeDockerSandboxFactory = {
                 : Effect.void
               ).pipe(
                 Effect.andThen(
-                  hooks?.host?.onWorktreeReady?.length
-                    ? runHostHooks(
-                        hooks.host.onWorktreeReady,
-                        worktreeInfo.path,
-                        signal,
-                      )
+                  onWorktreeReady.length > 0
+                    ? runHostHooks(onWorktreeReady, worktreeInfo.path, signal)
                     : Effect.void,
                 ),
                 Effect.andThen(
