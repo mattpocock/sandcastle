@@ -15,6 +15,7 @@
     "coverage-e2e.ts",
     "coverage-floor*.ts",
     "api-report.ts",
-    "ensure-build.ts"
+    "ensure-build.ts",
+    "entry-points.ts"
   ]
 }
