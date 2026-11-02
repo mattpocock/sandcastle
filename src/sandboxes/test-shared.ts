@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { createBindMountSandboxProvider } from "../SandboxProvider.js";
 import type {
+  BindMountCreateOptions,
   BindMountSandboxHandle,
   BindMountSandboxProvider,
   ExecResult,
@@ -123,7 +124,7 @@ export const createTempSandbox = async (
 
 export interface StubProviderRecord {
   readonly provider: BindMountSandboxProvider;
-  readonly createCalls: readonly unknown[];
+  readonly createCalls: readonly BindMountCreateOptions[];
   readonly closeCalls: { count: number };
 }
 
@@ -134,7 +135,7 @@ export interface StubProviderRecord {
 export const testStubProvider = (
   options: { name?: string; worktreePath?: string } = {},
 ): StubProviderRecord => {
-  const createCalls: unknown[] = [];
+  const createCalls: BindMountCreateOptions[] = [];
   const closeCalls = { count: 0 };
   const provider = createBindMountSandboxProvider({
     name: options.name ?? "test-stub",
