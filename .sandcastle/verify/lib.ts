@@ -154,12 +154,19 @@ export const loadKeys = (): void => {
     return;
   }
   for (const line of readFileSync(file, "utf8").split("\n")) {
-    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/u.exec(line);
-    if (!m) {
+    const groups =
+      /^\s*(?<key>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?<raw>.*?)\s*$/u.exec(
+        line,
+      )?.groups;
+    const key = groups?.["key"];
+    const raw = groups?.["raw"];
+    if (key === undefined || raw === undefined) {
       continue;
     }
-    const [, key, raw] = m as unknown as [string, string, string];
-    const value = raw.replace(/^(['"])(.*)\1$/u, "$2");
+    const value = raw.replace(
+      /^(?<quote>['"])(?<inner>.*)\k<quote>$/u,
+      "$<inner>",
+    );
     if (value && !isEnvSet(key)) {
       process.env[key] = value;
     }
