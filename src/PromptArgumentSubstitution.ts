@@ -3,7 +3,7 @@ import { Display } from "./Display.js";
 import { PromptError } from "./errors.js";
 import { SHELL_BLOCK_MARKER } from "./PromptPreprocessor.js";
 
-const SHELL_BLOCK_PATTERN = /!`([^`]+)`/gu;
+const SHELL_BLOCK_PATTERN = /!`(?<command>[^`]+)`/gu;
 
 /**
  * A map of named values used for prompt argument substitution.
@@ -21,14 +21,14 @@ export const BUILT_IN_PROMPT_ARG_KEYS = [
   "TARGET_BRANCH",
 ] as const;
 
-const PLACEHOLDER_PATTERN = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/gu;
+const PLACEHOLDER_PATTERN = /\{\{\s*(?<key>[A-Za-z_][A-Za-z0-9_]*)\s*\}\}/gu;
 
 /**
  * The key of every `{{KEY}}` placeholder in `text`, in order, repeats
- * included. The capture group is required, so the `?? ""` never applies.
+ * included. The `key` group is required, so the `?? ""` never applies.
  */
 const placeholderKeys = (text: string): string[] =>
-  [...text.matchAll(PLACEHOLDER_PATTERN)].map((m) => m[1] ?? "");
+  [...text.matchAll(PLACEHOLDER_PATTERN)].map((m) => m.groups?.["key"] ?? "");
 
 /**
  * Validates that the user has not provided any built-in prompt argument keys.
