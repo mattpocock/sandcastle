@@ -23,6 +23,8 @@ import {
   createIsolatedSandboxProvider,
 } from "./SandboxProvider.js";
 import type {
+  BindMountCreateOptions,
+  BindMountSandboxProvider,
   SandboxProvider,
   BranchStrategy,
   NoSandboxProvider,
@@ -101,8 +103,8 @@ const sandcastleBranches = async (dir: string): Promise<string[]> => {
 
 /** Create a mock sandbox provider that records calls and delegates to a no-op handle. */
 const makeMockProvider = (): {
-  provider: SandboxProvider;
-  createCalls: any[];
+  provider: BindMountSandboxProvider;
+  createCalls: readonly BindMountCreateOptions[];
   readonly closeCalls: number;
 } => {
   const stub = testStubProvider({
@@ -111,7 +113,7 @@ const makeMockProvider = (): {
   });
   return {
     provider: stub.provider,
-    createCalls: stub.createCalls as any[],
+    createCalls: stub.createCalls,
     get closeCalls() {
       return stub.closeCalls.count;
     },
@@ -190,18 +192,20 @@ describe("WorktreeDockerSandboxFactory", () => {
       }).pipe(Effect.provide(makeLayer())),
     );
 
-    expect(observedBranch).toMatch(/^sandcastle\//);
+    expect(observedBranch).toMatch(/^sandcastle\//u);
   });
 
   it("creates the worktree before calling provider.create", async () => {
     let worktreeExistedAtCreate: boolean | undefined;
-    const { provider } = makeMockProvider();
-    const origCreate = provider.create;
-    (provider as any).create = async (opts: any) => {
-      // Record whether the worktree directory already exists at this point
-      worktreeExistedAtCreate = existsSync(opts.worktreePath);
-      return origCreate(opts);
-    };
+    const { provider: stub } = makeMockProvider();
+    const provider = createBindMountSandboxProvider({
+      name: stub.name,
+      create: async (opts) => {
+        // Record whether the worktree directory already exists at this point
+        worktreeExistedAtCreate = existsSync(opts.worktreePath);
+        return stub.create(opts);
+      },
+    });
 
     const layer = Layer.provide(
       WorktreeDockerSandboxFactory.layer,
@@ -243,11 +247,11 @@ describe("WorktreeDockerSandboxFactory", () => {
     expect(mockProvider.createCalls).toHaveLength(1);
     const opts = mockProvider.createCalls[0];
     expect(observedWorktree).toBeDefined();
-    expect(opts.mounts).toContainEqual({
+    expect(opts?.mounts).toContainEqual({
       hostPath: observedWorktree,
       sandboxPath: SANDBOX_REPO_DIR,
     });
-    expect(opts.mounts).toContainEqual({
+    expect(opts?.mounts).toContainEqual({
       hostPath: `${hostRepoDir}/.git`,
       sandboxPath: `${hostRepoDir}/.git`,
     });
@@ -663,11 +667,11 @@ describe("WorktreeDockerSandboxFactory", () => {
 
       expect(mockProvider.createCalls).toHaveLength(1);
       const opts = mockProvider.createCalls[0];
-      expect(opts.mounts).toContainEqual({
+      expect(opts?.mounts).toContainEqual({
         hostPath: hostRepoDir,
         sandboxPath: SANDBOX_REPO_DIR,
       });
-      expect(opts.mounts).toContainEqual({
+      expect(opts?.mounts).toContainEqual({
         hostPath: `${hostRepoDir}/.git`,
         sandboxPath: `${hostRepoDir}/.git`,
       });

@@ -23,7 +23,11 @@ import type {
 } from "./SandboxProvider.js";
 import { runHostHooks } from "./SandboxLifecycle.js";
 import type { SandboxHooks } from "./SandboxLifecycle.js";
-import { startSandbox } from "./startSandbox.js";
+import {
+  startBindMountSandbox,
+  startIsolatedSandbox,
+  startSandbox,
+} from "./startSandbox.js";
 import { syncOut } from "./syncOut.js";
 import { patchGitMountsForWindows, removeMountTempDirs } from "./mountUtils.js";
 import { registerShutdown } from "./shutdownRegistry.js";
@@ -351,7 +355,9 @@ export const resolveGitMounts = (
     }
     // Worktree: .git is a file with "gitdir: <path>"
     const content = (yield* fs.readFileString(gitPath)).trim();
-    const gitdirPath = /^gitdir:\s*(.+)$/u.exec(content)?.[1];
+    const gitdirPath = /^gitdir:\s*(?<gitdir>.+)$/u.exec(content)?.groups?.[
+      "gitdir"
+    ];
     if (gitdirPath === undefined) {
       // Unrecognized format — fall back to mounting the file as-is
       return [{ hostPath: gitPath, sandboxPath: gitPath }];
@@ -580,7 +586,7 @@ export const WorktreeDockerSandboxFactory = {
                 ).pipe(
                   Effect.andThen(
                     Effect.acquireUseRelease(
-                      startSandbox({
+                      startIsolatedSandbox({
                         provider: sandboxProvider,
                         hostRepoDir: worktreeInfo.path,
                         env,
@@ -593,10 +599,7 @@ export const WorktreeDockerSandboxFactory = {
                             hostWorktreePath: worktreeInfo.path,
                             sandboxRepoPath: worktreePath,
                             applyToHost: () =>
-                              syncOut(
-                                worktreeInfo.path,
-                                handle as IsolatedSandboxHandle,
-                              ),
+                              syncOut(worktreeInfo.path, handle),
                           },
                           sandbox,
                         ),
@@ -653,7 +656,7 @@ export const WorktreeDockerSandboxFactory = {
               ),
               Effect.flatMap((gitMounts) =>
                 Effect.acquireUseRelease(
-                  startSandbox({
+                  startBindMountSandbox({
                     provider: sandboxProvider,
                     hostRepoDir,
                     env,
@@ -667,7 +670,7 @@ export const WorktreeDockerSandboxFactory = {
                       {
                         hostWorktreePath: hostRepoDir,
                         sandboxRepoPath: worktreePath,
-                        bindMountHandle: handle as BindMountSandboxHandle,
+                        bindMountHandle: handle,
                       },
                       sandbox,
                     ) as Effect.Effect<A, E | SandboxError, R>,
@@ -743,7 +746,7 @@ export const WorktreeDockerSandboxFactory = {
                   Effect.acquireUseRelease(
                     // sandboxProvider is guaranteed bind-mount here
                     // (isolated providers return early above)
-                    startSandbox({
+                    startBindMountSandbox({
                       provider: sandboxProvider,
                       hostRepoDir,
                       env,
@@ -756,7 +759,7 @@ export const WorktreeDockerSandboxFactory = {
                         {
                           hostWorktreePath: worktreeInfo.path,
                           sandboxRepoPath: worktreePath,
-                          bindMountHandle: handle as BindMountSandboxHandle,
+                          bindMountHandle: handle,
                         },
                         sandbox,
                       ),

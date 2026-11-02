@@ -627,32 +627,32 @@ describe("InitService scaffold", () => {
       const lines = next("simple-loop", "main.mts");
       const joined = lines.join("\n");
       expect(joined).toContain("prompt");
-      expect(joined).toMatch(/customiz|review|read/i);
+      expect(joined).toMatch(/customiz|review|read/iu);
     });
 
     it("sequential-reviewer template includes a step mentioning prompt files", () => {
       const lines = next("sequential-reviewer", "main.mts");
       const joined = lines.join("\n");
       expect(joined).toContain("prompt");
-      expect(joined).toMatch(/customiz|review|read/i);
+      expect(joined).toMatch(/customiz|review|read/iu);
     });
 
     it("parallel-planner template includes a step mentioning prompt files", () => {
       const lines = next("parallel-planner", "main.mts");
       const joined = lines.join("\n");
       expect(joined).toContain("prompt");
-      expect(joined).toMatch(/customiz|review|read/i);
+      expect(joined).toMatch(/customiz|review|read/iu);
     });
 
     it("returns at least 2 numbered steps for blank template", () => {
       const lines = next("blank", "main.mts");
-      const numberedSteps = lines.filter((l) => /^\d+\./.test(l));
+      const numberedSteps = lines.filter((l) => /^\d+\./u.test(l));
       expect(numberedSteps.length).toBeGreaterThanOrEqual(2);
     });
 
     it("returns at least 3 numbered steps for non-blank templates", () => {
       const lines = next("simple-loop", "main.mts");
-      const numberedSteps = lines.filter((l) => /^\d+\./.test(l));
+      const numberedSteps = lines.filter((l) => /^\d+\./u.test(l));
       expect(numberedSteps.length).toBeGreaterThanOrEqual(3);
     });
 
@@ -843,7 +843,7 @@ describe("InitService scaffold", () => {
           "pnpm",
           ["zod"],
         )
-          .filter((l) => /^\d+\./.test(l))
+          .filter((l) => /^\d+\./u.test(l))
           .map((l) => Number(l.split(".")[0]));
         expect(numbers).toEqual(numbers.map((_, i) => i + 1));
       });
@@ -938,7 +938,7 @@ describe("InitService scaffold", () => {
     expect(dockerfile).toContain("ARG AGENT_UID=1000");
     expect(dockerfile).toContain("ARG AGENT_GID=1000");
     expect(dockerfile).toMatch(
-      /USER \$\{AGENT_UID\}:\$\{AGENT_GID\}[\s\S]*RUN curl https:\/\/cursor\.com\/install -fsS \| bash/,
+      /USER \$\{AGENT_UID\}:\$\{AGENT_GID\}[\s\S]*RUN curl https:\/\/cursor\.com\/install -fsS \| bash/u,
     );
     expect(dockerfile).not.toContain("{{ISSUE_TRACKER_TOOLS}}");
   });
@@ -977,7 +977,7 @@ describe("InitService scaffold", () => {
     // The gh issue list command should still be valid
     expect(prompt).toContain("gh issue list");
     // No double spaces in gh commands from removal
-    expect(prompt).not.toMatch(/gh issue list {2}/);
+    expect(prompt).not.toMatch(/gh issue list {2}/u);
   });
 
   it("parallel-planner plan-prompt.md strips --label Sandcastle when createLabel is false", async () => {
@@ -2242,7 +2242,7 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "Dockerfile"),
         "utf8",
       );
-      expect(dockerfile).toMatch(/ARG BEADS_VERSION=\d+\.\d+\.\d+/);
+      expect(dockerfile).toMatch(/ARG BEADS_VERSION=\d+\.\d+\.\d+/u);
       expect(dockerfile).toContain(
         "https://github.com/gastownhall/beads/releases/download/v${BEADS_VERSION}",
       );
@@ -2302,8 +2302,8 @@ describe("InitService scaffold", () => {
           "utf8",
         );
         expect(main).not.toContain("podman()");
-        expect(main).not.toMatch(/\bdocker\b/);
-        expect(main.match(/podman\(sandboxOptions\)/g)).toHaveLength(3);
+        expect(main).not.toMatch(/\bdocker\b/u);
+        expect(main.match(/podman\(sandboxOptions\)/gu)).toHaveLength(3);
         expect(main).toContain('BEADS_DIR: "/home/agent/host-beads"');
       });
 
@@ -2533,7 +2533,7 @@ describe("InitService scaffold", () => {
       );
       expect(mainTs).not.toContain("docker");
       // parallel-planner calls the factory three times
-      expect(mainTs.match(/sandbox: podman\(\)/g)).toHaveLength(3);
+      expect(mainTs.match(/sandbox: podman\(\)/gu)).toHaveLength(3);
     });
 
     it("selecting docker leaves the main file importing and calling docker", async () => {
@@ -2579,7 +2579,7 @@ const AGENT_AUTH_KEY: Record<string, string> = {
 const declaredKeys = (envExample: string): string[] =>
   envExample
     .split("\n")
-    .map((l) => l.match(/^([A-Z][A-Z0-9_]*)=/)?.[1])
+    .map((l) => /^(?<key>[A-Z][A-Z0-9_]*)=/u.exec(l)?.groups?.["key"])
     .filter((k): k is string => k !== undefined);
 
 describe("init scaffold consistency (every agent x template x sandbox x tracker)", () => {
@@ -2642,7 +2642,7 @@ describe("init scaffold consistency (every agent x template x sandbox x tracker)
         "utf8",
       );
       expect(containerfile).not.toContain("${SANDBOX_REPO_DIR}");
-      expect(containerfile).not.toMatch(/\{\{[A-Z_]+\}\}/);
+      expect(containerfile).not.toMatch(/\{\{[A-Z_]+\}\}/u);
       expect(containerfile).toContain(SANDBOX_REPO_DIR);
 
       // Main file: the chosen agent, model, sandbox provider and image name.
@@ -2651,7 +2651,7 @@ describe("init scaffold consistency (every agent x template x sandbox x tracker)
       for (const pattern of mainMustNotMatch) {
         expect(main).not.toMatch(pattern);
       }
-      expect(main).not.toMatch(new RegExp(`\\b${otherSandbox}\\(`));
+      expect(main).not.toMatch(new RegExp(`\\b${otherSandbox}\\(`, "u"));
       const sandboxCalls = [
         ...main.matchAll(
           new RegExp(`\\b${sandboxProvider.name}\\([^)]*\\)`, "gu"),

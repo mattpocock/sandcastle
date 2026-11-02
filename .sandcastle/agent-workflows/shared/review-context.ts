@@ -1,4 +1,4 @@
-import { gh, safeSh, sh } from "./common";
+import { gh, isRecord, safeSh, sh, textOr } from "./common";
 import { parseDiffLines } from "./diff-lines";
 
 export interface ReviewThreadComment {
@@ -27,22 +27,62 @@ const linkedIssueNumber = (body: string): string =>
   /(?:closes|fixes|resolves)\s+#(?<issue>\d+)/iu.exec(body)?.groups?.issue ??
   "";
 
+// --- Narrowing `gh` JSON ------------------------------------------------------
+
+/** `value[key]` when `value` is an object, else undefined. */
+const field = (value: unknown, key: string): unknown =>
+  isRecord(value) ? value[key] : undefined;
+
+/** `value` as an array, or [] when it isn't one (GitHub omitted the list). */
+const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+
+const stringOrNull = (value: unknown): string | null =>
+  typeof value === "string" ? value : null;
+
+const numberOrNull = (value: unknown): number | null =>
+  typeof value === "number" ? value : null;
+
+/** The `login` of a GitHub actor (`author`, `user`), or "unknown". */
+const login = (actor: unknown): string =>
+  textOr(field(actor, "login"), "unknown");
+
+/** Unresolved review-thread comments from the `reviewThreads` GraphQL query. */
+const unresolvedThreadComments = (response: unknown): ReviewThreadComment[] => {
+  const threads = list(
+    field(
+      field(
+        field(field(field(response, "data"), "repository"), "pullRequest"),
+        "reviewThreads",
+      ),
+      "nodes",
+    ),
+  );
+  return threads
+    .filter((thread) => field(thread, "isResolved") !== true)
+    .flatMap((thread) =>
+      list(field(field(thread, "comments"), "nodes")).map((comment) => ({
+        commentId: textOr(field(comment, "id"), ""),
+        threadId: textOr(field(thread, "id"), ""),
+        path: stringOrNull(field(comment, "path")),
+        line:
+          numberOrNull(field(comment, "line")) ??
+          numberOrNull(field(comment, "originalLine")),
+        author: login(field(comment, "author")),
+        body: textOr(field(comment, "body"), ""),
+      })),
+    );
+};
+
 export const fetchPullRequestContext = (
   prNumber: string,
 ): PullRequestContext => {
-  const prView = JSON.parse(
+  const prView: unknown = JSON.parse(
     gh(["pr", "view", prNumber, "--json", "title,body,comments"]),
-  ) as {
-    title: string;
-    body?: string | null;
-    comments: {
-      author?: { login: string } | null;
-      body: string;
-      createdAt?: string;
-    }[];
-  };
+  );
+  const prTitle = textOr(field(prView, "title"), "");
+  const prBody = textOr(field(prView, "body"), "");
 
-  const issueNumber = linkedIssueNumber(prView.body ?? "");
+  const issueNumber = linkedIssueNumber(prBody);
   const issueTitle = issueNumber
     ? safeSh(`gh issue view ${issueNumber} --json title --jq .title`).trim()
     : "";
@@ -50,14 +90,9 @@ export const fetchPullRequestContext = (
     ? safeSh(`gh issue view ${issueNumber} --comments`)
     : "(no linked issue found)";
 
-  const reviews = JSON.parse(
-    gh(["api", `repos/{owner}/{repo}/pulls/${prNumber}/reviews`]),
-  ) as {
-    user?: { login: string } | null;
-    body?: string | null;
-    state: string;
-    submitted_at?: string | null;
-  }[];
+  const reviews = list(
+    JSON.parse(gh(["api", `repos/{owner}/{repo}/pulls/${prNumber}/reviews`])),
+  );
 
   const [owner, repo] = (process.env.GH_REPO ?? "").split("/");
   const query = `
@@ -85,7 +120,7 @@ query($owner:String!,$repo:String!,$number:Int!) {
   }
 }`;
 
-  const threadsParsed = JSON.parse(
+  const threadsParsed: unknown = JSON.parse(
     gh([
       "api",
       "graphql",
@@ -98,70 +133,31 @@ query($owner:String!,$repo:String!,$number:Int!) {
       "-f",
       `query=${query}`,
     ]),
-  ) as {
-    data?: {
-      repository?: {
-        pullRequest?: {
-          reviewThreads?: {
-            nodes?: {
-              id: string;
-              isResolved: boolean;
-              comments: {
-                nodes: {
-                  id: string;
-                  path: string | null;
-                  line: number | null;
-                  originalLine: number | null;
-                  body: string;
-                  author?: { login: string } | null;
-                }[];
-              };
-            }[];
-          };
-        };
-      };
-    };
-  };
-
-  const unresolvedThreads =
-    threadsParsed.data?.repository?.pullRequest?.reviewThreads?.nodes?.filter(
-      (thread) => !thread.isResolved,
-    ) ?? [];
-
-  const reviewThreads: ReviewThreadComment[] = unresolvedThreads.flatMap(
-    (thread) =>
-      thread.comments.nodes.map((comment) => ({
-        commentId: comment.id,
-        threadId: thread.id,
-        path: comment.path,
-        line: comment.line ?? comment.originalLine,
-        author: comment.author?.login ?? "unknown",
-        body: comment.body,
-      })),
   );
+  const reviewThreads = unresolvedThreadComments(threadsParsed);
 
   const prComments = {
-    issue_comments: prView.comments.map((comment) => ({
-      author: comment.author?.login ?? "unknown",
-      body: comment.body,
-      createdAt: comment.createdAt,
+    issue_comments: list(field(prView, "comments")).map((comment) => ({
+      author: login(field(comment, "author")),
+      body: textOr(field(comment, "body"), ""),
+      createdAt: field(comment, "createdAt"),
     })),
     review_summaries: reviews
-      .filter((review) => (review.body ?? "").trim().length > 0)
       .map((review) => ({
-        author: review.user?.login ?? "unknown",
-        state: review.state,
-        body: review.body,
-        submittedAt: review.submitted_at,
-      })),
+        author: login(field(review, "user")),
+        state: textOr(field(review, "state"), ""),
+        body: textOr(field(review, "body"), ""),
+        submittedAt: stringOrNull(field(review, "submitted_at")),
+      }))
+      .filter((review) => review.body.trim().length > 0),
     review_threads: reviewThreads,
   };
 
   const diff = safeSh("git diff main...HEAD") || sh("git diff main..HEAD");
 
   return {
-    prTitle: prView.title,
-    prBody: prView.body ?? "",
+    prTitle,
+    prBody,
     issueNumber,
     issueTitle,
     linkedIssue,
