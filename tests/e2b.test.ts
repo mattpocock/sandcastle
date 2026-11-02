@@ -54,7 +54,7 @@ interface Started {
 
 interface World {
   home: string;
-  failMkdir: boolean;
+  failMkdir: false | "rpc" | "exit";
   readonly created: Record<string, unknown>[];
   readonly killed: string[];
   readonly started: Started[];
@@ -113,8 +113,29 @@ const startProcess = async (req: IncomingMessage, res: ServerResponse) => {
     stdin: stdin === true,
   });
   res.writeHead(200, { "content-type": "application/connect+json" });
-  if (world.failMkdir && command.includes("mkdir -p")) {
+  if (world.failMkdir === "rpc" && command.includes("mkdir -p")) {
     res.end(frame(2, { error: { code: "internal", message: "disk full" } }));
+    return;
+  }
+  if (world.failMkdir === "exit" && command.includes("mkdir -p")) {
+    res.write(frame(0, { event: { start: { pid: 1 } } }));
+    res.write(
+      frame(0, {
+        event: {
+          data: {
+            stderr: Buffer.from("mkdir: Permission denied\n").toString(
+              "base64",
+            ),
+          },
+        },
+      }),
+    );
+    res.write(
+      frame(0, {
+        event: { end: { exitCode: 1, exited: true, status: "exit status 1" } },
+      }),
+    );
+    res.end(frame(2, {}));
     return;
   }
   nextPid += 1;
@@ -294,10 +315,19 @@ describe.skipIf(process.platform === "win32")("e2b()", () => {
   });
 
   it("kills the sandbox when setting up the worktree fails", async () => {
-    world.failMkdir = true;
+    world.failMkdir = "rpc";
 
     await expect(provider().create({ env: {} })).rejects.toThrow("disk full");
     expect(world.created).toHaveLength(1);
+    expect(world.killed).toHaveLength(1);
+  });
+
+  it("names the worktree folder and quotes stderr when mkdir exits non-zero", async () => {
+    world.failMkdir = "exit";
+
+    await expect(provider().create({ env: {} })).rejects.toThrow(
+      "e2b(): could not create $HOME/workspace: mkdir: Permission denied",
+    );
     expect(world.killed).toHaveLength(1);
   });
 
