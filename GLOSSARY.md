@@ -47,7 +47,7 @@ _Avoid_: "local provider", "none provider", "host provider"
 ### Branching
 
 **Branch strategy**:
-Configuration on a **sandbox provider** that controls how the agent's changes relate to branches, set at provider construction time.
+A choice the caller makes for each run or **worktree** that controls how the **agent**'s changes relate to branches. When none is given, the **sandbox provider**'s kind picks the default: **head** for **bind-mount** and **no-sandbox providers**, **merge-to-head** for **isolated sandbox providers**.
 _Avoid_: "worktree mode" (old name), "branch mode"
 
 **Head (branch strategy)**:
