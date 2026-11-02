@@ -2,21 +2,21 @@
 
 ## `sandcastle init`
 
-Scaffolds the `.sandcastle/` config directory and, for an image-based provider, builds the container image. This is the first command you run in a new repo.
+Scaffolds the `.sandcastle/` [config directory](./glossary.md#config-directory) and, for an image-based provider, builds the container image. This is the first command you run in a new repo.
 
-See [Init](./init.md) for what init asks, checks and writes.
+See [Init](./init.md) for what [init](./glossary.md#init) asks, checks and writes.
 
 | Option                    | Required | Default                      | Description                                                                                                            |
 | ------------------------- | -------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `--image-name`            | No       | `sandcastle:<repo-dir-name>` | Image name to build, also passed as `imageName` to the scaffolded main file's sandbox                                  |
-| `--agent`                 | No       | Interactive prompt           | Agent to use (`claude-code`, `pi`, `codex`, `cursor`, `opencode`, `copilot`)                                           |
+| `--image-name`            | No       | `sandcastle:<repo-dir-name>` | Image name to build, also passed as `imageName` to the scaffolded main file's [sandbox](./glossary.md#sandbox)         |
+| `--agent`                 | No       | Asked interactively          | [Agent](./glossary.md#agent) to use (`claude-code`, `pi`, `codex`, `cursor`, `opencode`, `copilot`)                    |
 | `--model`                 | No       | Agent's default model        | Model to use (e.g. `claude-sonnet-4-6`). Defaults to agent's default                                                   |
-| `--sandbox`               | No       | Interactive prompt           | Sandbox provider to use (`bwrap`, `seatbelt`, `docker`, `podman`)                                                      |
-| `--template`              | No       | Interactive prompt           | Template to scaffold (e.g. `blank`, `simple-loop`)                                                                     |
-| `--issue-tracker`         | No       | Interactive prompt           | Issue tracker to use (`github-issues`, `beads`, `custom`)                                                              |
-| `--create-label`          | No       | Interactive prompt           | `true` / `false` — whether to create the `Sandcastle` GitHub label (only with `--issue-tracker github-issues`)         |
-| `--build-image`           | No       | Interactive prompt           | `true` / `false` — whether to build the sandbox image now (ignored with `--issue-tracker custom` or a native provider) |
-| `--install-template-deps` | No       | Interactive prompt           | `true` / `false` — whether to install template host deps (e.g. `zod` for the planner templates)                        |
+| `--sandbox`               | No       | Asked interactively          | [Sandbox provider](./glossary.md#sandbox-provider) to use (`bwrap`, `seatbelt`, `docker`, `podman`)                    |
+| `--template`              | No       | Asked interactively          | Template to scaffold (e.g. `blank`, `simple-loop`)                                                                     |
+| `--issue-tracker`         | No       | Asked interactively          | [Issue tracker](./glossary.md#issue-tracker) to use (`github-issues`, `beads`, `custom`)                               |
+| `--create-label`          | No       | Asked interactively          | `true` / `false` — whether to create the `Sandcastle` GitHub label (only with `--issue-tracker github-issues`)         |
+| `--build-image`           | No       | Asked interactively          | `true` / `false` — whether to build the sandbox image now (ignored with `--issue-tracker custom` or a native provider) |
+| `--install-template-deps` | No       | Asked interactively          | `true` / `false` — whether to install template [host](./glossary.md#host) deps (e.g. `zod` for the planner templates)  |
 
 ## `sandcastle docker build-image`
 

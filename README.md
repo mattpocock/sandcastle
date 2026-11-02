@@ -18,7 +18,7 @@ Sandcastle is provider-agnostic. It ships with native sandboxes that use your OS
 
 ## Documentation
 
-The docs live in [`docs/guide`](./docs/guide), one page per glossary term (see [`GLOSSARY.md`](./GLOSSARY.md)), and are published at [aihero.dev/sandcastle](https://www.aihero.dev/sandcastle).
+The docs live in [`docs/guide`](./docs/guide), one page per major term, with every term defined in the [Glossary](./docs/guide/glossary.md), and are published at [aihero.dev/sandcastle](https://www.aihero.dev/sandcastle).
 
 - [Getting started](./docs/guide/getting-started.md): prerequisites and a quick start
 - Core: [Core concepts](./docs/guide/core-concepts.md)
@@ -30,7 +30,7 @@ The docs live in [`docs/guide`](./docs/guide), one page per glossary term (see [
 - Hooks: [Hooks](./docs/guide/hooks.md)
 - Init: [Init](./docs/guide/init.md)
 - Display: [Run logs](./docs/guide/run-logs.md)
-- Reference: [`run()` and `createSandbox()`](./docs/guide/run.md), [CLI commands](./docs/guide/cli.md)
+- Reference: [`run()` and `createSandbox()`](./docs/guide/run.md), [CLI commands](./docs/guide/cli.md), [Glossary](./docs/guide/glossary.md)
 
 ## Development
 

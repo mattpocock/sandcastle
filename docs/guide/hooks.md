@@ -1,10 +1,6 @@
 # Hooks
 
-> **Host hook**: A lifecycle hook that runs on the **host** machine, not inside the **sandbox**. Host hooks are `{ command: string }` — no `sudo`, no `cwd`.
-
-> **Sandbox hook**: A lifecycle hook that runs inside the **sandbox** container. Sandbox hooks are `{ command: string; sudo?: boolean }`.
-
-Pass `hooks` to `run()`. Here a sandbox hook installs dependencies before the agent starts:
+Pass `hooks` to `run()`. Here a [sandbox hook](./glossary.md#sandbox-hook) installs dependencies before the [agent](./glossary.md#agent) starts:
 
 ```typescript
 import { run, claudeCode } from "@ai-hero/sandcastle";
@@ -25,7 +21,7 @@ await run({
 });
 ```
 
-Hooks are grouped by **where** they run — `host` (on the developer's machine) or `sandbox` (inside the sandbox):
+Hooks are grouped by **where** they run — `host` (on the developer's machine) or `sandbox` (inside the [sandbox](./glossary.md#sandbox)):
 
 ```ts
 hooks: {
@@ -42,15 +38,15 @@ hooks: {
 }
 ```
 
-| Hook                     | Runs on | When                                         | Working directory                           |
-| ------------------------ | ------- | -------------------------------------------- | ------------------------------------------- |
-| `host.onWorktreeReady`   | Host    | After `copyToWorktree`, before sandbox start | Worktree path (host repo root under `head`) |
-| `host.onSandboxReady`    | Host    | After sandbox is up                          | Worktree path (host repo root under `head`) |
-| `sandbox.onSandboxReady` | Sandbox | After sandbox is up                          | Sandbox repo directory                      |
+| Hook                     | Runs on                    | When                                         | Working directory                                                     |
+| ------------------------ | -------------------------- | -------------------------------------------- | --------------------------------------------------------------------- |
+| `host.onWorktreeReady`   | [Host](./glossary.md#host) | After `copyToWorktree`, before sandbox start | [Worktree](./glossary.md#worktree) path (host repo root under `head`) |
+| `host.onSandboxReady`    | Host                       | After sandbox is up                          | Worktree path (host repo root under `head`)                           |
+| `sandbox.onSandboxReady` | Sandbox                    | After sandbox is up                          | Sandbox repo directory                                                |
 
 **Ordering:** `copyToWorktree` -> `host.onWorktreeReady` (sequential) -> sandbox created -> `host.onSandboxReady` + `sandbox.onSandboxReady` (parallel).
 
-- **Host hooks** accept `{ command: string; timeoutMs?: number }` — no `sudo`, no `cwd`. Use `cd` or inline env in the command string.
+- **[Host hooks](./glossary.md#host-hook)** accept `{ command: string; timeoutMs?: number }` — no `sudo`, no `cwd`. Use `cd` or inline env in the command string.
 - **Sandbox hooks** accept `{ command: string; sudo?: boolean; timeoutMs?: number }` — set `sudo: true` to run the whole command as root. On `docker` and `podman` this runs it as the container's root user, so the image needs no `sudo` binary; on `daytona` and `vercel` it uses the sandbox's own `sudo`. `sudo: true` isn't available on the native providers (`bwrap`, `seatbelt`), which have no root: the hook fails, naming the provider and pointing to `docker()`. Install system packages on your host instead.
 - **`timeoutMs`** overrides the default 60 s per-hook timeout. Useful for long-running setup commands like dependency installs (e.g. `timeoutMs: 300_000` for 5 minutes).
 - Within each hook point, sandbox hooks run in parallel; host hooks within `onSandboxReady` also run in parallel with sandbox hooks. `host.onWorktreeReady` hooks run sequentially in declared order.
@@ -62,5 +58,5 @@ hooks: {
 - [Core concepts](./core-concepts.md): the host and the sandbox
 - [Branch strategies](./branch-strategies.md): the worktree that host hooks run in
 - [Sandbox providers](./sandbox-providers.md): which providers support `sudo: true`
-- [Prompts](./prompts.md#dynamic-context-with--command-): shell expressions, which run after sandbox hooks
+- [Prompts](./prompts.md#dynamic-context-with--command-): [shell expressions](./glossary.md#shell-expression), which run after sandbox hooks
 - [`run()` reference](./run.md#runoptions): the `hooks` option
