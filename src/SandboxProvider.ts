@@ -123,8 +123,9 @@ export interface IsolatedSandboxHandle {
   readonly worktreePath: string;
   /**
    * The vendor's id for the sandbox, so a supervisor outside this process can
-   * address it with the vendor's own CLI or API, e.g. `vercel()` and
-   * `daytona()` set it to the Vercel and Daytona sandbox ids. Surfaced as
+   * address it with the vendor's own CLI or API, e.g. `vercel()`,
+   * `daytona()` and `modal()` set it to the Vercel, Daytona and Modal sandbox
+   * ids. Surfaced as
    * `Sandbox.sandboxId`. Omit it when the provider has no such id.
    */
   readonly sandboxId?: string;

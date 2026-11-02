@@ -15,6 +15,7 @@ export default defineConfig({
     "sandboxes/vercel": "src/sandboxes/vercel.ts",
     "sandboxes/daytona": "src/sandboxes/daytona.ts",
     "sandboxes/e2b": "src/sandboxes/e2b.ts",
+    "sandboxes/modal": "src/sandboxes/modal.ts",
     "sandboxes/no-sandbox": "src/sandboxes/no-sandbox.ts",
     "sandboxes/bwrap": "src/sandboxes/bwrap.ts",
     "sandboxes/seatbelt": "src/sandboxes/seatbelt.ts",
@@ -28,7 +29,7 @@ export default defineConfig({
   clean: true,
   dts: true,
   treeshake: true,
-  external: ["@vercel/sandbox", "@daytona/sdk", "e2b"],
+  external: ["@vercel/sandbox", "@daytona/sdk", "e2b", "modal"],
   define: {
     __SANDCASTLE_VERSION__: JSON.stringify(pkg.version),
   },

@@ -100,6 +100,22 @@ Ledger section (e) checks the result against the world's canary and every undecl
 - **Plan:** the Hobby plan caps a sandbox at 1 hour and 20 at once. Keep each run well under that.
 - **Proof:** as vercel. Teardown is checked with the SDK: `Sandbox.getInfo(id)` must fail with `SandboxNotFoundError`, and `Sandbox.list()` (running and paused) must not show the id. The listing is eventually consistent: a killed id can drop out and reappear for a second, so poll it for timing and let `getInfo` decide.
 
+## modal (`…/sandboxes/modal`, isolated)
+
+- **Entry:** `modal({ tokenId?, tokenSecret?, environment?, appName?, image?, timeoutMs?, create?, env? })` (`src/sandboxes/modal.ts`).
+- **Peer dependency:** `modal`, which a world lacks. Add it as a user would: `npm run -s verify -- sh <run> npm install modal`, then commit.
+- **Auth:** the SDK reads `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` itself (then `~/.modal.toml`); `tokenId`/`tokenSecret` win. A spend-limit error at create ("billing cycle spend limit") is UNVERIFIABLE, naming the limit.
+- **Behaviour:**
+  - With no `image`, the sandbox is `node:24-bookworm` plus `npm install -g @anthropic-ai/claude-code`, built once per Modal workspace (the first create can take a minute or more; later ones about 30 s). Other agents need their CLI installed in an `onSandboxReady` hook, or an `image`.
+  - Every command runs as **root**, whatever the image's `USER`: `sudo: true` is a no-op, and `modal()` puts `IS_SANDBOX=1` in its env so claudeCode's `--dangerously-skip-permissions` runs.
+  - The repo lands at `/workspace`, synced in and out as in [branch-strategies.md](branch-strategies.md).
+  - The sandbox lives `timeoutMs` (default one hour). `close()` calls `terminate()`. Nothing stops it on SIGINT.
+  - `sandboxId` is the Modal id (`sb-…`).
+- **Proof:**
+  - As vercel: commits on the host branch, no `.sandcastle/patches/`.
+  - Teardown can't come from `sandboxes.list()`: sandboxes on Modal's V2 backend (this account's) don't appear there. Record every `sandboxId`, then `(await client.sandboxes.fromId(id)).poll()`: `null` means running, a number (137 after `terminate()`) means gone. `terminate()` returns before the sandbox exits, so poll a few seconds later.
+  - `interactive()` isn't supported (no `interactiveExec`).
+
 ## noSandbox: never run
 
 `noSandbox()` runs the agent on this host with the host's **whole** env (`src/sandboxes/no-sandbox.ts:51`). That is unsafe here, and no sandbox seam exists to test. Its claims are proved by vitest tests beside `src/sandboxes/no-sandbox.ts` and reported as `VERIFIED (unit test)` or `FAILED (unit test)`, naming the test. `interactive()` and `wt.interactive()` default to it, so always pass a sandbox.
