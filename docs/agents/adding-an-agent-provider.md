@@ -173,4 +173,4 @@ For a new agent provider `foo`:
 - [ ] `AGENT_REGISTRY` entry in [`src/InitService.ts`](../../src/InitService.ts).
 - [ ] `FOO_DOCKERFILE` constant in `src/InitService.ts`.
 - [ ] Changeset in `.changeset/` (patch, since pre-1.0). See [`CLAUDE.md`](../../CLAUDE.md).
-- [ ] `README.md` update if the public-facing list of supported agents is mentioned there.
+- [ ] `docs/guide/` update if the public-facing list of supported agents is mentioned there.

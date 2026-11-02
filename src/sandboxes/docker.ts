@@ -12,6 +12,7 @@ import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import { Effect } from "effect";
 import { startContainer, removeContainer } from "../DockerLifecycle.js";
+import type { LinuxCapability } from "../DockerLifecycle.js";
 import { createBindMountSandboxProvider } from "../SandboxProvider.js";
 import type {
   SandboxProvider,
@@ -85,6 +86,20 @@ export interface DockerOptions {
    * When omitted, no `--group-add` flags are added.
    */
   readonly groups?: readonly (string | number)[];
+  /**
+   * Linux capabilities to drop from the container, via `--cap-drop`.
+   *
+   * Names are written without the `CAP_` prefix, as `docker run` accepts them,
+   * and a misspelt name is a type error:
+   *
+   * - `["NET_RAW"]` → `--cap-drop NET_RAW` (no raw sockets, so no `ping`)
+   * - `["NET_RAW", "MKNOD"]` → `--cap-drop NET_RAW --cap-drop MKNOD`
+   * - `["ALL"]` → `--cap-drop ALL` (drop every capability)
+   *
+   * When omitted, no `--cap-drop` flags are added and the container keeps
+   * Docker's default capability set.
+   */
+  readonly capDrop?: readonly LinuxCapability[];
   /**
    * Host devices to expose to the container, via `--device`.
    *
@@ -187,6 +202,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
             user: `${containerUid}:${containerGid}`,
             network: options?.network,
             groups: options?.groups,
+            capDrop: options?.capDrop,
             devices: options?.devices,
             cpus: options?.cpus,
             selinuxLabel,
@@ -402,6 +418,8 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
     },
   });
 };
+
+export type { LinuxCapability } from "../DockerLifecycle.js";
 
 // Re-export for backwards compatibility
 export { defaultImageName } from "../mountUtils.js";

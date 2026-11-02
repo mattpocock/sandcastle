@@ -46,6 +46,7 @@ import type {
   OutputStringDefinition,
 } from "./Output.js";
 import { StructuredOutputError } from "./Output.js";
+import type { PromptError } from "./errors.js";
 import { extractStructuredOutput } from "./extractStructuredOutput.js";
 import { validateTimeoutOptions } from "./validateTimeouts.js";
 import { buildContextWindowLines } from "./ContextWindow.js";
@@ -498,6 +499,175 @@ export interface RunResult {
   ) => Promise<RunResult>;
 }
 
+/** Fails when the branch strategy can't be used with the other options. */
+const validateBranchOptions = (
+  options: RunOptions,
+  branchType: BranchStrategy["type"],
+): void => {
+  // Validate: head strategy is not supported with isolated providers
+  if (branchType === "head" && options.sandbox.tag === "isolated") {
+    throw new Error(
+      "head branch strategy is not supported with isolated providers",
+    );
+  }
+
+  // Validate: copyToWorktree is incompatible with head strategy
+  if (
+    branchType === "head" &&
+    options.copyToWorktree &&
+    options.copyToWorktree.length > 0
+  ) {
+    throw new Error(
+      "copyToWorktree is not supported with head branch strategy. " +
+        "In head mode the host working directory is bind-mounted directly.",
+    );
+  }
+};
+
+/** Fails on an impossible resume/fork combination; whether this run resumes. */
+const validateSessionOptions = (
+  options: RunOptions,
+  maxIterations: number,
+): boolean => {
+  const isResuming =
+    options.resumeSession !== undefined && options.resumeSession !== "";
+
+  // Validate: resumeSession + maxIterations > 1 is not allowed
+  if (isResuming && maxIterations > 1) {
+    throw new Error(
+      "resumeSession cannot be combined with maxIterations > 1. " +
+        "Resume applies to iteration 1 only; multi-iteration resume semantics are not supported.",
+    );
+  }
+
+  // Validate: forkSession only makes sense alongside resumeSession.
+  // It is wired internally by RunResult.fork() and never set on its own.
+  if (options.forkSession === true && !isResuming) {
+    throw new Error(
+      "forkSession requires resumeSession. " +
+        "Use RunResult.fork(prompt) to fork the last captured session.",
+    );
+  }
+  if (options.forkSession === true) {
+    assertForkSupported(options.agent);
+  }
+  return isResuming;
+};
+
+/** Fails on unusable structured-output options; the output retry budget. */
+const validateOutputOptions = (
+  options: RunOptions,
+  maxIterations: number,
+): number => {
+  // Validate: output requires maxIterations === 1
+  if (options.output && maxIterations !== 1) {
+    throw new Error(
+      "output requires maxIterations to be 1. " +
+        "Structured output is only supported for single-iteration runs.",
+    );
+  }
+
+  // Validate: output.maxRetries requires a provider that supports session
+  // resumption. Fail at the earliest possible point — the issue is fully
+  // determined by the inputs to run() and does not depend on the agent's
+  // output. See issue #825.
+  const outputMaxRetries = options.output?.maxRetries ?? 0;
+  if (outputMaxRetries < 0 || !Number.isInteger(outputMaxRetries)) {
+    throw new Error(
+      "output.maxRetries must be a non-negative integer. " +
+        `Received: ${outputMaxRetries}`,
+    );
+  }
+  if (outputMaxRetries > 0 && !options.agent.sessionStorage) {
+    throw new Error(
+      `output.maxRetries requires an agent provider that supports session resumption. ` +
+        `The "${options.agent.name}" provider does not. ` +
+        `Use an agent provider that supports resume, or set maxRetries to 0.`,
+    );
+  }
+  return outputMaxRetries;
+};
+
+/**
+ * The prompt the agent gets. Inline prompts pass through to the agent
+ * literally — no substitution, no built-in arg injection. Guard against
+ * silently ignoring promptArgs.
+ */
+const buildAgentPrompt = (input: {
+  readonly rawPrompt: string;
+  readonly isInlinePrompt: boolean;
+  readonly userArgs: PromptArgs;
+  readonly sourceBranch: string;
+  readonly targetBranch: string;
+}): Effect.Effect<string, PromptError, Display> =>
+  Effect.gen(function* () {
+    if (input.isInlinePrompt) {
+      yield* validateNoArgsWithInlinePrompt(input.userArgs);
+      return input.rawPrompt;
+    }
+    yield* validateNoBuiltInArgOverride(input.userArgs);
+    const effectiveArgs = {
+      SOURCE_BRANCH: input.sourceBranch,
+      TARGET_BRANCH: input.targetBranch,
+      ...input.userArgs,
+    };
+    const builtInArgKeysSet = new Set<string>(BUILT_IN_PROMPT_ARG_KEYS);
+    return yield* substitutePromptArgs(
+      input.rawPrompt,
+      effectiveArgs,
+      builtInArgKeysSet,
+    );
+  });
+
+/** Shows how the run ended and how full each iteration's context window got. */
+const reportRunEnd = (
+  result: OrchestrateResult,
+): Effect.Effect<void, never, Display> =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    const completion = buildCompletionMessage(
+      result.completionSignal,
+      result.iterations.length,
+    );
+    yield* d.status(completion.message, completion.severity);
+
+    for (const line of buildContextWindowLines(result.iterations)) {
+      yield* d.text(line);
+    }
+  });
+
+/**
+ * A follow-up run on the last iteration's session: `resume` continues it,
+ * `fork` continues a copy.
+ */
+const followUpRun =
+  (options: RunOptions, result: OrchestrateResult, kind: "resume" | "fork") =>
+  async (
+    followUpPrompt: string,
+    followUpOptions?: ResumeRunResultOptions,
+  ): Promise<RunResult> => {
+    const lastIteration = result.iterations.at(-1);
+    if (
+      lastIteration?.sessionId === undefined ||
+      lastIteration.sessionId === ""
+    ) {
+      throw new Error(`Cannot ${kind}: no sessionId was captured`);
+    }
+    return run({
+      ...options,
+      // The follow-up prompt is inline: drop the template's arguments.
+      promptArgs: undefined,
+      // The follow-up prompt is new: structured output is opt-in per call.
+      output: undefined,
+      ...followUpOptions,
+      prompt: followUpPrompt,
+      promptFile: undefined,
+      maxIterations: 1,
+      resumeSession: lastIteration.sessionId,
+      ...(kind === "fork" ? { forkSession: true } : {}),
+    });
+  };
+
 /** Overload: with `Output.object`, returns `RunResult` with typed `output: T`. */
 export function run<T, A extends AgentProvider>(
   options: RunOptions<A> & { output: OutputObjectDefinition<T> },
@@ -534,75 +704,9 @@ export async function run(
 
   // Validate: timeouts must be positive (0 would fire before the agent's first output)
   validateTimeoutOptions(options);
-
-  // Validate: head strategy is not supported with isolated providers
-  if (effectiveBranchType === "head" && options.sandbox.tag === "isolated") {
-    throw new Error(
-      "head branch strategy is not supported with isolated providers",
-    );
-  }
-
-  // Validate: copyToWorktree is incompatible with head strategy
-  if (
-    effectiveBranchType === "head" &&
-    options.copyToWorktree &&
-    options.copyToWorktree.length > 0
-  ) {
-    throw new Error(
-      "copyToWorktree is not supported with head branch strategy. " +
-        "In head mode the host working directory is bind-mounted directly.",
-    );
-  }
-
-  const isResuming =
-    options.resumeSession !== undefined && options.resumeSession !== "";
-
-  // Validate: resumeSession + maxIterations > 1 is not allowed
-  if (isResuming && maxIterations > 1) {
-    throw new Error(
-      "resumeSession cannot be combined with maxIterations > 1. " +
-        "Resume applies to iteration 1 only; multi-iteration resume semantics are not supported.",
-    );
-  }
-
-  // Validate: forkSession only makes sense alongside resumeSession.
-  // It is wired internally by RunResult.fork() and never set on its own.
-  if (options.forkSession === true && !isResuming) {
-    throw new Error(
-      "forkSession requires resumeSession. " +
-        "Use RunResult.fork(prompt) to fork the last captured session.",
-    );
-  }
-  if (options.forkSession === true) {
-    assertForkSupported(provider);
-  }
-
-  // Validate: output requires maxIterations === 1
-  if (options.output && maxIterations !== 1) {
-    throw new Error(
-      "output requires maxIterations to be 1. " +
-        "Structured output is only supported for single-iteration runs.",
-    );
-  }
-
-  // Validate: output.maxRetries requires a provider that supports session
-  // resumption. Fail at the earliest possible point — the issue is fully
-  // determined by the inputs to run() and does not depend on the agent's
-  // output. See issue #825.
-  const outputMaxRetries = options.output?.maxRetries ?? 0;
-  if (outputMaxRetries < 0 || !Number.isInteger(outputMaxRetries)) {
-    throw new Error(
-      "output.maxRetries must be a non-negative integer. " +
-        `Received: ${outputMaxRetries}`,
-    );
-  }
-  if (outputMaxRetries > 0 && !provider.sessionStorage) {
-    throw new Error(
-      `output.maxRetries requires an agent provider that supports session resumption. ` +
-        `The "${provider.name}" provider does not. ` +
-        `Use an agent provider that supports resume, or set maxRetries to 0.`,
-    );
-  }
+  validateBranchOptions(options, effectiveBranchType);
+  const isResuming = validateSessionOptions(options, maxIterations);
+  const outputMaxRetries = validateOutputOptions(options, maxIterations);
 
   // Extract explicit branch when in branch mode
   const branch: string | undefined =
@@ -613,7 +717,7 @@ export async function run(
   );
 
   // Validate: resumeSession file must exist on the host
-  if (isResuming) {
+  if (isResuming && options.resumeSession !== undefined) {
     await assertResumeSessionExists({
       provider,
       sandboxTag: options.sandbox.tag,
@@ -743,28 +847,13 @@ export async function run(
     });
     yield* d.summary("Sandcastle Run", rows);
 
-    const userArgs = options.promptArgs ?? {};
-
-    // Inline prompts pass through to the agent literally — no substitution,
-    // no built-in arg injection. Guard against silently ignoring promptArgs.
-    let resolvedPrompt: string;
-    if (isInlinePrompt) {
-      yield* validateNoArgsWithInlinePrompt(userArgs);
-      resolvedPrompt = rawPrompt;
-    } else {
-      yield* validateNoBuiltInArgOverride(userArgs);
-      const effectiveArgs = {
-        SOURCE_BRANCH: resolvedBranch,
-        TARGET_BRANCH: currentHostBranch,
-        ...userArgs,
-      };
-      const builtInArgKeysSet = new Set<string>(BUILT_IN_PROMPT_ARG_KEYS);
-      resolvedPrompt = yield* substitutePromptArgs(
-        rawPrompt,
-        effectiveArgs,
-        builtInArgKeysSet,
-      );
-    }
+    const resolvedPrompt = yield* buildAgentPrompt({
+      rawPrompt,
+      isInlinePrompt,
+      userArgs: options.promptArgs ?? {},
+      sourceBranch: resolvedBranch,
+      targetBranch: currentHostBranch,
+    });
 
     // In head mode, pass the host branch so SandboxLifecycle skips the merge step.
     // In merge-to-head mode, branch is undefined (triggers merge). In branch mode, it's the explicit branch.
@@ -789,16 +878,7 @@ export async function run(
       timeouts: options.timeouts,
     });
 
-    const completion = buildCompletionMessage(
-      orchestrateResult.completionSignal,
-      orchestrateResult.iterations.length,
-    );
-    yield* d.status(completion.message, completion.severity);
-
-    for (const line of buildContextWindowLines(orchestrateResult.iterations)) {
-      yield* d.text(line);
-    }
-
+    yield* reportRunEnd(orchestrateResult);
     return orchestrateResult;
   });
 
@@ -832,55 +912,8 @@ export async function run(
     ...result,
     logFilePath:
       resolvedLogging.type === "file" ? resolvedLogging.path : undefined,
-    resume: async (
-      followUpPrompt: string,
-      resumeOptions?: ResumeRunResultOptions,
-    ): Promise<RunResult> => {
-      const lastIteration = result.iterations.at(-1);
-      if (
-        lastIteration?.sessionId === undefined ||
-        lastIteration.sessionId === ""
-      ) {
-        throw new Error("Cannot resume: no sessionId was captured");
-      }
-      return run({
-        ...options,
-        // The follow-up prompt is inline: drop the template's arguments.
-        promptArgs: undefined,
-        // The follow-up prompt is new: structured output is opt-in per call.
-        output: undefined,
-        ...resumeOptions,
-        prompt: followUpPrompt,
-        promptFile: undefined,
-        maxIterations: 1,
-        resumeSession: lastIteration.sessionId,
-      });
-    },
-    fork: async (
-      followUpPrompt: string,
-      forkOptions?: ResumeRunResultOptions,
-    ): Promise<RunResult> => {
-      const lastIteration = result.iterations.at(-1);
-      if (
-        lastIteration?.sessionId === undefined ||
-        lastIteration.sessionId === ""
-      ) {
-        throw new Error("Cannot fork: no sessionId was captured");
-      }
-      return run({
-        ...options,
-        // The follow-up prompt is inline: drop the template's arguments.
-        promptArgs: undefined,
-        // The follow-up prompt is new: structured output is opt-in per call.
-        output: undefined,
-        ...forkOptions,
-        prompt: followUpPrompt,
-        promptFile: undefined,
-        maxIterations: 1,
-        resumeSession: lastIteration.sessionId,
-        forkSession: true,
-      });
-    },
+    resume: followUpRun(options, result, "resume"),
+    fork: followUpRun(options, result, "fork"),
   };
 
   // Extract structured output after the iteration completes (separate pass from completion signal)

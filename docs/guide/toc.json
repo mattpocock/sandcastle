@@ -1,0 +1,13 @@
+{
+  "start": "getting-started",
+  "groups": [
+    {
+      "title": "Guides",
+      "pages": ["sandbox-providers", "how-it-works", "prompts", "configuration"]
+    },
+    {
+      "title": "Reference",
+      "pages": ["api", "cli-commands", "custom-sandbox-providers"]
+    }
+  ]
+}

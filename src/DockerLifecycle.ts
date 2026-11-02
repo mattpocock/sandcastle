@@ -4,6 +4,10 @@ import { resolve } from "node:path";
 import { DockerError, ImageNotFoundError } from "./errors.js";
 import { formatVolumeMount } from "./mountUtils.js";
 import type { SelinuxLabel } from "./mountUtils.js";
+import type { LinuxCapability } from "./LinuxCapability.js";
+
+// Re-exported so docker.ts gets it with the lifecycle it already imports.
+export type { LinuxCapability } from "./LinuxCapability.js";
 
 const dockerExec = (args: string[]): Effect.Effect<string, DockerError> =>
   Effect.async((resume) => {
@@ -75,6 +79,8 @@ export interface StartContainerOptions {
   readonly network?: string | readonly string[];
   /** Supplementary groups to add the container user to. Passed as `--group-add` flags. */
   readonly groups?: readonly (string | number)[];
+  /** Linux capabilities to drop from the container. Passed as `--cap-drop` flags. */
+  readonly capDrop?: readonly LinuxCapability[];
   /** Host devices to expose to the container. Passed as `--device` flags. */
   readonly devices?: readonly string[];
   /** Limit CPU resources via `--cpus` (e.g. `1.5`). Fractional values allowed. */
@@ -139,6 +145,10 @@ export const startContainer = (
       "--group-add",
       String(g),
     ]);
+    const capDropFlags = (options?.capDrop ?? []).flatMap((cap) => [
+      "--cap-drop",
+      cap,
+    ]);
     const deviceFlags = (options?.devices ?? []).flatMap((d) => [
       "--device",
       d,
@@ -157,6 +167,7 @@ export const startContainer = (
       ...userFlags,
       ...networkFlags,
       ...groupAddFlags,
+      ...capDropFlags,
       ...deviceFlags,
       ...cpusFlags,
       imageName,

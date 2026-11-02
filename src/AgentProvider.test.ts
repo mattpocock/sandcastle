@@ -1134,7 +1134,7 @@ describe("cursor factory", () => {
     const provider = cursor("claude-sonnet-4-6");
     const huge = "x".repeat(120 * 1024 + 1);
     expect(() => provider.buildPrintCommand(opts(huge))).toThrow(
-      /Cursor print-mode prompt/,
+      /Cursor print-mode prompt/u,
     );
   });
 
@@ -1889,7 +1889,7 @@ describe("copilot factory", () => {
     const provider = copilot("claude-sonnet-4.5");
     const huge = "x".repeat(120 * 1024 + 1);
     expect(() => provider.buildPrintCommand(opts(huge))).toThrow(
-      /Copilot print-mode prompt/,
+      /Copilot print-mode prompt/u,
     );
   });
 
