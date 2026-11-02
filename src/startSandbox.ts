@@ -78,6 +78,14 @@ export interface StartSandboxResult<
   worktreePath: string;
 }
 
+export type StartSandboxError =
+  | DockerError
+  | WorktreeError
+  | SyncError
+  | ContainerStartTimeoutError
+  | SyncInTimeoutError
+  | CopyToWorktreeTimeoutError;
+
 export const CONTAINER_START_TIMEOUT_MS = 120_000;
 const SYNC_IN_TIMEOUT_MS = 120_000;
 export const COPY_PATHS_TIMEOUT_MS = 120_000;
@@ -99,14 +107,6 @@ const isBindMountOptions = (
 const isNoSandboxOptions = (
   options: StartSandboxOptions,
 ): options is StartSandboxNoSandboxOptions => options.provider.tag === "none";
-
-export type StartSandboxError =
-  | DockerError
-  | WorktreeError
-  | SyncError
-  | ContainerStartTimeoutError
-  | SyncInTimeoutError
-  | CopyToWorktreeTimeoutError;
 
 /**
  * Start a sandbox by dispatching on `provider.tag`.
@@ -217,6 +217,41 @@ export const startBindMountSandbox = (
   );
 };
 
+/** Copies `paths` (relative to `sourceDir`) into the sandbox's worktree. */
+const copyPathsIn = (
+  handle: IsolatedSandboxHandle,
+  paths: string[],
+  sourceDir: string,
+): Effect.Effect<void, WorktreeError | CopyToWorktreeTimeoutError> =>
+  Effect.gen(function* () {
+    for (const relativePath of paths) {
+      const hostPath = join(sourceDir, relativePath);
+      if (!existsSync(hostPath)) {
+        continue;
+      }
+      // Sandbox-side path: Linux container, must use POSIX separators
+      // regardless of host platform.
+      const sandboxPath = posix.join(handle.worktreePath, relativePath);
+      yield* Effect.tryPromise({
+        try: () => handle.copyIn(hostPath, sandboxPath),
+        catch: (e) =>
+          new WorktreeError({
+            message: `Failed to copy ${relativePath} into sandbox: ${e instanceof Error ? e.message : String(e)}`,
+          }),
+      });
+    }
+  }).pipe(
+    withTimeout(
+      COPY_PATHS_TIMEOUT_MS,
+      () =>
+        new CopyToWorktreeTimeoutError({
+          message: `Copying paths to worktree timed out after ${COPY_PATHS_TIMEOUT_MS}ms`,
+          timeoutMs: COPY_PATHS_TIMEOUT_MS,
+          paths,
+        }),
+    ),
+  );
+
 /** `startSandbox` for an isolated provider, typed to its handle. */
 export const startIsolatedSandbox = (
   options: StartSandboxIsolatedOptions,
@@ -257,38 +292,8 @@ export const startIsolatedSandbox = (
             }),
         ),
       );
-
       if (options.copyPaths && options.copyPaths.length > 0) {
-        const pathsToCopy = options.copyPaths;
-        const { copySourceDir } = options;
-        yield* Effect.gen(function* () {
-          for (const relativePath of pathsToCopy) {
-            const hostPath = join(copySourceDir, relativePath);
-            if (!existsSync(hostPath)) {
-              continue;
-            }
-            // Sandbox-side path: Linux container, must use POSIX separators
-            // regardless of host platform.
-            const sandboxPath = posix.join(handle.worktreePath, relativePath);
-            yield* Effect.tryPromise({
-              try: () => handle.copyIn(hostPath, sandboxPath),
-              catch: (e) =>
-                new WorktreeError({
-                  message: `Failed to copy ${relativePath} into sandbox: ${e instanceof Error ? e.message : String(e)}`,
-                }),
-            });
-          }
-        }).pipe(
-          withTimeout(
-            COPY_PATHS_TIMEOUT_MS,
-            () =>
-              new CopyToWorktreeTimeoutError({
-                message: `Copying paths to worktree timed out after ${COPY_PATHS_TIMEOUT_MS}ms`,
-                timeoutMs: COPY_PATHS_TIMEOUT_MS,
-                paths: pathsToCopy,
-              }),
-          ),
-        );
+        yield* copyPathsIn(handle, options.copyPaths, options.copySourceDir);
       }
     }).pipe(
       Effect.onError(() =>
