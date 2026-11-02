@@ -1,6 +1,6 @@
 # Agent sessions
 
-Sandcastle captures the [agent session](./glossary.md#agent-session) after each [iteration](./glossary.md#iteration). Continue it with `resume()` on the result:
+Sandcastle captures the [agent session](./glossary.md#agent-session), the [agent](./glossary.md#agent)'s own record of the conversation, after each [iteration](./glossary.md#iteration). Continue it with `resume()` on the result:
 
 ```typescript
 import { run, codex } from "@ai-hero/sandcastle";
@@ -19,7 +19,7 @@ const second = await first.resume?.("Now implement the plan");
 
 ## Session capture
 
-After each resumable provider iteration, Sandcastle automatically captures the [agent](./glossary.md#agent)'s session file from the [sandbox](./glossary.md#sandbox) to the [host](./glossary.md#host). Claude Code sessions are stored under `~/.claude/projects/<encoded-path>/<session-id>.jsonl`; Codex sessions are stored under `~/.codex/sessions/YYYY/MM/DD/rollout-*-<session-id>.jsonl`; Pi sessions are stored under `~/.pi/agent/sessions/--<encoded-cwd>--/<timestamp>_<session-id>.jsonl`; Copilot sessions are stored under `~/.copilot/session-state/<session-id>/events.jsonl`; Cursor chats are stored under `~/.cursor/chats/<md5-of-cwd>/<chat-id>/store.db` (an SQLite file, copied byte for byte). OpenCode keeps sessions in its SQLite database, so Sandcastle runs `opencode export <id>` in the sandbox and stores the JSON under `~/.local/share/opencode/sandcastle-sessions/<session-id>.json` ([ADR 0022](../adr/0022-opencode-resume-via-export-import.md)). Any provider-specific `cwd` fields are rewritten to match the host repo root, so the provider's native resume command works.
+After each resumable provider iteration, Sandcastle automatically captures the agent's session file from the [sandbox](./glossary.md#sandbox) to the [host](./glossary.md#host). Claude Code sessions are stored under `~/.claude/projects/<encoded-path>/<session-id>.jsonl`; Codex sessions are stored under `~/.codex/sessions/YYYY/MM/DD/rollout-*-<session-id>.jsonl`; Pi sessions are stored under `~/.pi/agent/sessions/--<encoded-cwd>--/<timestamp>_<session-id>.jsonl`; Copilot sessions are stored under `~/.copilot/session-state/<session-id>/events.jsonl`; Cursor chats are stored under `~/.cursor/chats/<md5-of-cwd>/<chat-id>/store.db` (an SQLite file, copied byte for byte). OpenCode keeps sessions in its SQLite database, so Sandcastle runs `opencode export <id>` in the sandbox and stores the JSON under `~/.local/share/opencode/sandcastle-sessions/<session-id>.json`. Any provider-specific `cwd` fields are rewritten to match the host repo root, so the provider's native resume command works.
 
 For Claude Code, any `Agent`-tool or `Workflow`-tool subagent transcripts written under `<session-id>/subagents/agent-*.jsonl` are captured alongside the main session. Subagent capture is best-effort: a failure on an individual transcript logs a warning and lets siblings and the main session through. Main-session capture failure still fails the run (see below).
 
@@ -69,7 +69,7 @@ Constraints:
 - The provider's host session file must exist (throws before sandbox creation).
 - Only iteration 1 receives the resume flag; subsequent iterations (if any) start fresh.
 - Providers without resume support reject `resumeSession`.
-- `.resume()` and `.fork()` don't inherit the first run's `output` or `promptArgs`. To get [structured output](./glossary.md#structured-output) from the follow-up, pass `output` again, and put its tag in the follow-up prompt.
+- `.resume()` and `.fork()` don't inherit the first run's `output` or `promptArgs`. To parse `output` from the follow-up, pass `output` again, and put its tag in the follow-up prompt.
 
 ## Session fork
 
@@ -94,9 +94,9 @@ const [reviewA, reviewB] = await Promise.all([
 ]);
 ```
 
-**Fork is session-only.** `--fork-session` and `codex exec fork` isolate the agent session JSONL — they do **not** isolate the branch, [worktree](./glossary.md#worktree), or sandbox. Safe concurrent fan-out (`Promise.all([r.fork(a), r.fork(b)])`) requires the caller to give each child a distinct `branch` via `branchStrategy: { type: "branch", branch: "..." }`. The default `head` and `merge-to-head` strategies are **not** safe for concurrent forks: `head` shares the host working directory across all children, and `merge-to-head` races `git merge` against the same HEAD. See [ADR 0018](../adr/0018-fork-is-session-only.md).
+**Fork is session-only.** `--fork-session` and `codex exec fork` isolate the agent session JSONL — they do **not** isolate the branch, [worktree](./glossary.md#worktree), or sandbox. Safe concurrent fan-out (`Promise.all([r.fork(a), r.fork(b)])`) requires the caller to give each child a distinct `branch` via `branchStrategy: { type: "branch", branch: "..." }`. The default `head` and `merge-to-head` strategies are **not** safe for concurrent forks: `head` shares the host working directory across all children, and `merge-to-head` races `git merge` against the same HEAD.
 
-`fork` is present only on results from providers with `sessionStorage` — hence the optional-chaining call. The same single-iteration and session-file constraints as `.resume()` apply. A provider whose CLI resumes but has no fork flag (Copilot, Cursor) throws a `ForkNotSupportedError` naming it before any sandbox starts; match it on `error._tag === "ForkNotSupportedError"` and call `.resume()` instead ([ADR 0021](../adr/0021-resume-without-fork.md)).
+`fork` is present only on results from providers with `sessionStorage` — hence the optional-chaining call. The same single-iteration and session-file constraints as `.resume()` apply. A provider whose CLI resumes but has no fork flag (Copilot, Cursor) throws a `ForkNotSupportedError` naming it before any sandbox starts; match it on `error._tag === "ForkNotSupportedError"` and call `.resume()` instead.
 
 ## Related terms
 

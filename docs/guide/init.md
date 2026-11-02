@@ -43,7 +43,7 @@ All per-repo sandbox configuration lives in `.sandcastle/`. Run `sandcastle init
 
 ## Templates
 
-`sandcastle init` asks you to choose a sandbox provider (your OS's native sandbox, Docker or Podman), an [issue tracker](./glossary.md#issue-tracker) (GitHub Issues, Beads, or Custom), and a template, which scaffolds a ready-to-use [prompt](./glossary.md#prompt) and `main.mts` suited to a specific workflow. If your project's `package.json` has `"type": "module"`, the file will be named `main.ts` instead. Choosing **Custom** scaffolds the project in a deliberately broken-until-configured state plus a `.sandcastle/SETUP_ISSUE_TRACKER.md` prompt you feed to your coding agent, which wires up your own tracker by editing the scaffolded files in place. Five templates are available:
+`sandcastle init` asks you to choose a sandbox provider (your OS's native sandbox, Docker or Podman), an [issue tracker](./glossary.md#issue-tracker) (GitHub Issues, Beads, or Custom), which is where the agent finds its [tasks](./glossary.md#task): the pieces of work it picks up, one per [iteration](./glossary.md#iteration), and a template, which scaffolds a ready-to-use [prompt](./glossary.md#prompt) and `main.mts` suited to a specific workflow. If your project's `package.json` has `"type": "module"`, the file will be named `main.ts` instead. Choosing **Custom** scaffolds the project in a deliberately broken-until-configured state plus a `.sandcastle/SETUP_ISSUE_TRACKER.md` prompt you feed to your coding agent, which wires up your own tracker by editing the scaffolded files in place. Five templates are available:
 
 | Template                       | Description                                                               |
 | ------------------------------ | ------------------------------------------------------------------------- |
@@ -57,7 +57,7 @@ Select a template during `sandcastle init` when prompted, or re-run init in a fr
 
 ## Template arguments
 
-The scaffold templates contain [template arguments](./glossary.md#template-argument), and init replaces them as it writes the files: for example, `{{ISSUE_TRACKER_TOOLS}}` in the Dockerfile becomes the setup for the issue tracker you chose. They use the same `{{KEY}}` syntax as [prompt arguments](./prompts.md#prompt-arguments-with-key), but init fills them in once, when it writes the file.
+The scaffold templates contain [template arguments](./glossary.md#template-argument), `{{KEY}}` placeholders that init replaces with your choices as it writes the files: for example, `{{ISSUE_TRACKER_TOOLS}}` in the Dockerfile becomes the setup for the issue tracker you chose. They use the same `{{KEY}}` syntax as [prompt arguments](./prompts.md#prompt-arguments-with-key), but init fills them in once, when it writes the file.
 
 ## Custom Dockerfile
 
@@ -83,5 +83,5 @@ Add your project-specific dependencies (e.g., language runtimes, build tools) to
 - [Sandbox providers](./sandbox-providers.md): the providers init offers, and build-image
 - [Agent providers](./agent-providers.md): the agents init offers
 - [Prompts](./prompts.md): the scaffolded `prompt.md`
-- [Iterations](./iterations.md): an [iteration](./glossary.md#iteration) works on one [task](./glossary.md#task) from the issue tracker
+- [Iterations](./iterations.md): an iteration works on one [task](./glossary.md#task) from the issue tracker
 - [CLI commands](./cli.md): every `sandcastle init` flag

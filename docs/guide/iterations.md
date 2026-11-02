@@ -1,6 +1,6 @@
 # Iterations
 
-`maxIterations` sets how many [iterations](./glossary.md#iteration) `run()` may run (default `1`). The loop stops sooner when the [agent](./glossary.md#agent) emits the [completion signal](./glossary.md#completion-signal):
+`maxIterations` sets how many [iterations](./glossary.md#iteration) `run()` may run (default `1`). The loop stops sooner when the [agent](./glossary.md#agent) emits the [completion signal](./glossary.md#completion-signal), a marker it prints to say there is nothing left to do:
 
 ```typescript
 import { run, claudeCode } from "@ai-hero/sandcastle";
@@ -42,7 +42,7 @@ Tell the agent to output your chosen string(s) in the prompt, and the orchestrat
 
 ## Hanging processes after the completion signal
 
-The agent process is expected to exit shortly after emitting the completion signal. When a child it spawned — a `gh`/git subprocess, a long-lived MCP server, etc. — inherits the agent's stdout pipe and keeps it open, the parent process can linger long past its logical end. Sandcastle would otherwise wait for the full `idleTimeoutSeconds` and fail with `AgentIdleTimeoutError`, throwing away the commits the agent already made.
+The agent process is expected to exit shortly after emitting the completion signal. When a child it spawned — a `gh`/git subprocess, a long-lived MCP server, etc. — inherits the agent's stdout pipe and keeps it open, the agent becomes a [hanging process](./glossary.md#hanging-process): it has said it is done, but it never exits. Sandcastle would otherwise wait for the full `idleTimeoutSeconds` and fail with `AgentIdleTimeoutError`, throwing away the commits the agent already made.
 
 Instead, once the completion signal is observed in the output buffer, Sandcastle swaps in a short **[completion timeout](./glossary.md#completion-timeout)** (default 60 s). When it expires, the run resolves successfully with a warning that the process was hanging; `result.commits` and `result.completionSignal` are populated as if the process had exited cleanly. The timer resets on every subsequent output line, so trailing data emitted after the signal — token-usage events, terminal `result` events, a structured-output `<tag>` — is still captured.
 
@@ -57,12 +57,12 @@ await run({
 });
 ```
 
-This is independent of `idleTimeoutSeconds`. They cover different phases: `idleTimeoutSeconds` runs **before** any signal is seen (genuinely stuck agent → fail); `completionTimeoutSeconds` runs **after** the signal is seen ([hanging process](./glossary.md#hanging-process) → succeed with warning). See [ADR 0019](../adr/0019-completion-timeout-for-hanging-process.md).
+This is independent of `idleTimeoutSeconds`. They cover different phases: `idleTimeoutSeconds` runs **before** any signal is seen (genuinely stuck agent → fail); `completionTimeoutSeconds` runs **after** the signal is seen (hanging process → succeed with warning).
 
 ## Related terms
 
 - [Prompts](./prompts.md): the prompt each iteration starts with
-- [Init](./init.md): the [issue tracker](./glossary.md#issue-tracker) that iterations take [tasks](./glossary.md#task) from
+- [Init](./init.md): where the work each iteration picks up comes from
 - [Structured output](./structured-output.md): the other way for an agent to report back, independent of the completion signal
 - [Agent sessions](./agent-sessions.md): each iteration's session
 - [`run()` reference](./run.md#iterationresult): `IterationResult`, `IterationUsage` and `ContextWindow`

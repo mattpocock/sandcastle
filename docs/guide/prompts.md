@@ -1,6 +1,6 @@
 # Prompts
 
-A [prompt template](./glossary.md#prompt-template) in `.sandcastle/prompt.md`, with a [prompt argument](./glossary.md#prompt-argument), a [built-in prompt argument](./glossary.md#built-in-prompt-argument) and a [shell expression](./glossary.md#shell-expression):
+A [prompt template](./glossary.md#prompt-template) is a [prompt](./glossary.md#prompt) that Sandcastle reads from a file and fills in before the [agent](./glossary.md#agent) sees it. This one, in `.sandcastle/prompt.md`, has a [prompt argument](./glossary.md#prompt-argument), `{{ISSUE_NUMBER}}`, whose value you pass in `promptArgs`; a [built-in prompt argument](./glossary.md#built-in-prompt-argument), `{{SOURCE_BRANCH}}`, which Sandcastle fills in for you; and a [shell expression](./glossary.md#shell-expression), a `` !`command` `` that Sandcastle runs in the [sandbox](./glossary.md#sandbox) and replaces with its output:
 
 ```markdown
 Work on issue #{{ISSUE_NUMBER}}. You are on {{SOURCE_BRANCH}}.
@@ -22,18 +22,18 @@ await run({
 });
 ```
 
-Sandcastle uses a flexible [prompt](./glossary.md#prompt) system. You write the prompt, and the engine executes it — no opinions about workflow, issue tracking, or context sources are imposed.
+Sandcastle uses a flexible prompt system. You write the prompt, and the engine executes it — no opinions about workflow, issue tracking, or context sources are imposed.
 
 ## Prompt resolution
 
 You must provide exactly one of:
 
-1. `prompt: "inline string"` — pass an [inline prompt](./glossary.md#inline-prompt) directly via `RunOptions`
+1. `prompt: "inline string"` — pass an [inline prompt](./glossary.md#inline-prompt), a prompt written as a string in your code, directly via `RunOptions`
 2. `promptFile: "./path/to/prompt.md"` — point to a specific file via `RunOptions`
 
 `prompt` and `promptFile` are mutually exclusive — providing both is an error. If neither is provided, `run()` throws an error asking you to supply one.
 
-**Inline prompts (`prompt: "..."`) are passed to the [agent](./glossary.md#agent) literally.** No `{{KEY}}` substitution, no `` !`command` `` expansion, no built-in `{{SOURCE_BRANCH}}` / `{{TARGET_BRANCH}}` injection. If you need values interpolated into an inline prompt, build the string in JavaScript (`` `Work on ${branch}…` ``). Passing `promptArgs` alongside an inline prompt is an error — switch to `promptFile` to use substitution.
+**Inline prompts (`prompt: "..."`) are passed to the agent literally.** No `{{KEY}}` substitution, no `` !`command` `` expansion, no built-in `{{SOURCE_BRANCH}}` / `{{TARGET_BRANCH}}` injection. If you need values interpolated into an inline prompt, build the string in JavaScript (`` `Work on ${branch}…` ``). Passing `promptArgs` alongside an inline prompt is an error — switch to `promptFile` to use substitution.
 
 The substitution and expansion features below apply **only** to prompts sourced from `promptFile`.
 
@@ -43,7 +43,7 @@ The substitution and expansion features below apply **only** to prompts sourced 
 
 Use `` !`command` `` expressions in your prompt to pull in dynamic context. Each expression is replaced with the command's stdout before the prompt is sent to the agent. All expressions in a prompt run **in parallel** for faster expansion.
 
-Commands run **inside the [sandbox](./glossary.md#sandbox)** after `sandbox.onSandboxReady` hooks complete, so they see the same repo state the agent sees (including installed dependencies).
+Commands run **inside the sandbox** after `sandbox.onSandboxReady` hooks complete, so they see the same repo state the agent sees (including installed dependencies).
 
 ```markdown
 # Open issues
@@ -78,7 +78,7 @@ In the prompt file:
 Work on issue #{{ISSUE_NUMBER}} (priority: {{PRIORITY}}).
 ```
 
-[Prompt argument substitution](./glossary.md#prompt-argument-substitution) runs on the [host](./glossary.md#host) before shell expression expansion, so `{{KEY}}` placeholders inside `` !`command` `` expressions are replaced first:
+[Prompt argument substitution](./glossary.md#prompt-argument-substitution), the step that swaps each `{{KEY}}` for its value, runs on the [host](./glossary.md#host) before shell expression expansion, so `{{KEY}}` placeholders inside `` !`command` `` expressions are replaced first:
 
 ```markdown
 !`gh issue view {{ISSUE_NUMBER}} --json body -q .body`
@@ -111,4 +111,4 @@ Passing `SOURCE_BRANCH` or `TARGET_BRANCH` in `promptArgs` is an error — built
 - [Structured output](./structured-output.md): the prompt must contain the output tag
 - [Hooks](./hooks.md): shell expressions run after `sandbox.onSandboxReady` hooks
 - [Branch strategies](./branch-strategies.md#source-and-target-branches): the source and [target branches](./glossary.md#target-branch)
-- [Init](./init.md): [template arguments](./glossary.md#template-argument), which [init](./glossary.md#init) fills in once, and the scaffolded `prompt.md`
+- [Init](./init.md): the placeholders `sandcastle init` fills in once, and the scaffolded `prompt.md`
