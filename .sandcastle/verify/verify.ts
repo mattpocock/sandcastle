@@ -10,6 +10,8 @@
  *   npm run -s verify -- ledger <run>          what the runs left behind (LEDGER-<n>.md); exit 1 on a leak
  *   npm run -s verify -- cleanup <run>|--all   remove the world's containers, images, worktrees
  *   npm run -s verify -- dir <run>             the world's directory
+ *   npm run -s verify -- reap [--delete] [<provider>:<id>…]
+ *                                             sandboxes alive on each remote provider; --delete removes Sandcastle's
  */
 import { rmSync } from "node:fs";
 import { join } from "node:path";
@@ -28,6 +30,7 @@ import {
   works,
 } from "./lib.ts";
 import { runLedger } from "./ledger.ts";
+import { reapVerb } from "./remoteAccounts.ts";
 import {
   checkoutStatus,
   createWorld,
@@ -271,9 +274,12 @@ const main = async (): Promise<number> => {
       console.log(loadWorld(rest[0]).dir);
       return 0;
     }
+    case "reap": {
+      return reapVerb(rest);
+    }
     default: {
       console.error(
-        "verbs: world | doctor [run] | sandcastle <run> … | tsx <run> <file> … | sh <run> <cmd> … | ledger <run> | cleanup <run>|--all | dir <run>",
+        "verbs: world | doctor [run] | sandcastle <run> … | tsx <run> <file> … | sh <run> <cmd> … | ledger <run> | cleanup <run>|--all | dir <run> | reap [--delete] [<provider>:<id>…]",
       );
       return 2;
     }
