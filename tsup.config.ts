@@ -1,9 +1,10 @@
 import { readFileSync } from "node:fs";
 import { defineConfig } from "tsup";
+import { z } from "zod";
 
-const pkg = JSON.parse(readFileSync("./package.json", "utf8")) as {
-  version: string;
-};
+const pkg = z
+  .object({ version: z.string() })
+  .parse(JSON.parse(readFileSync("./package.json", "utf8")));
 
 export default defineConfig({
   entry: {

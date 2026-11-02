@@ -15,7 +15,7 @@ const distDir = join(here, "..", "dist");
 
 /** Matches a string-literal module specifier of `effect` or `@effect/<sub>`. */
 const EFFECT_IMPORT_PATTERN =
-  /(["'])(?:effect(?:\/[^"']+)?|@effect\/[^"']+)\1/u;
+  /(?<quote>["'])(?:effect(?:\/[^"']+)?|@effect\/[^"']+)\k<quote>/u;
 
 async function* walk(dir) {
   const entries = await readdir(dir, { withFileTypes: true });
