@@ -103,6 +103,46 @@ const glossaryLinks = docs.flatMap((file) =>
 /** The pages the first-mention lint covers: all but the glossary itself. */
 const mentionPages = pages.filter((page) => page !== "glossary");
 
+const titleOf = (slug: string) =>
+  /^# (?<title>.+)$/mu.exec(read(slug))?.groups?.title.trim() ?? "";
+
+/**
+ * Each glossary entry's home: the earliest page in sidebar order that
+ * mentions it, where the guide explains it. The glossary doesn't count.
+ */
+const mentionsByPage = listed
+  .filter((slug) => slug !== "glossary")
+  .map((slug) => ({
+    slug,
+    terms: new Set(
+      firstMentions(
+        readFileSync(path.join(guide, `${slug}.md`), "utf8"),
+        entries,
+      ).map((mention) => mention.entry.term),
+    ),
+  }));
+const glossaryMarkdown = read("glossary");
+const homes = entries.map((entry) => {
+  const home = mentionsByPage.find(({ terms }) => terms.has(entry.term));
+  const body =
+    glossaryMarkdown
+      .split(/^## /mu)
+      .find((section) => section.startsWith(`${entry.term}\n`)) ?? "";
+  return {
+    term: entry.term,
+    home: home?.slug,
+    lastLine: body.trim().split("\n").at(-1) ?? "",
+  };
+});
+const mentionedHomes = homes.filter((home) => home.home !== undefined);
+const unmentioned = homes.filter((home) => home.home === undefined);
+
+/** The README and every guide page: where readers go, so no ADRs. */
+const userDocs = [
+  "README.md",
+  ...pages.map((slug) => path.join("docs", "guide", `${slug}.md`)),
+];
+
 describe("docs/guide", () => {
   it("lists every page in toc.json exactly once", () => {
     expect(new Set(listed)).toStrictEqual(new Set(pages));
@@ -162,6 +202,29 @@ describe("docs/guide", () => {
       expect(unlinked).toStrictEqual([]);
     },
   );
+
+  it.each(mentionedHomes)(
+    "ends the glossary entry for $term with its home page, $home",
+    ({ home = "", lastLine }) => {
+      expect(lastLine).toBe(
+        `First explained in [${titleOf(home)}](./${home}.md).`,
+      );
+    },
+  );
+
+  // A term no page mentions has no home: the glossary must not claim one.
+  it.each(unmentioned)(
+    "gives $term, which no guide page mentions, no home page",
+    ({ lastLine }) => {
+      expect(lastLine).not.toMatch(/^First explained in /u);
+    },
+  );
+
+  it.each(userDocs)("never sends readers of %s to an ADR", (file) => {
+    const markdown = readFileSync(path.join(root, file), "utf8");
+    expect(markdown).not.toMatch(/\badr\//iu);
+    expect(markdown).not.toMatch(/\bADRs?\b/u);
+  });
 });
 
 describe("firstMentions", () => {
