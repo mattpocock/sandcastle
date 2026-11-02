@@ -49,30 +49,29 @@ loadKeys();
 const TSX = join(REPO_ROOT, "node_modules", ".bin", "tsx");
 const [verb, ...rest] = process.argv.slice(2);
 
-const doctor = (world?: World): number => {
-  let fails = 0;
-  const ok = (good: boolean, line: string) => {
-    if (!good) fails++;
-    console.log(`${good ? "ok  " : "FAIL"} ${line}`);
-  };
-  if (world) {
-    ok(
-      world.cleanedAt === undefined,
-      `world ${world.runId} at ${world.dir}${world.cleanedAt === undefined ? "" : " was cleaned up"}`,
-    );
-    const head = sh("git", ["rev-parse", "HEAD"], {
-      cwd: REPO_ROOT,
-    }).stdout.trim();
-    const same =
-      head === world.sandcastleCommit &&
-      !world.sandcastleDirty &&
-      checkoutStatus().length === 0;
-    console.log(
-      `${same ? "ok  " : "warn"} world built from ${world.sandcastleCommit.slice(0, 7)}${world.sandcastleDirty ? "+dirty" : ""}; checkout is at ${head.slice(0, 7)}${same ? "" : ": make a new world to test the checkout as it is now"}`,
-    );
-  }
-  const file = keysFile();
-  console.log(`keys file: ${file ?? "none (keys come from the shell only)"}`);
+/** Checks the world is live and was built from the current checkout. */
+const doctorWorld = (
+  world: World,
+  ok: (good: boolean, line: string) => void,
+): void => {
+  ok(
+    world.cleanedAt === undefined,
+    `world ${world.runId} at ${world.dir}${world.cleanedAt === undefined ? "" : " was cleaned up"}`,
+  );
+  const head = sh("git", ["rev-parse", "HEAD"], {
+    cwd: REPO_ROOT,
+  }).stdout.trim();
+  const same =
+    head === world.sandcastleCommit &&
+    !world.sandcastleDirty &&
+    checkoutStatus().length === 0;
+  console.log(
+    `${same ? "ok  " : "warn"} world built from ${world.sandcastleCommit.slice(0, 7)}${world.sandcastleDirty ? "+dirty" : ""}; checkout is at ${head.slice(0, 7)}${same ? "" : ": make a new world to test the checkout as it is now"}`,
+  );
+};
+
+/** Prints which sandboxes can be verified, and what the rest are missing. */
+const doctorSandboxes = (): void => {
   console.log("\nsandboxes:");
   for (const s of SANDBOXES) {
     const need = SANDBOX_NEEDS[s];
@@ -86,6 +85,10 @@ const doctor = (world?: World): number => {
       `  ${s.padEnd(8)} ${why.length > 0 ? `UNVERIFIABLE (${why.join("; ")})` : "ready"}`,
     );
   }
+};
+
+/** Prints each agent's cheapest factory call, and its missing keys. */
+const doctorAgents = (): void => {
   console.log(
     "\nagents (factory call on the cheapest model; VERIFY_MODEL swaps the model and drops its options):",
   );
@@ -95,13 +98,29 @@ const doctor = (world?: World): number => {
       `  ${a.padEnd(10)} ${cheapAgentCall(a).padEnd(56)} ${missing.length > 0 ? `UNVERIFIABLE (missing ${missing.join(", ")})` : "ready"}`,
     );
   }
+};
+
+const doctor = (world?: World): number => {
+  let fails = 0;
+  const ok = (good: boolean, line: string) => {
+    if (!good) fails++;
+    console.log(`${good ? "ok  " : "FAIL"} ${line}`);
+  };
+  if (world) {
+    doctorWorld(world, ok);
+  }
+  const file = keysFile();
+  console.log(`keys file: ${file ?? "none (keys come from the shell only)"}`);
+  doctorSandboxes();
+  doctorAgents();
   console.log(
     "\nA missing key is Matt's to add: .sandcastle/setup-verify-keys.sh",
   );
   return fails === 0 ? 0 : 1;
 };
 
-const cleanup = (world: World): void => {
+/** Removes the containers this world started; returns what went. */
+const removeContainers = (world: World): string[] => {
   const removed: string[] = [];
   const observed = new Set(observations(world).map((o) => o.container));
   for (const c of listContainers()) {
@@ -112,6 +131,12 @@ const cleanup = (world: World): void => {
         removed.push(`container ${c}`);
     }
   }
+  return removed;
+};
+
+/** Removes the images tagged with this world's run id; returns what went. */
+const removeImages = (world: World): string[] => {
+  const removed: string[] = [];
   for (const engine of ENGINES.filter(engineUp)) {
     for (const img of listImages()) {
       if (!img.startsWith(`${engine}:`)) continue;
@@ -123,6 +148,11 @@ const cleanup = (world: World): void => {
         removed.push(`image ${engine}:${ref}`);
     }
   }
+  return removed;
+};
+
+/** Removes the project's extra worktrees; returns what went. */
+const removeWorktrees = (world: World): string[] => {
   const wts = sh("git", ["worktree", "list", "--porcelain"], {
     cwd: world.project,
   })
@@ -132,13 +162,26 @@ const cleanup = (world: World): void => {
     .filter((p) => p !== world.project);
   for (const p of wts) {
     sh("git", ["worktree", "remove", "--force", p], { cwd: world.project });
-    removed.push(`worktree ${p}`);
   }
+  return wts.map((p) => `worktree ${p}`);
+};
+
+/** Removes the world's project, remote, home, tmp and packed build. */
+const removeWorldFiles = (world: World): void => {
   for (const p of [world.project, world.remote, world.home, worldTmp(world)])
     rmSync(p, { recursive: true, force: true });
   for (const f of sh("ls", [world.dir]).stdout.split("\n")) {
     if (f.endsWith(".tgz")) rmSync(join(world.dir, f), { force: true });
   }
+};
+
+const cleanup = (world: World): void => {
+  const removed = [
+    ...removeContainers(world),
+    ...removeImages(world),
+    ...removeWorktrees(world),
+  ];
+  removeWorldFiles(world);
   removed.push("project, remote, home, tmp and packed build");
   world.cleanedAt = new Date().toISOString();
   saveWorld(world);
@@ -150,23 +193,57 @@ const cleanup = (world: World): void => {
   );
 };
 
+/** `world`: creates a world and prints its run id. */
+const newWorld = (): number => {
+  const world = createWorld();
+  console.error(`world:    ${world.dir}`);
+  console.error(`project:  ${world.project}   (cwd of every verb)`);
+  console.error(`remote:   ${world.remote}   (origin)`);
+  console.error(`home:     ${world.home}   (HOME of every verb)`);
+  console.error(`image:    ${world.image}   (the default image name here)`);
+  console.error(
+    `build:    @ai-hero/sandcastle from ${world.sandcastleCommit.slice(0, 7)}${world.sandcastleDirty ? " + uncommitted changes" : ""}`,
+  );
+  console.error(`run id:   ${world.runId}   <- pass it to every later verb`);
+  console.log(world.runId);
+  return 0;
+};
+
+/** `sandcastle`, `tsx` and `sh`: runs a command inside a live world. */
+const runIn = async (
+  runVerb: "sandcastle" | "tsx" | "sh",
+  runArgs: string[],
+): Promise<number> => {
+  const world = loadWorld(runArgs[0]);
+  if (world.cleanedAt !== undefined)
+    throw new Error(`world ${world.runId} was cleaned up; make a new one`);
+  const args = runArgs.slice(1);
+  if (runVerb === "sandcastle") {
+    return runInWorld(world, "sandcastle", process.execPath, [
+      join(
+        world.project,
+        "node_modules",
+        "@ai-hero",
+        "sandcastle",
+        "dist",
+        "main.js",
+      ),
+      ...args,
+    ]);
+  }
+  if (args.length === 0)
+    throw new Error(
+      `usage: ${runVerb} <run> <${runVerb === "tsx" ? "file" : "command"}> [args…]`,
+    );
+  return runVerb === "tsx"
+    ? runInWorld(world, "tsx", TSX, args)
+    : runInWorld(world, "sh", args[0], args.slice(1));
+};
+
 const main = async (): Promise<number> => {
   switch (verb) {
     case "world": {
-      const world = createWorld();
-      console.error(`world:    ${world.dir}`);
-      console.error(`project:  ${world.project}   (cwd of every verb)`);
-      console.error(`remote:   ${world.remote}   (origin)`);
-      console.error(`home:     ${world.home}   (HOME of every verb)`);
-      console.error(`image:    ${world.image}   (the default image name here)`);
-      console.error(
-        `build:    @ai-hero/sandcastle from ${world.sandcastleCommit.slice(0, 7)}${world.sandcastleDirty ? " + uncommitted changes" : ""}`,
-      );
-      console.error(
-        `run id:   ${world.runId}   <- pass it to every later verb`,
-      );
-      console.log(world.runId);
-      return 0;
+      return newWorld();
     }
     case "doctor": {
       return doctor(rest[0] ? loadWorld(rest[0]) : undefined);
@@ -174,30 +251,7 @@ const main = async (): Promise<number> => {
     case "sandcastle":
     case "tsx":
     case "sh": {
-      const world = loadWorld(rest[0]);
-      if (world.cleanedAt !== undefined)
-        throw new Error(`world ${world.runId} was cleaned up; make a new one`);
-      const args = rest.slice(1);
-      if (verb === "sandcastle") {
-        return runInWorld(world, "sandcastle", process.execPath, [
-          join(
-            world.project,
-            "node_modules",
-            "@ai-hero",
-            "sandcastle",
-            "dist",
-            "main.js",
-          ),
-          ...args,
-        ]);
-      }
-      if (args.length === 0)
-        throw new Error(
-          `usage: ${verb} <run> <${verb === "tsx" ? "file" : "command"}> [args…]`,
-        );
-      return verb === "tsx"
-        ? runInWorld(world, "tsx", TSX, args)
-        : runInWorld(world, "sh", args[0], args.slice(1));
+      return runIn(verb, rest);
     }
     case "ledger": {
       const { text, leaks, file } = await runLedger(loadWorld(rest[0]));
