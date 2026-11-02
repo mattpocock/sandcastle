@@ -413,4 +413,18 @@ describe.skipIf(process.platform === "win32")("e2b()", () => {
       "a",
     );
   });
+
+  it.skipIf(process.getuid?.() === 0)(
+    "names the host error when a file can't be read",
+    async () => {
+      const handle = await provider().create({ env: {} });
+      const host = await mkdtemp(join(tmpdir(), "e2b-host-"));
+      await writeFile(join(host, "secret.local"), "s");
+      await chmod(join(host, "secret.local"), 0o000);
+
+      await expect(
+        handle.copyIn(join(host, "secret.local"), join(world.home, "s")),
+      ).rejects.toThrow("EACCES");
+    },
+  );
 });

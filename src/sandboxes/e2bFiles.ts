@@ -6,8 +6,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { openAsBlob } from "node:fs";
-import { rm, stat } from "node:fs/promises";
+import { readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Sandbox } from "e2b";
@@ -15,6 +14,13 @@ import { shellEscape } from "../AgentProvider.js";
 
 /** Upload as a raw body, not multipart (the SDK falls back on an old envd). */
 const OCTET = { useOctetStream: true } as const;
+
+/**
+ * A host file's bytes, read now: a lazy `openAsBlob` would fail mid-upload
+ * as "fetch failed" instead of naming the error, such as EACCES.
+ */
+const fileBlob = async (path: string): Promise<Blob> =>
+  new Blob([await readFile(path)]);
 
 /** Pack `dir` into a gzipped tarball at `archive` on the host. */
 const tarDirectory = async (archive: string, dir: string): Promise<void> => {
@@ -54,7 +60,7 @@ const copyDirIn = async (
   const tar = shellEscape(sandboxTarPath);
   try {
     await tarDirectory(tarPath, hostPath);
-    await sandbox.files.write(sandboxTarPath, await openAsBlob(tarPath), OCTET);
+    await sandbox.files.write(sandboxTarPath, await fileBlob(tarPath), OCTET);
     const dest = shellEscape(sandboxPath);
     // Remove the archive even if extraction fails, keeping its exit code
     await runToEnd(
@@ -75,7 +81,7 @@ export const makeCopyIn =
       await copyDirIn(sandbox, hostPath, sandboxPath);
       return;
     }
-    await sandbox.files.write(sandboxPath, await openAsBlob(hostPath), OCTET);
+    await sandbox.files.write(sandboxPath, await fileBlob(hostPath), OCTET);
     // files.write keeps an existing file's mode, so always apply the host's
     const mode = (info.mode % 0o1000).toString(8);
     await runToEnd(sandbox, `chmod ${mode} ${shellEscape(sandboxPath)}`);
