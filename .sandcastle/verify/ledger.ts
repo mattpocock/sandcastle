@@ -202,22 +202,32 @@ const filesUnder = (dir: string, prefix = ""): string[] => {
   });
 };
 
-const hostFiles = (world: World): Section => {
-  const leaks: string[] = [];
-  const notes: string[] = [];
+/** Lines of `git status` in the Sandcastle checkout that weren't there before. */
+const checkoutChanges = (world: World): string[] => {
   const before = new Set(world.baseline.checkoutStatus);
-  for (const line of checkoutStatus()) {
-    if (!before.has(line)) leaks.push(`Sandcastle checkout changed: ${line}`);
-  }
-  // The world's verbs run with TMPDIR=<world>/tmp: whatever Sandcastle left
-  // there is this world's.
+  return checkoutStatus()
+    .filter((line) => !before.has(line))
+    .map((line) => `Sandcastle checkout changed: ${line}`);
+};
+
+/**
+ * The world's verbs run with TMPDIR=<world>/tmp: whatever Sandcastle left
+ * there is this world's.
+ */
+const worldTmpLeaks = (world: World): string[] => {
   const tmp = worldTmp(world);
-  for (const entry of listTmpEntries(tmp))
-    leaks.push(
+  return listTmpEntries(tmp).map(
+    (entry) =>
       `temp entry ${relative(world.dir, join(tmp, entry))} left behind`,
-    );
-  // The shared $TMPDIR: other worlds and `npm test` write here too, so only
-  // an entry that names this world counts.
+  );
+};
+
+/**
+ * The shared $TMPDIR: other worlds and `npm test` write here too, so only
+ * an entry that names this world counts.
+ */
+const sharedTmp = (world: World): { leaks: string[]; note: string } => {
+  const leaks: string[] = [];
   const others: string[] = [];
   for (const entry of listTmpEntries()) {
     if (world.baseline.tmpEntries.includes(entry)) continue;
@@ -231,13 +241,16 @@ const hostFiles = (world: World): Section => {
       leaks.push(`temp entry $TMPDIR/${entry} left behind (names this world)`);
     else others.push(entry);
   }
-  notes.push(
+  const note =
     others.length > 0
       ? `${others.length} new Sandcastle temp entr${others.length === 1 ? "y" : "ies"} in the shared $TMPDIR, none naming this world (other worlds or test runs): ${others.slice(0, 5).join(", ")}${others.length > 5 ? ", …" : ""}`
-      : "no new Sandcastle temp entries in the shared $TMPDIR",
-  );
-  // Anything under the real HOME named after this run came from inside it.
-  const found = sh(
+      : "no new Sandcastle temp entries in the shared $TMPDIR";
+  return { leaks, note };
+};
+
+/** Anything under the real HOME named after this run came from inside it. */
+const realHomeLeaks = (world: World): string[] =>
+  sh(
     "find",
     [
       homedir(),
@@ -265,14 +278,26 @@ const hostFiles = (world: World): Section => {
     { timeoutMs: 60_000 },
   )
     .stdout.split("\n")
-    .filter(Boolean);
-  for (const f of found) leaks.push(`real HOME: ${f}`);
+    .filter(Boolean)
+    .map((f) => `real HOME: ${f}`);
+
+const hostFiles = (world: World): Section => {
+  const checkout = checkoutChanges(world);
+  const ownTmp = worldTmpLeaks(world);
+  const shared = sharedTmp(world);
+  const leaks = [
+    ...checkout,
+    ...ownTmp,
+    ...shared.leaks,
+    ...realHomeLeaks(world),
+  ];
   const home = filesUnder(world.home);
-  notes.push(
+  const notes = [
+    shared.note,
     home.length > 0
       ? `written to the world's HOME (a user's ~ would get these):\n${home.map((f) => `      ~/${f}`).join("\n")}`
       : "nothing written to the world's HOME",
-  );
+  ];
   return { title: "(d) Host files outside the world", leaks, notes };
 };
 
