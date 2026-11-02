@@ -47,7 +47,7 @@ import type {
 } from "../SandboxProvider.js";
 import { MAX_TAIL_CHARS } from "../boundedTail.js";
 import { markNativeSandboxProvider } from "../nativeSandboxProvider.js";
-import { registerShutdown } from "../shutdownRegistry.js";
+import { registerNativeSandboxShutdown } from "../nativeSandboxShutdown.js";
 
 /** Options for {@link bwrap}. */
 export interface BwrapOptions {
@@ -146,7 +146,7 @@ const createHandle = async (
       killSandboxProcess(sandbox);
     }
   };
-  const unregisterShutdown = registerShutdown(killAll);
+  const unregisterShutdown = registerNativeSandboxShutdown(killAll, dirs);
   let closed = false;
   const hostPathOf = (p: string): string => toHostPath(p, dirs, options.mounts);
 

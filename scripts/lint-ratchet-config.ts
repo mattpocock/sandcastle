@@ -120,4 +120,9 @@ export const ALLOWED_DIRECTIVES: readonly Exemption[] = [
     rules: ["oxlint-disable"],
     why: "seatbelt() must throw NativeSandboxUnavailableError at construction (#1272), and construction is synchronous, so its sandbox-exec probe is spawnSync and its sandbox-exec check is existsSync. One file-level node/no-sync disable, nothing else.",
   },
+  {
+    files: ["src/nativeSandboxShutdown.ts"],
+    rules: ["oxlint-disable"],
+    why: "A native sandbox's private dirs must go when SIGINT/SIGTERM interrupts a run, and the shutdown registry's teardowns are synchronous (the process exits as soon as they return), so the removal is rmSync. One file-level node/no-sync disable, nothing else.",
+  },
 ];
