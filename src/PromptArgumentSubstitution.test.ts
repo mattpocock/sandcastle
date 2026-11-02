@@ -10,7 +10,18 @@ import {
   findMissingPromptArgKeys,
   BUILT_IN_PROMPT_ARG_KEYS,
 } from "./PromptArgumentSubstitution.js";
+import type { PromptArgs } from "./PromptArgumentSubstitution.js";
 import { PromptError } from "./errors.js";
+
+/**
+ * Prompt args holding a value the type forbids, as a JavaScript caller (or a
+ * stale config) can pass. `Reflect.set` writes it without a type assertion.
+ */
+const untypedArgs = (key: string, value: undefined | null): PromptArgs => {
+  const args: PromptArgs = {};
+  Reflect.set(args, key, value);
+  return args;
+};
 
 describe("PromptArgumentSubstitution", () => {
   const setup = () => {
@@ -96,7 +107,7 @@ describe("PromptArgumentSubstitution", () => {
     const { layer } = setup();
     const error = await runFail(
       "Hello {{TITLE}}",
-      { TITLE: undefined } as unknown as Record<string, string>,
+      untypedArgs("TITLE", undefined),
       layer,
     );
     expect(error).toBeInstanceOf(PromptError);
@@ -109,7 +120,7 @@ describe("PromptArgumentSubstitution", () => {
     const { layer } = setup();
     const error = await runFail(
       "Hello {{TITLE}}",
-      { TITLE: null } as unknown as Record<string, string>,
+      untypedArgs("TITLE", null),
       layer,
     );
     expect(error).toBeInstanceOf(PromptError);
@@ -196,7 +207,7 @@ describe("PromptArgumentSubstitution", () => {
     const error = await runFail("{{A}} and {{B}}", {}, layer);
     expect(error).toBeInstanceOf(PromptError);
     // Should mention at least one of the missing keys
-    expect(error.message).toMatch(/A|B/);
+    expect(error.message).toMatch(/A|B/u);
   });
 
   it("warns about multiple unused args", async () => {
@@ -357,16 +368,18 @@ describe("findMissingPromptArgKeys", () => {
   });
 
   it("treats a key with an undefined value as missing", () => {
-    const result = findMissingPromptArgKeys("Fix {{COMPONENT}}", {
-      COMPONENT: undefined,
-    } as unknown as Record<string, string>);
+    const result = findMissingPromptArgKeys(
+      "Fix {{COMPONENT}}",
+      untypedArgs("COMPONENT", undefined),
+    );
     expect(result).toStrictEqual(["COMPONENT"]);
   });
 
   it("treats a key with a null value as missing", () => {
-    const result = findMissingPromptArgKeys("Fix {{COMPONENT}}", {
-      COMPONENT: null,
-    } as unknown as Record<string, string>);
+    const result = findMissingPromptArgKeys(
+      "Fix {{COMPONENT}}",
+      untypedArgs("COMPONENT", null),
+    );
     expect(result).toStrictEqual(["COMPONENT"]);
   });
 });

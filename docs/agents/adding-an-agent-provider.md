@@ -7,7 +7,7 @@ This document is for contributors adding support for a new **agent** (e.g. Claud
 3. [Scaffold integration](#scaffold-integration) — what `sandcastle init` needs to offer the agent.
 4. [Implementation checklist](#implementation-checklist) — every file to touch.
 
-For terminology (**agent**, **agent provider**, **sandbox**, etc.), see [`CONTEXT.md`](../../CONTEXT.md).
+For terminology (**agent**, **agent provider**, **sandbox**, etc.), see [`GLOSSARY.md`](../../GLOSSARY.md).
 
 ## Evaluating a new agent
 

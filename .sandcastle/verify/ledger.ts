@@ -25,6 +25,7 @@ import { leftoverBwrap } from "./nativeSandboxes.ts";
 import {
   allWorldSpans,
   checkoutStatus,
+  engineEntries,
   imageCreated,
   listContainers,
   listImages,
@@ -34,7 +35,7 @@ import {
   worldContainer,
   worldTmp,
 } from "./world.ts";
-import type { Engine, World } from "./world.ts";
+import type { World } from "./world.ts";
 
 interface Section {
   readonly title: string;
@@ -46,7 +47,7 @@ const git = (world: World, ...args: string[]): string =>
   sh("git", args, { cwd: world.project }).stdout.trim();
 
 /** Branch names Sandcastle generates for temp branches: <ts>-<6hex>. */
-const TEMP_BRANCH = /^sandcastle\/(.+\/)?\d{8}-\d{6}-[0-9a-f]{6}$/u;
+const TEMP_BRANCH = /^sandcastle\/(?:.+\/)?\d{8}-\d{6}-[0-9a-f]{6}$/u;
 
 const gitState = (world: World): Section => {
   const leaks: string[] = [];
@@ -125,9 +126,10 @@ const containersAndImages = (world: World): Section => {
   const leaks: string[] = [];
   const notes: string[] = [];
   const observed = new Set(observations(world).map((o) => o.container));
-  for (const c of listContainers()) {
+  for (const { entry: c, engine, rest: name } of engineEntries(
+    listContainers(),
+  )) {
     if (world.baseline.containers.includes(c)) continue;
-    const [engine, name] = c.split(":") as [Engine, string];
     if (observed.has(c) || worldContainer(world, engine, name))
       leaks.push(`container ${c} still exists`);
     else notes.push(`container ${c} is not this world's (no mount inside it)`);
@@ -135,11 +137,10 @@ const containersAndImages = (world: World): Section => {
   notes.push(`sandboxes observed (containers and bwraps): ${observed.size}`);
   const others = allWorldSpans();
   const now = new Date().toISOString();
-  for (const img of listImages()) {
+  for (const { entry: img, engine, rest } of engineEntries(listImages())) {
     if (world.baseline.images.includes(img)) continue;
-    const engine = img.slice(0, img.indexOf(":")) as Engine;
-    const ref = img.slice(engine.length + 1, img.lastIndexOf("@"));
-    const id = img.slice(img.lastIndexOf("@") + 1);
+    const ref = rest.slice(0, rest.lastIndexOf("@"));
+    const id = rest.slice(rest.lastIndexOf("@") + 1);
     const a = attributeImage(
       { ref, created: imageCreated(engine, id) },
       world,
@@ -202,22 +203,32 @@ const filesUnder = (dir: string, prefix = ""): string[] => {
   });
 };
 
-const hostFiles = (world: World): Section => {
-  const leaks: string[] = [];
-  const notes: string[] = [];
+/** Lines of `git status` in the Sandcastle checkout that weren't there before. */
+const checkoutChanges = (world: World): string[] => {
   const before = new Set(world.baseline.checkoutStatus);
-  for (const line of checkoutStatus()) {
-    if (!before.has(line)) leaks.push(`Sandcastle checkout changed: ${line}`);
-  }
-  // The world's verbs run with TMPDIR=<world>/tmp: whatever Sandcastle left
-  // there is this world's.
+  return checkoutStatus()
+    .filter((line) => !before.has(line))
+    .map((line) => `Sandcastle checkout changed: ${line}`);
+};
+
+/**
+ * The world's verbs run with TMPDIR=<world>/tmp: whatever Sandcastle left
+ * there is this world's.
+ */
+const worldTmpLeaks = (world: World): string[] => {
   const tmp = worldTmp(world);
-  for (const entry of listTmpEntries(tmp))
-    leaks.push(
+  return listTmpEntries(tmp).map(
+    (entry) =>
       `temp entry ${relative(world.dir, join(tmp, entry))} left behind`,
-    );
-  // The shared $TMPDIR: other worlds and `npm test` write here too, so only
-  // an entry that names this world counts.
+  );
+};
+
+/**
+ * The shared $TMPDIR: other worlds and `npm test` write here too, so only
+ * an entry that names this world counts.
+ */
+const sharedTmp = (world: World): { leaks: string[]; note: string } => {
+  const leaks: string[] = [];
   const others: string[] = [];
   for (const entry of listTmpEntries()) {
     if (world.baseline.tmpEntries.includes(entry)) continue;
@@ -231,13 +242,16 @@ const hostFiles = (world: World): Section => {
       leaks.push(`temp entry $TMPDIR/${entry} left behind (names this world)`);
     else others.push(entry);
   }
-  notes.push(
+  const note =
     others.length > 0
       ? `${others.length} new Sandcastle temp entr${others.length === 1 ? "y" : "ies"} in the shared $TMPDIR, none naming this world (other worlds or test runs): ${others.slice(0, 5).join(", ")}${others.length > 5 ? ", …" : ""}`
-      : "no new Sandcastle temp entries in the shared $TMPDIR",
-  );
-  // Anything under the real HOME named after this run came from inside it.
-  const found = sh(
+      : "no new Sandcastle temp entries in the shared $TMPDIR";
+  return { leaks, note };
+};
+
+/** Anything under the real HOME named after this run came from inside it. */
+const realHomeLeaks = (world: World): string[] =>
+  sh(
     "find",
     [
       homedir(),
@@ -265,14 +279,26 @@ const hostFiles = (world: World): Section => {
     { timeoutMs: 60_000 },
   )
     .stdout.split("\n")
-    .filter(Boolean);
-  for (const f of found) leaks.push(`real HOME: ${f}`);
+    .filter(Boolean)
+    .map((f) => `real HOME: ${f}`);
+
+const hostFiles = (world: World): Section => {
+  const checkout = checkoutChanges(world);
+  const ownTmp = worldTmpLeaks(world);
+  const shared = sharedTmp(world);
+  const leaks = [
+    ...checkout,
+    ...ownTmp,
+    ...shared.leaks,
+    ...realHomeLeaks(world),
+  ];
   const home = filesUnder(world.home);
-  notes.push(
+  const notes = [
+    shared.note,
     home.length > 0
       ? `written to the world's HOME (a user's ~ would get these):\n${home.map((f) => `      ~/${f}`).join("\n")}`
       : "nothing written to the world's HOME",
-  );
+  ];
   return { title: "(d) Host files outside the world", leaks, notes };
 };
 

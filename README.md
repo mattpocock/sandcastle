@@ -18,11 +18,19 @@ Sandcastle is provider-agnostic. It ships with native sandboxes that use your OS
 
 ## Documentation
 
-The docs live in [`docs/guide`](./docs/guide), one page per topic, and are published at [aihero.dev/sandcastle](https://www.aihero.dev/sandcastle).
+The docs live in [`docs/guide`](./docs/guide), one page per glossary term (see [`GLOSSARY.md`](./GLOSSARY.md)), and are published at [aihero.dev/sandcastle](https://www.aihero.dev/sandcastle).
 
 - [Getting started](./docs/guide/getting-started.md): prerequisites and a quick start
-- Guides: [Sandbox providers](./docs/guide/sandbox-providers.md), [How it works](./docs/guide/how-it-works.md), [Prompts](./docs/guide/prompts.md), [Configuration](./docs/guide/configuration.md)
-- Reference: [API](./docs/guide/api.md), [CLI commands](./docs/guide/cli-commands.md), [Custom sandbox providers](./docs/guide/custom-sandbox-providers.md)
+- Core: [Core concepts](./docs/guide/core-concepts.md)
+- Sandboxes: [Sandbox providers](./docs/guide/sandbox-providers.md)
+- Branching: [Branch strategies](./docs/guide/branch-strategies.md)
+- Agents: [Agent providers](./docs/guide/agent-providers.md), [Agent sessions](./docs/guide/agent-sessions.md)
+- Execution: [Iterations](./docs/guide/iterations.md), [Structured output](./docs/guide/structured-output.md)
+- Prompts: [Prompts](./docs/guide/prompts.md)
+- Hooks: [Hooks](./docs/guide/hooks.md)
+- Init: [Init](./docs/guide/init.md)
+- Display: [Run logs](./docs/guide/run-logs.md)
+- Reference: [`run()` and `createSandbox()`](./docs/guide/run.md), [CLI commands](./docs/guide/cli.md)
 
 ## Development
 

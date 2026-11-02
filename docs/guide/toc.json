@@ -1,13 +1,15 @@
 {
   "start": "getting-started",
   "groups": [
-    {
-      "title": "Guides",
-      "pages": ["sandbox-providers", "how-it-works", "prompts", "configuration"]
-    },
-    {
-      "title": "Reference",
-      "pages": ["api", "cli-commands", "custom-sandbox-providers"]
-    }
+    { "title": "Core", "pages": ["core-concepts"] },
+    { "title": "Sandboxes", "pages": ["sandbox-providers"] },
+    { "title": "Branching", "pages": ["branch-strategies"] },
+    { "title": "Agents", "pages": ["agent-providers", "agent-sessions"] },
+    { "title": "Execution", "pages": ["iterations", "structured-output"] },
+    { "title": "Prompts", "pages": ["prompts"] },
+    { "title": "Hooks", "pages": ["hooks"] },
+    { "title": "Init", "pages": ["init"] },
+    { "title": "Display", "pages": ["run-logs"] },
+    { "title": "Reference", "pages": ["run", "cli"] }
   ]
 }
