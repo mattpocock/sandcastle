@@ -201,6 +201,11 @@ Mock at **system boundaries** only:
 
 Prefer SDK-style interfaces over generic fetchers at boundaries — each function is independently mockable with a single return shape, no conditional logic in test setup.
 
+A sandbox provider's SDK is such a boundary. In `tests/`, fake it one of two ways:
+
+- **Fake the network, run the real SDK**, when the SDK takes a base URL or uses `fetch`: `tests/e2b.test.ts` (a local server) and `tests/sprites.test.ts` (stubbed `fetch` and `WebSocket`). Prefer this: it also tests how the provider drives the SDK.
+- **Mock the module**, when it doesn't: copy `tests/modal.test.ts`. It shows `vi.mock(import("modal"), …)` in the `import()` form, keeps state in `vi.hoisted`, and types the fake constructor as `vi.fn<(params: P) => ReturnType<UntypedMock>>`. That typing satisfies both `require-mock-type-parameters` and `no-unnecessary-type-arguments` without an `as`.
+
 ### TDD Workflow: Vertical Slices
 
 Do NOT write all tests first, then all implementation. That produces tests that verify _imagined_ behavior and are insensitive to real changes.
