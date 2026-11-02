@@ -1,20 +1,6 @@
 # Sandbox providers
 
-> **Sandbox provider**: A pluggable implementation that creates and manages a **sandbox**, injected into `run()` via the `sandbox` option.
-
-> **Bind-mount sandbox provider**: A **sandbox provider** where the **host** filesystem is mounted directly into the environment.
-
-> **Native sandbox provider**: A **bind-mount sandbox provider** that contains the **agent** with the **host** OS's own process sandbox (Bubblewrap, Seatbelt) instead of a container, using the **host**'s toolchain.
-
-> **Isolated sandbox provider**: A **sandbox provider** where the environment has its own filesystem, requiring sync to move code in and commits out.
-
-> **No-sandbox provider**: A **sandbox provider** where no container is created -- the **agent** runs directly on the **host**.
-
-> **Build-image**: A provider-namespaced CLI command that rebuilds the image (e.g. `sandcastle docker build-image`).
-
-> **Remove-image**: A provider-namespaced CLI command that removes the image (e.g. `sandcastle docker remove-image`).
-
-Sandcastle uses a `SandboxProvider` to create isolated environments. The `sandbox` option on `run()`, `interactive()`, and `createSandbox()` accepts any provider, including `noSandbox()`: opt in to running the agent directly on the host when isolation is undesired. Built-in providers:
+Sandcastle uses a `SandboxProvider` to create isolated environments. The `sandbox` option on `run()`, `interactive()`, and `createSandbox()` accepts any provider, including `noSandbox()`: opt in to running the [agent](./glossary.md#agent) directly on the [host](./glossary.md#host) when isolation is undesired. Built-in providers:
 
 | Provider   | Import path                                | Type                | Accepted by                                 |
 | ---------- | ------------------------------------------ | ------------------- | ------------------------------------------- |
@@ -25,7 +11,7 @@ Sandcastle uses a `SandboxProvider` to create isolated environments. The `sandbo
 | Vercel     | `@ai-hero/sandcastle/sandboxes/vercel`     | Isolated            | `run()`, `createSandbox()`, `interactive()` |
 | No-sandbox | `@ai-hero/sandcastle/sandboxes/no-sandbox` | None                | `run()`, `createSandbox()`, `interactive()` |
 
-Worktree methods (`wt.run()`, `wt.interactive()`, `wt.createSandbox()`) accept the same providers as their top-level counterparts. `wt.interactive()` defaults to `noSandbox()` when no sandbox is specified.
+[Worktree](./glossary.md#worktree) methods (`wt.run()`, `wt.interactive()`, `wt.createSandbox()`) accept the same providers as their top-level counterparts. `wt.interactive()` defaults to `noSandbox()` when no [sandbox](./glossary.md#sandbox) is specified.
 
 ```typescript
 import { run, interactive, claudeCode } from "@ai-hero/sandcastle";
@@ -116,11 +102,11 @@ Or, more bluntly, allow user namespaces for every program: `sudo sysctl -w kerne
 
 **`seatbelt()` on macOS.** It needs macOS 14 or later and runs the system `/usr/bin/sandbox-exec`, so there's nothing to install. macOS refuses to nest Seatbelt sandboxes, so `seatbelt()` can't start inside another one; the error says so.
 
-**Agents' own sandboxes.** The native sandbox is the containment layer, and Sandcastle already runs agents with their permission prompts skipped, so turn off the agent's own sandboxing. An agent can't apply its own Seatbelt sandbox inside `seatbelt()`, because macOS refuses to nest them. Inside `bwrap()`, whether an agent's own Bubblewrap sandbox can start depends on your kernel.
+**Agents' own sandboxes.** The native sandbox is the containment layer, and Sandcastle already runs agents with their permission checks skipped, so turn off the agent's own sandboxing. An agent can't apply its own Seatbelt sandbox inside `seatbelt()`, because macOS refuses to nest them. Inside `bwrap()`, whether an agent's own Bubblewrap sandbox can start depends on your kernel.
 
 ## Containment
 
-What a sandbox protects you from depends on the provider. Native sandboxes are built for **accidents and prompt injection**: an agent that runs the wrong command, or follows instructions planted in an issue or a web page, can't read your credentials, write outside the repo, or touch your other processes.
+What a sandbox protects you from depends on the provider. Native sandboxes are built for **accidents and prompt-injection attacks**: an agent that runs the wrong command, or follows instructions planted in an issue or a web page, can't read your credentials, write outside the repo, or touch your other processes.
 
 They don't protect against:
 
@@ -133,11 +119,11 @@ For an image-based sandbox, or a VM boundary on macOS and Windows, use `docker()
 
 ## Build-image and remove-image
 
-An image-based provider (`docker()`, `podman()`) runs the agent in an image built from the config directory. Rebuild it after you change the `Dockerfile` or `Containerfile`, and remove it when you no longer need it: see [`sandcastle docker build-image`](./cli.md#sandcastle-docker-build-image) and the commands after it. Native providers have no image.
+An image-based provider (`docker()`, `podman()`) runs the agent in an image built from the [config directory](./glossary.md#config-directory). Rebuild it after you change the `Dockerfile` or `Containerfile`, and remove it when you no longer need it: see [`sandcastle docker build-image`](./cli.md#sandcastle-docker-build-image) and the commands after it. Native providers have no image.
 
 ## Custom sandbox providers
 
-Sandcastle ships with built-in providers for Docker, Podman, and Vercel, but you can create your own. A sandbox provider tells Sandcastle how to execute commands in an isolated environment. There are two kinds:
+Sandcastle ships with built-in providers for Docker, Podman, and Vercel, but you can create your own. A [sandbox provider](./glossary.md#sandbox-provider) tells Sandcastle how to execute commands in an isolated environment. There are two kinds:
 
 - **Bind-mount** — the sandbox can mount a host directory. Sandcastle creates a worktree on the host and the provider mounts it in. No file sync needed. Use this for Docker, Podman, or any local container runtime.
 - **Isolated** — the sandbox has its own filesystem (e.g. a cloud VM). The provider handles syncing code in and out via `copyIn` and `copyFileOut`. Use this when the sandbox cannot access the host filesystem.
@@ -404,7 +390,7 @@ For real-world examples, see:
 
 - [Core concepts](./core-concepts.md): sandbox, host and agent
 - [Branch strategies](./branch-strategies.md): how a worktree is mounted into a bind-mount sandbox, or synced with an isolated one
-- [Hooks](./hooks.md): sandbox hooks, and `sudo: true` on each provider
-- [Init](./init.md): choosing a provider during init, and the custom Dockerfile
-- [CLI commands](./cli.md): build-image and remove-image
+- [Hooks](./hooks.md): [sandbox hooks](./glossary.md#sandbox-hook), and `sudo: true` on each provider
+- [Init](./init.md): choosing a provider during [init](./glossary.md#init), and the custom Dockerfile
+- [CLI commands](./cli.md): [build-image](./glossary.md#build-image) and [remove-image](./glossary.md#remove-image)
 - [`createSandbox()`](./run.md#createsandbox--reusable-sandbox): one sandbox for several runs
