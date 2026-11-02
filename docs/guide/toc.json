@@ -1,15 +1,27 @@
 {
   "start": "getting-started",
   "groups": [
-    { "title": "Core", "pages": ["core-concepts"] },
-    { "title": "Sandboxes", "pages": ["sandbox-providers"] },
-    { "title": "Branching", "pages": ["branch-strategies"] },
-    { "title": "Agents", "pages": ["agent-providers", "agent-sessions"] },
-    { "title": "Execution", "pages": ["iterations", "structured-output"] },
-    { "title": "Prompts", "pages": ["prompts"] },
-    { "title": "Hooks", "pages": ["hooks"] },
-    { "title": "Init", "pages": ["init"] },
-    { "title": "Display", "pages": ["run-logs"] },
+    {
+      "title": "Concepts",
+      "pages": [
+        "core-concepts",
+        "sandbox-providers",
+        "branch-strategies",
+        "agent-providers",
+        "agent-sessions"
+      ]
+    },
+    {
+      "title": "Running",
+      "pages": [
+        "prompts",
+        "iterations",
+        "structured-output",
+        "hooks",
+        "run-logs",
+        "init"
+      ]
+    },
     { "title": "Reference", "pages": ["run", "cli"] }
   ]
 }
