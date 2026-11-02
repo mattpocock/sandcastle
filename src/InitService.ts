@@ -924,6 +924,62 @@ const envNotes = (
     : []),
 ];
 
+/**
+ * The custom issue tracker scaffolds a broken-until-configured project, so
+ * its next steps are about running the setup prompt — not the template's
+ * normal "set env vars and go" flow.
+ */
+const customTrackerNextSteps = (
+  agent: AgentEntry,
+  sandboxProvider: SandboxProviderEntry,
+): string[] => {
+  const hasImage = sandboxProvider.image !== undefined;
+  return [
+    "Next steps:",
+    "1. Your custom issue tracker isn't wired up yet — runs hard-fail until you configure it.",
+    `2. Feed the setup prompt to ${agent.label} on your host to finish wiring it up:`,
+    `   ${agent.setupCommand}`,
+    hasImage
+      ? `   (Runs on the host — you need the ${agent.label} CLI installed locally, since the sandbox image isn't built yet.)`
+      : `   (Runs on the host — you need the ${agent.label} CLI installed locally.)`,
+    hasImage
+      ? `3. Follow .sandcastle/${SETUP_ISSUE_TRACKER_DOC} to edit the scaffolded files in place, build the image, and verify.`
+      : `3. Follow .sandcastle/${SETUP_ISSUE_TRACKER_DOC} to edit the scaffolded files in place and verify.`,
+  ];
+};
+
+/** The blank template's next steps: env vars, prompt, then the main file. */
+const blankTemplateNextSteps = ({
+  mainFilename,
+  notes,
+  runStep,
+}: {
+  readonly mainFilename: string;
+  /** Lines under the env-var step (see `envNotes`). */
+  readonly notes: readonly string[];
+  readonly runStep: string;
+}): string[] => [
+  "Next steps:",
+  `1. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
+  ...notes,
+  "2. Read and customize .sandcastle/prompt.md to describe what you want the agent to do",
+  `3. Customize .sandcastle/${mainFilename} — it uses the JS API (\`run()\`) to control how the agent runs`,
+  `4. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
+  `5. ${runStep}`,
+];
+
+/** Template step about `copyToWorktree` and the install hook. */
+const copyToWorktreeStep = (packageManager: PackageManager): string =>
+  `Templates use \`copyToWorktree: ["node_modules"]\` to copy your host node_modules into the sandbox for fast startup — the \`npm install\` in the onSandboxReady hook is a safety net for platform-specific binaries. ${
+    packageManager === "npm"
+      ? "Adjust both if you use a different package manager"
+      : `This project uses ${packageManager}, so change the hook to \`${installCommand(packageManager)}\` and check \`copyToWorktree\` suits it`
+  }`;
+
+/** Template step for a planner whose `<plan>` schema needs Zod installed. */
+const planSchemaStep = (packageManager: PackageManager): string =>
+  `Install a schema validator for the planner's \`<plan>\` output — the template uses Zod (\`${addDependencyCommand(packageManager, "zod")}\`), but Valibot, ArkType, or any Standard Schema library works (https://standardschema.dev)`;
+
 export const getNextStepsLines = (
   template: string,
   mainFilename: string,
@@ -936,35 +992,17 @@ export const getNextStepsLines = (
   sandboxProvider: SandboxProviderEntry = SANDBOX_PROVIDER_REGISTRY[0],
 ): string[] => {
   const runStep = `Run \`${runScriptCommand(packageManager, "sandcastle")}\` to start the agent`;
-  // The custom issue tracker scaffolds a broken-until-configured project, so
-  // its next steps are about running the setup prompt — not the template's
-  // normal "set env vars and go" flow. This branch wins over template-specific
-  // steps regardless of the chosen template.
+  // The custom issue tracker's steps win over template-specific steps
+  // regardless of the chosen template.
   if (issueTracker.name === "custom") {
-    const hasImage = sandboxProvider.image !== undefined;
-    return [
-      "Next steps:",
-      "1. Your custom issue tracker isn't wired up yet — runs hard-fail until you configure it.",
-      `2. Feed the setup prompt to ${agent.label} on your host to finish wiring it up:`,
-      `   ${agent.setupCommand}`,
-      hasImage
-        ? `   (Runs on the host — you need the ${agent.label} CLI installed locally, since the sandbox image isn't built yet.)`
-        : `   (Runs on the host — you need the ${agent.label} CLI installed locally.)`,
-      hasImage
-        ? `3. Follow .sandcastle/${SETUP_ISSUE_TRACKER_DOC} to edit the scaffolded files in place, build the image, and verify.`
-        : `3. Follow .sandcastle/${SETUP_ISSUE_TRACKER_DOC} to edit the scaffolded files in place and verify.`,
-    ];
+    return customTrackerNextSteps(agent, sandboxProvider);
   }
   if (template === "blank") {
-    return [
-      "Next steps:",
-      `1. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
-      ...envNotes(issueTracker, agent, sandboxProvider),
-      "2. Read and customize .sandcastle/prompt.md to describe what you want the agent to do",
-      `3. Customize .sandcastle/${mainFilename} — it uses the JS API (\`run()\`) to control how the agent runs`,
-      `4. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
-      `5. ${runStep}`,
-    ];
+    return blankTemplateNextSteps({
+      mainFilename,
+      notes: envNotes(issueTracker, agent, sandboxProvider),
+      runStep,
+    });
   }
   const hasReviewer = template.includes("review");
   const needsPlanSchema =
@@ -976,16 +1014,10 @@ export const getNextStepsLines = (
     `${step++}. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
     ...envNotes(issueTracker, agent, sandboxProvider),
     `${step++}. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
-    `${step++}. Templates use \`copyToWorktree: ["node_modules"]\` to copy your host node_modules into the sandbox for fast startup — the \`npm install\` in the onSandboxReady hook is a safety net for platform-specific binaries. ${
-      packageManager === "npm"
-        ? "Adjust both if you use a different package manager"
-        : `This project uses ${packageManager}, so change the hook to \`${installCommand(packageManager)}\` and check \`copyToWorktree\` suits it`
-    }`,
+    `${step++}. ${copyToWorktreeStep(packageManager)}`,
   ];
   if (needsPlanSchema) {
-    lines.push(
-      `${step++}. Install a schema validator for the planner's \`<plan>\` output — the template uses Zod (\`${addDependencyCommand(packageManager, "zod")}\`), but Valibot, ArkType, or any Standard Schema library works (https://standardschema.dev)`,
-    );
+    lines.push(`${step++}. ${planSchemaStep(packageManager)}`);
   }
   lines.push(
     `${step++}. Read and customize the prompt files in .sandcastle/ — they shape what the agent does`,
