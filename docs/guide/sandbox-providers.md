@@ -8,8 +8,9 @@ Sandcastle uses a `SandboxProvider` to create isolated environments. The `sandbo
 | Seatbelt   | `@ai-hero/sandcastle/sandboxes/seatbelt`   | Native (bind-mount) | `run()`, `createSandbox()`                  |
 | Docker     | `@ai-hero/sandcastle/sandboxes/docker`     | Bind-mount          | `run()`, `createSandbox()`, `interactive()` |
 | Podman     | `@ai-hero/sandcastle/sandboxes/podman`     | Bind-mount          | `run()`, `createSandbox()`, `interactive()` |
-| Vercel     | `@ai-hero/sandcastle/sandboxes/vercel`     | Isolated            | `run()`, `createSandbox()`, `interactive()` |
+| E2B        | `@ai-hero/sandcastle/sandboxes/e2b`        | Isolated            | `run()`, `createSandbox()`                  |
 | Modal      | `@ai-hero/sandcastle/sandboxes/modal`      | Isolated            | `run()`, `createSandbox()`                  |
+| Vercel     | `@ai-hero/sandcastle/sandboxes/vercel`     | Isolated            | `run()`, `createSandbox()`, `interactive()` |
 | No-sandbox | `@ai-hero/sandcastle/sandboxes/no-sandbox` | None                | `run()`, `createSandbox()`, `interactive()` |
 
 [Worktree](./glossary.md#worktree) methods (`wt.run()`, `wt.interactive()`, `wt.createSandbox()`) accept the same providers as their top-level counterparts. `wt.interactive()` defaults to `noSandbox()` when no [sandbox](./glossary.md#sandbox) is specified.
@@ -104,6 +105,25 @@ Or, more bluntly, allow user namespaces for every program: `sudo sysctl -w kerne
 **`seatbelt()` on macOS.** It needs macOS 14 or later and runs the system `/usr/bin/sandbox-exec`, so there's nothing to install. macOS refuses to nest Seatbelt sandboxes, so `seatbelt()` can't start inside another one; the error says so.
 
 **Agents' own sandboxes.** The native sandbox is the containment layer, and Sandcastle already runs agents with their permission checks skipped, so turn off the agent's own sandboxing. An agent can't apply its own Seatbelt sandbox inside `seatbelt()`, because macOS refuses to nest them. Inside `bwrap()`, whether an agent's own Bubblewrap sandbox can start depends on your kernel.
+
+## E2B: `e2b()`
+
+`e2b()` runs the agent in an [E2B](https://e2b.dev) sandbox, a Firecracker microVM. Install the SDK (`npm install e2b`; it needs Node 22.19 or later) and set `E2B_API_KEY` in your shell, or pass the `apiKey` option. Don't put the key in `.sandcastle/.env`: the keys declared there are forwarded into the sandbox.
+
+E2B's default template has no agent CLI. Its prebuilt `claude` and `codex` templates ship one:
+
+```typescript
+import { run, claudeCode } from "@ai-hero/sandcastle";
+import { e2b } from "@ai-hero/sandcastle/sandboxes/e2b";
+
+await run({
+  agent: claudeCode("claude-opus-4-8"),
+  sandbox: e2b({ template: "claude" }),
+  prompt: "...",
+});
+```
+
+`e2b()` accepts the SDK's `Sandbox.create()` options (`template`, `timeoutMs`, `apiKey`, `metadata`, `network`, ...) except `envs` and `lifecycle`, which the provider sets. The repo lands in `$HOME/workspace`. Each sandbox is killed on `close()`, or when `timeoutMs` (default 30 minutes) runs out, so the timeout must cover setup, the agent run and syncing the commits back. E2B's free Hobby plan caps a sandbox at 1 hour. The handle's `sandboxId` is the E2B sandbox id. `interactive()` isn't supported yet.
 
 ## Modal: `modal()`
 
@@ -409,6 +429,7 @@ const result = await run({
 For real-world examples, see:
 
 - [`src/sandboxes/docker.ts`](../../src/sandboxes/docker.ts) — bind-mount provider using Docker containers (with SELinux label support)
+- [`src/sandboxes/e2b.ts`](../../src/sandboxes/e2b.ts) — isolated provider using E2B sandboxes via `e2b`
 - [`src/sandboxes/vercel.ts`](../../src/sandboxes/vercel.ts) — isolated provider using Vercel Firecracker microVMs via `@vercel/sandbox`
 - [`src/sandboxes/modal.ts`](../../src/sandboxes/modal.ts) — isolated provider using Modal sandboxes via `modal`
 - [`src/sandboxes/podman.ts`](../../src/sandboxes/podman.ts) — bind-mount provider using Podman containers (with SELinux label support)
