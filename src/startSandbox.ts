@@ -20,6 +20,7 @@ import type {
 import { makeSandboxFromHandle, SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 import type { SandboxService, MountEntry } from "./SandboxFactory.js";
 import { syncIn } from "./syncIn.js";
+import { createClosingIfAbandoned } from "./createClosingIfAbandoned.js";
 import { normalizeMounts } from "./mountUtils.js";
 import { protectGitControlFiles } from "./protectGitMounts.js";
 
@@ -128,31 +129,6 @@ export const startSandbox = (
   }
   return startIsolatedSandbox(options);
 };
-
-/**
- * Run a provider's `create()`. If we stop waiting for it (the start timeout
- * fires, or the caller is interrupted) the provider still finishes creating
- * the sandbox, and nobody holds its handle. Close that handle when it
- * arrives, so a late sandbox never outlives the run.
- */
-const createClosingIfAbandoned = <H extends { close: () => Promise<void> }, E>(
-  create: () => Promise<H>,
-  onError: (e: unknown) => E,
-): Effect.Effect<H, E> =>
-  Effect.suspend(() => {
-    let pending: Promise<H> | undefined;
-    return Effect.tryPromise({
-      try: () => (pending = create()),
-      catch: onError,
-    }).pipe(
-      Effect.onInterrupt(() =>
-        Effect.sync(() => {
-          // A late close that fails has no one left to report to.
-          pending?.then((handle) => handle.close()).catch(() => undefined);
-        }),
-      ),
-    );
-  });
 
 const startNoSandbox = (
   options: StartSandboxNoSandboxOptions,
