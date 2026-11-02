@@ -1,6 +1,6 @@
 # Branch strategies
 
-> **Branch strategy**: Configuration on a **sandbox provider** that controls how the agent's changes relate to branches, set at provider construction time.
+> **Branch strategy**: A choice the caller makes for each run or **worktree** that controls how the **agent**'s changes relate to branches. When none is given, the **sandbox provider**'s kind picks the default: **head** for **bind-mount** and **no-sandbox providers**, **merge-to-head** for **isolated sandbox providers**.
 
 > **Head (branch strategy)**: A **branch strategy** where the **agent** works directly in the **host** working directory -- no **worktree**, no branch indirection.
 
@@ -32,7 +32,7 @@ console.log(result.commits); // array of { sha } for commits created
 
 ## How it works
 
-Sandcastle uses a **branch strategy** configured on the sandbox provider to control how the agent's changes relate to branches. There are three strategies:
+Sandcastle uses a **branch strategy**, chosen when you call `run()`, to control how the agent's changes relate to branches. There are three strategies:
 
 - **Head** (`{ type: "head" }`) — The agent writes directly to the host working directory. No worktree, no branch indirection. This is the default for bind-mount providers like `docker()`.
 - **Merge-to-head** (`{ type: "merge-to-head" }`) — Sandcastle creates a temporary branch in a git worktree. The agent works on the temp branch, and changes are merged back to HEAD when done. The temp branch is cleaned up after merge. If the run fails, the temp branch is deleted too, unless the agent left commits on it: then it is kept, and Sandcastle prints how to merge or discard it. If the merge itself fails (for example on a conflict), Sandcastle aborts it so HEAD is unchanged and keeps the temp branch.
@@ -48,7 +48,7 @@ From your point of view, you just configure `branchStrategy: { type: 'branch', b
 
 ## Choosing a strategy
 
-A branch strategy controls where the agent's commits land. Configure it when constructing the provider:
+A branch strategy controls where the agent's commits land. Pass it to `run()` or `interactive()` (or `createWorktree()`, which requires one); if you leave it out, the provider's kind picks the default:
 
 | Strategy        | Behavior                                                                 | Bind-mount | Isolated  |
 | --------------- | ------------------------------------------------------------------------ | ---------- | --------- |
