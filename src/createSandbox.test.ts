@@ -1,9 +1,10 @@
 import { exec } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import {
   copyFile,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rm,
   writeFile,
@@ -11,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
-import { Effect, Layer } from "effect";
+import { Effect } from "effect";
 import { assert, describe, expect, it } from "vitest";
 import { claudeCode, codex, copilot, cursor, pi } from "./AgentProvider.js";
 import { ForkNotSupportedError } from "./errors.js";
@@ -79,27 +80,61 @@ const localSandboxWithAgent = (
   };
 };
 
+type ProviderExec = BindMountSandboxHandle["exec"];
+
 /**
  * A bind-mount `exec` that runs each command on the host, in the given cwd or
- * else `worktreePath`.
+ * else `worktreePath`, with `env` when given (else the host's).
  */
 const hostExec =
-  (worktreePath: string): BindMountSandboxHandle["exec"] =>
+  (worktreePath: string, env?: NodeJS.ProcessEnv): ProviderExec =>
   async (cmd, execOpts) => {
-    const result = await execAsync(cmd, { cwd: execOpts?.cwd ?? worktreePath });
+    const result = await execAsync(cmd, {
+      cwd: execOpts?.cwd ?? worktreePath,
+      env,
+    });
     return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
   };
 
 /** Like {@link hostExec}, and replays stdout to `onLine` once it finishes. */
 const streamingHostExec =
-  (worktreePath: string): BindMountSandboxHandle["exec"] =>
+  (worktreePath: string, env?: NodeJS.ProcessEnv): ProviderExec =>
   async (cmd, execOpts) => {
-    const result = await hostExec(worktreePath)(cmd, execOpts);
+    const result = await hostExec(worktreePath, env)(cmd, execOpts);
     for (const line of result.stdout.split("\n")) {
       execOpts?.onLine?.(line);
     }
     return result;
   };
+
+/**
+ * Answers the `claude ...` agent run with `output` as stream JSON (or plain
+ * "mock" when nothing streams), and sends every other command to `fallback`.
+ */
+const mockClaudeExec =
+  (output: string, fallback: ProviderExec): ProviderExec =>
+  async (cmd, execOpts) => {
+    if (!cmd.startsWith("claude ")) {
+      return fallback(cmd, execOpts);
+    }
+    const onLine = execOpts?.onLine;
+    if (!onLine) {
+      return { stdout: "mock", stderr: "", exitCode: 0 };
+    }
+    const stdout = toStreamJson(output);
+    for (const line of stdout.split("\n")) {
+      onLine(line);
+    }
+    return { stdout, stderr: "", exitCode: 0 };
+  };
+
+/** Answers `command` with `stdout`, and sends every other command to `fallback`. */
+const replyTo =
+  (command: string, stdout: string, fallback: ProviderExec): ProviderExec =>
+  async (cmd, execOpts) =>
+    cmd === command
+      ? { stdout, stderr: "", exitCode: 0 }
+      : fallback(cmd, execOpts);
 
 /** The first iteration of a run, failing the test if there is none. */
 const firstIteration = <T>(result: {
@@ -1180,37 +1215,29 @@ describe("createSandbox", () => {
       GIT_CONFIG_GLOBAL: globalConfigPath,
     };
 
-    let userExecCmd: string | undefined;
-    let userExecCwd: string | undefined;
+    // Sandcastle issues `git config --global --add safe.directory ...` and
+    // other commands before user code runs, so every call is recorded.
+    const execCalls: { cmd: string; cwd: string | undefined }[] = [];
 
     const spyProvider = createBindMountSandboxProvider({
       name: "spy-exec",
-      create: async (opts) => ({
-        worktreePath: opts.worktreePath,
-        exec: async (cmd, execOpts) => {
-          // Sandcastle issues a `git config --global --add safe.directory ...`
-          // command before user code can run; only record the user-issued one.
-          if (cmd === "echo hello-from-provider") {
-            userExecCmd = cmd;
-            userExecCwd = execOpts?.cwd;
-            return {
-              stdout: "hello-from-provider\n",
-              stderr: "",
-              exitCode: 0,
-            };
-          }
-          const cwd = execOpts?.cwd ?? opts.worktreePath;
-          const result = await execAsync(cmd, { cwd, env: isolatedEnv });
-          return {
-            stdout: result.stdout,
-            stderr: result.stderr,
-            exitCode: 0,
-          };
-        },
-        copyFileIn: async () => {},
-        copyFileOut: async () => {},
-        close: async () => {},
-      }),
+      create: async (opts) => {
+        const answer = replyTo(
+          "echo hello-from-provider",
+          "hello-from-provider\n",
+          hostExec(opts.worktreePath, isolatedEnv),
+        );
+        return {
+          worktreePath: opts.worktreePath,
+          exec: async (cmd, execOpts) => {
+            execCalls.push({ cmd, cwd: execOpts?.cwd });
+            return answer(cmd, execOpts);
+          },
+          copyFileIn: async () => {},
+          copyFileOut: async () => {},
+          close: async () => {},
+        };
+      },
     });
 
     const sandbox = await createSandbox({
@@ -1222,9 +1249,11 @@ describe("createSandbox", () => {
     try {
       const result = await sandbox.exec("echo hello-from-provider");
       expect(result.stdout).toBe("hello-from-provider\n");
-      expect(userExecCmd).toBe("echo hello-from-provider");
       // cwd should default to the provider's worktreePath.
-      expect(userExecCwd).toBe(sandbox.worktreePath);
+      expect(execCalls).toContainEqual({
+        cmd: "echo hello-from-provider",
+        cwd: sandbox.worktreePath,
+      });
     } finally {
       await sandbox.close();
       await rm(hostDir, { recursive: true, force: true });
@@ -1619,34 +1648,12 @@ describe("createSandbox", () => {
       name: "spy",
       create: async (opts) => {
         createCallCount++;
-        const workDir = opts.worktreePath;
         return {
-          worktreePath: workDir,
-          exec: async (cmd, execOpts) => {
-            const cwd = execOpts?.cwd ?? workDir;
-            if (cmd.startsWith("claude ") && execOpts?.onLine) {
-              const { onLine } = execOpts;
-              const output = toStreamJson("mock output");
-              for (const line of output.split("\n")) {
-                onLine(line);
-              }
-              return { stdout: output, stderr: "", exitCode: 0 };
-            }
-            if (cmd.startsWith("claude ")) {
-              return { stdout: "mock", stderr: "", exitCode: 0 };
-            }
-            const result = await execAsync(cmd, { cwd, env: isolatedEnv });
-            if (execOpts?.onLine) {
-              for (const line of result.stdout.split("\n")) {
-                execOpts.onLine(line);
-              }
-            }
-            return {
-              stdout: result.stdout,
-              stderr: result.stderr,
-              exitCode: 0,
-            };
-          },
+          worktreePath: opts.worktreePath,
+          exec: mockClaudeExec(
+            "mock output",
+            streamingHostExec(opts.worktreePath, isolatedEnv),
+          ),
           copyFileIn: async () => {},
           copyFileOut: async () => {},
           close: async () => {
@@ -1705,26 +1712,7 @@ describe("createSandbox", () => {
       name: "spy-close",
       create: async (opts) => ({
         worktreePath: opts.worktreePath,
-        exec: async (cmd, execOpts) => {
-          const cwd = execOpts?.cwd ?? opts.worktreePath;
-          if (cmd.startsWith("claude ") && execOpts?.onLine) {
-            const { onLine } = execOpts;
-            const output = toStreamJson("mock");
-            for (const line of output.split("\n")) {
-              onLine(line);
-            }
-            return { stdout: output, stderr: "", exitCode: 0 };
-          }
-          if (cmd.startsWith("claude ")) {
-            return { stdout: "mock", stderr: "", exitCode: 0 };
-          }
-          const result = await execAsync(cmd, { cwd, env: isolatedEnv });
-          return {
-            stdout: result.stdout,
-            stderr: result.stderr,
-            exitCode: 0,
-          };
-        },
+        exec: mockClaudeExec("mock", hostExec(opts.worktreePath, isolatedEnv)),
         copyFileIn: async () => {},
         copyFileOut: async () => {},
         close: async () => {
@@ -1752,30 +1740,19 @@ describe("createSandbox", () => {
     await initRepo(hostDir);
     await commitFile(hostDir, "init.txt", "init", "initial commit");
 
-    let runNumber = 0;
+    // Run 1: create a file (non-committed state)
+    let agentBehavior = async (cwd: string) => {
+      await writeFile(join(cwd, "persistent-state.txt"), "from-run-1");
+      return "created file";
+    };
+    let contentSeenInRun2: string | undefined;
     const sandbox = await createSandbox({
       branch: "test-state-persistence",
       sandbox: testSandbox,
       cwd: hostDir,
       _test: {
         buildSandbox: (sandboxDir) =>
-          makeMockAgentLayer(sandboxDir, async (cwd) => {
-            runNumber++;
-            if (runNumber === 1) {
-              // Run 1: create a file (non-committed state)
-              await writeFile(join(cwd, "persistent-state.txt"), "from-run-1");
-              return "created file";
-            }
-            // Run 2: verify the file still exists
-            const content = await readFile(
-              join(cwd, "persistent-state.txt"),
-              "utf8",
-            );
-            if (content !== "from-run-1") {
-              throw new Error("State did not persist between runs!");
-            }
-            return "verified file exists";
-          }),
+          makeMockAgentLayer(sandboxDir, async (cwd) => agentBehavior(cwd)),
       },
     });
 
@@ -1793,12 +1770,20 @@ describe("createSandbox", () => {
       );
       expect(content).toBe("from-run-1");
 
-      // Run 2 — the mock agent verifies the file persists inside the sandbox
+      // Run 2 — the mock agent reads the file inside the sandbox
+      agentBehavior = async (cwd: string) => {
+        contentSeenInRun2 = await readFile(
+          join(cwd, "persistent-state.txt"),
+          "utf8",
+        );
+        return "verified file exists";
+      };
       await sandbox.run({
         agent: testProvider,
         prompt: "verify file",
         maxIterations: 1,
       });
+      expect(contentSeenInRun2).toBe("from-run-1");
     } finally {
       await sandbox.close();
       await rm(hostDir, { recursive: true, force: true });
@@ -2477,9 +2462,8 @@ describe("createSandbox", () => {
 
       // The worktree must not be left orphaned on disk.
       const worktreesDir = join(hostDir, ".sandcastle", "worktrees");
-      const leftover = existsSync(worktreesDir)
-        ? readdirSync(worktreesDir)
-        : [];
+      // A missing worktrees dir counts as no leftovers.
+      const leftover = await readdir(worktreesDir).catch(() => []);
       expect(leftover).toHaveLength(0);
 
       const { stdout } = await execAsync("git worktree list", { cwd: hostDir });
