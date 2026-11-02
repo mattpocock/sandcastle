@@ -17,13 +17,8 @@ import {
   beadsVersionWarning,
   parseBdVersion,
 } from "./InitService.js";
-import type {
-  AgentEntry,
-  PackageManager,
-  ScaffoldOptions,
-} from "./InitService.js";
+import type { PackageManager, ScaffoldOptions } from "./InitService.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
-import { SKELETON_PROMPT } from "./templates.js";
 
 const makeDir = async () => mkdtemp(join(tmpdir(), "init-service-"));
 
@@ -563,7 +558,7 @@ describe("InitService scaffold", () => {
     const compiledFiles = files.filter((f) =>
       /\.(?:js|d\.ts|js\.map|d\.ts\.map)$/u.test(f),
     );
-    expect(compiledFiles).toEqual([]);
+    expect(compiledFiles).toStrictEqual([]);
   });
 
   describe("getNextStepsLines", () => {
@@ -845,7 +840,7 @@ describe("InitService scaffold", () => {
         )
           .filter((l) => /^\d+\./u.test(l))
           .map((l) => Number(l.split(".")[0]));
-        expect(numbers).toEqual(numbers.map((_, i) => i + 1));
+        expect(numbers).toStrictEqual(numbers.map((_, i) => i + 1));
       });
     });
 

@@ -668,6 +668,356 @@ const followUpRun =
     });
   };
 
+/** The host repo dir; when resuming, also checks the session file exists there. */
+const resolveRunHostRepoDir = async (
+  options: RunOptions,
+  isResuming: boolean,
+): Promise<string> => {
+  const hostRepoDir = await Effect.runPromise(
+    resolveCwd(options.cwd).pipe(Effect.provide(NodeContext.layer)),
+  );
+  // Validate: resumeSession file must exist on the host
+  if (isResuming && options.resumeSession !== undefined) {
+    await assertResumeSessionExists({
+      provider: options.agent,
+      sandboxTag: options.sandbox.tag,
+      hostRepoDir,
+      resumeSession: options.resumeSession,
+    });
+  }
+  return hostRepoDir;
+};
+
+/** Explicit branch strategy, else merge-to-head for isolated providers, else head. */
+const resolveBranchStrategy = (options: RunOptions): BranchStrategy =>
+  options.branchStrategy ??
+  (options.sandbox.tag === "isolated"
+    ? { type: "merge-to-head" }
+    : { type: "head" });
+
+/** The prompt text and whether it was inline, with the output tag checked. */
+const resolveRunPrompt = async (
+  options: RunOptions,
+): Promise<{
+  readonly rawPrompt: string;
+  readonly isInlinePrompt: boolean;
+}> => {
+  const resolved = await Effect.runPromise(
+    resolvePrompt({
+      prompt: options.prompt,
+      promptFile: options.promptFile,
+    }).pipe(Effect.provide(NodeContext.layer)),
+  );
+  // Validate: output tag must appear in the resolved prompt
+  if (options.output && !resolved.text.includes(`<${options.output.tag}>`)) {
+    throw new Error(
+      `output tag <${options.output.tag}> not found in the resolved prompt. ` +
+        "The caller must instruct the agent to emit the configured tag.",
+    );
+  }
+  return {
+    rawPrompt: resolved.text,
+    isInlinePrompt: resolved.source === "inline",
+  };
+};
+
+/** The branches a run works with, derived from the host's current branch. */
+interface RunBranches {
+  /** The host's current branch: the TARGET_BRANCH built-in prompt argument. */
+  readonly currentHostBranch: string;
+  /** The branch the agent works on. */
+  readonly resolvedBranch: string;
+  /** Set when using a temp branch: prefixes the log filename. */
+  readonly targetBranch: string | undefined;
+  /** The branch passed to orchestrate (see `resolveRunBranches`). */
+  readonly orchestrateBranch: string | undefined;
+}
+
+const resolveRunBranches = async (
+  options: RunOptions,
+  branchStrategy: BranchStrategy,
+  hostRepoDir: string,
+): Promise<RunBranches> => {
+  // Explicit branch when in branch mode
+  const branch =
+    branchStrategy.type === "branch" ? branchStrategy.branch : undefined;
+  const currentHostBranch = await Effect.runPromise(
+    getCurrentBranch(hostRepoDir),
+  );
+  return {
+    currentHostBranch,
+    // When in merge-to-head mode, generate a temporary branch name.
+    // In head mode, use the host's current branch directly (no worktree).
+    resolvedBranch:
+      branchStrategy.type === "head"
+        ? currentHostBranch
+        : (branch ?? generateTempBranchName(options.name)),
+    // When using a temp branch, prefix the log filename with the target branch
+    // (the host's current branch) so developers can tell which branch was targeted.
+    targetBranch:
+      branchStrategy.type === "merge-to-head" ? currentHostBranch : undefined,
+    // In head mode, pass the host branch so SandboxLifecycle skips the merge step.
+    // In merge-to-head mode, branch is undefined (triggers merge). In branch mode, it's the explicit branch.
+    orchestrateBranch:
+      branchStrategy.type === "head" ? currentHostBranch : branch,
+  };
+};
+
+/** Resolve env vars and merge with the agent and sandbox providers' env. */
+const resolveRunEnv = async (options: RunOptions, hostRepoDir: string) =>
+  mergeProviderEnv({
+    resolvedEnv: await Effect.runPromise(
+      resolveEnv(hostRepoDir).pipe(Effect.provide(NodeContext.layer)),
+    ),
+    agentProviderEnv: options.agent.env,
+    sandboxProviderEnv: options.sandbox.env,
+  });
+
+/** Shared inputs for building a run's layers and effect. */
+interface RunSetup {
+  readonly options: RunOptions;
+  readonly branchStrategy: BranchStrategy;
+  readonly hostRepoDir: string;
+  readonly maxIterations: number;
+  readonly branches: RunBranches;
+  readonly logging: LoggingOption;
+  /** Resolved env vars merged with the agent and sandbox providers' env. */
+  readonly env: Record<string, string>;
+  readonly rawPrompt: string;
+  readonly isInlinePrompt: boolean;
+}
+
+/** `options.logging`, else a file under .sandcastle/logs named for the branch. */
+const resolveRunLogging = (
+  options: RunOptions,
+  hostRepoDir: string,
+  { resolvedBranch, targetBranch }: RunBranches,
+): LoggingOption =>
+  options.logging ?? {
+    type: "file",
+    path: join(
+      hostRepoDir,
+      ".sandcastle",
+      "logs",
+      buildLogFilename(resolvedBranch, targetBranch, options.name),
+    ),
+  };
+
+const buildDisplayLayer = ({
+  options,
+  hostRepoDir,
+  branches,
+  logging,
+}: RunSetup) => {
+  if (logging.type !== "file") {
+    return ClackDisplay.layer;
+  }
+  printFileDisplayStartup({
+    logPath: logging.path,
+    agentName: options.name,
+    branch: branches.resolvedBranch,
+    hostRepoDir,
+  });
+  return Layer.provide(FileDisplay.layer(logging.path), NodeFileSystem.layer);
+};
+
+/** The display, sandbox factory and agent stream layers for a run. */
+const buildRunLayer = (setup: RunSetup) => {
+  const { options, hostRepoDir, branchStrategy, branches, env } = setup;
+  const displayLayer = buildDisplayLayer(setup);
+  const factoryLayer = Layer.provide(
+    WorktreeDockerSandboxFactory.layer,
+    Layer.mergeAll(
+      Layer.succeed(SandboxConfig, {
+        env,
+        hostRepoDir,
+        copyToWorktree: options.copyToWorktree,
+        name: options.name,
+        // Create the worktree on the temp branch already shown to the user,
+        // rather than letting WorktreeManager generate a second name.
+        tempBranch:
+          branchStrategy.type === "merge-to-head"
+            ? branches.resolvedBranch
+            : undefined,
+        sandboxProvider: options.sandbox,
+        branchStrategy,
+        hooks: options.hooks,
+        signal: options.signal,
+        timeouts: options.timeouts,
+      }),
+      NodeFileSystem.layer,
+      displayLayer,
+    ),
+  );
+  return Layer.mergeAll(
+    factoryLayer,
+    displayLayer,
+    agentStreamEmitterLayer(buildAgentStreamHandler(setup.logging)),
+  );
+};
+
+/** Shows the run summary, builds the prompt, and orchestrates the iterations. */
+const runIterations = ({
+  options,
+  hostRepoDir,
+  maxIterations,
+  branches,
+  rawPrompt,
+  isInlinePrompt,
+}: RunSetup) =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    yield* d.intro(options.name ?? "sandcastle");
+    const rows = buildRunSummaryRows({
+      name: options.name,
+      agentName: options.agent.name,
+      sandboxName: options.sandbox.name,
+      maxIterations,
+      branch: branches.resolvedBranch,
+    });
+    yield* d.summary("Sandcastle Run", rows);
+
+    const resolvedPrompt = yield* buildAgentPrompt({
+      rawPrompt,
+      isInlinePrompt,
+      userArgs: options.promptArgs ?? {},
+      sourceBranch: branches.resolvedBranch,
+      targetBranch: branches.currentHostBranch,
+    });
+
+    const orchestrateResult = yield* orchestrate({
+      hostRepoDir,
+      iterations: maxIterations,
+      hooks: options.hooks,
+      prompt: resolvedPrompt,
+      branch: branches.orchestrateBranch,
+      provider: options.agent,
+      completionSignal: options.completionSignal,
+      idleTimeoutSeconds: options.idleTimeoutSeconds,
+      completionTimeoutSeconds: options.completionTimeoutSeconds,
+      name: options.name,
+      resumeSession: options.resumeSession,
+      forkSession: options.forkSession,
+      signal: options.signal,
+      skipPromptExpansion: isInlinePrompt,
+      timeouts: options.timeouts,
+    });
+
+    yield* reportRunEnd(orchestrateResult);
+    return orchestrateResult;
+  });
+
+/** Runs the iterations; with file logging, errors are written to the log first. */
+const executeRun = async (setup: RunSetup): Promise<OrchestrateResult> => {
+  const baseEffect = runIterations(setup);
+  // In stdout mode (ClackDisplay), errors are already shown by withFriendlyErrors
+  // in main.ts, so we skip to avoid duplicate terminal output.
+  const withErrorLog =
+    setup.logging.type === "file"
+      ? baseEffect.pipe(
+          Effect.tapError((error) =>
+            Effect.gen(function* () {
+              const d = yield* Display;
+              yield* d.status(formatErrorMessage(error), "error");
+            }),
+          ),
+        )
+      : baseEffect;
+  const runLayer = buildRunLayer(setup);
+  try {
+    return await Effect.runPromise(withErrorLog.pipe(Effect.provide(runLayer)));
+  } catch (error: unknown) {
+    // If the signal was aborted, surface its reason verbatim (no wrapping)
+    setup.options.signal?.throwIfAborted();
+    throw error;
+  }
+};
+
+/**
+ * Extracts structured output from a finished run. On a StructuredOutputError
+ * with retries left and a session to resume, retries with a token-efficient
+ * feedback prompt; each retry decrements maxRetries, so it terminates (#825).
+ */
+const withStructuredOutput = async (
+  options: RunOptions & { output: NonNullable<RunOptions["output"]> },
+  baseResult: RunResult,
+  outputMaxRetries: number,
+): Promise<RunResult & { output?: unknown }> => {
+  // Structured output runs are single-iteration, so the last iteration is the
+  // one that produced this stdout. Carry its session id onto the error so a
+  // caller can resume the same session to re-emit corrected output.
+  const lastIteration = baseResult.iterations.at(-1);
+  try {
+    const output = await extractStructuredOutput(
+      baseResult.stdout,
+      options.output,
+      {
+        commits: baseResult.commits,
+        branch: baseResult.branch,
+        preservedWorktreePath: baseResult.preservedWorktreePath,
+        sessionId: lastIteration?.sessionId,
+        sessionFilePath: lastIteration?.sessionFilePath,
+      },
+    );
+    return { ...baseResult, output };
+  } catch (error) {
+    if (
+      error instanceof StructuredOutputError &&
+      outputMaxRetries > 0 &&
+      error.sessionId !== undefined
+    ) {
+      const retriesRemainingAfter = outputMaxRetries - 1;
+      const retryOutput = {
+        ...options.output,
+        maxRetries: retriesRemainingAfter,
+      };
+      return run({
+        ...options,
+        prompt: buildStructuredOutputRetryFeedback(
+          error,
+          retriesRemainingAfter,
+        ),
+        promptFile: undefined,
+        promptArgs: undefined,
+        resumeSession: error.sessionId,
+        forkSession: false,
+        output: retryOutput,
+      } as RunOptions);
+    }
+    throw error;
+  }
+};
+
+/** The run's result, with its follow-ups and any structured output. */
+const finishRun = async ({
+  options,
+  result,
+  logging,
+  outputMaxRetries,
+}: {
+  readonly options: RunOptions;
+  readonly result: OrchestrateResult;
+  readonly logging: LoggingOption;
+  readonly outputMaxRetries: number;
+}): Promise<RunResult & { output?: unknown }> => {
+  const baseResult = {
+    ...result,
+    logFilePath: logging.type === "file" ? logging.path : undefined,
+    resume: followUpRun(options, result, "resume"),
+    fork: followUpRun(options, result, "fork"),
+  };
+  // Extract structured output after the iteration completes (separate pass from completion signal)
+  const { output } = options;
+  if (!output) {
+    return baseResult;
+  }
+  return withStructuredOutput(
+    { ...options, output },
+    baseResult,
+    outputMaxRetries,
+  );
+};
+
 /** Overload: with `Output.object`, returns `RunResult` with typed `output: T`. */
 export function run<T, A extends AgentProvider>(
   options: RunOptions<A> & { output: OutputObjectDefinition<T> },
@@ -686,286 +1036,36 @@ export async function run(
   // If signal is already aborted, reject immediately without any setup
   options.signal?.throwIfAborted();
 
-  const {
-    prompt,
-    promptFile,
-    maxIterations = DEFAULT_MAX_ITERATIONS,
-    hooks,
-    agent: provider,
-  } = options;
-
-  // Derive branch strategy: explicit option > default based on provider tag
-  const branchStrategy: BranchStrategy =
-    options.branchStrategy ??
-    (options.sandbox.tag === "isolated"
-      ? { type: "merge-to-head" }
-      : { type: "head" });
-  const effectiveBranchType = branchStrategy.type;
+  const { maxIterations = DEFAULT_MAX_ITERATIONS } = options;
+  const branchStrategy = resolveBranchStrategy(options);
 
   // Validate: timeouts must be positive (0 would fire before the agent's first output)
   validateTimeoutOptions(options);
-  validateBranchOptions(options, effectiveBranchType);
+  validateBranchOptions(options, branchStrategy.type);
   const isResuming = validateSessionOptions(options, maxIterations);
   const outputMaxRetries = validateOutputOptions(options, maxIterations);
 
-  // Extract explicit branch when in branch mode
-  const branch: string | undefined =
-    branchStrategy.type === "branch" ? branchStrategy.branch : undefined;
+  const hostRepoDir = await resolveRunHostRepoDir(options, isResuming);
 
-  const hostRepoDir = await Effect.runPromise(
-    resolveCwd(options.cwd).pipe(Effect.provide(NodeContext.layer)),
+  const { rawPrompt, isInlinePrompt } = await resolveRunPrompt(options);
+  const env = await resolveRunEnv(options, hostRepoDir);
+  const branches = await resolveRunBranches(
+    options,
+    branchStrategy,
+    hostRepoDir,
   );
-
-  // Validate: resumeSession file must exist on the host
-  if (isResuming && options.resumeSession !== undefined) {
-    await assertResumeSessionExists({
-      provider,
-      sandboxTag: options.sandbox.tag,
-      hostRepoDir,
-      resumeSession: options.resumeSession,
-    });
-  }
-
-  // Resolve prompt
-  const resolved = await Effect.runPromise(
-    resolvePrompt({ prompt, promptFile }).pipe(
-      Effect.provide(NodeContext.layer),
-    ),
-  );
-  const rawPrompt = resolved.text;
-  const isInlinePrompt = resolved.source === "inline";
-
-  // Validate: output tag must appear in the resolved prompt
-  if (options.output) {
-    const openTag = `<${options.output.tag}>`;
-    if (!rawPrompt.includes(openTag)) {
-      throw new Error(
-        `output tag <${options.output.tag}> not found in the resolved prompt. ` +
-          "The caller must instruct the agent to emit the configured tag.",
-      );
-    }
-  }
-
-  const agentName = provider.name;
-
-  // Resolve env vars and merge with provider env
-  const resolvedEnv = await Effect.runPromise(
-    resolveEnv(hostRepoDir).pipe(Effect.provide(NodeContext.layer)),
-  );
-  const env = mergeProviderEnv({
-    resolvedEnv,
-    agentProviderEnv: provider.env,
-    sandboxProviderEnv: options.sandbox.env,
+  const logging = resolveRunLogging(options, hostRepoDir, branches);
+  const result = await executeRun({
+    options,
+    branchStrategy,
+    hostRepoDir,
+    maxIterations,
+    branches,
+    logging,
+    env,
+    rawPrompt,
+    isInlinePrompt,
   });
 
-  // Always capture the host's current branch for the TARGET_BRANCH built-in
-  // prompt argument. When using a temp branch, it also prefixes the log filename.
-  const currentHostBranch = await Effect.runPromise(
-    getCurrentBranch(hostRepoDir),
-  );
-
-  // When in merge-to-head mode, generate a temporary branch name.
-  // In head mode, use the host's current branch directly (no worktree).
-  const resolvedBranch =
-    effectiveBranchType === "head"
-      ? currentHostBranch
-      : (branch ?? generateTempBranchName(options.name));
-
-  // When using a temp branch, prefix the log filename with the target branch
-  // (the host's current branch) so developers can tell which branch was targeted.
-  const targetBranch =
-    effectiveBranchType === "merge-to-head" ? currentHostBranch : undefined;
-
-  // Resolve logging option
-  const resolvedLogging: LoggingOption = options.logging ?? {
-    type: "file",
-    path: join(
-      hostRepoDir,
-      ".sandcastle",
-      "logs",
-      buildLogFilename(resolvedBranch, targetBranch, options.name),
-    ),
-  };
-  const displayLayer =
-    resolvedLogging.type === "file"
-      ? (() => {
-          printFileDisplayStartup({
-            logPath: resolvedLogging.path,
-            agentName: options.name,
-            branch: resolvedBranch,
-            hostRepoDir,
-          });
-          return Layer.provide(
-            FileDisplay.layer(resolvedLogging.path),
-            NodeFileSystem.layer,
-          );
-        })()
-      : ClackDisplay.layer;
-
-  const factoryLayer = Layer.provide(
-    WorktreeDockerSandboxFactory.layer,
-    Layer.mergeAll(
-      Layer.succeed(SandboxConfig, {
-        env,
-        hostRepoDir,
-        copyToWorktree: options.copyToWorktree,
-        name: options.name,
-        // Create the worktree on the temp branch already shown to the user,
-        // rather than letting WorktreeManager generate a second name.
-        tempBranch:
-          effectiveBranchType === "merge-to-head" ? resolvedBranch : undefined,
-        sandboxProvider: options.sandbox,
-        branchStrategy,
-        hooks,
-        signal: options.signal,
-        timeouts: options.timeouts,
-      }),
-      NodeFileSystem.layer,
-      displayLayer,
-    ),
-  );
-
-  const streamEmitterLayer = agentStreamEmitterLayer(
-    buildAgentStreamHandler(resolvedLogging),
-  );
-
-  const runLayer = Layer.mergeAll(
-    factoryLayer,
-    displayLayer,
-    streamEmitterLayer,
-  );
-
-  const baseEffect = Effect.gen(function* () {
-    const d = yield* Display;
-    yield* d.intro(options.name ?? "sandcastle");
-    const rows = buildRunSummaryRows({
-      name: options.name,
-      agentName,
-      sandboxName: options.sandbox.name,
-      maxIterations,
-      branch: resolvedBranch,
-    });
-    yield* d.summary("Sandcastle Run", rows);
-
-    const resolvedPrompt = yield* buildAgentPrompt({
-      rawPrompt,
-      isInlinePrompt,
-      userArgs: options.promptArgs ?? {},
-      sourceBranch: resolvedBranch,
-      targetBranch: currentHostBranch,
-    });
-
-    // In head mode, pass the host branch so SandboxLifecycle skips the merge step.
-    // In merge-to-head mode, branch is undefined (triggers merge). In branch mode, it's the explicit branch.
-    const orchestrateBranch =
-      effectiveBranchType === "head" ? currentHostBranch : branch;
-
-    const orchestrateResult = yield* orchestrate({
-      hostRepoDir,
-      iterations: maxIterations,
-      hooks,
-      prompt: resolvedPrompt,
-      branch: orchestrateBranch,
-      provider,
-      completionSignal: options.completionSignal,
-      idleTimeoutSeconds: options.idleTimeoutSeconds,
-      completionTimeoutSeconds: options.completionTimeoutSeconds,
-      name: options.name,
-      resumeSession: options.resumeSession,
-      forkSession: options.forkSession,
-      signal: options.signal,
-      skipPromptExpansion: isInlinePrompt,
-      timeouts: options.timeouts,
-    });
-
-    yield* reportRunEnd(orchestrateResult);
-    return orchestrateResult;
-  });
-
-  // In file-logging mode, write errors to the log before they propagate.
-  // In stdout mode (ClackDisplay), errors are already shown by withFriendlyErrors
-  // in main.ts, so we skip to avoid duplicate terminal output.
-  const withErrorLog =
-    resolvedLogging.type === "file"
-      ? baseEffect.pipe(
-          Effect.tapError((error) =>
-            Effect.gen(function* () {
-              const d = yield* Display;
-              yield* d.status(formatErrorMessage(error), "error");
-            }),
-          ),
-        )
-      : baseEffect;
-
-  let result: OrchestrateResult;
-  try {
-    result = await Effect.runPromise(
-      withErrorLog.pipe(Effect.provide(runLayer)),
-    );
-  } catch (error: unknown) {
-    // If the signal was aborted, surface its reason verbatim (no wrapping)
-    options.signal?.throwIfAborted();
-    throw error;
-  }
-
-  const baseResult = {
-    ...result,
-    logFilePath:
-      resolvedLogging.type === "file" ? resolvedLogging.path : undefined,
-    resume: followUpRun(options, result, "resume"),
-    fork: followUpRun(options, result, "fork"),
-  };
-
-  // Extract structured output after the iteration completes (separate pass from completion signal)
-  if (options.output) {
-    // Structured output runs are single-iteration, so the last iteration is the
-    // one that produced this stdout. Carry its session id onto the error so a
-    // caller can resume the same session to re-emit corrected output.
-    const lastIteration = baseResult.iterations.at(-1);
-    try {
-      const output = await extractStructuredOutput(
-        baseResult.stdout,
-        options.output,
-        {
-          commits: baseResult.commits,
-          branch: baseResult.branch,
-          preservedWorktreePath: baseResult.preservedWorktreePath,
-          sessionId: lastIteration?.sessionId,
-          sessionFilePath: lastIteration?.sessionFilePath,
-        },
-      );
-      return { ...baseResult, output };
-    } catch (error) {
-      // Built-in retry: when maxRetries > 0 and the agent emitted a session id
-      // we can resume, recurse with a token-efficient feedback prompt. Each
-      // retry decrements maxRetries so the recursion terminates. See issue
-      // #825.
-      if (
-        error instanceof StructuredOutputError &&
-        outputMaxRetries > 0 &&
-        error.sessionId !== undefined
-      ) {
-        const retriesRemainingAfter = outputMaxRetries - 1;
-        const retryOutput = {
-          ...options.output,
-          maxRetries: retriesRemainingAfter,
-        };
-        return run({
-          ...options,
-          prompt: buildStructuredOutputRetryFeedback(
-            error,
-            retriesRemainingAfter,
-          ),
-          promptFile: undefined,
-          promptArgs: undefined,
-          resumeSession: error.sessionId,
-          forkSession: false,
-          output: retryOutput,
-        } as RunOptions);
-      }
-      throw error;
-    }
-  }
-
-  return baseResult;
+  return finishRun({ options, result, logging, outputMaxRetries });
 }
