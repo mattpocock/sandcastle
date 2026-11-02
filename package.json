@@ -48,6 +48,7 @@
     "pretest": "tsx scripts/ensure-build.ts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:local": "vitest run --config vitest.local.config.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tests/tsconfig.json",
     "prelint": "tsx scripts/ensure-build.ts",
     "lint": "tsc --noEmit -p scripts/tsconfig.json && tsx scripts/lint-ratchet.ts",

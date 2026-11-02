@@ -47,6 +47,14 @@ export const TEMPLATE_FILES: readonly string[] = ["src/templates/**"];
 export const E2E_TESTS: readonly string[] = ["tests/**/*.test.ts"];
 
 /**
+ * The local tests: end-to-end tests that need real Docker and Podman, so they
+ * stay out of `npm test` and CI. Inside E2E_TESTS (same rules, same public-API
+ * boundary), but the `e2e` project excludes them; vitest.local.config.ts runs
+ * them (`npm run test:local`), before a release. See docs/agents/releasing.md.
+ */
+export const LOCAL_TESTS: readonly string[] = ["tests/local/**/*.test.ts"];
+
+/**
  * Tests of the repo's own tooling, not of the package. Mirrors the `tooling`
  * project in vitest.config.ts; out of scope for the move to tests/.
  */

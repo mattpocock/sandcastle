@@ -20,9 +20,12 @@
 //   coverage-final.json as the `e2e-coverage-windows` artifact, so code that
 //   runs only on win32 can count. Fetch it from the PR's CI run with
 //   `gh run download <run-id> -n e2e-coverage-windows -D <dir>`.
-//   The flag repeats, and takes a coverage-final.json or a folder holding one.
+//   The flag repeats, and takes a coverage-final.json or a folder holding one;
+// - with `--local`, the local tests too (tests/local/, `npm run test:local`):
+//   real Docker and Podman, which CI doesn't have, so code only a real
+//   container reaches can count. Both engines must be installed.
 //
-//   npm run coverage:gate -- src/boundedTail.test.ts [--coverage-from <dir>]
+//   npm run coverage:gate -- src/boundedTail.test.ts [--coverage-from <dir>] [--local]
 //
 // The decisions live in scripts/coverage-gate-core.ts and
 // scripts/coverage-gate-v8.ts; running vitest, in scripts/coverage-e2e.ts.
@@ -40,7 +43,13 @@ import {
   total,
 } from "./coverage-gate-core.ts";
 import type { Lines } from "./coverage-gate-core.ts";
-import { ROOT, coverage, e2eCoverage, ensureBuild } from "./coverage-e2e.ts";
+import {
+  LOCAL_SUITE,
+  ROOT,
+  coverage,
+  e2eCoverage,
+  ensureBuild,
+} from "./coverage-e2e.ts";
 
 const WINDOWS_ARTIFACT = "e2e-coverage-windows";
 
@@ -53,21 +62,29 @@ const extraLines = async (input: string): Promise<Lines> => {
   return linesFromIstanbul(JSON.parse(await readFile(file, "utf8")), ROOT);
 };
 
-/** The legacy test file, repo-relative, and the `--coverage-from` inputs. */
-const parseCli = (): { file: string; coverageFrom: readonly string[] } => {
+/** The legacy test file, repo-relative, the `--coverage-from` inputs, and `--local`. */
+const parseCli = (): {
+  file: string;
+  coverageFrom: readonly string[];
+  local: boolean;
+} => {
   const { positionals, values } = parseArgs({
     allowPositionals: true,
-    options: { "coverage-from": { type: "string", multiple: true } },
+    options: {
+      "coverage-from": { type: "string", multiple: true },
+      local: { type: "boolean", default: false },
+    },
   });
   const [file] = positionals;
   if (file === undefined || positionals.length > 1) {
     throw new Error(
-      "usage: npm run coverage:gate -- <legacy test file> [--coverage-from <dir>]...",
+      "usage: npm run coverage:gate -- <legacy test file> [--coverage-from <dir>]... [--local]",
     );
   }
   return {
     file: path.relative(ROOT, path.resolve(file)),
     coverageFrom: values["coverage-from"] ?? [],
+    local: values.local,
   };
 };
 
@@ -96,7 +113,7 @@ const extraSources = async (
 };
 
 const main = async (): Promise<void> => {
-  const { file, coverageFrom } = parseCli();
+  const { file, coverageFrom, local: withLocal } = parseCli();
   // Subprocess coverage maps dist/ back to src/, so dist/ must be current.
   // Some legacy tests need it too.
   await ensureBuild();
@@ -110,12 +127,19 @@ const main = async (): Promise<void> => {
     args: ["--project", "legacy", "--exclude", file],
   });
   const local = await e2eCoverage();
+  const localSuite = withLocal ? await e2eCoverage(LOCAL_SUITE) : undefined;
   const extra = await extraSources(coverageFrom);
   const input = {
     file,
     only: minus(alone.lines, others.lines),
-    e2e: merge(local.lines, ...extra.lines),
-    sources: [...local.sources, ...extra.sources],
+    e2e: merge(local.lines, localSuite?.lines ?? new Map(), ...extra.lines),
+    sources: [
+      ...local.sources,
+      ...(localSuite?.sources ?? [
+        "local tests (real Docker and Podman): not counted. To count them, pass `--local`.",
+      ]),
+      ...extra.sources,
+    ],
   };
   process.stdout.write(`${report(input)}\n`);
   if (total(missing(input)) > 0) {
