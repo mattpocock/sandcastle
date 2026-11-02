@@ -112,6 +112,25 @@ const must = (
 export const ENGINES = ["docker", "podman"] as const;
 export type Engine = (typeof ENGINES)[number];
 
+/**
+ * Split `<engine>:<rest>` entries, as listContainers/listImages print them,
+ * keeping the whole entry too. Entries naming no known engine are dropped.
+ */
+export const engineEntries = (
+  entries: readonly string[],
+): {
+  readonly entry: string;
+  readonly engine: Engine;
+  readonly rest: string;
+}[] =>
+  entries.flatMap((entry) => {
+    const at = entry.indexOf(":");
+    const engine = ENGINES.find((e) => e === entry.slice(0, at));
+    return engine === undefined
+      ? []
+      : [{ entry, engine, rest: entry.slice(at + 1) }];
+  });
+
 export const engineUp = (engine: Engine): boolean =>
   sh(engine, ["info"], { timeoutMs: 30_000 }).code === 0;
 
