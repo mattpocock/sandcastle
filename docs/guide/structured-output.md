@@ -1,6 +1,6 @@
 # Structured output
 
-Use `Output.object()` to extract a typed, schema-validated JSON payload from the [agent](./glossary.md#agent)'s stdout. The agent emits its answer inside an XML tag you specify, and Sandcastle parses, validates, and returns it on `result.output`. The schema can be any [Standard Schema](https://standardschema.dev) validator — the examples below use [Zod](https://zod.dev), but Valibot, ArkType, and others work identically. See [ADR 0010](../adr/0010-structured-output.md) for design rationale.
+[Structured output](./glossary.md#structured-output) is a typed answer from the [agent](./glossary.md#agent): it prints JSON inside an XML tag you choose, and Sandcastle parses it, checks it, and returns it on `result.output`. Ask for it with `Output.object()`, passing the tag and an [output schema](./glossary.md#output-schema), the validator the JSON must pass. The schema can be any [Standard Schema](https://standardschema.dev) validator — the examples below use [Zod](https://zod.dev), but Valibot, ArkType, and others work identically.
 
 ```ts
 import { run, Output, claudeCode } from "@ai-hero/sandcastle";

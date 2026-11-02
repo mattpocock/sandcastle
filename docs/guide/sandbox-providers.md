@@ -1,6 +1,6 @@
 # Sandbox providers
 
-Sandcastle uses a `SandboxProvider` to create isolated environments. The `sandbox` option on `run()`, `interactive()`, and `createSandbox()` accepts any provider, including `noSandbox()`: opt in to running the [agent](./glossary.md#agent) directly on the [host](./glossary.md#host) when isolation is undesired. Built-in providers:
+The `sandbox` option on `run()`, `interactive()`, and `createSandbox()` accepts any [sandbox provider](./glossary.md#sandbox-provider), including `noSandbox()`: opt in to running the [agent](./glossary.md#agent) directly on the [host](./glossary.md#host) when isolation is undesired. Built-in providers:
 
 | Provider   | Import path                                | Type                | Accepted by                                 |
 | ---------- | ------------------------------------------ | ------------------- | ------------------------------------------- |
@@ -196,11 +196,11 @@ For an image-based sandbox, or a VM boundary on macOS and Windows, use `docker()
 
 ## Build-image and remove-image
 
-An image-based provider (`docker()`, `podman()`) runs the agent in an image built from the [config directory](./glossary.md#config-directory). Rebuild it after you change the `Dockerfile` or `Containerfile`, and remove it when you no longer need it: see [`sandcastle docker build-image`](./cli.md#sandcastle-docker-build-image) and the commands after it. Native providers have no image.
+An image-based provider (`docker()`, `podman()`) runs the agent in an image built from the [config directory](./glossary.md#config-directory), the `.sandcastle/` folder that `sandcastle init` creates in your repo. After you change the `Dockerfile` or `Containerfile`, rebuild the image with [build-image](./glossary.md#build-image), the CLI command that builds it, and when you no longer need it, delete it with [remove-image](./glossary.md#remove-image): see [`sandcastle docker build-image`](./cli.md#sandcastle-docker-build-image) and the commands after it. Native providers have no image.
 
 ## Custom sandbox providers
 
-Sandcastle ships with built-in providers (see the [table above](#sandbox-providers)), but you can create your own. A [sandbox provider](./glossary.md#sandbox-provider) tells Sandcastle how to execute commands in an isolated environment. There are two kinds:
+Sandcastle ships with built-in providers (see the [table above](#sandbox-providers)), but you can create your own. There are two kinds:
 
 - **Bind-mount** — the sandbox can mount a host directory. Sandcastle creates a worktree on the host and the provider mounts it in. No file sync needed. Use this for Docker, Podman, or any local container runtime.
 - **Isolated** — the sandbox has its own filesystem (e.g. a cloud VM). The provider handles syncing code in and out via `copyIn` and `copyFileOut`. Use this when the sandbox cannot access the host filesystem.
@@ -469,7 +469,7 @@ For real-world examples, see:
 
 - [Core concepts](./core-concepts.md): sandbox, host and agent
 - [Branch strategies](./branch-strategies.md): how a worktree is mounted into a bind-mount sandbox, or synced with an isolated one
-- [Hooks](./hooks.md): [sandbox hooks](./glossary.md#sandbox-hook), and `sudo: true` on each provider
+- [Hooks](./hooks.md): commands that run inside the sandbox as it starts, and `sudo: true` on each provider
 - [Init](./init.md): choosing a provider during [init](./glossary.md#init), and the custom Dockerfile
 - [CLI commands](./cli.md): [build-image](./glossary.md#build-image) and [remove-image](./glossary.md#remove-image)
 - [`createSandbox()`](./run.md#createsandbox--reusable-sandbox): one sandbox for several runs

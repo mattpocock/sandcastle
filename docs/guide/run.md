@@ -377,7 +377,7 @@ if (closeResult.preservedWorktreePath) {
 | `commits`                  | `{ sha }[]`                                                                              | Commits created during the run                                                                                                      |
 | `logFilePath`              | string?                                                                                  | Path to the log file (only when logging to a file)                                                                                  |
 | `resume(prompt, options?)` | `(prompt: string, options?: ResumeSandboxRunResultOptions) => Promise<SandboxRunResult>` | Continue the captured session for one iteration inside the same warm sandbox. Present only when the provider captured a session id. |
-| `fork(prompt, options?)`   | `(prompt: string, options?: ResumeSandboxRunResultOptions) => Promise<SandboxRunResult>` | Fork the captured session for one iteration inside the same warm sandbox. The parent session is left intact (ADR 0018).             |
+| `fork(prompt, options?)`   | `(prompt: string, options?: ResumeSandboxRunResultOptions) => Promise<SandboxRunResult>` | Fork the captured session for one iteration inside the same warm sandbox. The parent session is left intact.                        |
 
 ### `CloseResult`
 
