@@ -82,7 +82,8 @@ export const standardSchema = <T>(
   },
 });
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
+/** A plain JSON object (not null, not an array). */
+export const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 export const asRecord = (
