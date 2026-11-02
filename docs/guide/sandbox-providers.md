@@ -9,6 +9,7 @@ Sandcastle uses a `SandboxProvider` to create isolated environments. The `sandbo
 | Docker     | `@ai-hero/sandcastle/sandboxes/docker`     | Bind-mount          | `run()`, `createSandbox()`, `interactive()` |
 | Podman     | `@ai-hero/sandcastle/sandboxes/podman`     | Bind-mount          | `run()`, `createSandbox()`, `interactive()` |
 | Vercel     | `@ai-hero/sandcastle/sandboxes/vercel`     | Isolated            | `run()`, `createSandbox()`, `interactive()` |
+| Modal      | `@ai-hero/sandcastle/sandboxes/modal`      | Isolated            | `run()`, `createSandbox()`                  |
 | No-sandbox | `@ai-hero/sandcastle/sandboxes/no-sandbox` | None                | `run()`, `createSandbox()`, `interactive()` |
 
 [Worktree](./glossary.md#worktree) methods (`wt.run()`, `wt.interactive()`, `wt.createSandbox()`) accept the same providers as their top-level counterparts. `wt.interactive()` defaults to `noSandbox()` when no [sandbox](./glossary.md#sandbox) is specified.
@@ -103,6 +104,32 @@ Or, more bluntly, allow user namespaces for every program: `sudo sysctl -w kerne
 **`seatbelt()` on macOS.** It needs macOS 14 or later and runs the system `/usr/bin/sandbox-exec`, so there's nothing to install. macOS refuses to nest Seatbelt sandboxes, so `seatbelt()` can't start inside another one; the error says so.
 
 **Agents' own sandboxes.** The native sandbox is the containment layer, and Sandcastle already runs agents with their permission checks skipped, so turn off the agent's own sandboxing. An agent can't apply its own Seatbelt sandbox inside `seatbelt()`, because macOS refuses to nest them. Inside `bwrap()`, whether an agent's own Bubblewrap sandbox can start depends on your kernel.
+
+## Modal: `modal()`
+
+`modal()` runs the agent in a [Modal](https://modal.com) sandbox. Install the SDK, an optional peer dependency, and give it a Modal token: `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` (from `modal token new` or the dashboard), or the `tokenId` and `tokenSecret` options, which win. With neither, the SDK reads `~/.modal.toml`.
+
+```bash
+npm install modal
+```
+
+```typescript
+import { run, claudeCode } from "@ai-hero/sandcastle";
+import { modal } from "@ai-hero/sandcastle/sandboxes/modal";
+
+await run({
+  agent: claudeCode("claude-opus-4-8"),
+  sandbox: modal(),
+  prompt: "...",
+});
+```
+
+- **Image.** Modal has no default image, so `modal()` builds one: `node:24-bookworm` (Node LTS, `git`, `tar`) with Claude Code installed. Modal builds it once and caches it. Pass `image` to use your own: a registry tag such as `"node:24-bookworm"`, or a Modal `Image`. It needs `sh` and `git`; install other agents' CLIs in it, or in an `onSandboxReady` hook.
+- **Root.** Modal runs every command as root, whatever the image's `USER`, so `sudo: true` changes nothing. `modal()` sets `IS_SANDBOX=1`, which Claude Code needs before it skips its permission checks as root.
+- **Lifetime.** A sandbox lives for at most `timeoutMs`, an hour by default (Modal's own default is 5 minutes, and its limit is 24 hours). Modal can't extend it after create, so set it above your longest run. `close()` terminates the sandbox.
+- **Other options.** Sandboxes go in the Modal App named by `appName` (default `"sandcastle"`), created if missing. `create` passes other `sandboxes.create()` options through, such as `cpu`, `memoryMiB` and `regions`.
+- **`sandboxId`** is the Modal sandbox id (`sb-…`). Reattach with `modal.sandboxes.fromId(<sandboxId>)` from the `modal` SDK, then `terminate()`. Some accounts' sandboxes don't appear in `sandboxes.list()`, so keep the id.
+- **Host.** The `modal` SDK needs Node 22 or later.
 
 ## Containment
 
@@ -383,6 +410,7 @@ For real-world examples, see:
 
 - [`src/sandboxes/docker.ts`](../../src/sandboxes/docker.ts) — bind-mount provider using Docker containers (with SELinux label support)
 - [`src/sandboxes/vercel.ts`](../../src/sandboxes/vercel.ts) — isolated provider using Vercel Firecracker microVMs via `@vercel/sandbox`
+- [`src/sandboxes/modal.ts`](../../src/sandboxes/modal.ts) — isolated provider using Modal sandboxes via `modal`
 - [`src/sandboxes/podman.ts`](../../src/sandboxes/podman.ts) — bind-mount provider using Podman containers (with SELinux label support)
 - [`src/sandboxes/test-isolated.ts`](../../src/sandboxes/test-isolated.ts) — isolated provider using temp directories (used in tests)
 
