@@ -8,9 +8,10 @@ Sandcastle uses a `SandboxProvider` to create isolated environments. The `sandbo
 | Seatbelt   | `@ai-hero/sandcastle/sandboxes/seatbelt`   | Native (bind-mount) | `run()`, `createSandbox()`                  |
 | Docker     | `@ai-hero/sandcastle/sandboxes/docker`     | Bind-mount          | `run()`, `createSandbox()`, `interactive()` |
 | Podman     | `@ai-hero/sandcastle/sandboxes/podman`     | Bind-mount          | `run()`, `createSandbox()`, `interactive()` |
-| Vercel     | `@ai-hero/sandcastle/sandboxes/vercel`     | Isolated            | `run()`, `createSandbox()`, `interactive()` |
+| E2B        | `@ai-hero/sandcastle/sandboxes/e2b`        | Isolated            | `run()`, `createSandbox()`                  |
 | Modal      | `@ai-hero/sandcastle/sandboxes/modal`      | Isolated            | `run()`, `createSandbox()`                  |
 | Sprites    | `@ai-hero/sandcastle/sandboxes/sprites`    | Isolated            | `run()`, `createSandbox()`                  |
+| Vercel     | `@ai-hero/sandcastle/sandboxes/vercel`     | Isolated            | `run()`, `createSandbox()`, `interactive()` |
 | No-sandbox | `@ai-hero/sandcastle/sandboxes/no-sandbox` | None                | `run()`, `createSandbox()`, `interactive()` |
 
 [Worktree](./glossary.md#worktree) methods (`wt.run()`, `wt.interactive()`, `wt.createSandbox()`) accept the same providers as their top-level counterparts. `wt.interactive()` defaults to `noSandbox()` when no [sandbox](./glossary.md#sandbox) is specified.
@@ -106,31 +107,24 @@ Or, more bluntly, allow user namespaces for every program: `sudo sysctl -w kerne
 
 **Agents' own sandboxes.** The native sandbox is the containment layer, and Sandcastle already runs agents with their permission checks skipped, so turn off the agent's own sandboxing. An agent can't apply its own Seatbelt sandbox inside `seatbelt()`, because macOS refuses to nest them. Inside `bwrap()`, whether an agent's own Bubblewrap sandbox can start depends on your kernel.
 
-## Modal: `modal()`
+## E2B: `e2b()`
 
-`modal()` runs the agent in a [Modal](https://modal.com) sandbox. Install the SDK, an optional peer dependency, and give it a Modal token: `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` (from `modal token new` or the dashboard), or the `tokenId` and `tokenSecret` options, which win. With neither, the SDK reads `~/.modal.toml`.
+`e2b()` runs the agent in an [E2B](https://e2b.dev) sandbox, a Firecracker microVM. Install the SDK (`npm install e2b`; it needs Node 22.19 or later) and set `E2B_API_KEY` in your shell, or pass the `apiKey` option. Don't put the key in `.sandcastle/.env`: the keys declared there are forwarded into the sandbox.
 
-```bash
-npm install modal
-```
+E2B's default template has no agent CLI. Its prebuilt `claude` and `codex` templates ship one:
 
 ```typescript
 import { run, claudeCode } from "@ai-hero/sandcastle";
-import { modal } from "@ai-hero/sandcastle/sandboxes/modal";
+import { e2b } from "@ai-hero/sandcastle/sandboxes/e2b";
 
 await run({
   agent: claudeCode("claude-opus-4-8"),
-  sandbox: modal(),
+  sandbox: e2b({ template: "claude" }),
   prompt: "...",
 });
 ```
 
-- **Image.** Modal has no default image, so `modal()` builds one: `node:24-bookworm` (Node LTS, `git`, `tar`) with Claude Code installed. Modal builds it once and caches it. Pass `image` to use your own: a registry tag such as `"node:24-bookworm"`, or a Modal `Image`. It needs `sh` and `git`; install other agents' CLIs in it, or in an `onSandboxReady` hook.
-- **Root.** Modal runs every command as root, whatever the image's `USER`, so `sudo: true` changes nothing. `modal()` sets `IS_SANDBOX=1`, which Claude Code needs before it skips its permission checks as root.
-- **Lifetime.** A sandbox lives for at most `timeoutMs`, an hour by default (Modal's own default is 5 minutes, and its limit is 24 hours). Modal can't extend it after create, so set it above your longest run. `close()` terminates the sandbox.
-- **Other options.** Sandboxes go in the Modal App named by `appName` (default `"sandcastle"`), created if missing. `create` passes other `sandboxes.create()` options through, such as `cpu`, `memoryMiB` and `regions`.
-- **`sandboxId`** is the Modal sandbox id (`sb-…`). Reattach with `modal.sandboxes.fromId(<sandboxId>)` from the `modal` SDK, then `terminate()`. Some accounts' sandboxes don't appear in `sandboxes.list()`, so keep the id.
-- **Host.** The `modal` SDK needs Node 22 or later.
+`e2b()` accepts the SDK's `Sandbox.create()` options (`template`, `timeoutMs`, `apiKey`, `metadata`, `network`, ...) except `envs` and `lifecycle`, which the provider sets. The repo lands in `$HOME/workspace`. Each sandbox is killed on `close()`, or when `timeoutMs` (default 30 minutes) runs out, so the timeout must cover setup, the agent run and syncing the commits back. E2B's free Hobby plan caps a sandbox at 1 hour. The handle's `sandboxId` is the E2B sandbox id. `interactive()` isn't supported yet.
 
 ## Fly.io Sprites: `sprites()`
 
@@ -161,6 +155,32 @@ await run({
 });
 ```
 
+## Modal: `modal()`
+
+`modal()` runs the agent in a [Modal](https://modal.com) sandbox. Install the SDK, an optional peer dependency, and give it a Modal token: `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` (from `modal token new` or the dashboard), or the `tokenId` and `tokenSecret` options, which win. With neither, the SDK reads `~/.modal.toml`.
+
+```bash
+npm install modal
+```
+
+```typescript
+import { run, claudeCode } from "@ai-hero/sandcastle";
+import { modal } from "@ai-hero/sandcastle/sandboxes/modal";
+
+await run({
+  agent: claudeCode("claude-opus-4-8"),
+  sandbox: modal(),
+  prompt: "...",
+});
+```
+
+- **Image.** Modal has no default image, so `modal()` builds one: `node:24-bookworm` (Node LTS, `git`, `tar`) with Claude Code installed. Modal builds it once and caches it. Pass `image` to use your own: a registry tag such as `"node:24-bookworm"`, or a Modal `Image`. It needs `sh` and `git`; install other agents' CLIs in it, or in an `onSandboxReady` hook.
+- **Root.** Modal runs every command as root, whatever the image's `USER`, so `sudo: true` changes nothing. `modal()` sets `IS_SANDBOX=1`, which Claude Code needs before it skips its permission checks as root.
+- **Lifetime.** A sandbox lives for at most `timeoutMs`, an hour by default (Modal's own default is 5 minutes, and its limit is 24 hours). Modal can't extend it after create, so set it above your longest run. `close()` terminates the sandbox.
+- **Other options.** Sandboxes go in the Modal App named by `appName` (default `"sandcastle"`), created if missing. `create` passes other `sandboxes.create()` options through, such as `cpu`, `memoryMiB` and `regions`.
+- **`sandboxId`** is the Modal sandbox id (`sb-…`). Reattach with `modal.sandboxes.fromId(<sandboxId>)` from the `modal` SDK, then `terminate()`. Some accounts' sandboxes don't appear in `sandboxes.list()`, so keep the id.
+- **Host.** The `modal` SDK needs Node 22 or later.
+
 ## Containment
 
 What a sandbox protects you from depends on the provider. Native sandboxes are built for **accidents and prompt-injection attacks**: an agent that runs the wrong command, or follows instructions planted in an issue or a web page, can't read your credentials, write outside the repo, or touch your other processes.
@@ -180,7 +200,7 @@ An image-based provider (`docker()`, `podman()`) runs the agent in an image buil
 
 ## Custom sandbox providers
 
-Sandcastle ships with built-in providers for Docker, Podman, and Vercel, but you can create your own. A [sandbox provider](./glossary.md#sandbox-provider) tells Sandcastle how to execute commands in an isolated environment. There are two kinds:
+Sandcastle ships with built-in providers (see the [table above](#sandbox-providers)), but you can create your own. A [sandbox provider](./glossary.md#sandbox-provider) tells Sandcastle how to execute commands in an isolated environment. There are two kinds:
 
 - **Bind-mount** — the sandbox can mount a host directory. Sandcastle creates a worktree on the host and the provider mounts it in. No file sync needed. Use this for Docker, Podman, or any local container runtime.
 - **Isolated** — the sandbox has its own filesystem (e.g. a cloud VM). The provider handles syncing code in and out via `copyIn` and `copyFileOut`. Use this when the sandbox cannot access the host filesystem.
@@ -439,6 +459,7 @@ const result = await run({
 For real-world examples, see:
 
 - [`src/sandboxes/docker.ts`](../../src/sandboxes/docker.ts) — bind-mount provider using Docker containers (with SELinux label support)
+- [`src/sandboxes/e2b.ts`](../../src/sandboxes/e2b.ts) — isolated provider using E2B sandboxes via `e2b`
 - [`src/sandboxes/vercel.ts`](../../src/sandboxes/vercel.ts) — isolated provider using Vercel Firecracker microVMs via `@vercel/sandbox`
 - [`src/sandboxes/modal.ts`](../../src/sandboxes/modal.ts) — isolated provider using Modal sandboxes via `modal`
 - [`src/sandboxes/podman.ts`](../../src/sandboxes/podman.ts) — bind-mount provider using Podman containers (with SELinux label support)

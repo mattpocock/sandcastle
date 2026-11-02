@@ -40,6 +40,7 @@ export type Sandbox =
   | "podman"
   | "vercel"
   | "daytona"
+  | "e2b"
   | "modal"
   | "sprites";
 export const SANDBOXES: readonly Sandbox[] = [
@@ -48,6 +49,7 @@ export const SANDBOXES: readonly Sandbox[] = [
   "podman",
   "vercel",
   "daytona",
+  "e2b",
   "modal",
   "sprites",
 ];
@@ -125,6 +127,7 @@ export const SANDBOX_NEEDS: Record<
   podman: { keys: [], command: ["podman", "info"] },
   vercel: { keys: [["VERCEL_TOKEN", "VERCEL_OIDC_TOKEN"]] },
   daytona: { keys: [["DAYTONA_API_KEY"]] },
+  e2b: { keys: [["E2B_API_KEY"]] },
   modal: { keys: [["MODAL_TOKEN_ID"], ["MODAL_TOKEN_SECRET"]] },
   sprites: { keys: [["SPRITES_TOKEN", "SPRITE_TOKEN"]] },
 };
