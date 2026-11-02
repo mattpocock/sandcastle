@@ -901,11 +901,9 @@ export const createSandboxFromWorktree = async (
 
     const startResult = await Effect.runPromise(startEffect);
 
-    ({
-      handle: providerHandle,
-      sandbox,
-      worktreePath: sandboxRepoDir,
-    } = startResult);
+    providerHandle = startResult.handle;
+    sandbox = startResult.sandbox;
+    sandboxRepoDir = startResult.worktreePath;
   }
 
   // 3. Run onSandboxReady hooks (sandbox-side and host-side in parallel)
@@ -1105,11 +1103,9 @@ export const createSandbox = async (
               );
             })();
 
-            ({
-              handle: providerHandle,
-              sandbox,
-              worktreePath: sandboxRepoDir,
-            } = startResult);
+            providerHandle = startResult.handle;
+            sandbox = startResult.sandbox;
+            sandboxRepoDir = startResult.worktreePath;
           }
 
           // Run onSandboxReady hooks (sandbox-side and host-side in parallel). If
