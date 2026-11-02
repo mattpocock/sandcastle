@@ -9,6 +9,7 @@ Sandcastle uses a `SandboxProvider` to create isolated environments. The `sandbo
 | Docker     | `@ai-hero/sandcastle/sandboxes/docker`     | Bind-mount          | `run()`, `createSandbox()`, `interactive()` |
 | Podman     | `@ai-hero/sandcastle/sandboxes/podman`     | Bind-mount          | `run()`, `createSandbox()`, `interactive()` |
 | Vercel     | `@ai-hero/sandcastle/sandboxes/vercel`     | Isolated            | `run()`, `createSandbox()`, `interactive()` |
+| Sprites    | `@ai-hero/sandcastle/sandboxes/sprites`    | Isolated            | `run()`, `createSandbox()`                  |
 | No-sandbox | `@ai-hero/sandcastle/sandboxes/no-sandbox` | None                | `run()`, `createSandbox()`, `interactive()` |
 
 [Worktree](./glossary.md#worktree) methods (`wt.run()`, `wt.interactive()`, `wt.createSandbox()`) accept the same providers as their top-level counterparts. `wt.interactive()` defaults to `noSandbox()` when no [sandbox](./glossary.md#sandbox) is specified.
@@ -103,6 +104,36 @@ Or, more bluntly, allow user namespaces for every program: `sudo sysctl -w kerne
 **`seatbelt()` on macOS.** It needs macOS 14 or later and runs the system `/usr/bin/sandbox-exec`, so there's nothing to install. macOS refuses to nest Seatbelt sandboxes, so `seatbelt()` can't start inside another one; the error says so.
 
 **Agents' own sandboxes.** The native sandbox is the containment layer, and Sandcastle already runs agents with their permission checks skipped, so turn off the agent's own sandboxing. An agent can't apply its own Seatbelt sandbox inside `seatbelt()`, because macOS refuses to nest them. Inside `bwrap()`, whether an agent's own Bubblewrap sandbox can start depends on your kernel.
+
+## Fly.io Sprites: `sprites()`
+
+`sprites()` runs each sandbox in a new [Fly.io Sprite](https://fly.io/sprites), a Linux microVM. It's an isolated provider: Sandcastle copies the repo in at `/home/sprite/workspace` and brings the agent's commits back out. Install the SDK alongside Sandcastle:
+
+```bash
+npm install @fly/sprites
+```
+
+- **Auth.** Put a Sprites token in `SPRITES_TOKEN` (in `.sandcastle/.env` or your shell). `SPRITE_TOKEN`, the name the Sprites CLI uses, works too. The `token` option wins over both.
+- **Node 24.** `@fly/sprites` asks for Node 24 or later on the host.
+- **Image.** Sprites have one base image, with `git`, Node and the `claude` CLI already installed. Install any other agent's CLI in an `onSandboxReady` hook.
+- **Teardown.** A Sprite keeps running until it's deleted. `close()` deletes it, and so does a failed setup. If the process is interrupted (`SIGINT`/`SIGTERM`) or exits without closing the sandbox, Sandcastle deletes the Sprite from a background process.
+- **`sandboxId`** is the Sprite's name, which the Sprites CLI and API take.
+- **`sudo: true`** uses the Sprite's own passwordless `sudo`.
+- **No `interactive()`.** Use `run()` or `createSandbox()`.
+
+```typescript
+import { run, claudeCode } from "@ai-hero/sandcastle";
+import { sprites } from "@ai-hero/sandcastle/sandboxes/sprites";
+
+await run({
+  agent: claudeCode("claude-opus-4-8"),
+  sandbox: sprites({
+    config: { cpus: 2, ramMB: 4096 }, // optional: the Sprite's resources
+    env: { MY_VAR: "value" }, // merged at launch, like docker()'s env
+  }),
+  prompt: "...",
+});
+```
 
 ## Containment
 

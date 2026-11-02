@@ -47,7 +47,7 @@ hooks: {
 **Ordering:** `copyToWorktree` -> `host.onWorktreeReady` (sequential) -> sandbox created -> `host.onSandboxReady` + `sandbox.onSandboxReady` (parallel).
 
 - **[Host hooks](./glossary.md#host-hook)** accept `{ command: string; timeoutMs?: number }` — no `sudo`, no `cwd`. Use `cd` or inline env in the command string.
-- **Sandbox hooks** accept `{ command: string; sudo?: boolean; timeoutMs?: number }` — set `sudo: true` to run the whole command as root. On `docker` and `podman` this runs it as the container's root user, so the image needs no `sudo` binary; on `daytona` and `vercel` it uses the sandbox's own `sudo`. `sudo: true` isn't available on the native providers (`bwrap`, `seatbelt`), which have no root: the hook fails, naming the provider and pointing to `docker()`. Install system packages on your host instead.
+- **Sandbox hooks** accept `{ command: string; sudo?: boolean; timeoutMs?: number }` — set `sudo: true` to run the whole command as root. On `docker` and `podman` this runs it as the container's root user, so the image needs no `sudo` binary; on `daytona`, `sprites` and `vercel` it uses the sandbox's own `sudo`. `sudo: true` isn't available on the native providers (`bwrap`, `seatbelt`), which have no root: the hook fails, naming the provider and pointing to `docker()`. Install system packages on your host instead.
 - **`timeoutMs`** overrides the default 60 s per-hook timeout. Useful for long-running setup commands like dependency installs (e.g. `timeoutMs: 300_000` for 5 minutes).
 - Within each hook point, sandbox hooks run in parallel; host hooks within `onSandboxReady` also run in parallel with sandbox hooks. `host.onWorktreeReady` hooks run sequentially in declared order.
 - If any hook exits non-zero, setup fails fast.
