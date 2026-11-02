@@ -98,7 +98,7 @@ Ledger section (e) checks the result against the world's canary and every undecl
   - `close()` kills the sandbox, and so does setup failure inside `create()`. The sandbox is killed, never paused, when `timeoutMs` (default 30 min) runs out. Nothing kills it on SIGINT except that timeout.
   - `sandboxId` is the E2B sandbox id.
 - **Plan:** the Hobby plan caps a sandbox at 1 hour and 20 at once. Keep each run well under that.
-- **Proof:** as vercel. Teardown is checked with the SDK's own listing: `Sandbox.list()` (running and paused) must not show the id, and `Sandbox.getInfo(id)` must fail as not found.
+- **Proof:** as vercel. Teardown is checked with the SDK: `Sandbox.getInfo(id)` must fail with `SandboxNotFoundError`, and `Sandbox.list()` (running and paused) must not show the id. The listing is eventually consistent: a killed id can drop out and reappear for a second, so poll it for timing and let `getInfo` decide.
 
 ## noSandbox: never run
 
