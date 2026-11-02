@@ -105,9 +105,7 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
     env: options?.env,
     create: async (createOptions): Promise<IsolatedSandboxHandle> => {
       const maxOutputTailChars = options?.maxOutputTailChars ?? MAX_TAIL_CHARS;
-      const { Daytona } = (await import(
-        "@daytona/sdk"
-      )) as typeof import("@daytona/sdk");
+      const { Daytona } = await import("@daytona/sdk");
 
       const client: DaytonaClient = new Daytona(toDaytonaConfig(options));
       // Pass the resolved env (env resolver + provider + agent) to the
@@ -219,6 +217,13 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
               let watchTimer: ReturnType<typeof setTimeout> | undefined;
               let watching = true;
               const sessionGone = new Promise<void>((resolve, reject) => {
+                // An unexpected throw inside `check` rejects the race instead
+                // of escaping as an unhandled rejection from the timer.
+                const scheduleCheck = () => {
+                  watchTimer = setTimeout(() => {
+                    check().catch(reject);
+                  }, SESSION_WATCH_INTERVAL_MS);
+                };
                 const check = async () => {
                   const alive = await sandbox.process
                     .executeCommand(
@@ -235,11 +240,12 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
                     return;
                   }
                   if (alive) {
-                    watchTimer = setTimeout(check, SESSION_WATCH_INTERVAL_MS);
+                    scheduleCheck();
                     return;
                   }
                   if (typeof cmd?.exitCode === "number") {
-                    return resolve();
+                    resolve();
+                    return;
                   }
                   reject(
                     new Error(
@@ -247,7 +253,7 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
                     ),
                   );
                 };
-                watchTimer = setTimeout(check, SESSION_WATCH_INTERVAL_MS);
+                scheduleCheck();
               });
 
               try {
