@@ -135,7 +135,7 @@ export const detectPackageManager = (
     const pkg = yield* readHostPackageJson(repoDir);
     const field = Option.getOrUndefined(pkg)?.["packageManager"];
     if (typeof field === "string") {
-      const name = field.split("@")[0];
+      const [name] = field.split("@");
       const match = PACKAGE_MANAGERS.find((pm) => pm === name);
       if (match) {
         return match;

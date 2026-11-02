@@ -51,7 +51,9 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   const acquire = async () =>
     running < MAX_PARALLEL
       ? (running++, Promise.resolve())
-      : new Promise<void>((resolve) => queue.push(resolve));
+      : new Promise<void>((resolve) => {
+          queue.push(resolve);
+        });
   const release = () => {
     running--;
     const next = queue.shift();
