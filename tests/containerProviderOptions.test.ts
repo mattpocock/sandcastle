@@ -49,16 +49,13 @@ describe.each([
     expect(provider().env).toStrictEqual({});
   });
 
-  it("accepts mounts from ~, an absolute path or a path relative to cwd", () => {
+  it("accepts mounts from ~, an absolute path or a path relative to cwd (the repo root)", () => {
     const made = provider({
       mounts: [
         { hostPath: "~", sandboxPath: "/mnt/home", readonly: true },
         { hostPath: dir, sandboxPath: "data" },
-        { hostPath: path.relative(process.cwd(), dir), sandboxPath: "/mnt/a" },
-        {
-          hostPath: `./${path.relative(process.cwd(), dir)}`,
-          sandboxPath: "/mnt/b",
-        },
+        { hostPath: "tests", sandboxPath: "/mnt/a" },
+        { hostPath: "./tests", sandboxPath: "/mnt/b" },
       ],
     });
 
