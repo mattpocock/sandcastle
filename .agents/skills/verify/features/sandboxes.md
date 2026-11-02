@@ -86,6 +86,20 @@ Ledger section (e) checks the result against the world's canary and every undecl
 - **Suspected:** the merged env is never passed to `create` (see the README's suspected list).
 - **Proof:** as vercel.
 
+## e2b (`…/sandboxes/e2b`, isolated)
+
+- **Entry:** `e2b({ template?, timeoutMs?, apiKey?, env?, … })` (`src/sandboxes/e2b.ts`). Every `Sandbox.create()` option of the SDK passes through, except `envs` and `lifecycle`.
+- **Peer dependency:** `e2b` (Node 22.19+), which a world lacks: `npm run -s verify -- sh <run> npm install e2b`, then commit.
+- **Auth:** the `apiKey` option, else the SDK reads `E2B_API_KEY` from the world's env. Keep `E2B_API_KEY` out of the project's `.sandcastle/.env`, or it is forwarded into the sandbox.
+- **Behaviour:**
+  - E2B's default template (`base`) has git and Node but no agent CLI. Pass `template: "claude"` (or `"codex"`), which ships the CLI.
+  - The repo lands at `$HOME/workspace` (`/home/user/workspace`), synced in and out as in [branch-strategies.md](branch-strategies.md).
+  - `exec` uses the SDK's native stdin and streams; `sudo: true` runs as root.
+  - `close()` kills the sandbox, and so does setup failure inside `create()`. The sandbox is killed, never paused, when `timeoutMs` (default 30 min) runs out. Nothing kills it on SIGINT except that timeout.
+  - `sandboxId` is the E2B sandbox id.
+- **Plan:** the Hobby plan caps a sandbox at 1 hour and 20 at once. Keep each run well under that.
+- **Proof:** as vercel. Teardown is checked with the SDK's own listing: `Sandbox.list()` (running and paused) must not show the id, and `Sandbox.getInfo(id)` must fail as not found.
+
 ## noSandbox: never run
 
 `noSandbox()` runs the agent on this host with the host's **whole** env (`src/sandboxes/no-sandbox.ts:51`). That is unsafe here, and no sandbox seam exists to test. Its claims are proved by vitest tests beside `src/sandboxes/no-sandbox.ts` and reported as `VERIFIED (unit test)` or `FAILED (unit test)`, naming the test. `interactive()` and `wt.interactive()` default to it, so always pass a sandbox.

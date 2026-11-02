@@ -50,7 +50,7 @@ A missing key makes the claim **UNVERIFIABLE**, naming the key. There are no dow
 
 ## The combination
 
-Every proof pins one **combination**: one agent (claudeCode, pi, codex, cursor, opencode, copilot) × one sandbox (bwrap, docker, podman, vercel, daytona; seatbelt only on a maintainer's Mac), through one entry point. A claim that names none gets the cohort default: `claudeCode` × `docker` through `sandcastle init`, then the scaffolded `main.ts`. A second combination earns its run only when the claim _is_ the difference between two. The claim decides which cells run, never the whole matrix.
+Every proof pins one **combination**: one agent (claudeCode, pi, codex, cursor, opencode, copilot) × one sandbox (bwrap, docker, podman, vercel, daytona, e2b; seatbelt only on a maintainer's Mac), through one entry point. A claim that names none gets the cohort default: `claudeCode` × `docker` through `sandcastle init`, then the scaffolded `main.ts`. A second combination earns its run only when the claim _is_ the difference between two. The claim decides which cells run, never the whole matrix.
 
 [features/](features/README.md) maps the whole surface:
 

@@ -34,13 +34,20 @@ export const AGENTS: readonly Agent[] = [
 
 /** Sandboxes a world may run. noSandbox is left out on purpose: it runs the
  *  agent on this host with the host's full env, and its unit tests cover it. */
-export type Sandbox = "bwrap" | "docker" | "podman" | "vercel" | "daytona";
+export type Sandbox =
+  | "bwrap"
+  | "docker"
+  | "podman"
+  | "vercel"
+  | "daytona"
+  | "e2b";
 export const SANDBOXES: readonly Sandbox[] = [
   "bwrap",
   "docker",
   "podman",
   "vercel",
   "daytona",
+  "e2b",
 ];
 
 /**
@@ -116,6 +123,7 @@ export const SANDBOX_NEEDS: Record<
   podman: { keys: [], command: ["podman", "info"] },
   vercel: { keys: [["VERCEL_TOKEN", "VERCEL_OIDC_TOKEN"]] },
   daytona: { keys: [["DAYTONA_API_KEY"]] },
+  e2b: { keys: [["E2B_API_KEY"]] },
 };
 
 /** The keys groups that are missing from the environment, by first name. */
