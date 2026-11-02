@@ -5,12 +5,22 @@
  * the worktree's admin dir). But `config`, `hooks` and `info` there, the
  * worktree's `.git` pointer file and its `commondir` decide what git commands
  * on the host read and run. Each one is mounted again, read-only, at every
- * place it is visible inside the sandbox.
+ * place it is visible inside the sandbox, and each dir between it and the
+ * writable mount that holds it is bound onto itself, so it can't be moved
+ * aside by renaming a parent.
  */
 
 import type { Stats } from "node:fs";
 import { lstat, mkdir, readFile, realpath } from "node:fs";
-import { dirname, isAbsolute, join, posix, relative, resolve } from "node:path";
+import {
+  dirname,
+  isAbsolute,
+  join,
+  posix,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { Effect, Option } from "effect";
 
 /** A bind mount as passed to a bind-mount provider. */
@@ -155,10 +165,36 @@ const protectAt = (
       ];
 
 /**
+ * The dirs between a control path and the writable mount it sits in, each
+ * bound onto itself, shallowest first. A mount point can't be renamed or
+ * removed, so the dirs that hold an overlay (the worktree admin dir that
+ * holds `commondir`, say) can't be swapped for fresh, writable ones. They
+ * stay writable: git writes the worktree's index, HEAD and logs there.
+ */
+const anchorsWithin = (
+  mount: GitMount,
+  realMountPath: string,
+  rel: string,
+): GitMount[] => {
+  if (mount.readonly === true) {
+    return [];
+  }
+  const parts = rel.split(sep);
+  return parts.slice(1).map((_, i) => {
+    const dir = parts.slice(0, i + 1).join(sep);
+    return {
+      hostPath: toMountPath(join(realMountPath, dir)),
+      sandboxPath: posix.join(mount.sandboxPath, toMountPath(dir)),
+    };
+  });
+};
+
+/**
  * Adds a read-only mount for each git control path at every sandbox path it
- * is visible at, and marks mounts that already target one read-only. Missing
- * or unreadable git metadata is skipped: git on the host can't read it
- * either.
+ * is visible at, and marks mounts that already target one read-only. The
+ * dirs between each one and its writable mount are anchored (`anchorsWithin`),
+ * ahead of the overlays. Missing or unreadable git metadata is skipped: git
+ * on the host can't read it either.
  */
 export const protectGitControlFiles = (
   mounts: readonly GitMount[],
@@ -180,12 +216,16 @@ export const protectGitControlFiles = (
       sandboxPath: m.sandboxPath,
       readonly: m.readonly,
     }));
+    const anchors = new Map<string, GitMount>();
     for (const controlPath of controlPaths) {
       for (const { mount, real } of withRealPaths) {
         const rel = real.pipe(
           Option.flatMap((path) => relativeWithin(controlPath, path)),
         );
-        if (Option.isSome(rel)) {
+        if (Option.isSome(rel) && Option.isSome(real)) {
+          for (const anchor of anchorsWithin(mount, real.value, rel.value)) {
+            anchors.set(anchor.sandboxPath, anchor);
+          }
           const sandboxPath =
             rel.value === ""
               ? mount.sandboxPath
@@ -194,5 +234,10 @@ export const protectGitControlFiles = (
         }
       }
     }
-    return result;
+    const taken = new Set(result.map((m) => m.sandboxPath));
+    return [
+      ...result.slice(0, mounts.length),
+      ...[...anchors.values()].filter((a) => !taken.has(a.sandboxPath)),
+      ...result.slice(mounts.length),
+    ];
   });
