@@ -88,6 +88,50 @@ describe("bind-mount sandbox git control files", () => {
     },
   );
 
+  it("anchors the dirs that hold commondir, writable, ahead of it", async () => {
+    const { provider, mounts } = recordingProvider();
+    const sandbox = await createSandbox({
+      branch: "w",
+      cwd: repo,
+      sandbox: provider,
+    });
+    await sandbox.close();
+
+    const all = mounts();
+    const paths = all.map((m) => m.sandboxPath);
+    const commondir = paths.findIndex((p) =>
+      p.endsWith("/worktrees/w/commondir"),
+    );
+    expect(commondir).toBeGreaterThan(-1);
+    const adminDir = path.posix.dirname(String(paths[commondir]));
+    const worktreesDir = path.posix.dirname(adminDir);
+    const indexOf = (sandboxPath: string): number => paths.indexOf(sandboxPath);
+    for (const dir of [worktreesDir, adminDir]) {
+      expect(indexOf(dir)).toBeGreaterThan(-1);
+      expect(indexOf(dir)).toBeLessThan(commondir);
+      expect(all[indexOf(dir)]).not.toHaveProperty("readonly");
+    }
+    expect(indexOf(worktreesDir)).toBeLessThan(indexOf(adminDir));
+  });
+
+  it.skipIf(isWindows)("binds each anchor onto its own host dir", async () => {
+    const { provider, mounts } = recordingProvider();
+    const sandbox = await createSandbox({
+      branch: "w",
+      cwd: repo,
+      sandbox: provider,
+    });
+    await sandbox.close();
+
+    const worktrees = path.join(repo, ".git", "worktrees");
+    for (const dir of [worktrees, path.join(worktrees, "w")]) {
+      expect(mounts().find((m) => m.sandboxPath === dir)).toStrictEqual({
+        hostPath: dir,
+        sandboxPath: dir,
+      });
+    }
+  });
+
   it.skipIf(isWindows)(
     "leaves the rest of the worktree's .git writable",
     async () => {
