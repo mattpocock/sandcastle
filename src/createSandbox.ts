@@ -245,6 +245,10 @@ export interface Sandbox {
    *   then call `stop()`.
    * - `daytona()`: the Daytona sandbox id: `daytona.get(<sandboxId>)`, then
    *   `delete()`, from `@daytona/sdk`.
+   * - `modal()`: the Modal sandbox id: `modal.sandboxes.fromId(<sandboxId>)`,
+   *   then `terminate()`, from `modal`.
+   * - `sprites()`: the Sprite's name: `client.getSprite(<sandboxId>)`, then
+   *   `delete()`, from `@fly/sprites`.
    * - A custom provider: whatever its handle's `sandboxId` is.
    *
    * `undefined` for `noSandbox()` and the native `bwrap()` and `seatbelt()`

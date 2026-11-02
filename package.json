@@ -26,6 +26,10 @@
       "import": "./dist/sandboxes/daytona.js",
       "types": "./dist/sandboxes/daytona.d.ts"
     },
+    "./sandboxes/modal": {
+      "import": "./dist/sandboxes/modal.js",
+      "types": "./dist/sandboxes/modal.d.ts"
+    },
     "./sandboxes/no-sandbox": {
       "import": "./dist/sandboxes/no-sandbox.js",
       "types": "./dist/sandboxes/no-sandbox.d.ts"
@@ -104,6 +108,7 @@
     "effect": "^3.20.0",
     "husky": "^9.1.7",
     "lint-staged": "^15.5.1",
+    "modal": "^0.11.1",
     "oxlint": "1.90.0",
     "oxlint-tsgolint": "7.0.2005",
     "tsup": "^8.5.1",
@@ -118,7 +123,8 @@
   "peerDependencies": {
     "@daytona/sdk": ">=0.164.0 <1.0.0",
     "@fly/sprites": ">=0.2.4 <1.0.0",
-    "@vercel/sandbox": ">=1.0.0"
+    "@vercel/sandbox": ">=1.0.0",
+    "modal": ">=0.11.0 <1.0.0"
   },
   "peerDependenciesMeta": {
     "@vercel/sandbox": {
@@ -128,6 +134,9 @@
       "optional": true
     },
     "@fly/sprites": {
+      "optional": true
+    },
+    "modal": {
       "optional": true
     }
   },
