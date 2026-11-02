@@ -1,29 +1,29 @@
-# Configuration
+# Hooks
 
-## Config directory (`.sandcastle/`)
+> **Host hook**: A lifecycle hook that runs on the **host** machine, not inside the **sandbox**. Host hooks are `{ command: string }` — no `sudo`, no `cwd`.
 
-All per-repo sandbox configuration lives in `.sandcastle/`. Run `sandcastle init` to create it.
+> **Sandbox hook**: A lifecycle hook that runs inside the **sandbox** container. Sandbox hooks are `{ command: string; sudo?: boolean }`.
 
-## Custom Dockerfile
+Pass `hooks` to `run()`. Here a sandbox hook installs dependencies before the agent starts:
 
-The `.sandcastle/Dockerfile` controls the sandbox environment. The default template installs:
+```typescript
+import { run, claudeCode } from "@ai-hero/sandcastle";
+import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 
-- **Node.js 22** (base image)
-- **git**, **curl**, **jq** (system dependencies)
-- **GitHub CLI** (`gh`)
-- **Claude Code CLI**
-- A non-root `agent` user (required — Claude runs as this user)
-
-When customizing the Dockerfile, ensure you keep:
-
-- A non-root user (the default `agent` user) for Claude to run as
-- `git` (required for commits and branch operations)
-- `gh` (required for issue fetching)
-- Claude Code CLI installed and on PATH
-
-Add your project-specific dependencies (e.g., language runtimes, build tools) to the Dockerfile as needed.
-
-## Hooks
+await run({
+  agent: claudeCode("claude-opus-4-8"),
+  sandbox: docker(),
+  promptFile: ".sandcastle/prompt.md",
+  hooks: {
+    host: {
+      onSandboxReady: [{ command: "echo sandbox is up" }],
+    },
+    sandbox: {
+      onSandboxReady: [{ command: "npm install", timeoutMs: 300_000 }],
+    },
+  },
+});
+```
 
 Hooks are grouped by **where** they run — `host` (on the developer's machine) or `sandbox` (inside the sandbox):
 
@@ -56,3 +56,11 @@ hooks: {
 - Within each hook point, sandbox hooks run in parallel; host hooks within `onSandboxReady` also run in parallel with sandbox hooks. `host.onWorktreeReady` hooks run sequentially in declared order.
 - If any hook exits non-zero, setup fails fast.
 - When a `signal` is passed to `run()`, it is threaded to all hooks — aborting the signal cancels any in-flight hook commands.
+
+## Related terms
+
+- [Core concepts](./core-concepts.md): the host and the sandbox
+- [Branch strategies](./branch-strategies.md): the worktree that host hooks run in
+- [Sandbox providers](./sandbox-providers.md): which providers support `sudo: true`
+- [Prompts](./prompts.md#dynamic-context-with--command-): shell expressions, which run after sandbox hooks
+- [`run()` reference](./run.md#runoptions): the `hooks` option
