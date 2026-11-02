@@ -104,7 +104,7 @@ const glossaryLinks = docs.flatMap((file) =>
 const mentionPages = pages.filter((page) => page !== "glossary");
 
 const titleOf = (slug: string) =>
-  /^# (?<title>.+)$/mu.exec(read(slug))?.groups?.title.trim() ?? "";
+  /^# (?<title>.+)$/mu.exec(read(slug))?.groups?.title?.trim() ?? "";
 
 /**
  * Each glossary entry's home: the earliest page in sidebar order that
