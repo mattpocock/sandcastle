@@ -69,8 +69,11 @@ export type StartSandboxOptions =
   | StartSandboxIsolatedOptions
   | StartSandboxNoSandboxOptions;
 
-export interface StartSandboxResult {
-  handle: BindMountSandboxHandle | IsolatedSandboxHandle | NoSandboxHandle;
+/** A started sandbox; `H` narrows the handle to one provider tag's. */
+export interface StartSandboxResult<
+  H = BindMountSandboxHandle | IsolatedSandboxHandle | NoSandboxHandle,
+> {
+  handle: H;
   sandbox: SandboxService;
   worktreePath: string;
 }
@@ -79,9 +82,9 @@ export const CONTAINER_START_TIMEOUT_MS = 120_000;
 const SYNC_IN_TIMEOUT_MS = 120_000;
 export const COPY_PATHS_TIMEOUT_MS = 120_000;
 
-const toResult = (
-  handle: StartSandboxResult["handle"],
-): StartSandboxResult => ({
+const toResult = <H extends StartSandboxResult["handle"]>(
+  handle: H,
+): StartSandboxResult<H> => ({
   handle,
   sandbox: makeSandboxFromHandle(handle),
   worktreePath: handle.worktreePath,
@@ -97,6 +100,14 @@ const isNoSandboxOptions = (
   options: StartSandboxOptions,
 ): options is StartSandboxNoSandboxOptions => options.provider.tag === "none";
 
+export type StartSandboxError =
+  | DockerError
+  | WorktreeError
+  | SyncError
+  | ContainerStartTimeoutError
+  | SyncInTimeoutError
+  | CopyToWorktreeTimeoutError;
+
 /**
  * Start a sandbox by dispatching on `provider.tag`.
  *
@@ -108,15 +119,7 @@ const isNoSandboxOptions = (
  */
 export const startSandbox = (
   options: StartSandboxOptions,
-): Effect.Effect<
-  StartSandboxResult,
-  | DockerError
-  | WorktreeError
-  | SyncError
-  | ContainerStartTimeoutError
-  | SyncInTimeoutError
-  | CopyToWorktreeTimeoutError
-> => {
+): Effect.Effect<StartSandboxResult, StartSandboxError> => {
   if (isBindMountOptions(options)) {
     return startBindMountSandbox(options);
   }
@@ -153,7 +156,7 @@ const createClosingIfAbandoned = <H extends { close: () => Promise<void> }, E>(
 
 const startNoSandbox = (
   options: StartSandboxNoSandboxOptions,
-): Effect.Effect<StartSandboxResult, WorktreeError> =>
+): Effect.Effect<StartSandboxResult<NoSandboxHandle>, WorktreeError> =>
   Effect.tryPromise({
     try: () =>
       options.provider.create({
@@ -166,10 +169,11 @@ const startNoSandbox = (
       }),
   }).pipe(Effect.map((handle) => toResult(handle)));
 
-const startBindMountSandbox = (
+/** `startSandbox` for a bind-mount provider, typed to its handle. */
+export const startBindMountSandbox = (
   options: StartSandboxBindMountOptions,
 ): Effect.Effect<
-  StartSandboxResult,
+  StartSandboxResult<BindMountSandboxHandle>,
   DockerError | WorktreeError | ContainerStartTimeoutError
 > => {
   const { worktreeOrRepoPath, provider } = options;
@@ -213,16 +217,12 @@ const startBindMountSandbox = (
   );
 };
 
-const startIsolatedSandbox = (
+/** `startSandbox` for an isolated provider, typed to its handle. */
+export const startIsolatedSandbox = (
   options: StartSandboxIsolatedOptions,
 ): Effect.Effect<
-  StartSandboxResult,
-  | DockerError
-  | WorktreeError
-  | SyncError
-  | ContainerStartTimeoutError
-  | SyncInTimeoutError
-  | CopyToWorktreeTimeoutError
+  StartSandboxResult<IsolatedSandboxHandle>,
+  StartSandboxError
 > =>
   Effect.gen(function* () {
     const handle = yield* createClosingIfAbandoned(
