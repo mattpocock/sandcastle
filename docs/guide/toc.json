@@ -22,6 +22,6 @@
         "init"
       ]
     },
-    { "title": "Reference", "pages": ["run", "cli"] }
+    { "title": "Reference", "pages": ["run", "cli", "glossary"] }
   ]
 }

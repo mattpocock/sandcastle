@@ -1,20 +1,6 @@
 # Prompts
 
-> **Prompt**: The instruction text passed to the **agent** at the start of each **iteration**.
-
-> **Inline prompt**: A **prompt** provided as a string via the `prompt` option. Passed through to the **agent** as-is — no **prompt argument substitution**, no **prompt expansion**.
-
-> **Prompt template**: A **prompt** sourced from a file via the `promptFile` option. May contain `{{KEY}}` placeholders and `` !`command` `` **shell expressions**, which are resolved via **prompt argument substitution** and **prompt expansion** before being passed to the **agent**.
-
-> **Prompt argument**: A runtime **template argument** passed via `promptArgs` in `run()` that substitutes a `{{KEY}}` placeholder in a **prompt**.
-
-> **Prompt expansion**: The preprocessing step that evaluates **shell expressions** in a **prompt**, replacing them with their stdout.
-
-> **Shell expression**: A `` !`command` `` marker in a **prompt** that evaluates a shell command inside the **sandbox**. A marker inside an HTML comment (`<!-- … -->`) is not a shell expression and never runs.
-
-> **Built-in prompt argument**: A **prompt argument** that Sandcastle injects automatically -- not provided by the user via `promptArgs`.
-
-A prompt template in `.sandcastle/prompt.md`, with a prompt argument, a built-in prompt argument and a shell expression:
+A [prompt template](./glossary.md#prompt-template) in `.sandcastle/prompt.md`, with a [prompt argument](./glossary.md#prompt-argument), a [built-in prompt argument](./glossary.md#built-in-prompt-argument) and a [shell expression](./glossary.md#shell-expression):
 
 ```markdown
 Work on issue #{{ISSUE_NUMBER}}. You are on {{SOURCE_BRANCH}}.
@@ -36,18 +22,18 @@ await run({
 });
 ```
 
-Sandcastle uses a flexible prompt system. You write the prompt, and the engine executes it — no opinions about workflow, task management, or context sources are imposed.
+Sandcastle uses a flexible [prompt](./glossary.md#prompt) system. You write the prompt, and the engine executes it — no opinions about workflow, issue tracking, or context sources are imposed.
 
 ## Prompt resolution
 
 You must provide exactly one of:
 
-1. `prompt: "inline string"` — pass an inline prompt directly via `RunOptions`
+1. `prompt: "inline string"` — pass an [inline prompt](./glossary.md#inline-prompt) directly via `RunOptions`
 2. `promptFile: "./path/to/prompt.md"` — point to a specific file via `RunOptions`
 
 `prompt` and `promptFile` are mutually exclusive — providing both is an error. If neither is provided, `run()` throws an error asking you to supply one.
 
-**Inline prompts (`prompt: "..."`) are passed to the agent literally.** No `{{KEY}}` substitution, no `` !`command` `` expansion, no built-in `{{SOURCE_BRANCH}}` / `{{TARGET_BRANCH}}` injection. If you need values interpolated into an inline prompt, build the string in JavaScript (`` `Work on ${branch}…` ``). Passing `promptArgs` alongside an inline prompt is an error — switch to `promptFile` to use substitution.
+**Inline prompts (`prompt: "..."`) are passed to the [agent](./glossary.md#agent) literally.** No `{{KEY}}` substitution, no `` !`command` `` expansion, no built-in `{{SOURCE_BRANCH}}` / `{{TARGET_BRANCH}}` injection. If you need values interpolated into an inline prompt, build the string in JavaScript (`` `Work on ${branch}…` ``). Passing `promptArgs` alongside an inline prompt is an error — switch to `promptFile` to use substitution.
 
 The substitution and expansion features below apply **only** to prompts sourced from `promptFile`.
 
@@ -57,7 +43,7 @@ The substitution and expansion features below apply **only** to prompts sourced 
 
 Use `` !`command` `` expressions in your prompt to pull in dynamic context. Each expression is replaced with the command's stdout before the prompt is sent to the agent. All expressions in a prompt run **in parallel** for faster expansion.
 
-Commands run **inside the sandbox** after `sandbox.onSandboxReady` hooks complete, so they see the same repo state the agent sees (including installed dependencies).
+Commands run **inside the [sandbox](./glossary.md#sandbox)** after `sandbox.onSandboxReady` hooks complete, so they see the same repo state the agent sees (including installed dependencies).
 
 ```markdown
 # Open issues
@@ -92,7 +78,7 @@ In the prompt file:
 Work on issue #{{ISSUE_NUMBER}} (priority: {{PRIORITY}}).
 ```
 
-Prompt argument substitution runs on the host before shell expression expansion, so `{{KEY}}` placeholders inside `` !`command` `` expressions are replaced first:
+[Prompt argument substitution](./glossary.md#prompt-argument-substitution) runs on the [host](./glossary.md#host) before shell expression expansion, so `{{KEY}}` placeholders inside `` !`command` `` expressions are replaced first:
 
 ```markdown
 !`gh issue view {{ISSUE_NUMBER}} --json body -q .body`
@@ -106,10 +92,10 @@ A `{{KEY}}` placeholder with no matching prompt argument is an error. Unused pro
 
 Sandcastle automatically injects two built-in prompt arguments into every prompt:
 
-| Placeholder         | Value                                                             |
-| ------------------- | ----------------------------------------------------------------- |
-| `{{SOURCE_BRANCH}}` | The branch the agent works on (determined by the branch strategy) |
-| `{{TARGET_BRANCH}}` | The host's active branch at `run()` time                          |
+| Placeholder         | Value                                                                                              |
+| ------------------- | -------------------------------------------------------------------------------------------------- |
+| `{{SOURCE_BRANCH}}` | The branch the agent works on (determined by the [branch strategy](./glossary.md#branch-strategy)) |
+| `{{TARGET_BRANCH}}` | The host's active branch at `run()` time                                                           |
 
 Use them in your prompt without passing them via `promptArgs`:
 
@@ -121,8 +107,8 @@ Passing `SOURCE_BRANCH` or `TARGET_BRANCH` in `promptArgs` is an error — built
 
 ## Related terms
 
-- [Iterations](./iterations.md): the prompt is passed at the start of each iteration, and can tell the agent to emit the completion signal
+- [Iterations](./iterations.md): the prompt is passed at the start of each [iteration](./glossary.md#iteration), and can tell the agent to emit the [completion signal](./glossary.md#completion-signal)
 - [Structured output](./structured-output.md): the prompt must contain the output tag
 - [Hooks](./hooks.md): shell expressions run after `sandbox.onSandboxReady` hooks
-- [Branch strategies](./branch-strategies.md#source-and-target-branches): the source and target branches
-- [Init](./init.md): template arguments, which init fills in once, and the scaffolded `prompt.md`
+- [Branch strategies](./branch-strategies.md#source-and-target-branches): the source and [target branches](./glossary.md#target-branch)
+- [Init](./init.md): [template arguments](./glossary.md#template-argument), which [init](./glossary.md#init) fills in once, and the scaffolded `prompt.md`
