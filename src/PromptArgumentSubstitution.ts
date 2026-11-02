@@ -114,6 +114,63 @@ const markShellBlocks = (prompt: string): string => {
   );
 };
 
+/** Strips shell-block markers from string arg values so they can't be forged. */
+const sanitizeArgs = (args: PromptArgs): PromptArgs =>
+  Object.fromEntries(
+    Object.entries(args).map(([key, value]) => [
+      key,
+      typeof value === "string"
+        ? value.replaceAll(SHELL_BLOCK_MARKER, "")
+        : value,
+    ]),
+  );
+
+/**
+ * Check for missing keys (placeholder in prompt but no matching arg, or
+ * a present-but-nullish value supplied by an untyped caller — e.g. an
+ * orchestrator building args from JSON.parse).
+ */
+const checkReferencedArgs = (
+  referencedKeys: ReadonlySet<string>,
+  args: PromptArgs,
+): Effect.Effect<void, PromptError> =>
+  Effect.gen(function* () {
+    for (const key of referencedKeys) {
+      if (!(key in args)) {
+        return yield* new PromptError({
+          message: `Prompt argument "{{${key}}}" has no matching value in promptArgs`,
+        });
+      }
+      const value = args[key];
+      if (value === null || value === undefined) {
+        return yield* new PromptError({
+          message: `Prompt argument "{{${key}}}" has value ${value === null ? "null" : "undefined"} in promptArgs`,
+        });
+      }
+    }
+  });
+
+/**
+ * Warn about unused keys (arg provided but no matching placeholder).
+ * Skip keys listed in silentKeys (e.g. built-in args).
+ */
+const warnUnusedArgs = (
+  args: PromptArgs,
+  referencedKeys: ReadonlySet<string>,
+  silentKeys: ReadonlySet<string> | undefined,
+): Effect.Effect<void, never, Display> =>
+  Effect.gen(function* () {
+    const display = yield* Display;
+    for (const key of Object.keys(args)) {
+      if (!referencedKeys.has(key) && silentKeys?.has(key) !== true) {
+        yield* display.status(
+          `Prompt argument "${key}" was provided but not referenced in the prompt`,
+          "warn",
+        );
+      }
+    }
+  });
+
 export const substitutePromptArgs = (
   prompt: string,
   args: PromptArgs,
@@ -128,14 +185,7 @@ export const substitutePromptArgs = (
   const markedPrompt = markShellBlocks(
     prompt.replaceAll(SHELL_BLOCK_MARKER, ""),
   );
-  const sanitizedArgs: PromptArgs = Object.fromEntries(
-    Object.entries(args).map(([key, value]) => [
-      key,
-      typeof value === "string"
-        ? value.replaceAll(SHELL_BLOCK_MARKER, "")
-        : value,
-    ]),
-  );
+  const sanitizedArgs = sanitizeArgs(args);
   const keys = placeholderKeys(markedPrompt);
 
   if (keys.length === 0 && Object.keys(sanitizedArgs).length === 0) {
@@ -143,46 +193,15 @@ export const substitutePromptArgs = (
   }
 
   return Effect.gen(function* () {
-    const display = yield* Display;
-
     // Collect all keys referenced in the prompt
     const referencedKeys = new Set(keys);
-
-    // Check for missing keys (placeholder in prompt but no matching arg, or
-    // a present-but-nullish value supplied by an untyped caller — e.g. an
-    // orchestrator building args from JSON.parse).
-    for (const key of referencedKeys) {
-      if (!(key in sanitizedArgs)) {
-        return yield* new PromptError({
-          message: `Prompt argument "{{${key}}}" has no matching value in promptArgs`,
-        });
-      }
-      const value = sanitizedArgs[key];
-      if (value === null || value === undefined) {
-        return yield* new PromptError({
-          message: `Prompt argument "{{${key}}}" has value ${value === null ? "null" : "undefined"} in promptArgs`,
-        });
-      }
-    }
-
-    // Warn about unused keys (arg provided but no matching placeholder)
-    // Skip keys listed in silentKeys (e.g. built-in args)
-    for (const key of Object.keys(sanitizedArgs)) {
-      if (!referencedKeys.has(key) && silentKeys?.has(key) !== true) {
-        yield* display.status(
-          `Prompt argument "${key}" was provided but not referenced in the prompt`,
-          "warn",
-        );
-      }
-    }
+    yield* checkReferencedArgs(referencedKeys, sanitizedArgs);
+    yield* warnUnusedArgs(sanitizedArgs, referencedKeys, silentKeys);
 
     // Replace all placeholders with their values
     // Every key was checked above to have a non-null value.
-    const result = markedPrompt.replaceAll(
-      PLACEHOLDER_PATTERN,
-      (_match, key: string) => String(sanitizedArgs[key]),
+    return markedPrompt.replaceAll(PLACEHOLDER_PATTERN, (_match, key: string) =>
+      String(sanitizedArgs[key]),
     );
-
-    return result;
   });
 };
