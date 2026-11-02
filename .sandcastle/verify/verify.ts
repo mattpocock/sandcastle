@@ -221,25 +221,30 @@ const runIn = async (
     throw new Error(`world ${world.runId} was cleaned up; make a new one`);
   const args = runArgs.slice(1);
   if (runVerb === "sandcastle") {
-    return runInWorld(world, "sandcastle", process.execPath, [
-      join(
-        world.project,
-        "node_modules",
-        "@ai-hero",
-        "sandcastle",
-        "dist",
-        "main.js",
-      ),
-      ...args,
-    ]);
+    return runInWorld(world, {
+      label: "sandcastle",
+      command: process.execPath,
+      args: [
+        join(
+          world.project,
+          "node_modules",
+          "@ai-hero",
+          "sandcastle",
+          "dist",
+          "main.js",
+        ),
+        ...args,
+      ],
+    });
   }
-  if (args.length === 0)
+  const [command, ...commandArgs] = args;
+  if (command === undefined)
     throw new Error(
       `usage: ${runVerb} <run> <${runVerb === "tsx" ? "file" : "command"}> [args…]`,
     );
   return runVerb === "tsx"
-    ? runInWorld(world, "tsx", TSX, args)
-    : runInWorld(world, "sh", args[0], args.slice(1));
+    ? runInWorld(world, { label: "tsx", command: TSX, args })
+    : runInWorld(world, { label: "sh", command, args: commandArgs });
 };
 
 const main = async (): Promise<number> => {

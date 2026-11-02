@@ -14,7 +14,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { z } from "zod";
 import type { WorldSpan } from "./attribution.ts";
 import { classifyEnv } from "./envLeaks.ts";
@@ -95,8 +95,7 @@ const stamp = (d: Date): string =>
 const must = (
   command: string,
   args: string[],
-  cwd: string,
-  timeoutMs?: number,
+  { cwd, timeoutMs }: { readonly cwd: string; readonly timeoutMs?: number },
 ): string => {
   const r = sh(command, args, { cwd, timeoutMs });
   if (r.code !== 0) {
@@ -200,6 +199,68 @@ export const checkoutStatus = (): string[] =>
 
 // --- Creating and loading ------------------------------------------------------
 
+/** Pack the Sandcastle under test into `dir`, as npm would publish it. */
+const packSandcastle = (dir: string): string =>
+  join(
+    dir,
+    must("npm", ["pack", "--silent", "--pack-destination", dir], {
+      cwd: REPO_ROOT,
+      timeoutMs: 300_000,
+    })
+      .split("\n")
+      .pop() ?? "",
+  );
+
+/**
+ * A fresh project at `project` with `tgz` installed, committed and pushed to
+ * a new bare `remote`.
+ */
+const initProject = ({
+  project,
+  projectName,
+  remote,
+  tgz,
+}: {
+  readonly project: string;
+  readonly projectName: string;
+  readonly remote: string;
+  readonly tgz: string;
+}): void => {
+  writeFileSync(
+    join(project, "package.json"),
+    `${JSON.stringify(
+      { name: projectName, private: true, type: "module" },
+      null,
+      2,
+    )}\n`,
+  );
+  writeFileSync(join(project, ".gitignore"), "node_modules\n");
+  writeFileSync(join(project, "README.md"), `# ${projectName}\n`);
+  const git = (...args: string[]) => must("git", args, { cwd: project });
+  git("init", "-q", "-b", "main");
+  git("config", "user.email", "verify@sandcastle.local");
+  git("config", "user.name", "Sandcastle Verify");
+  must(
+    "npm",
+    [
+      "install",
+      "--no-audit",
+      "--no-fund",
+      "--prefer-offline",
+      "--save-dev",
+      tgz,
+    ],
+    { cwd: project, timeoutMs: 600_000 },
+  );
+  git("add", "-A");
+  git("commit", "-q", "-m", "initial commit");
+  must("git", ["init", "-q", "--bare", "-b", "main", remote], {
+    cwd: dirname(remote),
+  });
+  git("remote", "add", "origin", remote);
+  git("push", "-q", "-u", "origin", "main");
+};
+
 /** Create a world from this checkout's current `dist`. */
 export const createWorld = (): World => {
   if (!existsSync(join(REPO_ROOT, "dist", "main.js"))) {
@@ -219,49 +280,7 @@ export const createWorld = (): World => {
   for (const d of [project, home, logs, tmp]) {
     mkdirSync(d, { recursive: true });
   }
-
-  // The Sandcastle under test, packed as npm would publish it.
-  const tgz =
-    must(
-      "npm",
-      ["pack", "--silent", "--pack-destination", dir],
-      REPO_ROOT,
-      300_000,
-    )
-      .split("\n")
-      .pop() ?? "";
-
-  writeFileSync(
-    join(project, "package.json"),
-    `${JSON.stringify(
-      { name: projectName, private: true, type: "module" },
-      null,
-      2,
-    )}\n`,
-  );
-  writeFileSync(join(project, ".gitignore"), "node_modules\n");
-  writeFileSync(join(project, "README.md"), `# ${projectName}\n`);
-  must("git", ["init", "-q", "-b", "main"], project);
-  must("git", ["config", "user.email", "verify@sandcastle.local"], project);
-  must("git", ["config", "user.name", "Sandcastle Verify"], project);
-  must(
-    "npm",
-    [
-      "install",
-      "--no-audit",
-      "--no-fund",
-      "--prefer-offline",
-      "--save-dev",
-      join(dir, tgz),
-    ],
-    project,
-    600_000,
-  );
-  must("git", ["add", "-A"], project);
-  must("git", ["commit", "-q", "-m", "initial commit"], project);
-  must("git", ["init", "-q", "--bare", "-b", "main", remote], dir);
-  must("git", ["remote", "add", "origin", remote], project);
-  must("git", ["push", "-q", "-u", "origin", "main"], project);
+  initProject({ project, projectName, remote, tgz: packSandcastle(dir) });
 
   const world: World = {
     runId,
@@ -273,7 +292,7 @@ export const createWorld = (): World => {
     tmp,
     image: `sandcastle:${projectName}`,
     sandcastleRoot: REPO_ROOT,
-    sandcastleCommit: must("git", ["rev-parse", "HEAD"], REPO_ROOT),
+    sandcastleCommit: must("git", ["rev-parse", "HEAD"], { cwd: REPO_ROOT }),
     sandcastleDirty: checkoutStatus().length > 0,
     createdAt: now.toISOString(),
     canary: `canary-${randomBytes(12).toString("hex")}`,
@@ -492,29 +511,16 @@ const bwrapObserver = (
 };
 
 /**
- * Run a command inside the world: cwd is the project, env is the world's.
- * Output streams through, redacted, and is logged under logs/. While it runs,
- * every sandcastle-* container that mounts the world, and every bwrap that
- * names a path in it, is inspected once and its env checked for leaks, into
- * observed.jsonl (names only, never values).
+ * Observes the world's new sandcastle-* containers on `engines`, one tick at a
+ * time: each is inspected once and, if it mounts the world, its env checked.
  */
-export const runInWorld = async (
+const containerObserver = (
   world: World,
-  label: string,
-  command: string,
-  args: readonly string[],
-): Promise<number> => {
-  mkdirSync(worldTmp(world), { recursive: true });
-  const env = worldEnv(world);
-  const seq = readdirSync(world.logs).length + 1;
-  const log = join(world.logs, `${String(seq).padStart(2, "0")}-${label}.log`);
-  appendFileSync(log, `$ ${[command, ...args].join(" ")}\n`);
-
-  const seen = new Set<string>(world.baseline.containers);
+  hostSecrets: ReadonlyMap<string, string>,
+  seen: Set<string>,
+): (() => void) => {
   const engines = ENGINES.filter(engineUp);
-  const hostSecrets = secretsIn(process.env);
-  const observeBwraps = bwrapObserver(world, hostSecrets, seen);
-  const observe = () => {
+  return () => {
     for (const engine of engines) {
       const names = sh(engine, [
         "ps",
@@ -548,6 +554,66 @@ export const runInWorld = async (
         });
       }
     }
+  };
+};
+
+/** Stream `from` into `to` and the log, line by line, redacted. */
+const pipeRedacted = (
+  from: NodeJS.ReadableStream,
+  to: NodeJS.WriteStream,
+  { log, canary }: { readonly log: string; readonly canary: string },
+): void => {
+  let buf = "";
+  from.setEncoding("utf8");
+  from.on("data", (chunk: string) => {
+    buf += chunk;
+    const lines = buf.split("\n");
+    buf = lines.pop() ?? "";
+    for (const line of lines) {
+      const clean = `${redact(line).split(canary).join("<CANARY>")}\n`;
+      to.write(clean);
+      appendFileSync(log, clean);
+    }
+  });
+  from.on("end", () => {
+    if (buf) {
+      const clean = `${redact(buf)}\n`;
+      to.write(clean);
+      appendFileSync(log, clean);
+    }
+  });
+};
+
+/** A command to run inside the world; `label` names its log file. */
+export interface WorldCommand {
+  readonly label: string;
+  readonly command: string;
+  readonly args: readonly string[];
+}
+
+/**
+ * Run a command inside the world: cwd is the project, env is the world's.
+ * Output streams through, redacted, and is logged under logs/. While it runs,
+ * every sandcastle-* container that mounts the world, and every bwrap that
+ * names a path in it, is inspected once and its env checked for leaks, into
+ * observed.jsonl (names only, never values).
+ */
+export const runInWorld = async (
+  world: World,
+  { label, command, args }: WorldCommand,
+): Promise<number> => {
+  mkdirSync(worldTmp(world), { recursive: true });
+  const env = worldEnv(world);
+  const seq = readdirSync(world.logs).length + 1;
+  const log = join(world.logs, `${String(seq).padStart(2, "0")}-${label}.log`);
+  appendFileSync(log, `$ ${[command, ...args].join(" ")}\n`);
+
+  const seen = new Set<string>(world.baseline.containers);
+  const hostSecrets = secretsIn(process.env);
+  const observeContainers = containerObserver(world, hostSecrets, seen);
+  const observeBwraps = bwrapObserver(world, hostSecrets, seen);
+  const observe = () => {
+    observeContainers();
     // Native sandboxes: no container, so read the sandboxed process's env.
     void observeBwraps();
   };
@@ -557,29 +623,8 @@ export const runInWorld = async (
     env,
     stdio: ["inherit", "pipe", "pipe"],
   });
-  const pipe = (from: NodeJS.ReadableStream, to: NodeJS.WriteStream) => {
-    let buf = "";
-    from.setEncoding("utf8");
-    from.on("data", (chunk: string) => {
-      buf += chunk;
-      const lines = buf.split("\n");
-      buf = lines.pop() ?? "";
-      for (const line of lines) {
-        const clean = `${redact(line).split(world.canary).join("<CANARY>")}\n`;
-        to.write(clean);
-        appendFileSync(log, clean);
-      }
-    });
-    from.on("end", () => {
-      if (buf) {
-        const clean = `${redact(buf)}\n`;
-        to.write(clean);
-        appendFileSync(log, clean);
-      }
-    });
-  };
-  pipe(child.stdout, process.stdout);
-  pipe(child.stderr, process.stderr);
+  pipeRedacted(child.stdout, process.stdout, { log, canary: world.canary });
+  pipeRedacted(child.stderr, process.stderr, { log, canary: world.canary });
   const timer = setInterval(observe, 1000);
   const code = await new Promise<number>((resolve) => {
     child.on("close", (c) => {
