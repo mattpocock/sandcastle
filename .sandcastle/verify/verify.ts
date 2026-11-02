@@ -31,6 +31,7 @@ import { runLedger } from "./ledger.ts";
 import {
   checkoutStatus,
   createWorld,
+  engineEntries,
   ENGINES,
   engineUp,
   listContainers,
@@ -43,7 +44,7 @@ import {
   worldContainer,
   worldTmp,
 } from "./world.ts";
-import type { Engine, World } from "./world.ts";
+import type { World } from "./world.ts";
 
 loadKeys();
 const TSX = join(REPO_ROOT, "node_modules", ".bin", "tsx");
@@ -104,9 +105,10 @@ const doctor = (world?: World): number => {
 const cleanup = (world: World): void => {
   const removed: string[] = [];
   const observed = new Set(observations(world).map((o) => o.container));
-  for (const c of listContainers()) {
+  for (const { entry: c, engine, rest: name } of engineEntries(
+    listContainers(),
+  )) {
     if (world.baseline.containers.includes(c)) continue;
-    const [engine, name] = c.split(":") as [Engine, string];
     if (observed.has(c) || worldContainer(world, engine, name)) {
       if (sh(engine, ["rm", "-f", name]).code === 0)
         removed.push(`container ${c}`);

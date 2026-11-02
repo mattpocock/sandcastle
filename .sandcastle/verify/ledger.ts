@@ -25,6 +25,7 @@ import { leftoverBwrap } from "./nativeSandboxes.ts";
 import {
   allWorldSpans,
   checkoutStatus,
+  engineEntries,
   imageCreated,
   listContainers,
   listImages,
@@ -34,7 +35,7 @@ import {
   worldContainer,
   worldTmp,
 } from "./world.ts";
-import type { Engine, World } from "./world.ts";
+import type { World } from "./world.ts";
 
 interface Section {
   readonly title: string;
@@ -46,7 +47,7 @@ const git = (world: World, ...args: string[]): string =>
   sh("git", args, { cwd: world.project }).stdout.trim();
 
 /** Branch names Sandcastle generates for temp branches: <ts>-<6hex>. */
-const TEMP_BRANCH = /^sandcastle\/(.+\/)?\d{8}-\d{6}-[0-9a-f]{6}$/u;
+const TEMP_BRANCH = /^sandcastle\/(?:.+\/)?\d{8}-\d{6}-[0-9a-f]{6}$/u;
 
 const gitState = (world: World): Section => {
   const leaks: string[] = [];
@@ -125,9 +126,10 @@ const containersAndImages = (world: World): Section => {
   const leaks: string[] = [];
   const notes: string[] = [];
   const observed = new Set(observations(world).map((o) => o.container));
-  for (const c of listContainers()) {
+  for (const { entry: c, engine, rest: name } of engineEntries(
+    listContainers(),
+  )) {
     if (world.baseline.containers.includes(c)) continue;
-    const [engine, name] = c.split(":") as [Engine, string];
     if (observed.has(c) || worldContainer(world, engine, name))
       leaks.push(`container ${c} still exists`);
     else notes.push(`container ${c} is not this world's (no mount inside it)`);
@@ -135,11 +137,10 @@ const containersAndImages = (world: World): Section => {
   notes.push(`sandboxes observed (containers and bwraps): ${observed.size}`);
   const others = allWorldSpans();
   const now = new Date().toISOString();
-  for (const img of listImages()) {
+  for (const { entry: img, engine, rest } of engineEntries(listImages())) {
     if (world.baseline.images.includes(img)) continue;
-    const engine = img.slice(0, img.indexOf(":")) as Engine;
-    const ref = img.slice(engine.length + 1, img.lastIndexOf("@"));
-    const id = img.slice(img.lastIndexOf("@") + 1);
+    const ref = rest.slice(0, rest.lastIndexOf("@"));
+    const id = rest.slice(rest.lastIndexOf("@") + 1);
     const a = attributeImage(
       { ref, created: imageCreated(engine, id) },
       world,
