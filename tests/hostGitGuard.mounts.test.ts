@@ -102,7 +102,7 @@ describe("bind-mount sandbox git control files", () => {
     const commondir = paths.findIndex((p) =>
       p.endsWith("/worktrees/w/commondir"),
     );
-    expect(commondir).toBeGreaterThan(-1);
+    expect(commondir, JSON.stringify(all)).toBeGreaterThan(-1);
     const adminDir = path.posix.dirname(String(paths[commondir]));
     const worktreesDir = path.posix.dirname(adminDir);
     const indexOf = (sandboxPath: string): number => paths.indexOf(sandboxPath);
