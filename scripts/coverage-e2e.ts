@@ -148,13 +148,38 @@ export interface E2eCoverage extends Coverage {
   readonly sources: readonly string[];
 }
 
-/** The e2e run, plus the CLI subprocesses its tests spawned. */
-export const e2eCoverage = async (): Promise<E2eCoverage> => {
+/** Which end-to-end suite to run with coverage. */
+export interface Suite {
+  /** Names the suite in the report. */
+  readonly label: string;
+  /** vitest arguments that select it. */
+  readonly args: readonly string[];
+}
+
+/** The e2e tests (tests/, minus tests/local/): what CI runs. */
+export const E2E_SUITE: Suite = {
+  label: "e2e tests",
+  args: ["--project", "e2e"],
+};
+
+/**
+ * The local tests (tests/local/, `npm run test:local`): real Docker and
+ * Podman, so never on CI. A run without both engines fails.
+ */
+export const LOCAL_SUITE: Suite = {
+  label: "local tests (real Docker and Podman)",
+  args: ["--config", "vitest.local.config.ts"],
+};
+
+/** A suite's run, plus the CLI subprocesses its tests spawned. */
+export const e2eCoverage = async (
+  suite: Suite = E2E_SUITE,
+): Promise<E2eCoverage> => {
   const v8 = await mkdtemp(path.join(tmpdir(), "coverage-gate-v8-"));
   try {
     const inProcess = await coverage({
-      label: "the e2e tests",
-      args: ["--project", "e2e"],
+      label: `the ${suite.label}`,
+      args: suite.args,
       env: { NODE_V8_COVERAGE: v8 },
     });
     const processes = await subprocessLines(v8);
@@ -163,8 +188,8 @@ export const e2eCoverage = async (): Promise<E2eCoverage> => {
       ...inProcess,
       lines: merge(inProcess.lines, subprocess),
       sources: [
-        `e2e tests in vitest (this machine): ${String(total(inProcess.lines))} lines`,
-        `CLI subprocesses spawned by e2e tests (built dist/ or src/ through tsx, source-mapped to src/): ${String(processes.length)} processes, ${String(total(subprocess))} lines`,
+        `${suite.label} in vitest (this machine): ${String(total(inProcess.lines))} lines`,
+        `CLI subprocesses spawned by ${suite.label} (built dist/ or src/ through tsx, source-mapped to src/): ${String(processes.length)} processes, ${String(total(subprocess))} lines`,
       ],
     };
   } finally {

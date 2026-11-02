@@ -29,9 +29,6 @@
   "src/Display.test.ts": {
     "ratchet/test-outside-tests": 1
   },
-  "src/DockerLifecycle.test.ts": {
-    "ratchet/test-outside-tests": 1
-  },
   "src/ErrorHandler.test.ts": {
     "ratchet/test-outside-tests": 1
   },
@@ -87,9 +84,6 @@
     "ratchet/test-outside-tests": 1
   },
   "src/sandboxes/daytona.test.ts": {
-    "ratchet/test-outside-tests": 1
-  },
-  "src/sandboxes/docker.test.ts": {
     "ratchet/test-outside-tests": 1
   },
   "src/sandboxes/no-sandbox.test.ts": {

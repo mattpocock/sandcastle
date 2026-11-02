@@ -128,6 +128,8 @@ Split helpers into their own files before writing, not after the ratchet fails. 
 
 New tests go in `tests/` and use only the public API: `@ai-hero/sandcastle` and its `exports` subpaths, imported by package name. dependency-cruiser (`.dependency-cruiser.mjs`) enforces this, and `src/` never imports from `tests/`. The unit tests elsewhere in `src/` are legacy. The test ratchet (`scripts/test-baseline.json`, checked by `npm run lint`) fails on any new test file outside `tests/`, and the legacy count only shrinks. The tests of the repo's own tooling (`scripts/`, `.sandcastle/`) are out of scope.
 
+Tests that need a real Docker or Podman engine go in `tests/local/`, under the same rules. `npm test` and CI never run them (CI has no container engine); `npm run test:local` does, and it must pass before a release (`docs/agents/releasing.md`). It fails, rather than skips, when an engine is missing. Keep `tests/local/` to what only a real container can show: anything that runs without an engine belongs in `tests/`.
+
 Tests in `tests/` have no type assertions (`as T`, `<T>x`); `as const` is fine. The test ratchet counts them (`ratchet/test-type-assertion`), from zero. Build a value of the real type, or narrow with `expect` or a type guard. The legacy tests use them freely, so drop them when porting one.
 
 A migration PR may delete a legacy test only when `npm run coverage:gate -- <file>` passes: every line only that file covers must now be covered by `tests/`. Paste its output into the PR body.
