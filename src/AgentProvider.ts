@@ -464,11 +464,16 @@ const readSandboxFile = async (
   }
 };
 
+/** A file to write into the sandbox; `tag` names its host temp file. */
+interface SandboxFileWrite {
+  readonly sandboxPath: string;
+  readonly content: string;
+  readonly tag: string;
+}
+
 const writeSandboxFile = async (
   handle: Pick<BindMountSandboxHandle, "copyFileIn" | "exec">,
-  sandboxPath: string,
-  content: string,
-  tag: string,
+  { sandboxPath, content, tag }: SandboxFileWrite,
 ): Promise<void> => {
   const tmpPath = join(
     tmpdir(),
@@ -511,6 +516,117 @@ const copyClaudeSessionFile = async ({
   await writeFile(destPath, rewritten);
 };
 
+/** A Claude session to copy out of the sandbox, and where it goes. */
+interface ClaudeSessionCapture {
+  handle: BindMountSandboxHandle;
+  hostCwd: string;
+  sandboxCwd: string;
+  sessionId: string;
+  sandboxProjectsDir: string;
+  hostProjectsDir: string | undefined;
+}
+
+/**
+ * Subagent / workflow transcripts: best-effort. A missing `subagents/`
+ * dir is the normal case (no Agent-tool / Workflow usage this run);
+ * an individual subagent failing to copy must not abort siblings or
+ * the (already-successful) main capture.
+ */
+const captureClaudeSubagents = async ({
+  handle,
+  hostCwd,
+  sandboxCwd,
+  sessionId,
+  sandboxProjectsDir,
+  hostProjectsDir,
+}: ClaudeSessionCapture): Promise<void> => {
+  const subagentSandboxPaths = await listClaudeSubagentSessionsInSandbox(
+    sandboxCwd,
+    sessionId,
+    handle,
+    sandboxProjectsDir,
+  );
+  const hostSubagentsDir = claudeSubagentsDirOnHost(
+    hostCwd,
+    sessionId,
+    hostProjectsDir,
+  );
+  for (const sandboxSubagentPath of subagentSandboxPaths) {
+    try {
+      await copyClaudeSessionFile({
+        handle,
+        sourcePath: sandboxSubagentPath,
+        fromCwd: sandboxCwd,
+        toCwd: hostCwd,
+        destPath: join(hostSubagentsDir, posix.basename(sandboxSubagentPath)),
+        tag: "claude-sub",
+      });
+    } catch (error) {
+      console.error(
+        `sandcastle: failed to capture Claude subagent transcript ${sandboxSubagentPath}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+};
+
+/** What `resumeIntoSandbox` is given. */
+type SessionTransfer = Parameters<AgentSessionStorage["resumeIntoSandbox"]>[0];
+
+/** Where an agent keeps its sessions, on the host and in the sandbox. */
+interface SessionDirs {
+  readonly hostSessionsDir: string | undefined;
+  readonly sandboxSessionsDir: string;
+}
+
+const resumeClaudeIntoSandbox = async (
+  { hostCwd, sandboxCwd, sessionId, handle }: SessionTransfer,
+  dirs: {
+    readonly hostProjectsDir: string | undefined;
+    readonly sandboxProjectsDir: string;
+  },
+): Promise<void> => {
+  const hostPath = claudeHostSessionPath(
+    hostCwd,
+    sessionId,
+    dirs.hostProjectsDir,
+  );
+  const jsonl = await readFile(hostPath, "utf8");
+  await writeSandboxFile(handle, {
+    sandboxPath: claudeSandboxSessionPath(
+      sandboxCwd,
+      sessionId,
+      dirs.sandboxProjectsDir,
+    ),
+    content: transferClaudeSession(jsonl, hostCwd, sandboxCwd),
+    tag: "claude-res",
+  });
+};
+
+/**
+ * Copies a Claude session out of the sandbox: the main session file, then
+ * its subagent / workflow transcripts.
+ */
+const captureClaudeSession = (capture: ClaudeSessionCapture): Promise<void> =>
+  // Main session: failure is fatal — the user expects their session.
+  copyClaudeSessionFile({
+    handle: capture.handle,
+    sourcePath: claudeSandboxSessionPath(
+      capture.sandboxCwd,
+      capture.sessionId,
+      capture.sandboxProjectsDir,
+    ),
+    fromCwd: capture.sandboxCwd,
+    toCwd: capture.hostCwd,
+    destPath: claudeHostSessionPath(
+      capture.hostCwd,
+      capture.sessionId,
+      capture.hostProjectsDir,
+    ),
+    tag: "claude-cap",
+  }).then(() => captureClaudeSubagents(capture));
+
 const makeClaudeSessionStorage = (
   options?: ClaudeCodeOptions,
 ): AgentSessionStorage => {
@@ -529,76 +645,39 @@ const makeClaudeSessionStorage = (
       if (!(await pathExists(path))) return undefined;
       return readFile(path, "utf8");
     },
-    captureToHost: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
-      const sandboxProjectsDir = sandboxProjectsDirOf(handle);
-      // Main session: failure is fatal — the user expects their session.
-      await copyClaudeSessionFile({
+    captureToHost: ({ hostCwd, sandboxCwd, sessionId, handle }) =>
+      captureClaudeSession({
         handle,
-        sourcePath: claudeSandboxSessionPath(
-          sandboxCwd,
-          sessionId,
-          sandboxProjectsDir,
-        ),
-        fromCwd: sandboxCwd,
-        toCwd: hostCwd,
-        destPath: claudeHostSessionPath(hostCwd, sessionId, hostProjectsDir),
-        tag: "claude-cap",
-      });
-
-      // Subagent / workflow transcripts: best-effort. A missing `subagents/`
-      // dir is the normal case (no Agent-tool / Workflow usage this run);
-      // an individual subagent failing to copy must not abort siblings or
-      // the (already-successful) main capture.
-      const subagentSandboxPaths = await listClaudeSubagentSessionsInSandbox(
+        hostCwd,
         sandboxCwd,
         sessionId,
-        handle,
-        sandboxProjectsDir,
-      );
-      const hostSubagentsDir = claudeSubagentsDirOnHost(
-        hostCwd,
-        sessionId,
+        sandboxProjectsDir: sandboxProjectsDirOf(handle),
         hostProjectsDir,
-      );
-      for (const sandboxSubagentPath of subagentSandboxPaths) {
-        try {
-          await copyClaudeSessionFile({
-            handle,
-            sourcePath: sandboxSubagentPath,
-            fromCwd: sandboxCwd,
-            toCwd: hostCwd,
-            destPath: join(
-              hostSubagentsDir,
-              posix.basename(sandboxSubagentPath),
-            ),
-            tag: "claude-sub",
-          });
-        } catch (error) {
-          console.error(
-            `sandcastle: failed to capture Claude subagent transcript ${sandboxSubagentPath}: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-        }
-      }
-    },
-    resumeIntoSandbox: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
-      const hostPath = claudeHostSessionPath(
-        hostCwd,
-        sessionId,
+      }),
+    resumeIntoSandbox: (transfer) =>
+      resumeClaudeIntoSandbox(transfer, {
         hostProjectsDir,
-      );
-      const jsonl = await readFile(hostPath, "utf8");
-      const rewritten = transferClaudeSession(jsonl, hostCwd, sandboxCwd);
-      const sandboxPath = claudeSandboxSessionPath(
-        sandboxCwd,
-        sessionId,
-        sandboxProjectsDirOf(handle),
-      );
-      await writeSandboxFile(handle, sandboxPath, rewritten, "claude-res");
-    },
+        sandboxProjectsDir: sandboxProjectsDirOf(transfer.handle),
+      }),
     findByIdOnHost: (id) => findClaudeSessionOnHost(id, hostProjectsDir),
   };
+};
+
+const resumeCodexIntoSandbox = async (
+  { hostCwd, sandboxCwd, sessionId, handle }: SessionTransfer,
+  dirs: SessionDirs,
+): Promise<void> => {
+  const found = await findCodexSessionOnHost(sessionId, dirs.hostSessionsDir);
+  const path = requireHostSessionPath(found, sessionId);
+  const jsonl = await readFile(path, "utf8");
+  await writeSandboxFile(handle, {
+    sandboxPath: posix.join(
+      dirs.sandboxSessionsDir,
+      ...relative(found.searchedRoot, path).split(/[\\/]/u),
+    ),
+    content: transferCodexSession(jsonl, hostCwd, sandboxCwd),
+    tag: "codex-res",
+  });
 };
 
 /**
@@ -640,17 +719,11 @@ const makeCodexSessionStorage = (
       await writeFile(target, rewritten);
       capturedPaths.set(sessionId, target);
     },
-    resumeIntoSandbox: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
-      const found = await findCodexSessionOnHost(sessionId, hostSessionsDir);
-      const path = requireHostSessionPath(found, sessionId);
-      const jsonl = await readFile(path, "utf8");
-      const rewritten = transferCodexSession(jsonl, hostCwd, sandboxCwd);
-      const target = posix.join(
-        sandboxSessionsDirOf(handle),
-        ...relative(found.searchedRoot, path).split(/[\\/]/u),
-      );
-      await writeSandboxFile(handle, target, rewritten, "codex-res");
-    },
+    resumeIntoSandbox: (transfer) =>
+      resumeCodexIntoSandbox(transfer, {
+        hostSessionsDir,
+        sandboxSessionsDir: sandboxSessionsDirOf(transfer.handle),
+      }),
     findByIdOnHost: (id) => findCodexSessionOnHost(id, hostSessionsDir),
   };
 };
@@ -672,6 +745,25 @@ const piHostCaptureTarget = (
   hostSessionsDir: string | undefined,
 ): string =>
   join(piSessionDirPath(hostCwd, hostSessionsDir), posix.basename(sandboxPath));
+
+const resumePiIntoSandbox = async (
+  { hostCwd, sandboxCwd, sessionId, handle }: SessionTransfer,
+  dirs: SessionDirs,
+): Promise<void> => {
+  const found = await findPiSessionOnHost(sessionId, dirs.hostSessionsDir);
+  const path = requireHostSessionPath(found, sessionId);
+  const jsonl = await readFile(path, "utf8");
+  const filename = posix.basename(path.replaceAll("\\", "/"));
+  await writeSandboxFile(handle, {
+    sandboxPath: posix.join(
+      dirs.sandboxSessionsDir,
+      encodePiSessionDir(sandboxCwd),
+      filename,
+    ),
+    content: transferPiSession(jsonl, hostCwd, sandboxCwd),
+    tag: "pi-res",
+  });
+};
 
 // Pi names its JSONL `<timestamp>_<id>.jsonl`, so the file is not derivable
 // from (cwd, id). captureToHost remembers what it wrote, so the iteration's
@@ -711,19 +803,11 @@ const makePiSessionStorage = (options?: PiOptions): AgentSessionStorage => {
       await writeFile(target, rewritten);
       capturedPaths.set(sessionId, target);
     },
-    resumeIntoSandbox: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
-      const found = await findPiSessionOnHost(sessionId, hostSessionsDir);
-      const path = requireHostSessionPath(found, sessionId);
-      const jsonl = await readFile(path, "utf8");
-      const rewritten = transferPiSession(jsonl, hostCwd, sandboxCwd);
-      const filename = posix.basename(path.replaceAll("\\", "/"));
-      const target = posix.join(
-        sandboxSessionsDirOf(handle),
-        encodePiSessionDir(sandboxCwd),
-        filename,
-      );
-      await writeSandboxFile(handle, target, rewritten, "pi-res");
-    },
+    resumeIntoSandbox: (transfer) =>
+      resumePiIntoSandbox(transfer, {
+        hostSessionsDir,
+        sandboxSessionsDir: sandboxSessionsDirOf(transfer.handle),
+      }),
     findByIdOnHost: (id) => findPiSessionOnHost(id, hostSessionsDir),
   };
 };
@@ -1046,6 +1130,41 @@ export interface CodexOptions {
   readonly approvalsReviewer?: "user" | "auto_review";
 }
 
+/** The `codex exec` command for a print-mode run. */
+const buildCodexPrintCommand = (
+  model: string,
+  options: CodexOptions | undefined,
+  { prompt, resumeSession, forkSession }: AgentCommandOptions,
+): PrintCommand => {
+  const effortFlag = options?.effort
+    ? ` -c ${shellEscape(`model_reasoning_effort="${options.effort}"`)}`
+    : "";
+  // auto_review only fires on interactive approvals, so the bypass flag is
+  // dropped in favour of `-a on-request`. `-s danger-full-access` disables
+  // Codex's own filesystem sandbox — Sandcastle owns that boundary, and
+  // here the reviewer agent owns the per-action approval boundary.
+  const approvalsFlags =
+    options?.approvalsReviewer === "auto_review"
+      ? ` -a on-request -s danger-full-access -c ${shellEscape(`approvals_reviewer="auto_review"`)}`
+      : " --dangerously-bypass-approvals-and-sandbox";
+  // Codex distinguishes fork from resume at the verb level — `codex exec
+  // fork <id>` leaves the parent rollout intact; `codex exec resume <id>`
+  // appends to it. See ADR 0018.
+  let base: string;
+  if (resumeSession && forkSession) {
+    base = `codex exec fork ${shellEscape(resumeSession)}`;
+  } else if (resumeSession) {
+    base = `codex exec resume ${shellEscape(resumeSession)}`;
+  } else {
+    base = "codex exec";
+  }
+  const stdinArg = resumeSession ? " -" : "";
+  return {
+    command: `${base} --json${approvalsFlags} -m ${shellEscape(model)}${effortFlag}${stdinArg}`,
+    stdin: prompt,
+  };
+};
+
 export const codex = (
   model: string,
   options?: CodexOptions,
@@ -1055,38 +1174,8 @@ export const codex = (
   captureSessions: options?.captureSessions ?? true,
   sessionStorage: makeCodexSessionStorage(options),
 
-  buildPrintCommand({
-    prompt,
-    resumeSession,
-    forkSession,
-  }: AgentCommandOptions): PrintCommand {
-    const effortFlag = options?.effort
-      ? ` -c ${shellEscape(`model_reasoning_effort="${options.effort}"`)}`
-      : "";
-    // auto_review only fires on interactive approvals, so the bypass flag is
-    // dropped in favour of `-a on-request`. `-s danger-full-access` disables
-    // Codex's own filesystem sandbox — Sandcastle owns that boundary, and
-    // here the reviewer agent owns the per-action approval boundary.
-    const approvalsFlags =
-      options?.approvalsReviewer === "auto_review"
-        ? ` -a on-request -s danger-full-access -c ${shellEscape(`approvals_reviewer="auto_review"`)}`
-        : " --dangerously-bypass-approvals-and-sandbox";
-    // Codex distinguishes fork from resume at the verb level — `codex exec
-    // fork <id>` leaves the parent rollout intact; `codex exec resume <id>`
-    // appends to it. See ADR 0018.
-    let base: string;
-    if (resumeSession && forkSession) {
-      base = `codex exec fork ${shellEscape(resumeSession)}`;
-    } else if (resumeSession) {
-      base = `codex exec resume ${shellEscape(resumeSession)}`;
-    } else {
-      base = "codex exec";
-    }
-    const stdinArg = resumeSession ? " -" : "";
-    return {
-      command: `${base} --json${approvalsFlags} -m ${shellEscape(model)}${effortFlag}${stdinArg}`,
-      stdin: prompt,
-    };
+  buildPrintCommand(commandOptions: AgentCommandOptions): PrintCommand {
+    return buildCodexPrintCommand(model, options, commandOptions);
   },
 
   buildInteractiveArgs({ prompt }: AgentCommandOptions): string[] {
@@ -1611,6 +1700,73 @@ export interface ClaudeCodeOptions {
     | "bypassPermissions";
 }
 
+/** The `claude --print` command for a print-mode run. */
+const buildClaudePrintCommand = (
+  model: string,
+  options: ClaudeCodeOptions | undefined,
+  {
+    prompt,
+    dangerouslySkipPermissions,
+    resumeSession,
+    forkSession,
+  }: AgentCommandOptions,
+): PrintCommand => {
+  // permissionMode and --dangerously-skip-permissions are mutually exclusive
+  // on Claude's CLI; an explicit mode on the provider takes precedence over
+  // Sandcastle's default bypass.
+  const skipPermissionsFlag = dangerouslySkipPermissions
+    ? " --dangerously-skip-permissions"
+    : "";
+  const permissionFlag = options?.permissionMode
+    ? ` --permission-mode ${options.permissionMode}`
+    : skipPermissionsFlag;
+  const effortFlag = options?.effort ? ` --effort ${options.effort}` : "";
+  const resumeFlag = resumeSession
+    ? ` --resume ${shellEscape(resumeSession)}`
+    : "";
+  // --fork-session is meaningful only alongside --resume; it tells Claude
+  // to write the continuation as a new session rather than mutating the
+  // resumed one. See ADR 0018.
+  const forkFlag = resumeSession && forkSession ? " --fork-session" : "";
+  return {
+    command: `claude --print --verbose${permissionFlag} --output-format stream-json --model ${shellEscape(model)}${effortFlag}${resumeFlag}${forkFlag} -p -`,
+    stdin: prompt,
+  };
+};
+
+/** The token usage of the last assistant message in a Claude session JSONL. */
+const parseClaudeSessionUsage = (
+  content: string,
+): IterationUsage | undefined => {
+  const lines = content.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]!;
+    if (!line.startsWith("{")) continue;
+    try {
+      const obj = JSON.parse(line);
+      if (obj.type === "assistant" && obj.message?.usage) {
+        const u = obj.message.usage;
+        if (
+          typeof u.input_tokens === "number" &&
+          typeof u.cache_creation_input_tokens === "number" &&
+          typeof u.cache_read_input_tokens === "number" &&
+          typeof u.output_tokens === "number"
+        ) {
+          return {
+            inputTokens: u.input_tokens,
+            cacheCreationInputTokens: u.cache_creation_input_tokens,
+            cacheReadInputTokens: u.cache_read_input_tokens,
+            outputTokens: u.output_tokens,
+          };
+        }
+      }
+    } catch {
+      // Not valid JSON — skip
+    }
+  }
+  return undefined;
+};
+
 export const claudeCode = (
   model: string,
   options?: ClaudeCodeOptions,
@@ -1620,33 +1776,8 @@ export const claudeCode = (
   captureSessions: options?.captureSessions ?? true,
   sessionStorage: makeClaudeSessionStorage(options),
 
-  buildPrintCommand({
-    prompt,
-    dangerouslySkipPermissions,
-    resumeSession,
-    forkSession,
-  }: AgentCommandOptions): PrintCommand {
-    // permissionMode and --dangerously-skip-permissions are mutually exclusive
-    // on Claude's CLI; an explicit mode on the provider takes precedence over
-    // Sandcastle's default bypass.
-    const skipPermissionsFlag = dangerouslySkipPermissions
-      ? " --dangerously-skip-permissions"
-      : "";
-    const permissionFlag = options?.permissionMode
-      ? ` --permission-mode ${options.permissionMode}`
-      : skipPermissionsFlag;
-    const effortFlag = options?.effort ? ` --effort ${options.effort}` : "";
-    const resumeFlag = resumeSession
-      ? ` --resume ${shellEscape(resumeSession)}`
-      : "";
-    // --fork-session is meaningful only alongside --resume; it tells Claude
-    // to write the continuation as a new session rather than mutating the
-    // resumed one. See ADR 0018.
-    const forkFlag = resumeSession && forkSession ? " --fork-session" : "";
-    return {
-      command: `claude --print --verbose${permissionFlag} --output-format stream-json --model ${shellEscape(model)}${effortFlag}${resumeFlag}${forkFlag} -p -`,
-      stdin: prompt,
-    };
+  buildPrintCommand(commandOptions: AgentCommandOptions): PrintCommand {
+    return buildClaudePrintCommand(model, options, commandOptions);
   },
 
   buildInteractiveArgs({
@@ -1670,32 +1801,6 @@ export const claudeCode = (
   },
 
   parseSessionUsage(content: string): IterationUsage | undefined {
-    const lines = content.split("\n");
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const line = lines[i]!;
-      if (!line.startsWith("{")) continue;
-      try {
-        const obj = JSON.parse(line);
-        if (obj.type === "assistant" && obj.message?.usage) {
-          const u = obj.message.usage;
-          if (
-            typeof u.input_tokens === "number" &&
-            typeof u.cache_creation_input_tokens === "number" &&
-            typeof u.cache_read_input_tokens === "number" &&
-            typeof u.output_tokens === "number"
-          ) {
-            return {
-              inputTokens: u.input_tokens,
-              cacheCreationInputTokens: u.cache_creation_input_tokens,
-              cacheReadInputTokens: u.cache_read_input_tokens,
-              outputTokens: u.output_tokens,
-            };
-          }
-        }
-      } catch {
-        // Not valid JSON — skip
-      }
-    }
-    return undefined;
+    return parseClaudeSessionUsage(content);
   },
 });

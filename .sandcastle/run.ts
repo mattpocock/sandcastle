@@ -1,5 +1,13 @@
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { z } from "zod";
+
+/** The JSON the planner writes inside its `<plan>` tag. */
+const PlanSchema = z.object({
+  issues: z.array(
+    z.object({ number: z.number(), title: z.string(), branch: z.string() }),
+  ),
+});
 
 const MAX_ITERATIONS = 10;
 const MAX_PARALLEL = 4;
@@ -15,16 +23,15 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     promptFile: "./.sandcastle/plan-prompt.md",
   });
 
-  const planMatch = plan.stdout.match(/<plan>([\s\S]*?)<\/plan>/u);
-  if (!planMatch) {
+  const planJson = /<plan>(?<plan>[\s\S]*?)<\/plan>/u.exec(plan.stdout)
+    ?.groups?.["plan"];
+  if (planJson === undefined) {
     throw new Error(
       `Orchestrator did not produce a <plan> tag.\n\n${plan.stdout}`,
     );
   }
 
-  const { issues } = JSON.parse(planMatch[1]) as {
-    issues: { number: number; title: string; branch: string }[];
-  };
+  const { issues } = PlanSchema.parse(JSON.parse(planJson));
 
   if (issues.length === 0) {
     console.log("No issues to work on. Exiting.");
