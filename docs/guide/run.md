@@ -1,4 +1,4 @@
-# API
+# `run()` and `createSandbox()`
 
 Sandcastle exports a programmatic `run()` function for use in scripts, CI pipelines, or custom tooling. The examples below use `docker()`, but any `SandboxProvider` works in its place.
 
@@ -17,6 +17,32 @@ console.log(result.iterations); // per-iteration results with optional sessionId
 console.log(result.commits); // array of { sha } for commits created
 console.log(result.branch); // target branch name
 ```
+
+Every option and result field below links to the page for its term.
+
+## `RunOptions`
+
+| Option                     | Type               | Default                       | Description                                                                                                                                                                                                                                                 |
+| -------------------------- | ------------------ | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent`                    | AgentProvider      | —                             | **Required.** Agent provider (e.g. `claudeCode("claude-opus-4-8")`, `pi("claude-sonnet-4-6")`, `codex("gpt-5.4")`, `cursor("composer-2")`, `opencode("opencode/big-pickle")`, `copilot("claude-sonnet-4.5")`). See [Agent providers](./agent-providers.md). |
+| `sandbox`                  | SandboxProvider    | —                             | **Required.** Sandbox provider (e.g. `docker()`, `podman()`, `docker({ imageName: "sandcastle:local" })`). See [Sandbox providers](./sandbox-providers.md).                                                                                                 |
+| `cwd`                      | string             | `process.cwd()`               | Host repo directory — anchor for `.sandcastle/` artifacts and git operations. Relative paths resolve against `process.cwd()`. See [Core concepts](./core-concepts.md).                                                                                      |
+| `prompt`                   | string             | —                             | Inline prompt (mutually exclusive with `promptFile`). See [Prompts](./prompts.md).                                                                                                                                                                          |
+| `promptFile`               | string             | —                             | Path to prompt file (mutually exclusive with `prompt`). Resolves against `process.cwd()`, **not** `cwd`. See [Prompts](./prompts.md).                                                                                                                       |
+| `maxIterations`            | number             | `1`                           | Maximum iterations to run. See [Iterations](./iterations.md).                                                                                                                                                                                               |
+| `hooks`                    | SandboxHooks       | —                             | Lifecycle hooks (`host.*`, `sandbox.*`). See [Hooks](./hooks.md).                                                                                                                                                                                           |
+| `name`                     | string             | —                             | Display name for the run, shown as a prefix in log output. See [Run logs](./run-logs.md).                                                                                                                                                                   |
+| `promptArgs`               | PromptArgs         | —                             | Key-value map for `{{KEY}}` placeholder substitution. See [Prompts](./prompts.md).                                                                                                                                                                          |
+| `branchStrategy`           | BranchStrategy     | per-provider default          | Branch strategy: `{ type: 'head' }`, `{ type: 'merge-to-head' }`, or `{ type: 'branch', branch: '…' }`. See [Branch strategies](./branch-strategies.md).                                                                                                    |
+| `copyToWorktree`           | string[]           | —                             | Host-relative file paths to copy into the sandbox before start (not supported with `branchStrategy: { type: 'head' }`). See [Branch strategies](./branch-strategies.md).                                                                                    |
+| `logging`                  | object             | file (auto-generated)         | `{ type: 'file', path }` or `{ type: 'stdout' }`. See [Run logs](./run-logs.md).                                                                                                                                                                            |
+| `completionSignal`         | string \| string[] | `<promise>COMPLETE</promise>` | String or array of strings the agent emits to stop the iteration loop early. See [Iterations](./iterations.md).                                                                                                                                             |
+| `idleTimeoutSeconds`       | number             | `600`                         | Idle timeout in seconds — resets on each agent output event. See [Iterations](./iterations.md).                                                                                                                                                             |
+| `completionTimeoutSeconds` | number             | `60`                          | Grace window in seconds after the completion signal is observed but the agent process has not exited (hanging process). See [Hanging processes after the completion signal](./iterations.md#hanging-processes-after-the-completion-signal).                 |
+| `resumeSession`            | string             | —                             | Resume a prior session by ID for agents that support resume. Incompatible with `maxIterations > 1`. Session file must exist on host. See [Agent sessions](./agent-sessions.md).                                                                             |
+| `signal`                   | AbortSignal        | —                             | Cancel the run when aborted. Kills the in-flight agent subprocess and cancels lifecycle hooks; the worktree is preserved on disk. Rejects with `signal.reason`.                                                                                             |
+| `timeouts`                 | Timeouts           | —                             | Override default timeouts for built-in lifecycle steps: `copyToWorktreeMs` (60 000), `gitSetupMs` (10 000), `commitCollectionMs` (30 000), `mergeToHostMs` (30 000). See [Branch strategies](./branch-strategies.md).                                       |
+| `output`                   | OutputDefinition   | —                             | Structured output definition (`Output.object(…)` or `Output.string(…)`). Requires `maxIterations === 1`. See [Structured output](./structured-output.md).                                                                                                   |
 
 ## All options
 
@@ -157,6 +183,48 @@ console.log(result.completionSignal); // matched signal string, or undefined if 
 console.log(result.commits); // array of { sha } for commits created
 console.log(result.branch); // target branch name
 ```
+
+## `RunResult`
+
+| Field                   | Type                                        | Description                                                                                                                                                |
+| ----------------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `iterations`            | `IterationResult[]`                         | Per-iteration results (use `.length` for the count). See [Iterations](./iterations.md).                                                                    |
+| `completionSignal`      | string?                                     | The matched completion signal string, or `undefined` if none fired. See [Iterations](./iterations.md).                                                     |
+| `stdout`                | string                                      | Agent output                                                                                                                                               |
+| `commits`               | `{ sha }[]`                                 | Commits created during the run. See [Branch strategies](./branch-strategies.md).                                                                           |
+| `branch`                | string                                      | Target branch name. See [Branch strategies](./branch-strategies.md).                                                                                       |
+| `logFilePath`           | string?                                     | Path to the log file (only when logging to a file). See [Run logs](./run-logs.md).                                                                         |
+| `output`                | T?                                          | Typed structured output (only present when `output` option is set). See [Structured output](./structured-output.md).                                       |
+| `preservedWorktreePath` | string?                                     | Host path to the preserved worktree, set when the run succeeded but the worktree had uncommitted changes. See [Branch strategies](./branch-strategies.md). |
+| `resume`                | `(prompt, options?) => Promise<RunResult>`? | Continue the last captured agent session for one iteration. See [Session resume](./agent-sessions.md#session-resume).                                      |
+| `fork`                  | `(prompt, options?) => Promise<RunResult>`? | Fork the last captured agent session for one iteration. See [Session fork](./agent-sessions.md#session-fork).                                              |
+
+## `IterationResult`
+
+| Field             | Type              | Description                                                                                                                                                                        |
+| ----------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sessionId`       | string?           | Agent session ID from the provider stream, or `undefined` if the provider does not emit one                                                                                        |
+| `sessionFilePath` | string?           | Absolute host path to the captured session JSONL, or `undefined` when capture is off                                                                                               |
+| `usage`           | `IterationUsage`? | Token usage snapshot from the last assistant message, or `undefined` when capture is off or provider does not support usage parsing                                                |
+| `contextWindow`   | `ContextWindow`?  | Input tokens of the iteration's last model call, cache included (shown as `Context window: NNNk` after the run), or `undefined` when the agent reports no per-call figure (cursor) |
+
+## `ContextWindow`
+
+| Field    | Type    | Description                                                                           |
+| -------- | ------- | ------------------------------------------------------------------------------------- |
+| `tokens` | number  | Input tokens of the last model call, cached and uncached together. Never a turn total |
+| `limit`  | number? | The model's context window size, only when the agent reports it (codex)               |
+
+Sources: claudeCode, pi, opencode and copilot read it from the agent's stream, so it works on every sandbox. codex reads it from its captured session, so it needs a bind-mount sandbox (docker, podman) with `captureSessions` on. cursor reports only a whole-turn total, so it has none.
+
+## `IterationUsage`
+
+| Field                      | Type   | Description                                |
+| -------------------------- | ------ | ------------------------------------------ |
+| `inputTokens`              | number | Input tokens consumed                      |
+| `cacheCreationInputTokens` | number | Tokens used to create prompt cache entries |
+| `cacheReadInputTokens`     | number | Tokens read from prompt cache              |
+| `outputTokens`             | number | Output tokens generated                    |
 
 ## `createSandbox()` — reusable sandbox
 
@@ -315,132 +383,3 @@ if (closeResult.preservedWorktreePath) {
 | Field                   | Type    | Description                                                              |
 | ----------------------- | ------- | ------------------------------------------------------------------------ |
 | `preservedWorktreePath` | string? | Host path to the preserved worktree, set when it had uncommitted changes |
-
-## `createWorktree()` — independent worktree lifecycle
-
-Use `createWorktree()` when you need a worktree (git worktree) as an independent, first-class concept — separate from any sandbox. This is useful when you want to run an interactive session first and then hand the same worktree to a sandboxed AFK agent.
-
-Only `branch` and `merge-to-head` strategies are accepted; `head` is a compile-time type error since it means no worktree.
-
-Pass `cwd` to target a repo other than `process.cwd()`. Relative paths resolve against `process.cwd()`; absolute paths pass through. A `CwdError` is thrown if the path does not exist or is not a directory.
-
-```typescript
-import { createWorktree } from "@ai-hero/sandcastle";
-
-await using wt = await createWorktree({
-  branchStrategy: { type: "branch", branch: "agent/fix-42" },
-  copyToWorktree: ["node_modules"],
-  cwd: "/path/to/other-repo", // optional — defaults to process.cwd()
-});
-
-console.log(wt.worktreePath); // host path to the worktree
-console.log(wt.branch); // "agent/fix-42"
-
-// Run an interactive session in the worktree (defaults to noSandbox)
-await wt.interactive({
-  agent: claudeCode("claude-opus-4-8"),
-  prompt: "Explore the codebase and understand the bug.",
-});
-
-// Run an AFK agent in the worktree (sandbox is required)
-const result = await wt.run({
-  agent: claudeCode("claude-opus-4-8"),
-  sandbox: docker({ imageName: "sandcastle:myrepo" }),
-  prompt: "Fix issue #42.",
-  maxIterations: 3,
-});
-console.log(result.commits); // commits made during the run
-
-// Create a long-lived sandbox from the worktree
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
-
-await using sandbox = await wt.createSandbox({
-  sandbox: docker(),
-  hooks: { sandbox: { onSandboxReady: [{ command: "npm install" }] } },
-});
-
-// sandbox.close() tears down the container only — the worktree stays
-await sandbox.close();
-
-// wt.close() cleans up the worktree
-```
-
-`wt.close()` checks for uncommitted changes: if the worktree is dirty, it's preserved on disk; if clean, it's removed. `await using` calls `close()` automatically. The worktree persists after `run()`, `interactive()`, and `createSandbox()` complete, so you can hand it to another agent or inspect it.
-
-With `branchStrategy: { type: "merge-to-head" }`, each `wt.run()` / `wt.interactive()` merges the agent's commits back to the host's current branch before returning, and the worktree's source branch is preserved across calls so subsequent ones can reuse the same handle. (This differs from top-level `run()`, where the temp branch is deleted after the merge.) `wt.close()` deletes it, unless it holds commits that are on no other branch (for example after a failed merge), in which case it is kept.
-
-**Split ownership**: When a sandbox is created via `wt.createSandbox()`, `sandbox.close()` tears down the container only — the worktree remains. `wt.close()` is responsible for worktree cleanup. This differs from the top-level `createSandbox()`, where `sandbox.close()` owns both container and worktree.
-
-### `CreateWorktreeOptions`
-
-| Option           | Type                   | Default | Description                                                                                                         |
-| ---------------- | ---------------------- | ------- | ------------------------------------------------------------------------------------------------------------------- |
-| `branchStrategy` | WorktreeBranchStrategy | —       | **Required.** `{ type: "branch", branch }` or `{ type: "merge-to-head" }`                                           |
-| `copyToWorktree` | string[]               | —       | Host-relative file paths to copy into the worktree at creation time                                                 |
-| `timeouts`       | Timeouts               | —       | Override built-in lifecycle step timeouts (`copyToWorktreeMs`, `gitSetupMs`, `commitCollectionMs`, `mergeToHostMs`) |
-
-### `Worktree`
-
-| Property / Method        | Type                                                                  | Description                                         |
-| ------------------------ | --------------------------------------------------------------------- | --------------------------------------------------- |
-| `branch`                 | string                                                                | The branch the worktree is on                       |
-| `worktreePath`           | string                                                                | Host path to the worktree                           |
-| `run(options)`           | `(options: WorktreeRunOptions) => Promise<WorktreeRunResult>`         | Run an AFK agent in the worktree (sandbox required) |
-| `interactive(options)`   | `(options: WorktreeInteractiveOptions) => Promise<InteractiveResult>` | Run an interactive agent session in the worktree    |
-| `createSandbox(options)` | `(options: WorktreeCreateSandboxOptions) => Promise<Sandbox>`         | Create a long-lived sandbox backed by this worktree |
-| `close()`                | `() => Promise<CloseResult>`                                          | Clean up the worktree (preserves if dirty)          |
-| `[Symbol.asyncDispose]`  | `() => Promise<void>`                                                 | Auto cleanup via `await using`                      |
-
-### `WorktreeInteractiveOptions`
-
-| Option       | Type                   | Default       | Description                                                                                       |
-| ------------ | ---------------------- | ------------- | ------------------------------------------------------------------------------------------------- |
-| `agent`      | AgentProvider          | —             | **Required.** Agent provider                                                                      |
-| `sandbox`    | AnySandboxProvider     | `noSandbox()` | Sandbox provider (defaults to no sandbox)                                                         |
-| `prompt`     | string                 | —             | Inline prompt (mutually exclusive with `promptFile`)                                              |
-| `promptFile` | string                 | —             | Path to prompt file                                                                               |
-| `name`       | string                 | —             | Optional session name                                                                             |
-| `hooks`      | SandboxHooks           | —             | Lifecycle hooks (`host.*`, `sandbox.*`)                                                           |
-| `promptArgs` | PromptArgs             | —             | Key-value map for `{{KEY}}` placeholder substitution                                              |
-| `env`        | Record<string, string> | —             | Environment variables to inject into the sandbox                                                  |
-| `signal`     | AbortSignal            | —             | Cancel the session when aborted. The worktree is preserved on disk. Rejects with `signal.reason`. |
-
-### `WorktreeRunOptions`
-
-| Option                     | Type                   | Default | Description                                                                                                                          |
-| -------------------------- | ---------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `agent`                    | AgentProvider          | —       | **Required.** Agent provider                                                                                                         |
-| `sandbox`                  | SandboxProvider        | —       | **Required.** Sandbox provider (AFK agents must be sandboxed)                                                                        |
-| `prompt`                   | string                 | —       | Inline prompt (mutually exclusive with `promptFile`)                                                                                 |
-| `promptFile`               | string                 | —       | Path to prompt file                                                                                                                  |
-| `maxIterations`            | number                 | 1       | Maximum iterations to run                                                                                                            |
-| `completionSignal`         | string \| string[]     | —       | Substring(s) to stop the iteration loop early                                                                                        |
-| `idleTimeoutSeconds`       | number                 | 600     | Idle timeout in seconds                                                                                                              |
-| `completionTimeoutSeconds` | number                 | 60      | Grace window after completion signal is seen but agent process hasn't exited                                                         |
-| `name`                     | string                 | —       | Optional run name                                                                                                                    |
-| `logging`                  | LoggingOption          | file    | Logging mode                                                                                                                         |
-| `hooks`                    | SandboxHooks           | —       | Lifecycle hooks (`host.*`, `sandbox.*`)                                                                                              |
-| `promptArgs`               | PromptArgs             | —       | Key-value map for `{{KEY}}` placeholder substitution                                                                                 |
-| `env`                      | Record<string, string> | —       | Environment variables to inject into the sandbox                                                                                     |
-| `resumeSession`            | string                 | —       | Resume a prior session by ID for agents that support resume. Incompatible with `maxIterations > 1`. Session file must exist on host. |
-| `signal`                   | AbortSignal            | —       | Cancel the run when aborted. Kills the in-flight agent subprocess; the worktree is preserved on disk. Rejects with `signal.reason`.  |
-
-### `WorktreeRunResult`
-
-| Property           | Type                | Description                                            |
-| ------------------ | ------------------- | ------------------------------------------------------ |
-| `iterations`       | `IterationResult[]` | Per-iteration results (use `.length` for the count)    |
-| `completionSignal` | string              | The matched completion signal, or undefined            |
-| `stdout`           | string              | Combined stdout output from all agent iterations       |
-| `commits`          | { sha: string }[]   | List of commits made by the agent during the run       |
-| `branch`           | string              | The branch name the agent worked on                    |
-| `logFilePath`      | string              | Path to the log file, if logging was drained to a file |
-
-### `WorktreeCreateSandboxOptions`
-
-| Option           | Type            | Default | Description                                                                                                         |
-| ---------------- | --------------- | ------- | ------------------------------------------------------------------------------------------------------------------- |
-| `sandbox`        | SandboxProvider | —       | **Required.** Sandbox provider (e.g. `docker()`)                                                                    |
-| `hooks`          | SandboxHooks    | —       | Lifecycle hooks (`host.*`, `sandbox.*`)                                                                             |
-| `copyToWorktree` | string[]        | —       | Host-relative file paths to copy into the worktree at creation time                                                 |
-| `timeouts`       | Timeouts        | —       | Override built-in lifecycle step timeouts (`copyToWorktreeMs`, `gitSetupMs`, `commitCollectionMs`, `mergeToHostMs`) |
