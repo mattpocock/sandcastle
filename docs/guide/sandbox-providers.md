@@ -10,6 +10,7 @@ Sandcastle uses a `SandboxProvider` to create isolated environments. The `sandbo
 | Podman     | `@ai-hero/sandcastle/sandboxes/podman`     | Bind-mount          | `run()`, `createSandbox()`, `interactive()` |
 | E2B        | `@ai-hero/sandcastle/sandboxes/e2b`        | Isolated            | `run()`, `createSandbox()`                  |
 | Modal      | `@ai-hero/sandcastle/sandboxes/modal`      | Isolated            | `run()`, `createSandbox()`                  |
+| Sprites    | `@ai-hero/sandcastle/sandboxes/sprites`    | Isolated            | `run()`, `createSandbox()`                  |
 | Vercel     | `@ai-hero/sandcastle/sandboxes/vercel`     | Isolated            | `run()`, `createSandbox()`, `interactive()` |
 | No-sandbox | `@ai-hero/sandcastle/sandboxes/no-sandbox` | None                | `run()`, `createSandbox()`, `interactive()` |
 
@@ -125,6 +126,35 @@ await run({
 
 `e2b()` accepts the SDK's `Sandbox.create()` options (`template`, `timeoutMs`, `apiKey`, `metadata`, `network`, ...) except `envs` and `lifecycle`, which the provider sets. The repo lands in `$HOME/workspace`. Each sandbox is killed on `close()`, or when `timeoutMs` (default 30 minutes) runs out, so the timeout must cover setup, the agent run and syncing the commits back. E2B's free Hobby plan caps a sandbox at 1 hour. The handle's `sandboxId` is the E2B sandbox id. `interactive()` isn't supported yet.
 
+## Fly.io Sprites: `sprites()`
+
+`sprites()` runs each sandbox in a new [Fly.io Sprite](https://fly.io/sprites), a Linux microVM. It's an isolated provider: Sandcastle copies the repo in at `/home/sprite/workspace` and brings the agent's commits back out. Install the SDK alongside Sandcastle:
+
+```bash
+npm install @fly/sprites
+```
+
+- **Auth.** Put a Sprites token in `SPRITES_TOKEN` (in `.sandcastle/.env` or your shell). `SPRITE_TOKEN`, the name the Sprites CLI uses, works too. The `token` option wins over both.
+- **Node 24.** `@fly/sprites` asks for Node 24 or later on the host.
+- **Image.** Sprites have one base image, with `git`, Node and the `claude` CLI already installed. Install any other agent's CLI in an `onSandboxReady` hook.
+- **Teardown.** A Sprite keeps running until it's deleted. `close()` deletes it, and so does a failed setup. If the process is interrupted (`SIGINT`/`SIGTERM`) or exits without closing the sandbox, Sandcastle deletes the Sprite from a background process.
+- **`sandboxId`** is the Sprite's name, which the Sprites CLI and API take.
+- **`sudo: true`** uses the Sprite's own passwordless `sudo`.
+- **No `interactive()`.** Use `run()` or `createSandbox()`.
+
+```typescript
+import { run, claudeCode } from "@ai-hero/sandcastle";
+import { sprites } from "@ai-hero/sandcastle/sandboxes/sprites";
+
+await run({
+  agent: claudeCode("claude-opus-4-8"),
+  sandbox: sprites({
+    env: { MY_VAR: "value" }, // merged at launch, like docker()'s env
+  }),
+  prompt: "...",
+});
+```
+
 ## Modal: `modal()`
 
 `modal()` runs the agent in a [Modal](https://modal.com) sandbox. Install the SDK, an optional peer dependency, and give it a Modal token: `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` (from `modal token new` or the dashboard), or the `tokenId` and `tokenSecret` options, which win. With neither, the SDK reads `~/.modal.toml`.
@@ -170,7 +200,7 @@ An image-based provider (`docker()`, `podman()`) runs the agent in an image buil
 
 ## Custom sandbox providers
 
-Sandcastle ships with built-in providers for Docker, Podman, and Vercel, but you can create your own. A [sandbox provider](./glossary.md#sandbox-provider) tells Sandcastle how to execute commands in an isolated environment. There are two kinds:
+Sandcastle ships with built-in providers (see the [table above](#sandbox-providers)), but you can create your own. A [sandbox provider](./glossary.md#sandbox-provider) tells Sandcastle how to execute commands in an isolated environment. There are two kinds:
 
 - **Bind-mount** — the sandbox can mount a host directory. Sandcastle creates a worktree on the host and the provider mounts it in. No file sync needed. Use this for Docker, Podman, or any local container runtime.
 - **Isolated** — the sandbox has its own filesystem (e.g. a cloud VM). The provider handles syncing code in and out via `copyIn` and `copyFileOut`. Use this when the sandbox cannot access the host filesystem.

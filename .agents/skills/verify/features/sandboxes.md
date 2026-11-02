@@ -116,6 +116,20 @@ Ledger section (e) checks the result against the world's canary and every undecl
   - Teardown can't come from `sandboxes.list()`: sandboxes on Modal's V2 backend (this account's) don't appear there. Record every `sandboxId`, then `(await client.sandboxes.fromId(id)).poll()`: `null` means running, a number (137 after `terminate()`) means gone. `terminate()` returns before the sandbox exits, so poll a few seconds later.
   - `interactive()` isn't supported (no `interactiveExec`).
 
+## sprites (`…/sandboxes/sprites`, isolated)
+
+- **Entry:** `sprites({ token?, env?, maxOutputTailChars? })` (`src/sandboxes/sprites.ts`).
+- **Peer dependency:** `@fly/sprites`, which a world lacks: `npm run -s verify -- sh <run> npm install @fly/sprites`, then commit. It asks for Node 24 or later; on Node 22 npm prints an `EBADENGINE` warning and it still works.
+- **Auth:** `SPRITES_TOKEN`, then `SPRITE_TOKEN`; the `token` option wins. No token fails before anything is created, naming `SPRITES_TOKEN`.
+- **Behaviour:**
+  - The base image has user `sprite`, `HOME=/home/sprite`, `git`, Node 24 and `claude` on the PATH, and passwordless `sudo`.
+  - The repo lands at `/home/sprite/workspace`. `sandboxId` is the Sprite's name (`sandcastle-<uuid>`).
+  - Env goes with each `exec` (the SDK puts it on the exec WebSocket's URL); a Sprite's create-time `environment` doesn't reach commands.
+  - **Sprites persist until deleted.** `close()` deletes the Sprite, and so does a failed setup. On SIGINT/SIGTERM, or an exit without `close()`, a detached child process deletes it after Sandcastle exits.
+- **Proof:**
+  - As vercel, for the commits and patches.
+  - Teardown needs the Sprites listing, not the ledger: `client.listAllSprites("sandcastle-")` from `@fly/sprites` before and after, and the `sandboxId` gone from it. Give an interrupted run a few seconds: the delete runs after the process exits.
+
 ## noSandbox: never run
 
 `noSandbox()` runs the agent on this host with the host's **whole** env (`src/sandboxes/no-sandbox.ts:51`). That is unsafe here, and no sandbox seam exists to test. Its claims are proved by vitest tests beside `src/sandboxes/no-sandbox.ts` and reported as `VERIFIED (unit test)` or `FAILED (unit test)`, naming the test. `interactive()` and `wt.interactive()` default to it, so always pass a sandbox.

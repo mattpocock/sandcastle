@@ -41,7 +41,8 @@ export type Sandbox =
   | "vercel"
   | "daytona"
   | "e2b"
-  | "modal";
+  | "modal"
+  | "sprites";
 export const SANDBOXES: readonly Sandbox[] = [
   "bwrap",
   "docker",
@@ -50,6 +51,7 @@ export const SANDBOXES: readonly Sandbox[] = [
   "daytona",
   "e2b",
   "modal",
+  "sprites",
 ];
 
 /**
@@ -127,6 +129,7 @@ export const SANDBOX_NEEDS: Record<
   daytona: { keys: [["DAYTONA_API_KEY"]] },
   e2b: { keys: [["E2B_API_KEY"]] },
   modal: { keys: [["MODAL_TOKEN_ID"], ["MODAL_TOKEN_SECRET"]] },
+  sprites: { keys: [["SPRITES_TOKEN", "SPRITE_TOKEN"]] },
 };
 
 /** The keys groups that are missing from the environment, by first name. */

@@ -45,6 +45,10 @@
     "./sandboxes/seatbelt": {
       "import": "./dist/sandboxes/seatbelt.js",
       "types": "./dist/sandboxes/seatbelt.d.ts"
+    },
+    "./sandboxes/sprites": {
+      "import": "./dist/sandboxes/sprites.js",
+      "types": "./dist/sandboxes/sprites.d.ts"
     }
   },
   "bin": {
@@ -99,6 +103,7 @@
     "@effect/platform-node": "^0.105.0",
     "@effect/printer": "^0.48.0",
     "@effect/printer-ansi": "^0.48.0",
+    "@fly/sprites": "^0.2.4",
     "@microsoft/api-extractor": "^7.60.1",
     "@types/node": "^25.5.0",
     "@typescript/native": "npm:typescript@7.0.2",
@@ -122,6 +127,7 @@
   },
   "peerDependencies": {
     "@daytona/sdk": ">=0.164.0 <1.0.0",
+    "@fly/sprites": ">=0.2.4 <1.0.0",
     "@vercel/sandbox": ">=1.0.0",
     "e2b": ">=2.62.0 <3.0.0",
     "modal": ">=0.11.0 <1.0.0"
@@ -131,6 +137,9 @@
       "optional": true
     },
     "@daytona/sdk": {
+      "optional": true
+    },
+    "@fly/sprites": {
       "optional": true
     },
     "e2b": {
