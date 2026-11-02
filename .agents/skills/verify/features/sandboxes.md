@@ -88,7 +88,7 @@ Ledger section (e) checks the result against the world's canary and every undecl
 
 ## sprites (`…/sandboxes/sprites`, isolated)
 
-- **Entry:** `sprites({ token?, config?, env?, maxOutputTailChars? })` (`src/sandboxes/sprites.ts`).
+- **Entry:** `sprites({ token?, env?, maxOutputTailChars? })` (`src/sandboxes/sprites.ts`).
 - **Peer dependency:** `@fly/sprites`, which a world lacks: `npm run -s verify -- sh <run> npm install @fly/sprites`, then commit. It asks for Node 24 or later; on Node 22 npm prints an `EBADENGINE` warning and it still works.
 - **Auth:** `SPRITES_TOKEN`, then `SPRITE_TOKEN`; the `token` option wins. No token fails before anything is created, naming `SPRITES_TOKEN`.
 - **Behaviour:**

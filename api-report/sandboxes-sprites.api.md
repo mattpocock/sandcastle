@@ -4,8 +4,6 @@
 
 ```ts
 
-import { SpriteConfig } from '@fly/sprites';
-
 // Warning: (ae-forgotten-export) The symbol "IsolatedSandboxProvider" needs to be exported by the entry point sprites.d.ts
 //
 // @public
@@ -13,7 +11,6 @@ export const sprites: (options?: SpritesOptions) => IsolatedSandboxProvider;
 
 // @public
 export interface SpritesOptions {
-    readonly config?: SpriteConfig;
     readonly env?: Record<string, string>;
     readonly maxOutputTailChars?: number;
     readonly token?: string;

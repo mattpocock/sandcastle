@@ -29,7 +29,7 @@ interface Exec {
 
 const api = {
   tokens: new Set<string>(),
-  created: new Array<{ name: string; config: unknown }>(),
+  created: new Array<string>(),
   deleted: new Array<string>(),
   execs: new Array<Exec>(),
   files: new Map<string, string>(),
@@ -51,14 +51,11 @@ const bearer = (headers: unknown): string => {
 const json = (body: unknown, status = 200): Response =>
   Response.json(body, { status });
 
-const CreateRequest = z.object({
-  name: z.string(),
-  config: z.unknown().optional(),
-});
+const CreateRequest = z.object({ name: z.string() });
 
 const createSprite = async (body: Response): Promise<Response> => {
   const request = CreateRequest.parse(await body.json());
-  api.created.push({ name: request.name, config: request.config });
+  api.created.push(request.name);
   if (api.createFails) {
     return new Response("capacity exhausted", { status: 500 });
   }
@@ -204,7 +201,7 @@ describe("sprites() lifecycle", () => {
     const handle = await create();
 
     expect(handle.worktreePath).toBe("/home/sprite/workspace");
-    expect(handle.sandboxId).toBe(api.created[0]?.name);
+    expect(handle.sandboxId).toBe(api.created[0]);
     expect(handle.sandboxId).toMatch(/^sandcastle-/u);
     expect(api.execs[0]).toMatchObject({
       line: "mkdir -p /home/sprite/workspace",
@@ -215,30 +212,20 @@ describe("sprites() lifecycle", () => {
     expect(api.deleted).toStrictEqual([handle.sandboxId]);
   });
 
-  it("passes the config option to the Sprite", async () => {
-    const handle = await sprites({
-      token: "t",
-      config: { cpus: 2, ramMB: 4096 },
-    }).create({ env: {} });
-    await handle.close();
-
-    expect(api.created[0]?.config).toStrictEqual({ cpus: 2, ram_mb: 4096 });
-  });
-
   it("deletes the Sprite and rethrows when the worktree folder can't be made", async () => {
     api.run = () => ({ exitCode: 1, stderr: "mkdir: Permission denied\n" });
 
     await expect(create()).rejects.toThrow(
       "sprites(): could not create /home/sprite/workspace: mkdir: Permission denied",
     );
-    expect(api.deleted).toStrictEqual([api.created[0]?.name]);
+    expect(api.deleted).toStrictEqual([api.created[0]]);
   });
 
   it("deletes the Sprite's name and rethrows when creating it fails", async () => {
     api.createFails = true;
 
     await expect(create()).rejects.toThrow("capacity exhausted");
-    expect(api.deleted).toStrictEqual([api.created[0]?.name]);
+    expect(api.deleted).toStrictEqual([api.created[0]]);
   });
 });
 

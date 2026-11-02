@@ -128,7 +128,6 @@ import { sprites } from "@ai-hero/sandcastle/sandboxes/sprites";
 await run({
   agent: claudeCode("claude-opus-4-8"),
   sandbox: sprites({
-    config: { cpus: 2, ramMB: 4096 }, // optional: the Sprite's resources
     env: { MY_VAR: "value" }, // merged at launch, like docker()'s env
   }),
   prompt: "...",

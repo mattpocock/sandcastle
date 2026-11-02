@@ -20,7 +20,7 @@ import type {
 import { MAX_TAIL_CHARS } from "../boundedTail.js";
 import { execInSprite } from "./spritesExec.js";
 import { registerSpriteDeletion } from "./spritesShutdown.js";
-import type { Sprite, SpriteConfig } from "@fly/sprites";
+import type { Sprite } from "@fly/sprites";
 
 /** The Sprite user's home: the worktree's parent, which the user can write. */
 const SPRITE_HOME = "/home/sprite";
@@ -37,9 +37,6 @@ export interface SpritesOptions {
    * `SPRITE_TOKEN` (the name the Sprites CLI uses).
    */
   readonly token?: string;
-
-  /** Resources for the Sprite (`ramMB`, `cpus`, `region`, `storageGB`). */
-  readonly config?: SpriteConfig;
 
   /** Environment variables injected by this provider. Merged at launch time with env resolver and agent provider env. */
   readonly env?: Record<string, string>;
@@ -186,7 +183,7 @@ const makeWorktreeDir = async (sprite: Sprite): Promise<void> => {
  * ```ts
  * import { sprites } from "@ai-hero/sandcastle/sandboxes/sprites";
  *
- * const provider = sprites({ config: { cpus: 2 } });
+ * const provider = sprites({ env: { MY_VAR: "value" } });
  * ```
  */
 export const sprites = (options?: SpritesOptions): IsolatedSandboxProvider =>
@@ -207,7 +204,7 @@ export const sprites = (options?: SpritesOptions): IsolatedSandboxProvider =>
         name,
       );
       try {
-        const sprite = await client.createSprite(name, options?.config);
+        const sprite = await client.createSprite(name);
         await makeWorktreeDir(sprite);
         return makeHandle(sprite, {
           env,
