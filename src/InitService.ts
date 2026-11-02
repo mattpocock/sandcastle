@@ -1063,102 +1063,28 @@ const copyTemplateFiles = (
     );
   });
 
+/** What gets written into the scaffolded main file. */
+interface MainFileChoices {
+  readonly configDir: string;
+  readonly mainFilename: string;
+  readonly agent: AgentEntry;
+  readonly model: string;
+  readonly sandboxProvider: SandboxProviderEntry;
+  readonly issueTracker: IssueTrackerEntry;
+  readonly imageName: string | undefined;
+}
+
 /**
- * Replace the agent factory and sandbox provider in a scaffolded main.ts.
- *
- * Templates use `claudeCode` as the default agent factory and `docker` as the
- * default sandbox provider. When a different agent, model, or sandbox provider
- * is selected, this function rewrites the imports and factory calls.
+ * Rewrites the scaffolded main file with `edit`, if the file exists. `edit`
+ * returns the new content.
  */
-const rewriteMainTs = (
-  configDir: string,
-  agent: AgentEntry,
-  model: string,
-  sandboxProvider: SandboxProviderEntry,
-  mainFilename: string,
-  imageName: string | undefined,
+const editMainFile = (
+  choices: MainFileChoices,
+  edit: (content: string) => Effect.Effect<string, InitError>,
 ): Effect.Effect<void, InitError, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const mainTsPath = join(configDir, mainFilename);
-
-    const exists = yield* fs
-      .exists(mainTsPath)
-      .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
-    if (!exists) {
-      return;
-    }
-
-    let content = yield* fs
-      .readFileString(mainTsPath)
-      .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
-
-    // Templates use main.mts as the canonical filename in comments.
-    // When the target is main.ts, rewrite those references.
-    if (mainFilename === "main.ts") {
-      content = content.replaceAll("main.mts", "main.ts");
-    }
-
-    // Replace factory function name in imports (e.g. claudeCode → pi)
-    // and all factory calls with the correct model.
-    // Templates always use claudeCode as the placeholder factory.
-    content = content.replaceAll(/\bclaudeCode\b/gu, agent.factoryImport);
-    // Replace model strings in factory calls: factoryImport("any-model")
-    const factoryCallRe = new RegExp(
-      `${agent.factoryImport}\\(["']([^"']+)["']\\)`,
-      "gu",
-    );
-    content = content.replaceAll(
-      factoryCallRe,
-      `${agent.factoryImport}("${model}")`,
-    );
-
-    // Replace the sandbox provider. Templates always use `docker` as the
-    // placeholder, where the registry name doubles as both the factory function
-    // name and the `/sandboxes/<name>` import subpath segment. A single
-    // case-sensitive word-boundary replace therefore rewrites the named import,
-    // the import subpath, and every factory call site — and is a no-op when
-    // docker is selected.
-    content = content.replaceAll(/\bdocker\b/gu, sandboxProvider.name);
-
-    // A custom image name (init --image-name) must reach every sandbox factory
-    // call, or the scaffolded run starts the default-named image instead of
-    // the one init built.
-    if (imageName !== undefined && sandboxProvider.image !== undefined) {
-      content = content.replaceAll(
-        new RegExp(`\\b${sandboxProvider.name}\\(\\)`, "gu"),
-        `${sandboxProvider.name}({ imageName: ${JSON.stringify(imageName)} })`,
-      );
-    }
-
-    yield* fs
-      .writeFileString(mainTsPath, content)
-      .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
-  });
-
-/**
- * Pass the issue tracker's `sandboxOptions` (if any) to every sandbox provider
- * call in a scaffolded main file: declare the options after the provider
- * import, then rewrite each bare `<provider>()` call to
- * `<provider>(sandboxOptions)`. Runs after `rewriteMainTs`, so the provider
- * name is already the selected one.
- */
-const applyIssueTrackerSandboxOptions = (
-  configDir: string,
-  issueTracker: IssueTrackerEntry,
-  sandboxProvider: SandboxProviderEntry,
-  mainFilename: string,
-): Effect.Effect<void, InitError, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const sandboxOptions =
-      sandboxProvider.image === undefined
-        ? (issueTracker.nativeSandboxOptions ?? issueTracker.sandboxOptions)
-        : issueTracker.sandboxOptions;
-    if (sandboxOptions === undefined || sandboxOptions === "") {
-      return;
-    }
-    const fs = yield* FileSystem.FileSystem;
-    const mainTsPath = join(configDir, mainFilename);
+    const mainTsPath = join(choices.configDir, choices.mainFilename);
 
     const exists = yield* fs
       .exists(mainTsPath)
@@ -1171,28 +1097,114 @@ const applyIssueTrackerSandboxOptions = (
       .readFileString(mainTsPath)
       .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
 
-    const provider = sandboxProvider.name;
-    const importRe = new RegExp(
-      `^import \\{ ${provider} \\} from "@ai-hero/sandcastle/sandboxes/${provider}";$`,
-      "mu",
-    );
-    if (!importRe.test(content)) {
-      return yield* new InitError({
-        message: `Cannot apply ${issueTracker.label} sandbox options: ${mainFilename} has no ${provider} import.`,
-      });
-    }
-
-    const updated = content
-      .replace(importRe, (line) => `${line}\n\n${sandboxOptions}`)
-      .replaceAll(
-        new RegExp(`\\b${provider}\\(\\)`, "gu"),
-        `${provider}(sandboxOptions)`,
-      );
+    const updated = yield* edit(content);
 
     yield* fs
       .writeFileString(mainTsPath, updated)
       .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
   });
+
+/** The main file's text with the chosen agent, model and sandbox provider. */
+const rewriteMainContent = (
+  original: string,
+  choices: MainFileChoices,
+): string => {
+  const { agent, model, sandboxProvider, imageName } = choices;
+  let content = original;
+  // Templates use main.mts as the canonical filename in comments.
+  // When the target is main.ts, rewrite those references.
+  if (choices.mainFilename === "main.ts") {
+    content = content.replaceAll("main.mts", "main.ts");
+  }
+
+  // Replace factory function name in imports (e.g. claudeCode → pi)
+  // and all factory calls with the correct model.
+  // Templates always use claudeCode as the placeholder factory.
+  content = content.replaceAll(/\bclaudeCode\b/gu, agent.factoryImport);
+  // Replace model strings in factory calls: factoryImport("any-model")
+  const factoryCallRe = new RegExp(
+    `${agent.factoryImport}\\(["']([^"']+)["']\\)`,
+    "gu",
+  );
+  content = content.replaceAll(
+    factoryCallRe,
+    `${agent.factoryImport}("${model}")`,
+  );
+
+  // Replace the sandbox provider. Templates always use `docker` as the
+  // placeholder, where the registry name doubles as both the factory function
+  // name and the `/sandboxes/<name>` import subpath segment. A single
+  // case-sensitive word-boundary replace therefore rewrites the named import,
+  // the import subpath, and every factory call site — and is a no-op when
+  // docker is selected.
+  content = content.replaceAll(/\bdocker\b/gu, sandboxProvider.name);
+
+  // A custom image name (init --image-name) must reach every sandbox factory
+  // call, or the scaffolded run starts the default-named image instead of
+  // the one init built.
+  if (imageName !== undefined && sandboxProvider.image !== undefined) {
+    content = content.replaceAll(
+      new RegExp(`\\b${sandboxProvider.name}\\(\\)`, "gu"),
+      `${sandboxProvider.name}({ imageName: ${JSON.stringify(imageName)} })`,
+    );
+  }
+  return content;
+};
+
+/**
+ * Replace the agent factory and sandbox provider in a scaffolded main.ts.
+ *
+ * Templates use `claudeCode` as the default agent factory and `docker` as the
+ * default sandbox provider. When a different agent, model, or sandbox provider
+ * is selected, this function rewrites the imports and factory calls.
+ */
+const rewriteMainTs = (
+  choices: MainFileChoices,
+): Effect.Effect<void, InitError, FileSystem.FileSystem> =>
+  editMainFile(choices, (content) =>
+    Effect.succeed(rewriteMainContent(content, choices)),
+  );
+
+/**
+ * Pass the issue tracker's `sandboxOptions` (if any) to every sandbox provider
+ * call in a scaffolded main file: declare the options after the provider
+ * import, then rewrite each bare `<provider>()` call to
+ * `<provider>(sandboxOptions)`. Runs after `rewriteMainTs`, so the provider
+ * name is already the selected one.
+ */
+const applyIssueTrackerSandboxOptions = (
+  choices: MainFileChoices,
+): Effect.Effect<void, InitError, FileSystem.FileSystem> => {
+  const { issueTracker, sandboxProvider, mainFilename } = choices;
+  const sandboxOptions =
+    sandboxProvider.image === undefined
+      ? (issueTracker.nativeSandboxOptions ?? issueTracker.sandboxOptions)
+      : issueTracker.sandboxOptions;
+  if (sandboxOptions === undefined || sandboxOptions === "") {
+    return Effect.void;
+  }
+  const provider = sandboxProvider.name;
+  const importRe = new RegExp(
+    `^import \\{ ${provider} \\} from "@ai-hero/sandcastle/sandboxes/${provider}";$`,
+    "mu",
+  );
+  return editMainFile(choices, (content) =>
+    importRe.test(content)
+      ? Effect.succeed(
+          content
+            .replace(importRe, (line) => `${line}\n\n${sandboxOptions}`)
+            .replaceAll(
+              new RegExp(`\\b${provider}\\(\\)`, "gu"),
+              `${provider}(sandboxOptions)`,
+            ),
+        )
+      : Effect.fail(
+          new InitError({
+            message: `Cannot apply ${issueTracker.label} sandbox options: ${mainFilename} has no ${provider} import.`,
+          }),
+        ),
+  );
+};
 
 /**
  * When the user opted out of the Sandcastle label, strip ` --label Sandcastle`
@@ -1318,6 +1330,40 @@ export const buildImageShellCommand = (
     imageName === undefined ? "" : ` --image-name ${imageName}`
   }`;
 
+/** The setup doc's step for installing the tracker's CLI in the image. */
+const imageToolsStep = (buildCommand: string | undefined): string =>
+  buildCommand === undefined
+    ? ""
+    : `- **Dockerfile / Containerfile** — replace the line
+
+  \`\`\`
+  ${CUSTOM_TRACKER_TOOLS}
+  \`\`\`
+
+  with the install steps for your tracker's CLI (if it needs one).
+
+`;
+
+/** The setup doc's closing steps: build the image (if any), then verify. */
+const verifySteps = (buildCommand: string | undefined): string =>
+  buildCommand === undefined
+    ? `## 4. Verify
+
+Run your **list** command and confirm it returns the open tasks as JSON. If it errors, fix the command or the auth.
+`
+    : `## 4. Build the image
+
+Once the files are wired up, build the sandbox image:
+
+\`\`\`
+${buildCommand}
+\`\`\`
+
+## 5. Verify
+
+Run your **list** command inside the built image and confirm it returns the open tasks as JSON. If it errors, fix the command or the auth and rebuild.
+`;
+
 const buildSetupIssueTrackerDoc = (
   /** The build-image command, or undefined for a provider with no image. */
   buildCommand: string | undefined,
@@ -1347,19 +1393,7 @@ Work out, together with the user, the shell commands for:
 
 ## 3. Edit the scaffolded files in place
 
-${
-  buildCommand === undefined
-    ? ""
-    : `- **Dockerfile / Containerfile** — replace the line
-
-  \`\`\`
-  ${CUSTOM_TRACKER_TOOLS}
-  \`\`\`
-
-  with the install steps for your tracker's CLI (if it needs one).
-
-`
-}- **Prompt files (\`.sandcastle/*.md\`)** — replace the sentinel
+${imageToolsStep(buildCommand)}- **Prompt files (\`.sandcastle/*.md\`)** — replace the sentinel
 
   \`\`\`
   ${CUSTOM_LIST_TASKS_SENTINEL}
@@ -1369,25 +1403,7 @@ ${
 
 - **\`.env.example\`** — replace the \`# TODO\` block with the real env var(s) your tracker needs, then tell the user to set them in \`.sandcastle/.env\`.
 
-${
-  buildCommand === undefined
-    ? `## 4. Verify
-
-Run your **list** command and confirm it returns the open tasks as JSON. If it errors, fix the command or the auth.
-`
-    : `## 4. Build the image
-
-Once the files are wired up, build the sandbox image:
-
-\`\`\`
-${buildCommand}
-\`\`\`
-
-## 5. Verify
-
-Run your **list** command inside the built image and confirm it returns the open tasks as JSON. If it errors, fix the command or the auth and rebuild.
-`
-}`;
+${verifySteps(buildCommand)}`;
 
 // ---------------------------------------------------------------------------
 // Main scaffold function
@@ -1426,23 +1442,12 @@ const detectMainFilename = (
       : "main.mts";
   });
 
-export const scaffold = (
-  repoDir: string,
-  options: ScaffoldOptions,
-): Effect.Effect<ScaffoldResult, InitError, FileSystem.FileSystem> =>
+/** Creates `.sandcastle/`, failing when it already exists. */
+const createConfigDir = (
+  configDir: string,
+): Effect.Effect<void, InitError, FileSystem.FileSystem> =>
   Effect.gen(function* () {
-    const {
-      agent,
-      model,
-      templateName = "blank",
-      createLabel = true,
-      issueTracker = ISSUE_TRACKER_REGISTRY[0], // default: github-issues
-      sandboxProvider = SANDBOX_PROVIDER_REGISTRY[0], // default: docker
-      imageName,
-    } = options;
     const fs = yield* FileSystem.FileSystem;
-    const configDir = join(repoDir, ".sandcastle");
-
     const exists = yield* fs
       .exists(configDir)
       .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
@@ -1452,15 +1457,22 @@ export const scaffold = (
           ".sandcastle/ directory already exists. Remove it first if you want to re-initialize.",
       });
     }
-
-    const mainFilename = yield* detectMainFilename(repoDir);
-
     yield* fs
       .makeDirectory(configDir, { recursive: false })
       .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
+  });
 
-    const templateDir = yield* getTemplateDir(templateName);
-
+/**
+ * Writes the Dockerfile (for a provider with an image), `.gitignore` and
+ * `.env.example`, and copies the template's files.
+ */
+const writeScaffoldFiles = (
+  choices: MainFileChoices,
+  templateDir: string,
+): Effect.Effect<void, InitError, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const { configDir, agent, issueTracker } = choices;
     // Build .env.example from agent + issue tracker env blocks
     const envExampleParts = [agent.envExample];
     if (issueTracker.envExample) {
@@ -1468,7 +1480,7 @@ export const scaffold = (
     }
     const envExampleContent = `${envExampleParts.join("\n")}\n`;
 
-    const { image } = sandboxProvider;
+    const { image } = choices.sandboxProvider;
     yield* Effect.all(
       [
         ...(image === undefined
@@ -1489,28 +1501,70 @@ export const scaffold = (
         fs
           .writeFileString(join(configDir, ".env.example"), envExampleContent)
           .pipe(Effect.mapError((e) => new InitError({ message: e.message }))),
-        copyTemplateFiles(templateDir, configDir, mainFilename),
+        copyTemplateFiles(templateDir, configDir, choices.mainFilename),
       ],
       { concurrency: "unbounded" },
     );
+  });
+
+/**
+ * For the custom issue tracker, drop the setup prompt the user feeds to
+ * their coding agent. Written after substituteTemplateArgs so it isn't
+ * clobbered and references the resolved sentinel markers the agent finds
+ * (not the {{KEY}} names, which are gone by now).
+ */
+const writeSetupIssueTrackerDoc = (
+  choices: MainFileChoices,
+): Effect.Effect<void, InitError, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const { image } = choices.sandboxProvider;
+    yield* fs
+      .writeFileString(
+        join(choices.configDir, SETUP_ISSUE_TRACKER_DOC),
+        buildSetupIssueTrackerDoc(
+          image === undefined
+            ? undefined
+            : buildImageShellCommand(image, choices.imageName),
+        ),
+      )
+      .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
+  });
+
+export const scaffold = (
+  repoDir: string,
+  options: ScaffoldOptions,
+): Effect.Effect<ScaffoldResult, InitError, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const {
+      templateName = "blank",
+      createLabel = true,
+      issueTracker = ISSUE_TRACKER_REGISTRY[0], // default: github-issues
+      sandboxProvider = SANDBOX_PROVIDER_REGISTRY[0], // default: docker
+    } = options;
+    const configDir = join(repoDir, ".sandcastle");
+    // Reads package.json only, so it can run before the directory exists.
+    const mainFilename = yield* detectMainFilename(repoDir);
+    yield* createConfigDir(configDir);
+
+    const templateDir = yield* getTemplateDir(templateName);
+    const choices: MainFileChoices = {
+      configDir,
+      mainFilename,
+      agent: options.agent,
+      model: options.model,
+      sandboxProvider,
+      issueTracker,
+      imageName: options.imageName,
+    };
+
+    yield* writeScaffoldFiles(choices, templateDir);
 
     // Rewrite main file with the selected agent factory, model, and sandbox provider
-    yield* rewriteMainTs(
-      configDir,
-      agent,
-      model,
-      sandboxProvider,
-      mainFilename,
-      imageName,
-    );
+    yield* rewriteMainTs(choices);
 
     // Pass the issue tracker's sandbox options to every sandbox provider call
-    yield* applyIssueTrackerSandboxOptions(
-      configDir,
-      issueTracker,
-      sandboxProvider,
-      mainFilename,
-    );
+    yield* applyIssueTrackerSandboxOptions(choices);
 
     // Replace issue tracker template arguments in all text files (must run before label stripping)
     yield* substituteTemplateArgs(configDir, issueTracker);
@@ -1520,21 +1574,8 @@ export const scaffold = (
       yield* rewritePromptFiles(configDir);
     }
 
-    // For the custom issue tracker, drop the setup prompt the user feeds to
-    // their coding agent. Written after substituteTemplateArgs so it isn't
-    // clobbered and references the resolved sentinel markers the agent finds
-    // (not the {{KEY}} names, which are gone by now).
     if (issueTracker.name === "custom") {
-      yield* fs
-        .writeFileString(
-          join(configDir, SETUP_ISSUE_TRACKER_DOC),
-          buildSetupIssueTrackerDoc(
-            image === undefined
-              ? undefined
-              : buildImageShellCommand(image, imageName),
-          ),
-        )
-        .pipe(Effect.mapError((e) => new InitError({ message: e.message })));
+      yield* writeSetupIssueTrackerDoc(choices);
     }
 
     return { mainFilename };
