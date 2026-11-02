@@ -1698,6 +1698,14 @@ export interface ClaudeCodeOptions {
     | "auto"
     | "dontAsk"
     | "bypassPermissions";
+  /**
+   * Raw CLI flags appended verbatim after every flag Sandcastle itself emits,
+   * before the trailing prompt delivery. Escape hatch for flags Sandcastle
+   * doesn't model yet (e.g. `--strict-mcp-config`, `--mcp-config`, `--settings`).
+   * Pass flag and value as separate array entries — each entry is shell-escaped
+   * independently in print mode, so a pre-joined string breaks escaping.
+   */
+  readonly extraArgs?: readonly string[];
 }
 
 /** The `claude --print` command for a print-mode run. */
@@ -1728,8 +1736,11 @@ const buildClaudePrintCommand = (
   // to write the continuation as a new session rather than mutating the
   // resumed one. See ADR 0018.
   const forkFlag = resumeSession && forkSession ? " --fork-session" : "";
+  const extraArgsFlag = options?.extraArgs?.length
+    ? ` ${options.extraArgs.map((arg) => shellEscape(arg)).join(" ")}`
+    : "";
   return {
-    command: `claude --print --verbose${permissionFlag} --output-format stream-json --model ${shellEscape(model)}${effortFlag}${resumeFlag}${forkFlag} -p -`,
+    command: `claude --print --verbose${permissionFlag} --output-format stream-json --model ${shellEscape(model)}${effortFlag}${resumeFlag}${forkFlag}${extraArgsFlag} -p -`,
     stdin: prompt,
   };
 };
@@ -1792,6 +1803,7 @@ export const claudeCode = (
     }
     args.push("--model", model);
     if (options?.effort) args.push("--effort", options.effort);
+    if (options?.extraArgs) args.push(...options.extraArgs);
     if (prompt) args.push(prompt);
     return args;
   },
