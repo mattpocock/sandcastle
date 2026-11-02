@@ -1,75 +1,40 @@
-import { execFileSync } from "node:child_process";
-import {
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createSandbox } from "@ai-hero/sandcastle";
 import type { SandboxProvider } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { podman } from "@ai-hero/sandcastle/sandboxes/podman";
+import { setUpFakeEngine } from "./helpers/fakeEngine.js";
+import type { FakeEngineWorld } from "./helpers/fakeEngine.js";
 
 // docker({ capDrop }) and podman({ capDrop }) drop Linux capabilities from the
 // container with one `--cap-drop` flag per entry on `<engine> run`. No real
-// engine runs here: a fake `docker`/`podman` on PATH records the arguments of
-// each `run` and succeeds at everything else. The fake is a POSIX shell
-// script, so these don't run on Windows.
+// engine runs here: a fake `docker`/`podman` on PATH (tests/helpers/fakeEngine.ts)
+// records the arguments of each `run`. The fake is a POSIX shell script, so
+// these don't run on Windows.
 
 describe.skipIf(process.platform === "win32").each([
   { engine: "docker", provider: docker },
   { engine: "podman", provider: podman },
 ] as const)("$engine({ capDrop })", ({ engine, provider }) => {
-  let repo = "";
-  let binDir = "";
-  let runLog = "";
+  let world: FakeEngineWorld;
 
   beforeEach(() => {
-    repo = realpathSync(mkdtempSync(path.join(tmpdir(), "e2e-capdrop-")));
-    const git = (...args: string[]): void => {
-      execFileSync("git", args, { cwd: repo, stdio: "ignore" });
-    };
-    git("init", "-b", "main");
-    writeFileSync(path.join(repo, "a.txt"), "a");
-    git("add", ".");
-    git("commit", "-m", "init");
-
-    binDir = mkdtempSync(path.join(tmpdir(), `e2e-fake-${engine}-`));
-    runLog = path.join(binDir, "run-args");
-    // `run` writes one argument per line; `podman machine list` (checked on
-    // macOS) reports a running machine; every other call succeeds silently.
-    writeFileSync(
-      path.join(binDir, engine),
-      [
-        "#!/bin/sh",
-        `if [ "$1" = run ]; then printf '%s\\n' "$@" > '${runLog}'; fi`,
-        `if [ "$1" = machine ]; then echo '[{"Running":true}]'; fi`,
-        "exit 0",
-        "",
-      ].join("\n"),
-      { mode: 0o755 },
-    );
-    vi.stubEnv(
-      "PATH",
-      `${binDir}${path.delimiter}${process.env["PATH"] ?? ""}`,
-    );
+    world = setUpFakeEngine(engine, "e2e-capdrop-");
   });
 
   afterEach(() => {
-    vi.unstubAllEnvs();
-    rmSync(repo, { recursive: true, force: true });
-    rmSync(binDir, { recursive: true, force: true });
+    world.cleanup();
   });
 
   /** The arguments of `<engine> run` when a sandbox starts on `sandbox`. */
   const runArgs = async (sandbox: SandboxProvider): Promise<string[]> => {
-    const handle = await createSandbox({ branch: "w", cwd: repo, sandbox });
+    const handle = await createSandbox({
+      branch: "w",
+      cwd: world.repo,
+      sandbox,
+    });
     await handle.close();
-    return readFileSync(runLog, "utf8").trimEnd().split("\n");
+    return world.runArgs();
   };
 
   /** The capability after each `--cap-drop`, in order. */

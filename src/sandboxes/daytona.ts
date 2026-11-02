@@ -136,6 +136,7 @@ export const daytona = (options?: DaytonaOptions): IsolatedSandboxProvider =>
 
       return {
         worktreePath,
+        sandboxId: sandbox.id,
 
         exec: async (
           command: string,

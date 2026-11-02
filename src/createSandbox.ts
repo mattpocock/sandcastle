@@ -231,6 +231,27 @@ export interface Sandbox {
   readonly branch: string;
   /** Host path to the worktree. */
   readonly worktreePath: string;
+  /**
+   * The provider's id for this sandbox, for a supervisor outside this process
+   * (a run registry, a kill step for stuck runs) to address it with the
+   * provider's own tools:
+   *
+   * - `docker()`: the container name: `docker inspect <sandboxId>`,
+   *   `docker rm -f <sandboxId>`.
+   * - `podman()`: the container name: `podman inspect <sandboxId>`,
+   *   `podman rm -f <sandboxId>`.
+   * - `vercel()`: the Vercel sandbox's id (its `name` from `@vercel/sandbox`
+   *   2 on, its `sandboxId` in 1.x): pass it to the SDK's `Sandbox.get()`,
+   *   then call `stop()`.
+   * - `daytona()`: the Daytona sandbox id: `daytona.get(<sandboxId>)`, then
+   *   `delete()`, from `@daytona/sdk`.
+   * - A custom provider: whatever its handle's `sandboxId` is.
+   *
+   * `undefined` for `noSandbox()` and the native `bwrap()` and `seatbelt()`
+   * sandboxes: their sandbox is a child process of this one, with nothing
+   * outside it to address.
+   */
+  readonly sandboxId?: string;
   /** Invoke an agent inside the existing sandbox. */
   run(options: SandboxRunOptions): Promise<SandboxRunResult>;
   /** Launch an interactive agent session inside the existing sandbox. */
@@ -379,6 +400,10 @@ const buildSandboxHandle = (
   const sandboxHandle: Sandbox = {
     branch,
     worktreePath,
+    sandboxId:
+      providerHandle !== undefined && "sandboxId" in providerHandle
+        ? providerHandle.sandboxId
+        : undefined,
 
     run: async (runOptions: SandboxRunOptions): Promise<SandboxRunResult> => {
       // If signal is already aborted, reject immediately without any setup

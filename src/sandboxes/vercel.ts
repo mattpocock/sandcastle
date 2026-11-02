@@ -375,6 +375,8 @@ const makeHandle = (
   maxOutputTailChars: number,
 ): IsolatedSandboxHandle => ({
   worktreePath: VERCEL_REPO_PATH,
+  // `@vercel/sandbox` 2 renamed the sandbox's id from `sandboxId` to `name`.
+  sandboxId: sandbox.name ?? sandbox.sandboxId,
 
   exec: async (command, opts): Promise<ExecResult> => {
     const params: RunCommandParams = {

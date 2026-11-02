@@ -40,6 +40,8 @@ interface FakeRunCommandParams {
 }
 
 interface FakeSandbox {
+  name?: string;
+  sandboxId?: string;
   mkDir: (path: string) => Promise<void>;
   writeFiles: (files: { path: string; content: Uint8Array }[]) => Promise<void>;
   runCommand: (params: FakeRunCommandParams) => Promise<FakeResult>;
@@ -189,6 +191,50 @@ describe("vercel() setup", () => {
       2,
       expect.objectContaining({ runtime: "python3.13" }),
     );
+  });
+});
+
+describe("vercel() sandboxId", () => {
+  beforeEach(() => {
+    vi.stubEnv("VERCEL_TOKEN", undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const identifiedSandbox = (identity: {
+    name?: string;
+    sandboxId?: string;
+  }): FakeSandbox => ({
+    ...identity,
+    mkDir: async () => {},
+    writeFiles: async () => {},
+    runCommand: async () => ({
+      exitCode: 0,
+      stdout: async () => "",
+      stderr: async () => "",
+    }),
+  });
+
+  it("is the sandbox's name (SDK 2 and later)", async () => {
+    sandboxCreate.mockImplementationOnce(async () =>
+      identifiedSandbox({ name: "sbx_named" }),
+    );
+
+    const handle = await vercel().create({ env: {} });
+
+    expect(handle.sandboxId).toBe("sbx_named");
+  });
+
+  it("is the sandbox's sandboxId (SDK 1)", async () => {
+    sandboxCreate.mockImplementationOnce(async () =>
+      identifiedSandbox({ sandboxId: "sbx_v1" }),
+    );
+
+    const handle = await vercel().create({ env: {} });
+
+    expect(handle.sandboxId).toBe("sbx_v1");
   });
 });
 
