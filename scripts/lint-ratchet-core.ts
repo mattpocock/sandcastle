@@ -81,17 +81,13 @@ export const shrink = (found: Counts, baseline: Counts): Counts =>
 export const baselineGrowth = (next: Counts, base: Counts): readonly string[] =>
   compare(next, base).grown;
 
-const top = (
-  totals: Readonly<Record<string, number>>,
-  limit: number,
-): string[] =>
-  Object.entries(totals)
-    .toSorted(([, a], [, b]) => b - a)
-    .slice(0, limit)
-    .map(([key, n]) => `  ${String(n).padStart(6)}  ${key}`);
+interface Totals {
+  readonly total: number;
+  readonly byRule: Readonly<Record<string, number>>;
+  readonly byFile: Readonly<Record<string, number>>;
+}
 
-/** A summary of the counts: totals, worst rules, worst files. */
-export const report = (counts: Counts, limit: number): string => {
+const totalsOf = (counts: Counts): Totals => {
   const byRule: Record<string, number> = {};
   const byFile: Record<string, number> = {};
   for (const [file, rule, n] of pairs(counts)) {
@@ -99,12 +95,66 @@ export const report = (counts: Counts, limit: number): string => {
     byFile[file] = (byFile[file] ?? 0) + n;
   }
   const total = Object.values(byFile).reduce((sum, n) => sum + n, 0);
+  return { total, byRule, byFile };
+};
+
+const worst = (
+  totals: Readonly<Record<string, number>>,
+  limit: number,
+): (readonly [string, number])[] =>
+  Object.entries(totals)
+    .toSorted(([, a], [, b]) => b - a)
+    .slice(0, limit);
+
+const top = (
+  totals: Readonly<Record<string, number>>,
+  limit: number,
+): string[] =>
+  worst(totals, limit).map(([key, n]) => `  ${String(n).padStart(6)}  ${key}`);
+
+/** A summary of the counts: totals, worst rules, worst files. */
+export const report = (counts: Counts, limit: number): string => {
+  const { total, byRule, byFile } = totalsOf(counts);
   return [
     `${String(total)} violations, ${String(Object.keys(byFile).length)} files, ${String(Object.keys(byRule).length)} rules`,
     `Top rules:`,
     ...top(byRule, limit),
     `Top files:`,
     ...top(byFile, limit),
+  ].join("\n");
+};
+
+const topAgainst = (
+  live: Readonly<Record<string, number>>,
+  baseline: Readonly<Record<string, number>>,
+  limit: number,
+): string[] =>
+  worst(live, limit).map(
+    ([key, n]) =>
+      `  ${String(n).padStart(6)} / ${String(baseline[key] ?? 0).padStart(6)}  ${key}`,
+  );
+
+const size = (record: Readonly<Record<string, number>>): string =>
+  String(Object.keys(record).length);
+
+/**
+ * The live counts summarised beside the baseline's, `live / baseline`, so
+ * drift between them shows: totals, then the worst rules and files by their
+ * live count.
+ */
+export const driftReport = (
+  live: Counts,
+  baseline: Counts,
+  limit: number,
+): string => {
+  const now = totalsOf(live);
+  const base = totalsOf(baseline);
+  return [
+    `${String(now.total)} / ${String(base.total)} violations (live / baseline), ${size(now.byFile)} / ${size(base.byFile)} files, ${size(now.byRule)} / ${size(base.byRule)} rules`,
+    `Top rules (live / baseline):`,
+    ...topAgainst(now.byRule, base.byRule, limit),
+    `Top files (live / baseline):`,
+    ...topAgainst(now.byFile, base.byFile, limit),
   ].join("\n");
 };
 
