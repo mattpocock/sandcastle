@@ -40,8 +40,30 @@ const SESSION_ID = "sess-bwrap-e2e";
 const IDENTITY = { name: "Bwrap E2E", email: "bwrap-e2e@example.com" };
 
 /**
+ * The idle timeout the two idle tests run under. The idle timer starts before
+ * the sandbox does, so the window before the fake's first line also holds
+ * bwrap's startup: about 0.4 s on an idle machine, up to 3.5 s with the
+ * machine oversubscribed eightfold. 5 s leaves room for that, and every
+ * pause the fake makes is a fraction of it.
+ */
+const IDLE_TIMEOUT_SECONDS = 5;
+
+/**
+ * How long the `SLOW` fake sleeps between lines: a quarter of the idle
+ * timeout, so each silence has three quarters of it to spare.
+ */
+const SLOW_PAUSE_SECONDS = IDLE_TIMEOUT_SECONDS / 4;
+
+/**
+ * How many pauses the `SLOW` fake makes. Together they last longer than the
+ * idle timeout, so only streaming keeps the agent alive.
+ */
+const SLOW_PAUSES = 5;
+
+/**
  * The fake `claude`. The prompt picks its behaviour: `HANG` prints the init
- * line and then goes silent; `SLOW` spaces its lines out; anything else is
+ * line and then goes silent; `SLOW` streams a line every
+ * `SLOW_PAUSE_SECONDS` and silence is all it adds; anything else is
  * quick. `SUBAGENT` also writes a subagent transcript where Claude Code puts
  * them. It commits the prompt and its global git email, then reports done.
  */
@@ -52,7 +74,6 @@ line '{"type":"system","subtype":"init","session_id":"${SESSION_ID}"}'
 case "$prompt" in
   *HANG*) sleep 60; exit 0 ;;
 esac
-pause() { case "$prompt" in *SLOW*) sleep 0.6 ;; esac; }
 project="$HOME/.claude/projects/$(pwd | sed 's/[^A-Za-z0-9]/-/g')"
 mkdir -p "$project"
 line '{"type":"summary","summary":"fake-session-marker"}' > "$project/${SESSION_ID}.jsonl"
@@ -66,11 +87,16 @@ printf '%s\\n' "$prompt" > agent.txt
 git config --global user.email > identity.txt
 git add agent.txt identity.txt
 git commit -qm "agent commit"
-pause
 line '{"type":"assistant","message":{"content":[{"type":"text","text":"Working."}]}}'
-pause
+case "$prompt" in
+  *SLOW*)
+    for _ in $(seq ${SLOW_PAUSES}); do
+      sleep ${SLOW_PAUSE_SECONDS}
+      line '{"type":"assistant","message":{"content":[{"type":"text","text":"Still working."}]}}'
+    done
+    ;;
+esac
 line '{"type":"assistant","message":{"content":[{"type":"text","text":"Done. <promise>COMPLETE</promise>"}]}}'
-pause
 line '{"type":"result","subtype":"success","result":"Done. <promise>COMPLETE</promise>"}'
 `;
 
@@ -248,16 +274,22 @@ describe.skipIf(skipsHere(BWRAP))(
     }, 30_000);
 
     it("keeps a slow but streaming agent alive past the idle timeout", async () => {
-      const result = await runFake("SLOW work.", { idleTimeoutSeconds: 1 });
+      const start = performance.now();
+      const result = await runFake("SLOW work.", {
+        idleTimeoutSeconds: IDLE_TIMEOUT_SECONDS,
+      });
 
       expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
-    }, 30_000);
+      expect(performance.now() - start).toBeGreaterThan(
+        IDLE_TIMEOUT_SECONDS * 1000,
+      );
+    }, 60_000);
 
     it("fails an agent that goes silent past the idle timeout", async () => {
       await expect(
-        runFake("HANG forever.", { idleTimeoutSeconds: 1 }),
+        runFake("HANG forever.", { idleTimeoutSeconds: IDLE_TIMEOUT_SECONDS }),
       ).rejects.toThrow(/idle/iu);
-    }, 30_000);
+    }, 60_000);
 
     it("runs onSandboxReady hooks inside the sandbox", async () => {
       await runFake("After the hook.", {

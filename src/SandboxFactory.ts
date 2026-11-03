@@ -259,15 +259,20 @@ const cleanupTempBranch = (
  * Check for uncommitted changes and either preserve or remove the worktree.
  * Returns the preserved path if preserved, undefined if removed.
  *
- * `tempBranch` is set for merge-to-head: once the worktree is removed, the
+ * `temp` is set for merge-to-head: once the worktree is removed, the
  * temp branch is deleted too unless it holds unmerged commits.
  */
 const cleanupWorktree = (
   worktreePath: string,
   exit: Exit.Exit<unknown, unknown>,
-  signal: AbortSignal | undefined,
-  temp?: { readonly hostRepoDir: string; readonly branch: string },
+  options: {
+    readonly signal: AbortSignal | undefined;
+    readonly temp:
+      | { readonly hostRepoDir: string; readonly branch: string }
+      | undefined;
+  },
 ): Effect.Effect<string | undefined, WorktreeError> => {
+  const { signal, temp } = options;
   // An interrupted run keeps its worktree, clean or dirty, so the caller can
   // inspect it (ADR-0004). An abort after a successful run is a no-op.
   if (!Exit.isSuccess(exit) && signal?.aborted === true) {
@@ -434,6 +439,44 @@ export const WorktreeDockerSandboxFactory = {
           })),
         );
 
+      /**
+       * Copy files into the worktree, run the host's onWorktreeReady hooks,
+       * then resolve the git mounts, patched for Windows worktrees (ADR-0006).
+       */
+      const prepareWorktree = (worktreePath: string) =>
+        (copyPaths && copyPaths.length > 0
+          ? display.spinner(
+              "Copying to worktree",
+              copyToWorktree(
+                copyPaths,
+                hostRepoDir,
+                worktreePath,
+                timeouts?.copyToWorktreeMs,
+              ),
+            )
+          : Effect.void
+        ).pipe(
+          Effect.andThen(
+            onWorktreeReady.length > 0
+              ? runHostHooks(onWorktreeReady, worktreePath, signal)
+              : Effect.void,
+          ),
+          Effect.andThen(
+            resolveGitMounts(join(hostRepoDir, ".git")).pipe(
+              Effect.provideService(FileSystem.FileSystem, fileSystem),
+              Effect.mapError(
+                (e) =>
+                  new WorktreeError({
+                    message: `Failed to resolve git mounts: ${String(e)}`,
+                  }),
+              ),
+            ),
+          ),
+          Effect.flatMap((gitMounts) =>
+            patchGitMountsForWindows(gitMounts, worktreePath, SANDBOX_REPO_DIR),
+          ),
+        );
+
       /** Release: remove or preserve the worktree (see cleanupWorktree). */
       const releaseWorktree = (
         worktreeInfo: {
@@ -445,12 +488,10 @@ export const WorktreeDockerSandboxFactory = {
       ) =>
         Effect.sync(worktreeInfo.unregisterShutdown).pipe(
           Effect.andThen(
-            cleanupWorktree(
-              worktreeInfo.path,
-              exit,
+            cleanupWorktree(worktreeInfo.path, exit, {
               signal,
-              tempBranchOf(worktreeInfo),
-            ),
+              temp: tempBranchOf(worktreeInfo),
+            }),
           ),
         );
 
@@ -706,42 +747,7 @@ export const WorktreeDockerSandboxFactory = {
             // Use: copy files, run host hooks, resolve+patch git mounts, then start
             // the sandbox under a nested acquireUseRelease.
             (worktreeInfo) =>
-              (copyPaths && copyPaths.length > 0
-                ? display.spinner(
-                    "Copying to worktree",
-                    copyToWorktree(
-                      copyPaths,
-                      hostRepoDir,
-                      worktreeInfo.path,
-                      timeouts?.copyToWorktreeMs,
-                    ),
-                  )
-                : Effect.void
-              ).pipe(
-                Effect.andThen(
-                  onWorktreeReady.length > 0
-                    ? runHostHooks(onWorktreeReady, worktreeInfo.path, signal)
-                    : Effect.void,
-                ),
-                Effect.andThen(
-                  resolveGitMounts(join(hostRepoDir, ".git")).pipe(
-                    Effect.provideService(FileSystem.FileSystem, fileSystem),
-                    Effect.mapError(
-                      (e) =>
-                        new WorktreeError({
-                          message: `Failed to resolve git mounts: ${String(e)}`,
-                        }),
-                    ),
-                  ),
-                ),
-                // Patch git mounts for Windows worktree compatibility (ADR-0006)
-                Effect.flatMap((gitMounts) =>
-                  patchGitMountsForWindows(
-                    gitMounts,
-                    worktreeInfo.path,
-                    SANDBOX_REPO_DIR,
-                  ),
-                ),
+              prepareWorktree(worktreeInfo.path).pipe(
                 Effect.flatMap((gitMounts) =>
                   Effect.acquireUseRelease(
                     // sandboxProvider is guaranteed bind-mount here
