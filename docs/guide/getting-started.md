@@ -41,10 +41,10 @@ npx @ai-hero/sandcastle init
 cp .sandcastle/.env.example .sandcastle/.env
 ```
 
-4. Run the `.sandcastle/main.ts` (or `main.mts`) file with `npx tsx`
+4. Run the `.sandcastle/main.mts` file with `npx tsx` (init names it `main.ts` instead when your `package.json` has `"type": "module"`)
 
 ```bash
-npx tsx .sandcastle/main.ts
+npx tsx .sandcastle/main.mts
 ```
 
 ```typescript

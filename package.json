@@ -56,7 +56,7 @@
   },
   "scripts": {
     "build": "tsup",
-    "postbuild": "rm -rf dist/templates && cp -r src/templates dist/templates && node scripts/check-public-types-effect-free.mjs",
+    "postbuild": "node scripts/copy-templates.mjs && node scripts/check-public-types-effect-free.mjs",
     "pretest": "tsx scripts/ensure-build.ts",
     "test": "vitest run",
     "test:watch": "vitest",
