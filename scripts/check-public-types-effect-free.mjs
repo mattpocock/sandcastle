@@ -17,6 +17,11 @@ const distDir = join(here, "..", "dist");
 const EFFECT_IMPORT_PATTERN =
   /(?<quote>["'])(?:effect(?:\/[^"']+)?|@effect\/[^"']+)\k<quote>/u;
 
+/**
+ * Yields every `.d.ts` file under `dir`, recursively.
+ * @param {string} dir
+ * @returns {AsyncGenerator<string>}
+ */
 async function* walk(dir) {
   const entries = await readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
