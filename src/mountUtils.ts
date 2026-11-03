@@ -148,13 +148,13 @@ export const normalizeMounts = <
   M extends { hostPath: string; sandboxPath: string },
 >(
   mounts: M[],
-  worktreeHostPath: string,
-  sandboxRepoDir: string,
+  repo: { readonly worktreeHostPath: string; readonly sandboxRepoDir: string },
   platform: string = process.platform,
 ): M[] => {
   if (platform !== "win32") {
     return mounts;
   }
+  const { worktreeHostPath, sandboxRepoDir } = repo;
 
   const normalizedWorktree = worktreeHostPath.replaceAll("\\", "/");
 

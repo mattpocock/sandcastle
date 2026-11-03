@@ -192,8 +192,7 @@ describe("normalizeMounts", () => {
       const mounts = [{ hostPath: "/repo/.git", sandboxPath: "/repo/.git" }];
       const result = normalizeMounts(
         mounts,
-        "/repo",
-        SANDBOX_REPO_DIR,
+        { worktreeHostPath: "/repo", sandboxRepoDir: SANDBOX_REPO_DIR },
         "linux",
       );
       expect(result).toStrictEqual(mounts);
@@ -208,8 +207,10 @@ describe("normalizeMounts", () => {
       ];
       const result = normalizeMounts(
         mounts,
-        "/home/user/project",
-        SANDBOX_REPO_DIR,
+        {
+          worktreeHostPath: "/home/user/project",
+          sandboxRepoDir: SANDBOX_REPO_DIR,
+        },
         "darwin",
       );
       expect(result[0]?.sandboxPath).toBe("/home/user/project/.git");
@@ -226,8 +227,10 @@ describe("normalizeMounts", () => {
       ];
       const result = normalizeMounts(
         mounts,
-        String.raw`C:\Users\project`,
-        SANDBOX_REPO_DIR,
+        {
+          worktreeHostPath: String.raw`C:\Users\project`,
+          sandboxRepoDir: SANDBOX_REPO_DIR,
+        },
         "win32",
       );
       expect(result[0]?.hostPath).toBe("C:/Users/project/.git");
@@ -242,8 +245,10 @@ describe("normalizeMounts", () => {
       ];
       const result = normalizeMounts(
         mounts,
-        String.raw`C:\Users\project`,
-        SANDBOX_REPO_DIR,
+        {
+          worktreeHostPath: String.raw`C:\Users\project`,
+          sandboxRepoDir: SANDBOX_REPO_DIR,
+        },
         "win32",
       );
       expect(result[0]?.sandboxPath).toBe(`${SANDBOX_REPO_DIR}/.git`);
@@ -262,8 +267,10 @@ describe("normalizeMounts", () => {
       ];
       const result = normalizeMounts(
         mounts,
-        String.raw`C:\Users\project`,
-        SANDBOX_REPO_DIR,
+        {
+          worktreeHostPath: String.raw`C:\Users\project`,
+          sandboxRepoDir: SANDBOX_REPO_DIR,
+        },
         "win32",
       );
       expect(result[0]?.hostPath).toBe("C:/Users/project");
@@ -288,8 +295,10 @@ describe("normalizeMounts", () => {
       ];
       const result = normalizeMounts(
         mounts,
-        String.raw`C:\Users\worktrees\my-wt`,
-        SANDBOX_REPO_DIR,
+        {
+          worktreeHostPath: String.raw`C:\Users\worktrees\my-wt`,
+          sandboxRepoDir: SANDBOX_REPO_DIR,
+        },
         "win32",
       );
       // worktree mount: hostPath normalized, sandboxPath already POSIX
@@ -313,8 +322,10 @@ describe("normalizeMounts", () => {
       ];
       const result = normalizeMounts(
         mounts,
-        String.raw`C:\Users\project`,
-        SANDBOX_REPO_DIR,
+        {
+          worktreeHostPath: String.raw`C:\Users\project`,
+          sandboxRepoDir: SANDBOX_REPO_DIR,
+        },
         "win32",
       );
       expect(result[0]?.readonly).toBe(true);
@@ -329,8 +340,10 @@ describe("normalizeMounts", () => {
       ];
       const result = normalizeMounts(
         mounts,
-        String.raw`C:\Users\project`,
-        SANDBOX_REPO_DIR,
+        {
+          worktreeHostPath: String.raw`C:\Users\project`,
+          sandboxRepoDir: SANDBOX_REPO_DIR,
+        },
         "win32",
       );
       expect(result[0]?.hostPath).toBe("C:/Users/project/cache");

@@ -160,7 +160,10 @@ export const startBindMountSandbox = (
   // The sandbox may write the repo's objects and refs, but never the git
   // files that decide what git on the host runs.
   return protectGitControlFiles(
-    normalizeMounts(rawMounts, worktreeOrRepoPath, SANDBOX_REPO_DIR),
+    normalizeMounts(rawMounts, {
+      worktreeHostPath: worktreeOrRepoPath,
+      sandboxRepoDir: SANDBOX_REPO_DIR,
+    }),
     worktreeOrRepoPath,
   ).pipe(
     Effect.flatMap((mounts) =>
