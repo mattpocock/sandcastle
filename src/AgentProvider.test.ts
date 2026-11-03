@@ -92,7 +92,8 @@ describe("claudeCode factory", () => {
   it("buildPrintCommand delivers prompt via stdin, not argv", () => {
     const provider = claudeCode("claude-opus-4-8");
     const { command, stdin } = provider.buildPrintCommand(opts("do something"));
-    expect(command).toContain("-p -");
+    expect(command).not.toMatch(/ -p\b/u);
+    expect(command).not.toMatch(/ -$/u);
     expect(command).not.toContain("'do something'");
     expect(stdin).toBe("do something");
   });
