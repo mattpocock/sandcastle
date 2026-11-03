@@ -328,7 +328,10 @@ const makeMockIsolatedProvider = (
       const handle = await base.create(opts);
       return {
         ...handle,
-        exec: async (command: string, options?: any) => {
+        exec: async (
+          command: string,
+          options?: Parameters<typeof handle.exec>[1],
+        ) => {
           const agent = AGENT_PREFIXES.find((a) =>
             command.startsWith(a.prefix),
           );
