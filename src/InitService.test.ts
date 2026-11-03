@@ -140,6 +140,34 @@ describe("InitService scaffold", () => {
     expect(envExample).toContain("Metadata");
   });
 
+  it("names the token permissions an agent needs to push branches and open pull requests", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      issueTracker: getIssueTracker("github-issues"),
+    });
+
+    const envExample = await readFile(
+      join(dir, ".sandcastle", ".env.example"),
+      "utf8",
+    );
+    expect(envExample).toContain("Contents (Read and write)");
+    expect(envExample).toContain("Pull requests (Read and write)");
+  });
+
+  it("scaffolds GH_HOST and GH_ENTERPRISE_TOKEN for GitHub Enterprise", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      issueTracker: getIssueTracker("github-issues"),
+    });
+
+    const envExample = await readFile(
+      join(dir, ".sandcastle", ".env.example"),
+      "utf8",
+    );
+    expect(envExample).toMatch(/^# GH_HOST=/mu);
+    expect(envExample).toMatch(/^# GH_ENTERPRISE_TOKEN=/mu);
+  });
+
   it("generates .env.example without GH_TOKEN when issue tracker is beads", async () => {
     const dir = await makeDir();
     await runScaffold(dir, {
