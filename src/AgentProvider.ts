@@ -1108,7 +1108,7 @@ const parseCodexStreamLine = (line: string): ParsedStreamEvent[] => {
 
 /** Options for the codex agent provider. */
 export interface CodexOptions {
-  readonly effort?: "low" | "medium" | "high" | "xhigh";
+  readonly effort?: "low" | "medium" | "high" | "xhigh" | "max";
   /** Environment variables injected by this agent provider. */
   readonly env?: Record<string, string>;
   /** When false, session capture is disabled. Default: true. */
@@ -1729,7 +1729,7 @@ const buildClaudePrintCommand = (
   // resumed one. See ADR 0018.
   const forkFlag = resumeSession && forkSession ? " --fork-session" : "";
   return {
-    command: `claude --print --verbose${permissionFlag} --output-format stream-json --model ${shellEscape(model)}${effortFlag}${resumeFlag}${forkFlag} -p -`,
+    command: `claude --print --verbose${permissionFlag} --output-format stream-json --model ${shellEscape(model)}${effortFlag}${resumeFlag}${forkFlag}`,
     stdin: prompt,
   };
 };
