@@ -6,7 +6,7 @@
 // repeat runs skip straight to the command.
 //
 // Not wired into vitest itself: the windows CI job runs `npx vitest` directly
-// and needs no build (postbuild uses rm/cp, which Windows lacks).
+// and needs no build.
 
 import { spawn } from "node:child_process";
 import { once } from "node:events";
@@ -22,6 +22,7 @@ const INPUTS = [
   "package-lock.json",
   "tsup.config.ts",
   "tsconfig.json",
+  "scripts/copy-templates.mjs",
   "scripts/check-public-types-effect-free.mjs",
 ];
 
