@@ -150,6 +150,11 @@
       "optional": true
     }
   },
+  "overrides": {
+    "@effect/platform-node": {
+      "undici": "^7.29.0"
+    }
+  },
   "files": [
     "dist"
   ]
