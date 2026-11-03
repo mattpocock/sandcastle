@@ -462,7 +462,7 @@ describe("WorktreeDockerSandboxFactory", () => {
       }).pipe(Effect.provide(makeLayer())),
     );
 
-    const output = stderrSpy.mock.calls.map((c) => c[0]).join(" ");
+    const output = stderrSpy.mock.calls.map((c): unknown => c[0]).join(" ");
     expect(output).toContain("uncommitted changes");
     expect(output).toContain(observedWorktreePath);
     stderrSpy.mockRestore();
@@ -612,7 +612,7 @@ describe("WorktreeDockerSandboxFactory", () => {
       ),
     ).rejects.toThrow("agent failed");
 
-    const output = stderrSpy.mock.calls.map((c) => c[0]).join(" ");
+    const output = stderrSpy.mock.calls.map((c): unknown => c[0]).join(" ");
     expect(output).toContain("no uncommitted changes");
     stderrSpy.mockRestore();
   });
