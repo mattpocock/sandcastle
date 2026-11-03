@@ -29,7 +29,9 @@
 //   npm run lint          both ratchets
 //   npm run lint:shrink   lower the baselines to what is found (never raises
 //                         them); optional, the shrink workflow does it on main
-//   npm run lint:report   totals, worst rules, worst files of each baseline
+//   npm run lint:report   live totals, worst rules, worst files of each
+//                         ratchet, each beside its baseline (live / baseline);
+//                         builds dist/ first when stale, as `npm run lint` does
 //   tsx scripts/lint-ratchet.ts --init   first baselines; skips any that exist
 //
 // See .sandcastle/CODING_STANDARDS.md, "The lint ratchet" and "Where tests
@@ -50,6 +52,7 @@ import {
   baselineGrowth,
   compare,
   countViolations,
+  driftReport,
   report,
   shrink,
 } from "./lint-ratchet-core.ts";
@@ -217,11 +220,15 @@ const init = async (): Promise<void> => {
   await Promise.all(RATCHETS.map(async (r) => initOne(r)));
 };
 
+/** Each ratchet's live counts, collected as `npm run lint` collects them, beside its baseline. */
 const printReport = async (): Promise<void> => {
   const reports = await Promise.all(
     RATCHETS.map(async (r) => {
-      const counts = await readBaseline(r.baselinePath);
-      return `${r.name} (${r.baselinePath}):\n${report(counts, REPORT_LIMIT)}\n`;
+      const [found, baseline] = await Promise.all([
+        collect(r),
+        readBaseline(r.baselinePath),
+      ]);
+      return `${r.name} (live / ${r.baselinePath}):\n${driftReport(found, baseline, REPORT_LIMIT)}\n`;
     }),
   );
   process.stdout.write(reports.join("\n"));
