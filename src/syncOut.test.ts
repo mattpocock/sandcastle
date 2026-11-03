@@ -30,10 +30,10 @@ const initRepo = async (dir: string) => {
 
 const commitFile = async (
   dir: string,
-  name: string,
-  content: string,
+  file: { readonly name: string; readonly content: string },
   message: string,
 ) => {
+  const { name, content } = file;
   await writeFile(join(dir, name), content);
   await execAsync(`git add "${name}"`, { cwd: dir });
   await execAsync(`git commit -m "${message}"`, { cwd: dir });
@@ -48,7 +48,11 @@ describe("syncOut", () => {
   it("extracts a single commit from sandbox back to host", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "initial.txt", "initial", "initial commit");
+    await commitFile(
+      hostDir,
+      { name: "initial.txt", content: "initial" },
+      "initial commit",
+    );
 
     const provider = testIsolated();
     const handle = await provider.create({ env: {} });
@@ -79,7 +83,11 @@ describe("syncOut", () => {
   it("extracts multiple commits preserving order", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "initial.txt", "initial", "initial commit");
+    await commitFile(
+      hostDir,
+      { name: "initial.txt", content: "initial" },
+      "initial commit",
+    );
 
     const provider = testIsolated();
     const handle = await provider.create({ env: {} });
@@ -114,7 +122,11 @@ describe("syncOut", () => {
   it("is a no-op when sandbox has no new commits", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "initial.txt", "initial", "initial commit");
+    await commitFile(
+      hostDir,
+      { name: "initial.txt", content: "initial" },
+      "initial commit",
+    );
 
     const { stdout: hostHeadBefore } = await execAsync("git rev-parse HEAD", {
       cwd: hostDir,
@@ -140,7 +152,11 @@ describe("syncOut", () => {
   it("handles empty/header-only patches from merge commits gracefully", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "initial.txt", "initial", "initial commit");
+    await commitFile(
+      hostDir,
+      { name: "initial.txt", content: "initial" },
+      "initial commit",
+    );
 
     const provider = testIsolated();
     const handle = await provider.create({ env: {} });
@@ -181,7 +197,11 @@ describe("syncOut", () => {
   it("extracts uncommitted staged and unstaged changes to host", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "initial.txt", "initial", "initial commit");
+    await commitFile(
+      hostDir,
+      { name: "initial.txt", content: "initial" },
+      "initial commit",
+    );
 
     const provider = testIsolated();
     const handle = await provider.create({ env: {} });
@@ -214,7 +234,11 @@ describe("syncOut", () => {
   it("extracts untracked files from sandbox to host", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "initial.txt", "initial", "initial commit");
+    await commitFile(
+      hostDir,
+      { name: "initial.txt", content: "initial" },
+      "initial commit",
+    );
 
     const provider = testIsolated();
     const handle = await provider.create({ env: {} });
@@ -245,7 +269,11 @@ describe("syncOut", () => {
   it("extracts commits + uncommitted changes + untracked files together", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "initial.txt", "initial", "initial commit");
+    await commitFile(
+      hostDir,
+      { name: "initial.txt", content: "initial" },
+      "initial commit",
+    );
 
     const provider = testIsolated();
     const handle = await provider.create({ env: {} });
@@ -289,7 +317,11 @@ describe("syncOut", () => {
   it("aborts stale git am session before applying patches", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "initial.txt", "initial", "initial commit");
+    await commitFile(
+      hostDir,
+      { name: "initial.txt", content: "initial" },
+      "initial commit",
+    );
 
     const provider = testIsolated();
     const handle = await provider.create({ env: {} });
@@ -319,7 +351,11 @@ describe("syncOut", () => {
   it("successful sync-out leaves no patch artifacts in .sandcastle/patches", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "initial.txt", "initial", "initial commit");
+    await commitFile(
+      hostDir,
+      { name: "initial.txt", content: "initial" },
+      "initial commit",
+    );
 
     const provider = testIsolated();
     const handle = await provider.create({ env: {} });
@@ -353,20 +389,22 @@ describe("syncOut", () => {
   it("successful sync-out preserves tracked .sandcastle files", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "initial.txt", "initial", "initial commit");
+    await commitFile(
+      hostDir,
+      { name: "initial.txt", content: "initial" },
+      "initial commit",
+    );
 
     // Commit tracked files inside .sandcastle, as a real repo would have
     await mkdir(join(hostDir, ".sandcastle"), { recursive: true });
     await commitFile(
       hostDir,
-      join(".sandcastle", "prompt.md"),
-      "prompt",
+      { name: join(".sandcastle", "prompt.md"), content: "prompt" },
       "add .sandcastle config",
     );
     await commitFile(
       hostDir,
-      join(".sandcastle", "Dockerfile"),
-      "FROM node",
+      { name: join(".sandcastle", "Dockerfile"), content: "FROM node" },
       "add Dockerfile",
     );
 
@@ -395,7 +433,11 @@ describe("syncOut", () => {
   it("failed git am preserves artifacts and prints recovery message", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "initial.txt", "initial", "initial commit");
+    await commitFile(
+      hostDir,
+      { name: "initial.txt", content: "initial" },
+      "initial commit",
+    );
 
     const provider = testIsolated();
     const handle = await provider.create({ env: {} });
@@ -454,7 +496,11 @@ describe("syncOut", () => {
   it("failed git apply preserves diff artifact with recovery message", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "initial.txt", "initial", "initial commit");
+    await commitFile(
+      hostDir,
+      { name: "initial.txt", content: "initial" },
+      "initial commit",
+    );
 
     const provider = testIsolated();
     const handle = await provider.create({ env: {} });
@@ -509,7 +555,11 @@ describe("syncOut", () => {
   it("preserves commit author and message metadata", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "initial.txt", "initial", "initial commit");
+    await commitFile(
+      hostDir,
+      { name: "initial.txt", content: "initial" },
+      "initial commit",
+    );
 
     const provider = testIsolated();
     const handle = await provider.create({ env: {} });
@@ -545,7 +595,11 @@ describe("syncOut", () => {
   it("extracts commits across two consecutive syncOut runs on the same sandbox", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "initial.txt", "initial", "initial commit");
+    await commitFile(
+      hostDir,
+      { name: "initial.txt", content: "initial" },
+      "initial commit",
+    );
 
     const provider = testIsolated();
     const handle = await provider.create({ env: {} });
@@ -594,7 +648,11 @@ describe("syncOut", () => {
   it("second syncOut with no new commits is a no-op", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "initial.txt", "initial", "initial commit");
+    await commitFile(
+      hostDir,
+      { name: "initial.txt", content: "initial" },
+      "initial commit",
+    );
 
     const provider = testIsolated();
     const handle = await provider.create({ env: {} });
@@ -639,7 +697,11 @@ describe("countCommitsToSync", () => {
   it("returns 0 after a successful syncOut when no new commits exist (run-2 case)", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "initial.txt", "initial", "initial commit");
+    await commitFile(
+      hostDir,
+      { name: "initial.txt", content: "initial" },
+      "initial commit",
+    );
 
     const provider = testIsolated();
     const handle = await provider.create({ env: {} });
@@ -676,7 +738,11 @@ describe("countCommitsToSync", () => {
   it("returns the number of new sandbox commits since the last sync", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "initial.txt", "initial", "initial commit");
+    await commitFile(
+      hostDir,
+      { name: "initial.txt", content: "initial" },
+      "initial commit",
+    );
 
     const provider = testIsolated();
     const handle = await provider.create({ env: {} });
@@ -717,7 +783,11 @@ describe("countCommitsToSync", () => {
   it("falls back to host HEAD when no sync-base ref is set yet", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "initial.txt", "initial", "initial commit");
+    await commitFile(
+      hostDir,
+      { name: "initial.txt", content: "initial" },
+      "initial commit",
+    );
 
     const provider = testIsolated();
     const handle = await provider.create({ env: {} });
