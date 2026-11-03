@@ -30,8 +30,7 @@ describe("attributeImage", () => {
   it("claims an image named with this world's run id", () => {
     const a = attributeImage(
       { ref: "sandcastle:world-20261030-210000-aaaa" },
-      self,
-      [sibling],
+      { self, others: [sibling] },
       now,
     );
     expect(a.kind).toBe("own");
@@ -43,8 +42,7 @@ describe("attributeImage", () => {
         ref: "sandcastle:world-20261030-210500-bbbb",
         created: "2026-10-30T21:10:00.000Z",
       },
-      self,
-      [],
+      { self, others: [] },
       now,
     );
     expect(a.kind).toBe("other-world");
@@ -54,8 +52,7 @@ describe("attributeImage", () => {
   it("leaks an unnamed sandcastle image built in this world's lifetime when no other world was live", () => {
     const a = attributeImage(
       { ref: "sandcastle:custom", created: "2026-10-30T21:30:00.000Z" },
-      self,
-      [],
+      { self, others: [] },
       now,
     );
     expect(a.kind).toBe("leak");
@@ -64,8 +61,7 @@ describe("attributeImage", () => {
   it("does not claim an unnamed sandcastle image built while another world was live", () => {
     const a = attributeImage(
       { ref: "sandcastle:custom", created: "2026-10-30T21:30:00.000Z" },
-      self,
-      [sibling],
+      { self, others: [sibling] },
       now,
     );
     expect(a.kind).toBe("ambiguous");
@@ -75,8 +71,7 @@ describe("attributeImage", () => {
   it("ignores a world that was already cleaned up when the image was built", () => {
     const a = attributeImage(
       { ref: "sandcastle:custom", created: "2026-10-30T21:30:00.000Z" },
-      self,
-      [{ ...sibling, cleanedAt: "2026-10-30T21:20:00.000Z" }],
+      { self, others: [{ ...sibling, cleanedAt: "2026-10-30T21:20:00.000Z" }] },
       now,
     );
     expect(a.kind).toBe("leak");
@@ -85,8 +80,7 @@ describe("attributeImage", () => {
   it("does not claim an unnamed sandcastle image built before the world", () => {
     const a = attributeImage(
       { ref: "sandcastle:custom", created: "2026-10-30T20:00:00.000Z" },
-      self,
-      [],
+      { self, others: [] },
       now,
     );
     expect(a.kind).toBe("unrelated");
@@ -94,7 +88,11 @@ describe("attributeImage", () => {
 
   it("leaks an unnamed sandcastle image whose build time is unknown, when alone", () => {
     expect(
-      attributeImage({ ref: "localhost/sandcastle:x" }, self, [], now).kind,
+      attributeImage(
+        { ref: "localhost/sandcastle:x" },
+        { self, others: [] },
+        now,
+      ).kind,
     ).toBe("leak");
   });
 
@@ -102,8 +100,7 @@ describe("attributeImage", () => {
     expect(
       attributeImage(
         { ref: "node:22", created: "2026-10-30T21:30:00.000Z" },
-        self,
-        [],
+        { self, others: [] },
         now,
       ).kind,
     ).toBe("unrelated");

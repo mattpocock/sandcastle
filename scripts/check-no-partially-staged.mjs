@@ -13,6 +13,10 @@
  */
 import { execFileSync } from "node:child_process";
 
+/**
+ * Lists the paths `git diff --name-only` reports for the given flags.
+ * @param {...string} args
+ */
 const names = (...args) =>
   execFileSync("git", ["diff", "--name-only", "-z", ...args], {
     encoding: "utf8",
