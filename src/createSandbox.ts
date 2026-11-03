@@ -1086,6 +1086,134 @@ export const createSandboxFromWorktree = async (
 };
 
 /**
+ * @internal Copies files into the new worktree, runs host `onWorktreeReady`
+ * hooks, starts the sandbox, then runs `onSandboxReady` hooks. If those
+ * hooks fail, the sandbox that just started is torn down.
+ */
+const prepareSandboxOnWorktree = (
+  options: CreateSandboxOptions,
+  target: {
+    readonly hostRepoDir: string;
+    readonly worktreePath: string;
+    readonly mountsToClean: MountEntry[];
+  },
+) =>
+  Effect.gen(function* () {
+    const { hostRepoDir, worktreePath, mountsToClean } = target;
+    // Copy files (bind-mount/no-sandbox only; isolated copies in startSandbox).
+    yield* copyIntoWorktree(options, hostRepoDir, worktreePath);
+
+    // Run host.onWorktreeReady hooks (after copy, before sandbox creation).
+    const onWorktreeReady = options.hooks?.host?.onWorktreeReady;
+    if (onWorktreeReady !== undefined && onWorktreeReady.length > 0) {
+      yield* runHostHooks(onWorktreeReady, worktreePath);
+    }
+
+    // Start the sandbox via the test layer or the shared startSandbox helper.
+    const { providerHandle, sandbox, sandboxRepoDir } =
+      yield* startSandboxOnWorktree({
+        options,
+        hostRepoDir,
+        worktreePath,
+        mountsToClean,
+      });
+
+    // Run onSandboxReady hooks (sandbox-side and host-side in parallel). If
+    // they fail, tear down the container that just started before the outer
+    // handler removes the worktree.
+    yield* runOnSandboxReadyHooks({
+      sandbox,
+      sandboxRepoDir,
+      worktreePath,
+      hooks: options.hooks,
+    }).pipe(
+      Effect.onError(() =>
+        (providerHandle
+          ? Effect.promise(() => providerHandle.close().catch(() => {}))
+          : Effect.void
+        ).pipe(Effect.andThen(removeMountTempDirs(mountsToClean))),
+      ),
+    );
+
+    return { providerHandle, sandbox, sandboxRepoDir };
+  });
+
+/**
+ * @internal Resolves the host repo, creates the worktree on `options.branch`
+ * and prepares the sandbox on it. Once the worktree exists, any later
+ * failure (e.g. a missing image surfacing when the provider creates the
+ * container) tears down the container — if it started — and removes the
+ * worktree so it is not orphaned on disk.
+ */
+const setUpWorktreeSandbox = (
+  options: CreateSandboxOptions,
+  mountsToClean: MountEntry[],
+) =>
+  Effect.gen(function* () {
+    const hostRepoDir = yield* resolveCwd(options.cwd);
+
+    yield* WorktreeManager.pruneStale(hostRepoDir).pipe(
+      Effect.catchAll(() => Effect.void),
+    );
+    const { path: worktreePath } = yield* WorktreeManager.create(hostRepoDir, {
+      branch: options.branch,
+      baseBranch: options.baseBranch,
+    });
+
+    const prepared = yield* prepareSandboxOnWorktree(options, {
+      hostRepoDir,
+      worktreePath,
+      mountsToClean,
+    }).pipe(
+      Effect.onError(() =>
+        WorktreeManager.remove(worktreePath).pipe(
+          Effect.catchAll(() => Effect.void),
+          Effect.andThen(removeMountTempDirs(mountsToClean)),
+        ),
+      ),
+    );
+
+    return { hostRepoDir, worktreePath, ...prepared };
+  });
+
+/** @internal Tells the user where a worktree left behind by a shutdown is. */
+const printWorktreePreserved = (worktreePath: string): void => {
+  console.error(`\nWorktree preserved at ${worktreePath}`);
+  console.error(`  To review: cd ${worktreePath}`);
+  console.error(`  To clean up: git worktree remove --force ${worktreePath}`);
+};
+
+/**
+ * @internal Closes a top-level `createSandbox()`: the container, the git
+ * mounts' temp dirs, then the worktree unless it has uncommitted changes.
+ */
+const closeSandboxAndWorktree = (target: {
+  readonly providerHandle: ProviderHandle | undefined;
+  readonly mountsToClean: readonly MountEntry[];
+  readonly worktreePath: string;
+}): Effect.Effect<CloseResult> =>
+  Effect.gen(function* () {
+    const { providerHandle, mountsToClean, worktreePath } = target;
+    if (providerHandle) {
+      yield* Effect.promise(() => providerHandle.close());
+    }
+    yield* removeMountTempDirs(mountsToClean);
+
+    // Preserve the worktree when it has uncommitted changes; otherwise remove it.
+    const isDirty = yield* WorktreeManager.hasUncommittedChanges(
+      worktreePath,
+    ).pipe(Effect.catchAll(() => Effect.succeed(false)));
+    if (isDirty) {
+      return { preservedWorktreePath: worktreePath };
+    }
+
+    yield* WorktreeManager.remove(worktreePath).pipe(
+      Effect.catchAll(() => Effect.void),
+    );
+    return { preservedWorktreePath: undefined };
+  });
+
+/**
  * Eagerly creates a git worktree on the provided explicit branch and starts
  * a sandbox with the worktree bind-mounted. Returns a Sandbox handle that
  * can be reused across multiple `run()` calls.
@@ -1099,115 +1227,30 @@ export const createSandbox = async (
   const mountsToClean: MountEntry[] = [];
 
   // Resolve cwd, create the worktree, and set up the sandbox in a single Effect.
-  // Once the worktree exists, any later failure (e.g. a missing image surfacing
-  // when the provider creates the container) tears down the container — if it
-  // started — and removes the worktree so it is not orphaned on disk.
   const { hostRepoDir, worktreePath, providerHandle, sandbox, sandboxRepoDir } =
     await Effect.runPromise(
-      Effect.gen(function* () {
-        const hostRepoDir = yield* resolveCwd(options.cwd);
-
-        yield* WorktreeManager.pruneStale(hostRepoDir).pipe(
-          Effect.catchAll(() => Effect.void),
-        );
-        const { path: worktreePath } = yield* WorktreeManager.create(
-          hostRepoDir,
-          { branch, baseBranch: options.baseBranch },
-        );
-
-        const prepared = yield* Effect.gen(function* () {
-          // Copy files (bind-mount/no-sandbox only; isolated copies in startSandbox).
-          yield* copyIntoWorktree(options, hostRepoDir, worktreePath);
-
-          // Run host.onWorktreeReady hooks (after copy, before sandbox creation).
-          const onWorktreeReady = options.hooks?.host?.onWorktreeReady;
-          if (onWorktreeReady !== undefined && onWorktreeReady.length > 0) {
-            yield* runHostHooks(onWorktreeReady, worktreePath);
-          }
-
-          // Start the sandbox via the test layer or the shared startSandbox helper.
-          const { providerHandle, sandbox, sandboxRepoDir } =
-            yield* startSandboxOnWorktree({
-              options,
-              hostRepoDir,
-              worktreePath,
-              mountsToClean,
-            });
-
-          // Run onSandboxReady hooks (sandbox-side and host-side in parallel). If
-          // they fail, tear down the container that just started before the outer
-          // handler removes the worktree.
-          yield* runOnSandboxReadyHooks({
-            sandbox,
-            sandboxRepoDir,
-            worktreePath,
-            hooks: options.hooks,
-          }).pipe(
-            Effect.onError(() =>
-              (providerHandle
-                ? Effect.promise(() => providerHandle.close().catch(() => {}))
-                : Effect.void
-              ).pipe(Effect.andThen(removeMountTempDirs(mountsToClean))),
-            ),
-          );
-
-          return { providerHandle, sandbox, sandboxRepoDir };
-        }).pipe(
-          Effect.onError(() =>
-            WorktreeManager.remove(worktreePath).pipe(
-              Effect.catchAll(() => Effect.void),
-              Effect.andThen(removeMountTempDirs(mountsToClean)),
-            ),
-          ),
-        );
-
-        return { hostRepoDir, worktreePath, ...prepared };
-      }).pipe(Effect.provide(NodeContext.layer)),
+      setUpWorktreeSandbox(options, mountsToClean).pipe(
+        Effect.provide(NodeContext.layer),
+      ),
     );
-
-  let closed = false;
-
-  const forceCleanup = () => {
-    console.error(`\nWorktree preserved at ${worktreePath}`);
-    console.error(`  To review: cd ${worktreePath}`);
-    console.error(`  To clean up: git worktree remove --force ${worktreePath}`);
-  };
 
   // Route cleanup through the shared registry so concurrent sandboxes share one
   // SIGINT/SIGTERM/exit listener instead of tripping MaxListenersExceededWarning.
-  const unregisterShutdown = registerShutdown(forceCleanup);
+  const unregisterShutdown = registerShutdown(() => {
+    printWorktreePreserved(worktreePath);
+  });
 
-  // Build close function
+  let closed = false;
   const doClose = async (): Promise<CloseResult> => {
     if (closed) {
       return { preservedWorktreePath: undefined };
     }
     closed = true;
-
     return Effect.runPromise(
-      Effect.gen(function* () {
-        if (providerHandle) {
-          yield* Effect.promise(() => providerHandle.close());
-        }
-        yield* removeMountTempDirs(mountsToClean);
-
-        // Preserve the worktree when it has uncommitted changes; otherwise remove it.
-        const isDirty = yield* WorktreeManager.hasUncommittedChanges(
-          worktreePath,
-        ).pipe(Effect.catchAll(() => Effect.succeed(false)));
-        if (isDirty) {
-          return { preservedWorktreePath: worktreePath };
-        }
-
-        yield* WorktreeManager.remove(worktreePath).pipe(
-          Effect.catchAll(() => Effect.void),
-        );
-        return { preservedWorktreePath: undefined };
-      }),
+      closeSandboxAndWorktree({ providerHandle, mountsToClean, worktreePath }),
     );
   };
 
-  // Return the Sandbox handle
   return buildSandboxHandle(
     {
       branch,
