@@ -48,10 +48,10 @@ const initRepo = async (dir: string) => {
 
 const commitFile = async (
   dir: string,
-  name: string,
-  content: string,
+  file: { readonly name: string; readonly content: string },
   message: string,
 ) => {
+  const { name, content } = file;
   await writeFile(join(dir, name), content);
   await execAsync(`git add "${name}"`, { cwd: dir });
   await execAsync(`git commit -m "${message}"`, { cwd: dir });
@@ -147,7 +147,11 @@ describe("startSandbox", () => {
       const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
       tempDirs.push(hostDir);
       await initRepo(hostDir);
-      await commitFile(hostDir, "hello.txt", "hello world", "initial");
+      await commitFile(
+        hostDir,
+        { name: "hello.txt", content: "hello world" },
+        "initial",
+      );
 
       const provider = testIsolated();
       const { handle, sandbox, worktreePath } = await Effect.runPromise(
@@ -170,7 +174,11 @@ describe("startSandbox", () => {
       const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
       tempDirs.push(hostDir);
       await initRepo(hostDir);
-      await commitFile(hostDir, "hello.txt", "hello", "initial");
+      await commitFile(
+        hostDir,
+        { name: "hello.txt", content: "hello" },
+        "initial",
+      );
       await writeFile(join(hostDir, "extra.txt"), "extra content");
 
       const provider = testIsolated();
@@ -194,7 +202,11 @@ describe("startSandbox", () => {
       const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
       tempDirs.push(hostDir);
       await initRepo(hostDir);
-      await commitFile(hostDir, "hello.txt", "hello", "initial");
+      await commitFile(
+        hostDir,
+        { name: "hello.txt", content: "hello" },
+        "initial",
+      );
       await writeFile(join(hostDir, "hang.txt"), "will hang");
 
       const realProvider = testIsolated();
@@ -251,7 +263,11 @@ describe("startSandbox", () => {
       const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
       tempDirs.push(hostDir);
       await initRepo(hostDir);
-      await commitFile(hostDir, "hello.txt", "hello", "initial");
+      await commitFile(
+        hostDir,
+        { name: "hello.txt", content: "hello" },
+        "initial",
+      );
 
       const realProvider = testIsolated();
       let closeCalls = 0;
@@ -283,7 +299,11 @@ describe("startSandbox", () => {
       const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
       tempDirs.push(hostDir);
       await initRepo(hostDir);
-      await commitFile(hostDir, "hello.txt", "hello", "initial");
+      await commitFile(
+        hostDir,
+        { name: "hello.txt", content: "hello" },
+        "initial",
+      );
       await writeFile(join(hostDir, "extra.txt"), "extra content");
 
       const realProvider = testIsolated();
@@ -323,7 +343,11 @@ describe("startSandbox", () => {
       const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
       tempDirs.push(hostDir);
       await initRepo(hostDir);
-      await commitFile(hostDir, "hello.txt", "hello", "initial");
+      await commitFile(
+        hostDir,
+        { name: "hello.txt", content: "hello" },
+        "initial",
+      );
 
       const realProvider = testIsolated();
       let closeCalls = 0;
@@ -352,7 +376,11 @@ describe("startSandbox", () => {
       const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
       tempDirs.push(hostDir);
       await initRepo(hostDir);
-      await commitFile(hostDir, "hello.txt", "hello", "initial");
+      await commitFile(
+        hostDir,
+        { name: "hello.txt", content: "hello" },
+        "initial",
+      );
 
       const provider = testIsolated();
       const started = Effect.runPromise(

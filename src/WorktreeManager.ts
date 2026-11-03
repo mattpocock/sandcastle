@@ -1,4 +1,5 @@
 import { Console, Effect, Option } from "effect";
+import type { Either } from "effect";
 import { FileSystem } from "@effect/platform";
 import { randomBytes } from "node:crypto";
 import { join, normalize } from "node:path";
@@ -177,6 +178,33 @@ const listWorktrees = (
     }),
   );
 
+/** The error for a worktree `operation` on `repoDir` that hit WORKTREE_TIMEOUT_MS. */
+const worktreeTimeout = (
+  repoDir: string,
+  operation: "create" | "prune",
+  noun: string,
+): WorktreeTimeoutError =>
+  new WorktreeTimeoutError({
+    message: `Worktree ${noun} timed out after ${WORKTREE_TIMEOUT_MS}ms`,
+    timeoutMs: WORKTREE_TIMEOUT_MS,
+    path: repoDir,
+    operation,
+  });
+
+/** HEAD's commit sha in `worktreePath`, or "" when it can't be read. */
+const headSha = (worktreePath: string): Effect.Effect<string> =>
+  execGit(["rev-parse", "HEAD"], worktreePath).pipe(
+    Effect.map((s) => s.trim()),
+    Effect.orElseSucceed(() => ""),
+  );
+
+/** Runs a git command without taking the config lock, capturing failure. */
+const tryUnlockedGit = (
+  args: readonly string[],
+  worktreePath: string,
+): Effect.Effect<Either.Either<string, WorktreeError>> =>
+  Effect.either(execGit([...NO_CONFIG_LOCK_FLAGS, ...args], worktreePath));
+
 /**
  * On the clean-reuse path, fetches `origin/<branch>` into the worktree and
  * fast-forwards local HEAD. Skipped silently (with an explanatory log) when:
@@ -216,11 +244,9 @@ const fastForwardFromOrigin = (
       );
       return;
     }
-    const fetchResult = yield* Effect.either(
-      execGit(
-        [...NO_CONFIG_LOCK_FLAGS, "fetch", "origin", branch],
-        worktreePath,
-      ),
+    const fetchResult = yield* tryUnlockedGit(
+      ["fetch", "origin", branch],
+      worktreePath,
     );
     if (fetchResult._tag === "Left") {
       yield* Console.log(
@@ -228,15 +254,10 @@ const fastForwardFromOrigin = (
       );
       return;
     }
-    const before = yield* execGit(["rev-parse", "HEAD"], worktreePath).pipe(
-      Effect.map((s) => s.trim()),
-      Effect.orElseSucceed(() => ""),
-    );
-    const mergeResult = yield* Effect.either(
-      execGit(
-        [...NO_CONFIG_LOCK_FLAGS, "merge", "--ff-only", `origin/${branch}`],
-        worktreePath,
-      ),
+    const before = yield* headSha(worktreePath);
+    const mergeResult = yield* tryUnlockedGit(
+      ["merge", "--ff-only", `origin/${branch}`],
+      worktreePath,
     );
     if (mergeResult._tag === "Left") {
       yield* Console.log(
@@ -244,16 +265,141 @@ const fastForwardFromOrigin = (
       );
       return;
     }
-    const after = yield* execGit(["rev-parse", "HEAD"], worktreePath).pipe(
-      Effect.map((s) => s.trim()),
-      Effect.orElseSucceed(() => ""),
-    );
+    const after = yield* headSha(worktreePath);
     yield* Console.log(
       before && after && before !== after
         ? `Fast-forwarded worktree at ${worktreePath} (branch '${branch}') to origin/${branch}`
         : `Reusing existing worktree at ${worktreePath} (branch '${branch}')`,
     );
   });
+
+/**
+ * Reuses a worktree that already has `branch` checked out, when Sandcastle
+ * manages it (under `.sandcastle/worktrees/`): a clean one is fast-forwarded
+ * from origin, a dirty one is reused with a warning. A branch checked out in
+ * the main working tree or an external worktree is an error.
+ */
+const reuseCollidingWorktree = (
+  collision: { readonly path: string },
+  branch: string,
+  worktreesDir: string,
+): Effect.Effect<WorktreeInfo, WorktreeError> =>
+  Effect.gen(function* () {
+    // Only reuse worktrees managed by sandcastle (under .sandcastle/worktrees/)
+    if (isManagedWorktreePath(collision.path, worktreesDir)) {
+      const dirty = yield* hasUncommittedChanges(collision.path);
+      yield* dirty
+        ? Console.warn(
+            `Reusing worktree at ${collision.path} (branch '${branch}') — worktree has uncommitted changes`,
+          )
+        : fastForwardFromOrigin(collision.path, branch);
+      // git reports forward slashes even on Windows; return a
+      // platform-native path so downstream join/fs calls stay consistent.
+      return { path: normalize(collision.path), branch };
+    }
+    // Branch is checked out in the main working tree or external worktree
+    return yield* new WorktreeError({
+      message:
+        `Branch '${branch}' is already checked out in worktree at '${collision.path}'. ` +
+        `Sandcastle's branch and merge-to-head strategies run the agent in a git worktree under .sandcastle/worktrees/, ` +
+        `and git refuses to check out the same branch in two worktrees at once (HEAD would become ambiguous). ` +
+        `Pick a different branch, or switch the main working tree to a different branch before re-running.`,
+    });
+  });
+
+/**
+ * Adds a worktree for an explicit branch, creating the branch from
+ * `baseBranch` (default `HEAD`) when it doesn't exist yet.
+ */
+const addBranchWorktree = (
+  repoDir: string,
+  worktreePath: string,
+  target: { readonly branch: string; readonly baseBranch: string | undefined },
+): Effect.Effect<string, WorktreeError> =>
+  execGit(
+    [...NO_CONFIG_LOCK_FLAGS, "worktree", "add", worktreePath, target.branch],
+    repoDir,
+  ).pipe(
+    Effect.catchAll((e) => {
+      if (e.message.includes("invalid reference")) {
+        return execGit(
+          [
+            ...NO_CONFIG_LOCK_FLAGS,
+            "worktree",
+            "add",
+            "-b",
+            target.branch,
+            worktreePath,
+            target.baseBranch ?? "HEAD",
+          ],
+          repoDir,
+        );
+      }
+      return Effect.fail(e);
+    }),
+  );
+
+/**
+ * Adds a worktree for an explicit branch, or reuses the worktree that
+ * already has it checked out (see reuseCollidingWorktree).
+ */
+const addOrReuseBranchWorktree = (
+  repoDir: string,
+  worktreePath: string,
+  target: {
+    readonly branch: string;
+    readonly baseBranch: string | undefined;
+    readonly worktreesDir: string;
+  },
+): Effect.Effect<WorktreeInfo, WorktreeError> =>
+  Effect.gen(function* () {
+    const { branch, worktreesDir } = target;
+    // Proactively detect collision before git produces a confusing error.
+    // Match by branch first; fall back to target path (covers mid-rebase
+    // detached-HEAD state where the branch field is null).
+    const existing = yield* listWorktrees(repoDir);
+    const collision = findCollidingWorktree(existing, branch, worktreePath);
+    if (collision) {
+      return yield* reuseCollidingWorktree(collision, branch, worktreesDir);
+    }
+    yield* addBranchWorktree(repoDir, worktreePath, target);
+    return { path: worktreePath, branch };
+  });
+
+/** Adds a worktree on a new temporary branch forked from `HEAD`. */
+const addTempBranchWorktree = (
+  repoDir: string,
+  worktreePath: string,
+  branch: string,
+): Effect.Effect<string, WorktreeError> =>
+  execGit(
+    [
+      ...NO_CONFIG_LOCK_FLAGS,
+      "worktree",
+      "add",
+      "-b",
+      branch,
+      worktreePath,
+      "HEAD",
+    ],
+    repoDir,
+  ).pipe(
+    Effect.catchAll((e) => {
+      if (
+        e.message.includes("already checked out") ||
+        e.message.includes("already exists")
+      ) {
+        return Effect.fail(
+          new WorktreeError({
+            message:
+              `Branch '${branch}' is already checked out in another worktree. ` +
+              `Use a different branch name, or wait for the other run to finish.`,
+          }),
+        );
+      }
+      return Effect.fail(e);
+    }),
+  );
 
 /**
  * Creates a git worktree at `.sandcastle/worktrees/<name>/`.
@@ -291,115 +437,26 @@ export const create = (
       .makeDirectory(worktreesDir, { recursive: true })
       .pipe(Effect.mapError((e) => new WorktreeError({ message: e.message })));
 
-    let branch: string;
-    let worktreeName: string;
-
     const explicitBranch = opts?.branch;
     const hasExplicitBranch =
       explicitBranch !== undefined && explicitBranch !== "";
+    const branch = hasExplicitBranch
+      ? explicitBranch
+      : (opts?.tempBranch ?? generateTempBranchName(opts?.name));
+    const worktreePath = join(worktreesDir, branch.replaceAll("/", "-"));
 
     if (hasExplicitBranch) {
-      branch = explicitBranch;
-      worktreeName = branch.replaceAll("/", "-");
-    } else {
-      branch = opts?.tempBranch ?? generateTempBranchName(opts?.name);
-      worktreeName = branch.replaceAll("/", "-");
+      return yield* addOrReuseBranchWorktree(repoDir, worktreePath, {
+        branch,
+        baseBranch: opts?.baseBranch,
+        worktreesDir,
+      });
     }
-
-    const worktreePath = join(worktreesDir, worktreeName);
-
-    if (hasExplicitBranch) {
-      // Proactively detect collision before git produces a confusing error.
-      // Match by branch first; fall back to target path (covers mid-rebase
-      // detached-HEAD state where the branch field is null).
-      const existing = yield* listWorktrees(repoDir);
-      const collision = findCollidingWorktree(existing, branch, worktreePath);
-      if (collision) {
-        // Only reuse worktrees managed by sandcastle (under .sandcastle/worktrees/)
-        if (isManagedWorktreePath(collision.path, worktreesDir)) {
-          const dirty = yield* hasUncommittedChanges(collision.path);
-          yield* dirty
-            ? Console.warn(
-                `Reusing worktree at ${collision.path} (branch '${branch}') — worktree has uncommitted changes`,
-              )
-            : fastForwardFromOrigin(collision.path, branch);
-          // git reports forward slashes even on Windows; return a
-          // platform-native path so downstream join/fs calls stay consistent.
-          return { path: normalize(collision.path), branch };
-        }
-        // Branch is checked out in the main working tree or external worktree
-        return yield* new WorktreeError({
-          message:
-            `Branch '${branch}' is already checked out in worktree at '${collision.path}'. ` +
-            `Sandcastle's branch and merge-to-head strategies run the agent in a git worktree under .sandcastle/worktrees/, ` +
-            `and git refuses to check out the same branch in two worktrees at once (HEAD would become ambiguous). ` +
-            `Pick a different branch, or switch the main working tree to a different branch before re-running.`,
-        });
-      }
-      yield* execGit(
-        [...NO_CONFIG_LOCK_FLAGS, "worktree", "add", worktreePath, branch],
-        repoDir,
-      ).pipe(
-        Effect.catchAll((e) => {
-          if (e.message.includes("invalid reference")) {
-            return execGit(
-              [
-                ...NO_CONFIG_LOCK_FLAGS,
-                "worktree",
-                "add",
-                "-b",
-                branch,
-                worktreePath,
-                opts?.baseBranch ?? "HEAD",
-              ],
-              repoDir,
-            );
-          }
-          return Effect.fail(e);
-        }),
-      );
-    } else {
-      yield* execGit(
-        [
-          ...NO_CONFIG_LOCK_FLAGS,
-          "worktree",
-          "add",
-          "-b",
-          branch,
-          worktreePath,
-          "HEAD",
-        ],
-        repoDir,
-      ).pipe(
-        Effect.catchAll((e) => {
-          if (
-            e.message.includes("already checked out") ||
-            e.message.includes("already exists")
-          ) {
-            return Effect.fail(
-              new WorktreeError({
-                message:
-                  `Branch '${branch}' is already checked out in another worktree. ` +
-                  `Use a different branch name, or wait for the other run to finish.`,
-              }),
-            );
-          }
-          return Effect.fail(e);
-        }),
-      );
-    }
-
+    yield* addTempBranchWorktree(repoDir, worktreePath, branch);
     return { path: worktreePath, branch };
   }).pipe(
-    withTimeout(
-      WORKTREE_TIMEOUT_MS,
-      () =>
-        new WorktreeTimeoutError({
-          message: `Worktree creation timed out after ${WORKTREE_TIMEOUT_MS}ms`,
-          timeoutMs: WORKTREE_TIMEOUT_MS,
-          path: repoDir,
-          operation: "create",
-        }),
+    withTimeout(WORKTREE_TIMEOUT_MS, () =>
+      worktreeTimeout(repoDir, "create", "creation"),
     ),
   );
 
@@ -479,6 +536,51 @@ export const deleteTempBranchIfUnused = (
     return { unmergedCommits: 0 };
   });
 
+/** The entries of `dir`, or null when it doesn't exist. */
+const readEntriesIfPresent = (
+  fs: FileSystem.FileSystem,
+  dir: string,
+): Effect.Effect<string[] | null, WorktreeError> =>
+  fs.readDirectory(dir).pipe(
+    Effect.map((es): string[] | null => es),
+    Effect.catchSome((e) =>
+      e._tag === "SystemError" && e.reason === "NotFound"
+        ? Option.some(Effect.succeed(null as string[] | null))
+        : Option.none(),
+    ),
+    Effect.mapError((e) => new WorktreeError({ message: e.message })),
+  );
+
+/** The paths of the worktrees git knows about, as `git worktree list` prints them. */
+const listActiveWorktreePaths = (
+  repoDir: string,
+): Effect.Effect<Set<string>, WorktreeError> =>
+  execGit(["worktree", "list", "--porcelain"], repoDir).pipe(
+    Effect.map(
+      (worktreeList) =>
+        new Set(
+          worktreeList
+            .split("\n")
+            .filter((line) => line.startsWith("worktree "))
+            .map((line) => line.slice("worktree ".length).trim()),
+        ),
+    ),
+  );
+
+/** Removes `dir` and everything in it. */
+const removeDir = (
+  fs: FileSystem.FileSystem,
+  dir: string,
+): Effect.Effect<void, WorktreeError> =>
+  fs.remove(dir, { recursive: true, force: true }).pipe(
+    Effect.mapError(
+      (e) =>
+        new WorktreeError({
+          message: `Failed to remove ${dir}: ${e.message}`,
+        }),
+    ),
+  );
+
 /**
  * Prunes stale git worktree metadata and removes orphaned directories under
  * `.sandcastle/worktrees/`.
@@ -498,17 +600,7 @@ export const pruneStale = (
 
     const worktreesDir = join(repoDir, ".sandcastle", "worktrees");
 
-    // Read directory entries — return null if directory doesn't exist
-    const entries: string[] | null = yield* fs.readDirectory(worktreesDir).pipe(
-      Effect.map((es): string[] | null => es),
-      Effect.catchSome((e) =>
-        e._tag === "SystemError" && e.reason === "NotFound"
-          ? Option.some(Effect.succeed(null as string[] | null))
-          : Option.none(),
-      ),
-      Effect.mapError((e) => new WorktreeError({ message: e.message })),
-    );
-
+    const entries = yield* readEntriesIfPresent(fs, worktreesDir);
     if (entries === null) {
       return;
     }
@@ -521,17 +613,7 @@ export const pruneStale = (
       .realPath(worktreesDir)
       .pipe(Effect.catchAll(() => Effect.succeed(worktreesDir)));
 
-    // Get the list of active worktree paths from git
-    const worktreeList = yield* execGit(
-      ["worktree", "list", "--porcelain"],
-      repoDir,
-    );
-    const activeWorktreePaths = new Set(
-      worktreeList
-        .split("\n")
-        .filter((line) => line.startsWith("worktree "))
-        .map((line) => line.slice("worktree ".length).trim()),
-    );
+    const activeWorktreePaths = yield* listActiveWorktreePaths(repoDir);
 
     // Remove any directory under .sandcastle/worktrees/ that is not an active worktree
     for (const entry of entries) {
@@ -541,25 +623,11 @@ export const pruneStale = (
         Effect.catchAll(() => Effect.succeed(false)),
       );
       if (isDir && isOrphanedWorktreePath(entryPath, activeWorktreePaths)) {
-        yield* fs.remove(entryPath, { recursive: true, force: true }).pipe(
-          Effect.mapError(
-            (e) =>
-              new WorktreeError({
-                message: `Failed to remove ${entryPath}: ${e.message}`,
-              }),
-          ),
-        );
+        yield* removeDir(fs, entryPath);
       }
     }
   }).pipe(
-    withTimeout(
-      WORKTREE_TIMEOUT_MS,
-      () =>
-        new WorktreeTimeoutError({
-          message: `Worktree prune timed out after ${WORKTREE_TIMEOUT_MS}ms`,
-          timeoutMs: WORKTREE_TIMEOUT_MS,
-          path: repoDir,
-          operation: "prune",
-        }),
+    withTimeout(WORKTREE_TIMEOUT_MS, () =>
+      worktreeTimeout(repoDir, "prune", "prune"),
     ),
   );

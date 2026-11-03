@@ -37,10 +37,10 @@ const initRepo = async (dir: string) => {
 
 const commitFile = async (
   dir: string,
-  name: string,
-  content: string,
+  file: { readonly name: string; readonly content: string },
   message: string,
 ) => {
+  const { name, content } = file;
   await writeFile(join(dir, name), content);
   await execAsync(`git add "${name}"`, { cwd: dir });
   await execAsync(`git commit -m "${message}"`, { cwd: dir });
@@ -68,7 +68,11 @@ describe("syncIn", () => {
   it("bundles a repo and clones it into the sandbox — files present", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "hello.txt", "hello world", "initial commit");
+    await commitFile(
+      hostDir,
+      { name: "hello.txt", content: "hello world" },
+      "initial commit",
+    );
 
     const provider = testIsolated();
     const handle = await provider.create({ env: {} });
@@ -85,9 +89,9 @@ describe("syncIn", () => {
   it("preserves git history after clone from bundle", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "a.txt", "a", "first commit");
-    await commitFile(hostDir, "b.txt", "b", "second commit");
-    await commitFile(hostDir, "c.txt", "c", "third commit");
+    await commitFile(hostDir, { name: "a.txt", content: "a" }, "first commit");
+    await commitFile(hostDir, { name: "b.txt", content: "b" }, "second commit");
+    await commitFile(hostDir, { name: "c.txt", content: "c" }, "third commit");
 
     const provider = testIsolated();
     const handle = await provider.create({ env: {} });
@@ -114,7 +118,11 @@ describe("syncIn", () => {
   it("works with repos that have unpushed commits (no remote)", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "local-only.txt", "no remote", "local commit");
+    await commitFile(
+      hostDir,
+      { name: "local-only.txt", content: "no remote" },
+      "local commit",
+    );
 
     const provider = testIsolated();
     const handle = await provider.create({ env: {} });
@@ -134,7 +142,11 @@ describe("syncIn", () => {
   it("returns the current branch name", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "file.txt", "content", "initial");
+    await commitFile(
+      hostDir,
+      { name: "file.txt", content: "content" },
+      "initial",
+    );
 
     const provider = testIsolated();
     const handle = await provider.create({ env: {} });
@@ -149,9 +161,17 @@ describe("syncIn", () => {
   it("works with a non-main branch", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "file.txt", "on main", "initial");
+    await commitFile(
+      hostDir,
+      { name: "file.txt", content: "on main" },
+      "initial",
+    );
     await execAsync("git checkout -b feature-branch", { cwd: hostDir });
-    await commitFile(hostDir, "feature.txt", "feature work", "feature commit");
+    await commitFile(
+      hostDir,
+      { name: "feature.txt", content: "feature work" },
+      "feature commit",
+    );
 
     const provider = testIsolated();
     const handle = await provider.create({ env: {} });
@@ -178,7 +198,11 @@ describe("syncIn", () => {
   it("only syncs committed state — uncommitted changes are excluded", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "committed.txt", "committed", "initial");
+    await commitFile(
+      hostDir,
+      { name: "committed.txt", content: "committed" },
+      "initial",
+    );
 
     // Add uncommitted changes
     await writeFile(join(hostDir, "committed.txt"), "modified uncommitted");
@@ -204,7 +228,11 @@ describe("syncIn", () => {
   it("fails with a SyncError when the sandbox HEAD doesn't match the host after sync", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+    await commitFile(
+      hostDir,
+      { name: "hello.txt", content: "hello" },
+      "initial commit",
+    );
 
     const provider = testIsolated();
     const handle = await provider.create({ env: {} });
