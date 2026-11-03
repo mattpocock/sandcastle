@@ -143,8 +143,7 @@ const containersAndImages = (world: World): Section => {
     const id = rest.slice(rest.lastIndexOf("@") + 1);
     const a = attributeImage(
       { ref, created: imageCreated(engine, id) },
-      world,
-      others,
+      { self: world, others },
       now,
     );
     if (a.kind === "leak") leaks.push(`image ${img}: ${a.detail}`);
