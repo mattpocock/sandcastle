@@ -164,7 +164,7 @@ describe("InitService scaffold", () => {
       join(dir, ".sandcastle", ".env.example"),
       "utf8",
     );
-    expect(envExample).toMatch(/^# GH_HOST=/mu);
+    expect(envExample).toMatch(/^GH_HOST=$/mu);
     expect(envExample).toMatch(/^# GH_ENTERPRISE_TOKEN=/mu);
   });
 
