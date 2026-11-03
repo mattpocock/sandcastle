@@ -38,15 +38,18 @@ const planSchema = z.object({
 // Raise this if your backlog is large; lower it for a quick smoke-test run.
 const MAX_ITERATIONS = 10;
 
-// Hooks run inside the sandbox before the agent starts each iteration.
-// npm install ensures the sandbox always has fresh dependencies.
-const hooks = {
+// Install hooks only for worktree phases (execute). Planner and merger
+// bind-mount the real checkout (no branchStrategy), so an `npm install`
+// there would rewrite the host's node_modules — e.g. Linux native binaries
+// on macOS, or packages removed from the host tree.
+const installHooks = {
   sandbox: { onSandboxReady: [{ command: "npm install" }] },
 };
 
-// Copy node_modules from the host into the worktree before each sandbox
-// starts. Avoids a full npm install from scratch; the hook above handles
-// platform-specific binaries and any packages added since the last copy.
+// Copy node_modules from the host into the worktree before each execute
+// sandbox starts. Avoids a full npm install from scratch; the hook above
+// handles platform-specific binaries and any packages added since the last
+// copy. Safe only with a worktree — never pair this with a head bind-mount.
 const copyToWorktree = ["node_modules"];
 
 // ---------------------------------------------------------------------------
@@ -66,7 +69,6 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // It outputs a <plan> JSON block — Output.object parses and validates it.
   // -------------------------------------------------------------------------
   const plan = await sandcastle.run({
-    hooks,
     sandbox: docker(),
     name: "planner",
     // One iteration is enough: the planner just needs to read and reason,
@@ -108,7 +110,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   const settled = await Promise.allSettled(
     issues.map((issue) =>
       sandcastle.run({
-        hooks,
+        hooks: installHooks,
         copyToWorktree,
         // Each agent starts on its own branch via branchStrategy on run().
         sandbox: docker(),
@@ -174,7 +176,6 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // uses to know which branches to merge and which issues to close.
   // -------------------------------------------------------------------------
   await sandcastle.run({
-    hooks,
     sandbox: docker(),
     name: "merger",
     maxIterations: 1,
