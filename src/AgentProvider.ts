@@ -870,7 +870,7 @@ const parsePiStreamLine = (line: string): ParsedStreamEvent[] => {
     // The first line of pi's --mode json stdout stream is a `session` header
     // carrying the UUID; subsequent stream entries (model_change,
     // thinking_level_change, message, ...) do not. Verified against
-    // @mariozechner/pi-coding-agent 0.73.1.
+    // @mariozechner/pi-coding-agent 0.73.1 and @earendil-works/pi-coding-agent 1.5.0.
     if (obj.type === "session" && typeof obj.id === "string") {
       return [{ type: "session_id", sessionId: obj.id }];
     }
