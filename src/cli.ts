@@ -3,7 +3,7 @@ import { FileSystem } from "@effect/platform";
 import { Effect, Option } from "effect";
 import * as clack from "@clack/prompts";
 import { execFile, execSync } from "node:child_process";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { styleText } from "node:util";
 
 import { Display } from "./Display.js";
@@ -88,6 +88,29 @@ const requireConfigDir = (
         new ConfigDirError({
           message: "No .sandcastle/ found. Run `sandcastle init` first.",
         }),
+    ),
+    Effect.asVoid,
+  );
+
+const NATIVE_SANDBOX_HINT =
+  "Native sandboxes (bwrap(), seatbelt(), noSandbox()) run without an image, so you only need one for a container sandbox.";
+
+/**
+ * Fails with a clear message when none of `candidates` exists, so a missing
+ * build file is not reported as the container runtime being down.
+ */
+const requireBuildFile = (
+  candidates: readonly string[],
+  message: string,
+): Effect.Effect<void, ConfigDirError, FileSystem.FileSystem> =>
+  FileSystem.FileSystem.pipe(
+    Effect.flatMap((fs) =>
+      Effect.all(candidates.map((candidate) => fs.exists(candidate))),
+    ),
+    Effect.catchAll(() => Effect.succeed([false])),
+    Effect.filterOrFail(
+      (found) => found.some(Boolean),
+      () => new ConfigDirError({ message }),
     ),
     Effect.asVoid,
   );
@@ -939,6 +962,15 @@ const buildImageCommand = Command.make(
       const dockerfileDir = join(cwd, CONFIG_DIR);
       const dockerfilePath =
         dockerfile._tag === "Some" ? dockerfile.value : undefined;
+      yield* dockerfilePath === undefined
+        ? requireBuildFile(
+            [join(dockerfileDir, "Dockerfile")],
+            `No Dockerfile found at ${CONFIG_DIR}/Dockerfile. ${NATIVE_SANDBOX_HINT} To build one, add ${CONFIG_DIR}/Dockerfile or pass --dockerfile <path>.`,
+          )
+        : requireBuildFile(
+            [resolve(dockerfilePath)],
+            `Dockerfile not found: ${dockerfilePath}`,
+          );
 
       yield* d.spinner(
         `Building Docker image '${imageName}'...`,
@@ -1012,6 +1044,18 @@ const podmanBuildImageCommand = Command.make(
       const containerfileDir = join(cwd, CONFIG_DIR);
       const containerfilePath =
         containerfile._tag === "Some" ? containerfile.value : undefined;
+      yield* containerfilePath === undefined
+        ? requireBuildFile(
+            [
+              join(containerfileDir, "Containerfile"),
+              join(containerfileDir, "Dockerfile"),
+            ],
+            `No Containerfile or Dockerfile found in ${CONFIG_DIR}/. ${NATIVE_SANDBOX_HINT} To build one, add ${CONFIG_DIR}/Containerfile or pass --containerfile <path>.`,
+          )
+        : requireBuildFile(
+            [resolve(containerfilePath)],
+            `Containerfile not found: ${containerfilePath}`,
+          );
       yield* d.spinner(
         `Building Podman image '${imageName}'...`,
         podmanBuildImage(imageName, containerfileDir, {
