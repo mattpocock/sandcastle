@@ -65,6 +65,7 @@
     "prelint": "tsx scripts/ensure-build.ts",
     "lint": "tsc --noEmit -p scripts/tsconfig.json && tsx scripts/lint-ratchet.ts",
     "lint:shrink": "tsx scripts/lint-ratchet.ts --shrink",
+    "prelint:report": "tsx scripts/ensure-build.ts",
     "lint:report": "tsx scripts/lint-ratchet.ts --report",
     "format": "biome format --write .",
     "format:check": "biome format .",
