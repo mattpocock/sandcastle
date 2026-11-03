@@ -1,5 +1,6 @@
 import { assert, describe, expect, it } from "vitest";
 import {
+  claudeHostSessionPath,
   claudeSubagentsDirInSandbox,
   claudeSubagentsDirOnHost,
   encodePiSessionDir,
@@ -14,7 +15,15 @@ import {
   transferCodexSession,
   transferPiSession,
 } from "./SessionStore.js";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
 import type { BindMountSandboxHandle } from "./SandboxProvider.js";
@@ -72,6 +81,54 @@ describe("encodeProjectPath", () => {
   it("strips multiple trailing backslashes", () => {
     expect(encodeProjectPath(String.raw`D:\projekts\app\\`)).toBe(
       "D--projekts-app",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// claudeHostSessionPath — the physical path Claude Code encodes
+// ---------------------------------------------------------------------------
+
+describe("claudeHostSessionPath", () => {
+  it("encodes the physical path when the repo is reached through a symlink", async () => {
+    const root = await mkdtemp(join(tmpdir(), "sandcastle-symlink-"));
+    const real = join(root, "real-repo");
+    const link = join(root, "linked-repo");
+    await mkdir(real);
+    try {
+      await symlink(
+        real,
+        link,
+        process.platform === "win32" ? "junction" : "dir",
+      );
+    } catch {
+      // Windows needs Developer Mode or an elevated shell for symlinks.
+      await rm(root, { recursive: true, force: true });
+      return;
+    }
+    try {
+      const id = "session-1";
+      const physical = realpathSync.native(real);
+      expect(claudeHostSessionPath(link, id, root)).toBe(
+        join(root, encodeProjectPath(physical), `${id}.jsonl`),
+      );
+      expect(claudeSubagentsDirOnHost(link, id, root)).toBe(
+        join(root, encodeProjectPath(physical), id, "subagents"),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a cwd that cannot be resolved, such as a sandbox-side path", () => {
+    expect(
+      claudeHostSessionPath("/does/not/exist/repo", "session-1", "/projects"),
+    ).toBe(
+      join(
+        "/projects",
+        encodeProjectPath("/does/not/exist/repo"),
+        "session-1.jsonl",
+      ),
     );
   });
 });
