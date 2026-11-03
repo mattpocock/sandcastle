@@ -59,10 +59,10 @@ const liveAt = (w: WorldSpan, t: number, now: number): boolean =>
  */
 export const attributeImage = (
   image: { readonly ref: string; readonly created?: string },
-  self: WorldSpan,
-  others: readonly WorldSpan[],
+  worlds: { readonly self: WorldSpan; readonly others: readonly WorldSpan[] },
   now: string,
 ): ImageAttribution => {
+  const { self, others } = worlds;
   const ids = runIdsIn(image.ref);
   if (ids.includes(self.runId)) {
     return { kind: "own", detail: "this world's, cleanup removes it" };

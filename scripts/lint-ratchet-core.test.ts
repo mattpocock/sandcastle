@@ -3,6 +3,7 @@ import {
   baselineGrowth,
   compare,
   countViolations,
+  driftReport,
   matchObjectUndefinedCount,
   shrink,
   tscErrors,
@@ -99,5 +100,29 @@ describe("tscErrors", () => {
 
   it("finds nothing in clean output", () => {
     expect(tscErrors("")).toStrictEqual([]);
+  });
+});
+
+describe("driftReport", () => {
+  it("ranks by the live counts and shows each baseline count alongside", () => {
+    const live = { "a.ts": { x: 3, y: 1 }, "b.ts": { x: 1 } };
+    const baseline = { "a.ts": { x: 5, y: 1 }, "c.ts": { z: 4 } };
+    expect(driftReport(live, baseline, 2).split("\n")).toStrictEqual([
+      "5 / 10 violations (live / baseline), 2 / 2 files, 2 / 3 rules",
+      "Top rules (live / baseline):",
+      "       4 /      5  x",
+      "       1 /      1  y",
+      "Top files (live / baseline):",
+      "       4 /      6  a.ts",
+      "       1 /      0  b.ts",
+    ]);
+  });
+
+  it("reports a clean tree against an empty baseline", () => {
+    expect(driftReport({}, {}, 10).split("\n")).toStrictEqual([
+      "0 / 0 violations (live / baseline), 0 / 0 files, 0 / 0 rules",
+      "Top rules (live / baseline):",
+      "Top files (live / baseline):",
+    ]);
   });
 });
