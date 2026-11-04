@@ -31,11 +31,23 @@ const init = (sessionId: string): string =>
 const result = (text: string): string =>
   JSON.stringify({ type: "result", is_error: false, result: text });
 
-/** A session that answers, then hangs until its completion timeout ends it. */
+/**
+ * A session that answers, then hangs: with a long completion timeout it runs
+ * until `endAgents` stops it, so "still running" never depends on timing.
+ */
 const answering = fakeAgent({
   lines: [init("s-reattach"), result("<answer>done</answer>")],
   hang: true,
 });
+
+/** Stops the fake agents running in a sandbox, ending their sessions. */
+const endAgents = async (
+  sandbox: DetachableSandbox,
+  supervisor: string,
+): Promise<void> => {
+  // The bracket keeps pkill from matching its own shell's command line.
+  await sandbox.exec(`pkill -f '${supervisor}/[r]eplays/'`);
+};
 
 /** Reattaches, failing the test when the supervisor isn't there. */
 const reattach = async (
@@ -133,7 +145,7 @@ describe.skipIf(process.platform === "win32")(
         agent: answering,
         prompt: "Reply in <answer> tags.",
         output: Output.string({ tag: "answer" }),
-        completionTimeoutSeconds: 1,
+        completionTimeoutSeconds: 600,
       });
       const receipt = await sandbox.detach({
         finishReport: {
@@ -167,6 +179,7 @@ describe.skipIf(process.platform === "win32")(
         -4,
       );
 
+      await endAgents(reattached, supervisorDir(provider, sandbox.sandboxId));
       await hook.first();
       const after = await statusUntil(
         reattached,
@@ -179,14 +192,15 @@ describe.skipIf(process.platform === "win32")(
             kind: "session",
             name: "implement",
             agent: "claude-code",
-            exitReason: "closing-tag",
+            // Stopped from outside, so it failed: what status() reports.
+            exitReason: "failed",
           },
         ],
         detached: {
           detachId: receipt.detachId,
           finishReport: {
             type: "sandcastle.detached.finished",
-            data: { detachId: receipt.detachId, status: "succeeded" },
+            data: { detachId: receipt.detachId, status: "failed" },
           },
         },
       });
@@ -208,7 +222,7 @@ describe.skipIf(process.platform === "win32")(
         agent: answering,
         prompt: "Reply in <answer> tags.",
         output: Output.string({ tag: "answer" }),
-        completionTimeoutSeconds: 0.5,
+        completionTimeoutSeconds: 600,
       });
       const receipt = await sandbox.detach({
         finishReport: {
@@ -220,6 +234,7 @@ describe.skipIf(process.platform === "win32")(
         provider,
         sandboxId: sandbox.sandboxId,
       });
+      await endAgents(watching, supervisorDir(provider, sandbox.sandboxId));
       await statusUntil(
         watching,
         (status) => status.detached?.delivery === "gave-up",

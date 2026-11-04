@@ -159,15 +159,29 @@ const withSupervisorCopiesAsBuilt = (json: unknown): unknown => {
   return json;
 };
 
+const parsedOrUndefined = (text: string): unknown => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+};
+
 /** Covered src/ lines per process that wrote a report into `dir`. */
 const subprocessLines = async (dir: string): Promise<Lines[]> => {
   const dist = await readDist();
   const reports = await readdir(dir);
   const perProcess = await Promise.all(
     reports.map(async (name) => {
-      const json: unknown = JSON.parse(
-        await readFile(path.join(dir, name), "utf8"),
-      );
+      const text = await readFile(path.join(dir, name), "utf8");
+      // A process killed while V8 wrote its report (a test closing a
+      // sandbox as its session supervisor exits) leaves it cut short. Its
+      // coverage is lost either way; the rest still counts.
+      const json: unknown = parsedOrUndefined(text);
+      if (json === undefined) {
+        const none: Lines = new Map();
+        return none;
+      }
       return linesFromV8(withSupervisorCopiesAsBuilt(json), ROOT, (file) =>
         dist.get(file),
       );

@@ -86,26 +86,19 @@ const deliver = (
   detached: Detached,
   body: string,
   remainingMs: number,
-): Effect.Effect<string> => {
+): Effect.Effect<FinishReportDelivery> => {
   const { request, secret } = detached;
   const key = secret === undefined ? undefined : signingKey(secret);
   const url = request.finishReport?.url;
   if (url === undefined || key === undefined) {
-    return Effect.promise(async () => detached.delivery("no-destination")).pipe(
-      Effect.as("written"),
-    );
+    return Effect.succeed("no-destination");
   }
   const sent = send({
     url,
     method: { kind: "webhook", key, id: request.detachId },
     body,
     giveUpMs: remainingMs,
-  }).pipe(
-    Effect.tap((result) =>
-      Effect.promise(async () => detached.delivery(result)),
-    ),
-    Effect.provide(FetchHttpClient.layer),
-  );
+  }).pipe(Effect.provide(FetchHttpClient.layer));
   return Effect.promise(async () => detached.delivery("delivering")).pipe(
     Effect.andThen(sent),
   );
@@ -125,7 +118,10 @@ export const carryOn = (detached: Detached): void => {
     // Until the kill time, which was `giveUpMs` away at the detach.
     const elapsed = (yield* Clock.currentTimeMillis) - detachedAt;
     const result = yield* deliver(detached, body, request.giveUpMs - elapsed);
-    yield* Effect.logInfo(`finish report ${request.detachId}: ${result}`);
+    const logged = result === "no-destination" ? "written" : result;
+    yield* Effect.logInfo(`finish report ${request.detachId}: ${logged}`);
+    // After the log line, so a status() that sees the outcome sees it logged.
+    yield* Effect.promise(async () => detached.delivery(result));
   }).pipe(
     Effect.catchAllCause((cause) =>
       Effect.logError("finish report failed", cause),
