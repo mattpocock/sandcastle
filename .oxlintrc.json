@@ -256,7 +256,8 @@
         "src/createSandbox.ts",
         "src/createWorktree.ts",
         "src/sandboxes/*.ts",
-        "src/v1/*.ts"
+        "src/v1/*.ts",
+        "src/v1/sandboxes/*.ts"
       ],
       "rules": { "eslint/no-restricted-properties": "off" }
     },

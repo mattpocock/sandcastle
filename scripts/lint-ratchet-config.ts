@@ -18,6 +18,8 @@ export const ENTRY_POINTS: readonly string[] = [
   // v1's public promise API (createSandbox, the handle) and its testing fake,
   // which wraps Node child processes like the providers above.
   "src/v1/*.ts",
+  // v1's provider factories, which wrap vendor SDKs' promise APIs.
+  "src/v1/sandboxes/*.ts",
 ];
 
 /** Mirrors the second override in .oxlintrc.json. */

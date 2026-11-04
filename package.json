@@ -57,6 +57,10 @@
     "./v1/testing": {
       "import": "./dist/v1/testing.js",
       "types": "./dist/v1/testing.d.ts"
+    },
+    "./v1/sandboxes/daytona": {
+      "import": "./dist/v1/sandboxes/daytona.js",
+      "types": "./dist/v1/sandboxes/daytona.d.ts"
     }
   },
   "bin": {
@@ -135,7 +139,7 @@
     "@clack/prompts": "^1.1.0"
   },
   "peerDependencies": {
-    "@daytona/sdk": ">=0.164.0 <1.0.0",
+    "@daytona/sdk": ">=0.199.0 <1.0.0",
     "@fly/sprites": ">=0.2.4 <1.0.0",
     "@vercel/sandbox": ">=1.0.0",
     "e2b": ">=2.62.0 <3.0.0",
