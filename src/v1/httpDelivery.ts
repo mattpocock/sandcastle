@@ -7,7 +7,8 @@ import { signMessage } from "./webhookSignature.js";
 // session records alike. A Standard Webhook POST is signed afresh for each
 // attempt; an upload is a plain PUT. Any answer but 2xx is retried with
 // backoff (or after the receiver's `Retry-After`), except 410 Gone, which
-// stops it. It gives up once the next attempt would land past `giveUpMs`.
+// stops it. It gives up once the next attempt could still be running at
+// `giveUpMs`, its timeout included.
 
 /** What delivery came to. */
 export type DeliveryResult = "delivered" | "gone" | "gave-up";
@@ -35,7 +36,7 @@ export interface Delivery {
   readonly giveUpMs: number;
 }
 
-const ATTEMPT_TIMEOUT = "30 seconds";
+const ATTEMPT_TIMEOUT = Duration.seconds(30);
 const MAX_WAIT_MS = 60_000;
 
 type Answer =
@@ -119,7 +120,9 @@ export const deliver = (
       const waitMs =
         answer.afterMs ?? Math.min(1000 * 2 ** attempt, MAX_WAIT_MS);
       const now = yield* Clock.currentTimeMillis;
-      if (now + waitMs - start > delivery.giveUpMs) {
+      // The next attempt must be over, timeout included, by the give-up time.
+      const lastsUntil = now + waitMs + Duration.toMillis(ATTEMPT_TIMEOUT);
+      if (lastsUntil - start > delivery.giveUpMs) {
         return "gave-up";
       }
       yield* Effect.sleep(Duration.millis(waitMs));
