@@ -19,15 +19,19 @@ export interface FakeProcessContext {
   readonly env: Readonly<Record<string, string>>;
 }
 
+// PWD is the directory as the sandbox names it, so `pwd` agrees with
+// `workingDirectory` even where the temp dir sits behind a symlink (macOS).
 const commandEnv = (
   context: FakeProcessContext,
   extra: Readonly<Record<string, string>> | undefined,
+  cwd: string,
 ): Record<string, string> => ({
   PATH: context.hostPath,
   ...context.env,
   ...extra,
   HOME: path.join(context.dir, "home"),
   TMPDIR: path.join(context.dir, "tmp"),
+  PWD: cwd,
 });
 
 /**
@@ -42,12 +46,13 @@ export const startProcess = (
   >,
   stdio: "pipe" | "ignore",
 ) => {
+  const cwd = path.resolve(
+    path.join(context.dir, "work"),
+    options.workingDirectory ?? ".",
+  );
   const child = spawn("sh", ["-c", options.command], {
-    cwd: path.resolve(
-      path.join(context.dir, "work"),
-      options.workingDirectory ?? ".",
-    ),
-    env: commandEnv(context, options.env),
+    cwd,
+    env: commandEnv(context, options.env, cwd),
     detached: true,
     stdio: [options.stdin === undefined ? "ignore" : "pipe", stdio, stdio],
   });
