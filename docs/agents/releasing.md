@@ -5,6 +5,10 @@ Releases go through [changesets](https://github.com/changesets/changesets). On e
 - While `.changeset/` holds unreleased changesets, it opens (or updates) the **Version Packages** PR from `changeset-release/main`. That PR bumps `package.json` and writes `CHANGELOG.md`.
 - Merging that PR is the release: the next run on `main` finds no changesets and publishes to npm (`npx changeset publish`).
 
+## v1 snapshots
+
+On every push to `release/v1`, the `snapshot` job in the same workflow publishes a prerelease of the next major under the `v1-next` dist-tag: `npx changeset version --snapshot v1-next`, then `npx changeset publish --tag v1-next --no-git-tag`. Versions look like `1.0.0-v1-next.20261104120000` (`snapshot` in `.changeset/config.json`). The versioning happens only in the job's checkout: nothing is committed, pushed or tagged, the changesets stay for the real release, and `latest` never moves. Install one with `npm install @ai-hero/sandcastle@v1-next`. The dist-tag is not plain `v1` because npm rejects tags that parse as a semver range.
+
 ## Before you merge the Version Packages PR
 
 Run the local tests on the PR's branch, with Docker and Podman both running:
