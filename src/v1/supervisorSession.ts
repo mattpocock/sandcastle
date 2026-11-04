@@ -1,18 +1,24 @@
 import type { WriteStream } from "node:fs";
-import { Duration, Effect, Option, Queue } from "effect";
+import { Clock, DateTime, Duration, Effect, Option, Queue } from "effect";
 import type { AgentProvider } from "../AgentProvider.js";
 import { shellEscape } from "../AgentProvider.js";
 import type { AgentProcess } from "./agentProcess.js";
 import { startAgentProcess } from "./agentProcess.js";
+import type { RecordedEvent } from "./SessionRecord.js";
+import type { RecordSecrets } from "./sessionRecordSchema.js";
 import type { StreamState } from "./sessionStream.js";
 import { applyEvents, emptyStream } from "./sessionStream.js";
 import type { StreamEnd, Watched } from "./sessionOutcome.js";
 import { sessionOutcome } from "./sessionOutcome.js";
+import type { Recording } from "./supervisorRecord.js";
+import { recordSession } from "./supervisorRecord.js";
 import type {
   Reply,
   SessionOutcome,
   SessionRequest,
 } from "./supervisorProtocol.js";
+
+export type { RecordSecrets } from "./sessionRecordSchema.js";
 
 // One agent session inside the sandbox: start the agent, read its stream,
 // and end it on exit, on kill, on the idle timeout, or, once the output's
@@ -34,6 +40,8 @@ interface Context {
   readonly emit: (reply: Reply) => void;
   /** The output's closing tag, which arms the completion timeout. */
   readonly trigger: string | undefined;
+  /** Every event the user sees, timestamped, for the session's record. */
+  readonly events: RecordedEvent[];
 }
 
 const stopped = (
@@ -50,8 +58,10 @@ const readLine = (
   line: string,
 ): StreamState => {
   const applied = applyEvents(stream, context.agent.parseStreamLine(line));
+  const at = DateTime.formatIso(DateTime.unsafeNow());
   for (const event of applied.visible) {
     context.emit({ type: "event", event });
+    context.events.push({ ...event, at });
   }
   return applied.state;
 };
@@ -118,15 +128,22 @@ const agentEnv = (options: Readonly<Record<string, unknown>>) => {
   );
 };
 
-/** Starts the session's agent; `outcome` resolves once it has ended. */
-export const startSession = (options: {
+/** What starting a session needs. */
+export interface StartOptions {
   readonly request: SessionRequest;
   readonly agent: AgentProvider;
   /** Turns the agent's real command into the one to run (a fake agent replays instead). */
   readonly command: (realCommand: string) => string;
   readonly log: WriteStream;
   readonly emit: (reply: Reply) => void;
-}): Effect.Effect<RunningSession> =>
+  /** The record's upload URL and webhook secret, opened. */
+  readonly secrets: RecordSecrets;
+  /** The detach the session is carried on under, if any. */
+  readonly detachId: () => string | undefined;
+}
+
+/** Starts the agent's process with the session's env; returns it and that env. */
+const launch = (options: StartOptions) =>
   Effect.gen(function* () {
     const { request, agent } = options;
     const print = agent.buildPrintCommand({
@@ -143,6 +160,17 @@ export const startSession = (options: {
       stdin: print.stdin,
       log: options.log,
     });
+    return { process, env };
+  });
+
+/** Starts the session's agent; `outcome` resolves once it has ended. */
+export const startSession = (
+  options: StartOptions,
+): Effect.Effect<RunningSession> =>
+  Effect.gen(function* () {
+    const { request, agent } = options;
+    const startedMs = yield* Clock.currentTimeMillis;
+    const { process, env } = yield* launch(options);
     const context: Context = {
       request,
       agent,
@@ -150,11 +178,23 @@ export const startSession = (options: {
       emit: options.emit,
       trigger:
         request.output === undefined ? undefined : `</${request.output.tag}>`,
+      events: [],
+    };
+    const recording: Recording = {
+      request,
+      secrets: options.secrets,
+      events: context.events,
+      startedAt: DateTime.formatIso(DateTime.unsafeMake(startedMs)),
+      killAtMs: startedMs + (request.record?.killInMs ?? 0),
+      sessionEnv: env,
+      detachId: options.detachId,
+      emit: options.emit,
     };
     const outcome = yield* watch(context).pipe(
       Effect.flatMap((watched) =>
         sessionOutcome({ request, agent, tail: process.tail }, watched),
       ),
+      Effect.flatMap((ended) => recordSession(recording, ended)),
       Effect.cached,
     );
     return {

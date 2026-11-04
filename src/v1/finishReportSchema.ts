@@ -1,16 +1,9 @@
 import { Schema } from "effect";
-import { ExitReason } from "./supervisorProtocol.js";
+import { ExitReason, RecordPointer, Usage } from "./sessionRecordSchema.js";
 
 // The finish report's wire shape, as verifyFinishReport reads it back. The
 // supervisor builds it from the public `FinishReport` type
 // (finishReportBuild.ts); this schema checks a body that claims to be one.
-
-const Usage = Schema.Struct({
-  inputTokens: Schema.Number,
-  outputTokens: Schema.Number,
-  cacheReadInputTokens: Schema.Number,
-  cacheCreationInputTokens: Schema.Number,
-});
 
 const SessionReport = Schema.Struct({
   name: Schema.String,
@@ -27,6 +20,7 @@ const SessionReport = Schema.Struct({
   output: Schema.optional(Schema.Unknown),
   finalMessage: Schema.String,
   outputTail: Schema.String,
+  record: Schema.optional(RecordPointer),
 });
 
 const ProcessReport = Schema.Struct({

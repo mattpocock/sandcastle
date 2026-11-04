@@ -6,7 +6,14 @@ import { createInterface } from "node:readline";
 import { Either, Schema } from "effect";
 import type { SealingKeys } from "./sealedSecret.js";
 import { makeSealingKeys, openSecret } from "./sealedSecret.js";
-import type { DetachRequest, Reply, Request } from "./supervisorProtocol.js";
+import type { RecordSecrets } from "./sessionRecordSchema.js";
+import { RecordSecretsJson } from "./sessionRecordSchema.js";
+import type {
+  DetachRequest,
+  Reply,
+  Request,
+  SessionRequest,
+} from "./supervisorProtocol.js";
 import { RequestJson } from "./supervisorProtocol.js";
 import { SessionRegistry } from "./supervisorRegistry.js";
 
@@ -20,6 +27,7 @@ import { SessionRegistry } from "./supervisorRegistry.js";
 export const SOCKET = "control.sock";
 
 const decodeRequest = Schema.decodeUnknownEither(RequestJson);
+const decodeSecrets = Schema.decodeUnknownEither(RecordSecretsJson);
 
 /** Writes one reply line; a client that has gone away is fine. */
 const sender =
@@ -64,6 +72,47 @@ const detach = (
   send({ type: "detached", carriedOn });
 };
 
+/** Opens a session record's sealed sinks; `undefined` when they don't open. */
+const recordSecrets = (
+  request: SessionRequest,
+  keys: SealingKeys,
+): RecordSecrets | undefined => {
+  const sealed = request.record?.sealed;
+  if (sealed === undefined) {
+    return {};
+  }
+  const opened = openSecret(keys.privateKey, sealed);
+  const decoded = opened === undefined ? undefined : decodeSecrets(opened);
+  return decoded !== undefined && Either.isRight(decoded)
+    ? decoded.right
+    : undefined;
+};
+
+/** Starts a session, once its record's sinks have opened. */
+const startSession = (
+  request: SessionRequest,
+  socket: Socket,
+  context: Context,
+): void => {
+  const secrets = recordSecrets(request, context.keys);
+  if (secrets === undefined) {
+    sender(socket)({
+      type: "error",
+      message: "the session record's sinks didn't open",
+    });
+    socket.end();
+    return;
+  }
+  context.registry.start({
+    request,
+    secrets,
+    send: sender(socket),
+    done: () => {
+      socket.end();
+    },
+  });
+};
+
 const handle = (request: Request, socket: Socket, context: Context): void => {
   const send = sender(socket);
   switch (request.type) {
@@ -82,9 +131,7 @@ const handle = (request: Request, socket: Socket, context: Context): void => {
       return;
     }
     case "session": {
-      context.registry.start(request, send, () => {
-        socket.end();
-      });
+      startSession(request, socket, context);
       return;
     }
     case "kill": {

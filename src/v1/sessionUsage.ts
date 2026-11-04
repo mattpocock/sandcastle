@@ -24,19 +24,16 @@ export const claudeSessionFile = (
     `${sessionId}.jsonl`,
   );
 
-/** The session's usage, from its session file where the agent reads it from there. */
-export const sessionUsage = (
-  agent: AgentProvider,
+/**
+ * The text of Claude Code's session file for `sessionId`, if it's there. The
+ * agent names its project by the directory as it sees it, which can be the
+ * resolved path where the given one runs through a symlink (macOS's temp
+ * dir), so both are tried.
+ */
+export const claudeSessionText = (
   workingDirectory: string,
-  stream: StreamState,
-): Effect.Effect<IterationUsage | undefined> => {
-  const { sessionId } = stream;
-  if (agent.parseSessionUsage === undefined || sessionId === undefined) {
-    return Effect.succeed(stream.usage);
-  }
-  // The agent names its project by the directory as it sees it, which can
-  // be the resolved path where the given one runs through a symlink (macOS's
-  // temp dir), so try both.
+  sessionId: string,
+): Effect.Effect<string | undefined> => {
   const read = (directory: string) =>
     Effect.tryPromise(() =>
       readFile(claudeSessionFile(directory, sessionId), "utf8"),
@@ -47,7 +44,25 @@ export const sessionUsage = (
         Effect.flatMap(read),
       ),
     ),
-    Effect.map((content) => agent.parseSessionUsage?.(content) ?? stream.usage),
-    Effect.orElseSucceed(() => stream.usage),
+    Effect.orElseSucceed(() => undefined),
+  );
+};
+
+/** The session's usage, from its session file where the agent reads it from there. */
+export const sessionUsage = (
+  agent: AgentProvider,
+  workingDirectory: string,
+  stream: StreamState,
+): Effect.Effect<IterationUsage | undefined> => {
+  const { sessionId } = stream;
+  if (agent.parseSessionUsage === undefined || sessionId === undefined) {
+    return Effect.succeed(stream.usage);
+  }
+  return claudeSessionText(workingDirectory, sessionId).pipe(
+    Effect.map((content) =>
+      content === undefined
+        ? stream.usage
+        : (agent.parseSessionUsage?.(content) ?? stream.usage),
+    ),
   );
 };

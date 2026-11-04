@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { posix } from "node:path";
 import { agentDescriptor } from "./agents.js";
+import type { RecordTarget } from "./recordRequest.js";
+import { recordRequest } from "./recordRequest.js";
 import type { SessionOptions } from "./Session.js";
 import type { SessionRequest } from "./supervisorProtocol.js";
 
@@ -79,7 +81,11 @@ const checkEnv = (env: Readonly<Record<string, string>>): void => {
 /** The supervisor's request for a session; throws on options that can't run. */
 export const sessionRequest = (
   options: SessionOptions,
-  context: { readonly name: string; readonly workingDirectory: string },
+  context: {
+    readonly name: string;
+    readonly workingDirectory: string;
+    readonly record: RecordTarget;
+  },
 ): SessionRequest => {
   checkPrompt(options);
   const agent = agentDescriptor(options.agent);
@@ -107,5 +113,8 @@ export const sessionRequest = (
     ...(output === undefined
       ? {}
       : { output: { kind: output._tag, tag: output.tag } }),
+    ...(options.record === undefined
+      ? {}
+      : { record: recordRequest(options.record, context.record) }),
   };
 };

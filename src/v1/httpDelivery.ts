@@ -3,21 +3,33 @@ import type { HttpClientResponse } from "@effect/platform";
 import { Clock, Duration, Effect } from "effect";
 import { signMessage } from "./webhookSignature.js";
 
-// Inside the sandbox: POSTs a finish report as a Standard Webhook, signed
-// afresh for each attempt. Any answer but 2xx is retried with backoff (or
-// after the receiver's `Retry-After`), except 410 Gone, which stops it. It
-// gives up once the next attempt would land past the sandbox's kill time.
+// Inside the sandbox: sends a JSON body over HTTP, the finish report and
+// session records alike. A Standard Webhook POST is signed afresh for each
+// attempt; an upload is a plain PUT. Any answer but 2xx is retried with
+// backoff (or after the receiver's `Retry-After`), except 410 Gone, which
+// stops it. It gives up once the next attempt would land past `giveUpMs`.
 
 /** What delivery came to. */
 export type DeliveryResult = "delivered" | "gone" | "gave-up";
 
+/** How a body is sent: a signed Standard Webhook POST, or a plain PUT. */
+export type DeliveryMethod =
+  | {
+      readonly kind: "webhook";
+      /** The HMAC key from the secret. */
+      readonly key: Buffer;
+      /** The `webhook-id`. */
+      readonly id: string;
+    }
+  | {
+      readonly kind: "upload";
+      readonly headers: Readonly<Record<string, string>>;
+    };
+
 /** What to deliver, and where. */
 export interface Delivery {
   readonly url: string;
-  /** The HMAC key from the detach's secret. */
-  readonly key: Buffer;
-  /** The detach id: the `webhook-id`. */
-  readonly id: string;
+  readonly method: DeliveryMethod;
   readonly body: string;
   /** How long it may keep retrying, from the start. */
   readonly giveUpMs: number;
@@ -53,22 +65,36 @@ const answerOf = (response: HttpClientResponse.HttpClientResponse): Answer => {
   return afterMs === undefined ? { kind: "retry" } : { kind: "retry", afterMs };
 };
 
-const post = (
+/** The request for one attempt, signed with `timestamp` when it's a webhook. */
+const requestFor = (
+  delivery: Delivery,
+  timestamp: string,
+): HttpClientRequest.HttpClientRequest => {
+  const { method, body } = delivery;
+  if (method.kind === "upload") {
+    return HttpClientRequest.put(delivery.url).pipe(
+      HttpClientRequest.bodyText(body, "application/json"),
+      HttpClientRequest.setHeaders(method.headers),
+    );
+  }
+  const { id, key } = method;
+  return HttpClientRequest.post(delivery.url).pipe(
+    HttpClientRequest.setHeaders({
+      "webhook-id": id,
+      "webhook-timestamp": timestamp,
+      "webhook-signature": signMessage(key, { id, timestamp, body }),
+    }),
+    HttpClientRequest.bodyText(body, "application/json"),
+  );
+};
+
+const tryOnce = (
   delivery: Delivery,
 ): Effect.Effect<Answer, never, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient;
     const now = yield* Clock.currentTimeMillis;
-    const timestamp = String(Math.floor(now / 1000));
-    const { id, body } = delivery;
-    const request = HttpClientRequest.post(delivery.url).pipe(
-      HttpClientRequest.setHeaders({
-        "webhook-id": id,
-        "webhook-timestamp": timestamp,
-        "webhook-signature": signMessage(delivery.key, { id, timestamp, body }),
-      }),
-      HttpClientRequest.bodyText(body, "application/json"),
-    );
+    const request = requestFor(delivery, String(Math.floor(now / 1000)));
     const answered = yield* client.execute(request).pipe(
       Effect.tap((response) => Effect.ignore(response.text)),
       Effect.timeout(ATTEMPT_TIMEOUT),
@@ -79,14 +105,14 @@ const post = (
       : answerOf(answered.right);
   });
 
-/** Delivers a finish report, retrying until it's taken, refused with 410, or out of time. */
-export const deliverFinishReport = (
+/** Delivers a body, retrying until it's taken, refused with 410, or out of time. */
+export const deliver = (
   delivery: Delivery,
 ): Effect.Effect<DeliveryResult, never, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const start = yield* Clock.currentTimeMillis;
     for (let attempt = 0; ; attempt += 1) {
-      const answer = yield* post(delivery);
+      const answer = yield* tryOnce(delivery);
       if (answer.kind !== "retry") {
         return answer.kind;
       }

@@ -12,6 +12,7 @@ import type {
   Reply,
   SessionRequest,
 } from "./supervisorProtocol.js";
+import type { RecordSecrets } from "./supervisorSession.js";
 import { startSession } from "./supervisorSession.js";
 
 // The sessions the supervisor is running, by request id.
@@ -42,21 +43,31 @@ const commandFor = (
 /** The sessions the supervisor is running. */
 export class SessionRegistry {
   private readonly running = new Map<string, CarriedSession>();
-  private detached = false;
+  private detachId: string | undefined;
 
-  /** Starts a session, sending its replies; calls `done` once it has ended. */
-  start(
-    request: SessionRequest,
-    send: (reply: Reply) => void,
-    done: () => void,
-  ): void {
-    if (this.detached) {
+  /**
+   * Starts a session, sending its replies; calls `done` once it has ended.
+   * `secrets` are its record's upload URL and webhook secret, opened.
+   */
+  start({
+    request,
+    secrets,
+    send,
+    done,
+  }: {
+    readonly request: SessionRequest;
+    readonly secrets: RecordSecrets;
+    readonly send: (reply: Reply) => void;
+    readonly done: () => void;
+  }): void {
+    if (this.detachId !== undefined) {
       // Only work spawned before a detach carries on.
       send({ type: "error", message: "the sandbox has been detached from" });
       done();
       return;
     }
     const { running } = this;
+    const detachId = () => this.detachId;
     const program = Effect.gen(function* () {
       const command = yield* commandFor(request);
       const log = createWriteStream(path.join("sessions", `${request.id}.log`));
@@ -66,6 +77,8 @@ export class SessionRegistry {
         command,
         log,
         emit: send,
+        secrets,
+        detachId,
       });
       running.set(request.id, { request, session });
       const outcome = yield* session.outcome;
@@ -105,10 +118,10 @@ export class SessionRegistry {
     finished: () => void,
   ): readonly { readonly name: string; readonly agent: string }[] {
     const carried = [...this.running.values()];
-    if (this.detached || carried.length === 0) {
+    if (this.detachId !== undefined || carried.length === 0) {
       return [];
     }
-    this.detached = true;
+    this.detachId = request.detachId;
     carryOn({ carried, request, secret, finished });
     return carried.map(({ request: session }) => ({
       name: session.name,
