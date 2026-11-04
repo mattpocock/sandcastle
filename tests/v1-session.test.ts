@@ -3,7 +3,12 @@ import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import type { AgentStreamEvent } from "@ai-hero/sandcastle/v1";
+import type {
+  AgentStreamEvent,
+  ClaudeCodeAgentOptions,
+  OutputObjectDefinition,
+  OutputStringDefinition,
+} from "@ai-hero/sandcastle/v1";
 import {
   claudeCode,
   createSandbox,
@@ -135,6 +140,24 @@ describe.skipIf(process.platform === "win32")("sessions (v1)", () => {
 
     const answer: number = done.output.answer;
     expect(answer).toBe(7);
+  });
+
+  it("has no output retries and no host-side session capture (types)", () => {
+    const retried: OutputObjectDefinition<{ readonly answer: number }> = {
+      ...ANSWER,
+      // @ts-expect-error a v1 session never retries its output
+      maxRetries: 1,
+    };
+    const retriedText: OutputStringDefinition = {
+      ...Output.string({ tag: "answer" }),
+      // @ts-expect-error a v1 session never retries its output
+      maxRetries: 1,
+    };
+    const captured: ClaudeCodeAgentOptions = {
+      // @ts-expect-error v1 writes nothing to the host
+      captureSessions: false,
+    };
+    expect([retried, retriedText, captured]).toHaveLength(3);
   });
 
   it("rejects with StructuredOutputError when the output is missing or fails the schema", async () => {

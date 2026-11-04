@@ -1,5 +1,5 @@
 import { Data, Deferred, Effect, Exit, FiberId, Queue, Stream } from "effect";
-import type { OutputDefinition } from "../Output.js";
+import type { OutputDefinition } from "./Output.js";
 import type {
   AgentStreamEvent,
   SessionOptions,

@@ -1,6 +1,6 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { Schema } from "effect";
-import type { OutputObjectDefinition } from "../Output.js";
+import type { OutputObjectDefinition } from "./Output.js";
 
 /** What the `implement` task hands back, in its `implementResult` tag. */
 export interface ImplementResult {
@@ -37,7 +37,7 @@ export const IMPLEMENT_RESULT: OutputObjectDefinition<ImplementResult> = {
   schema,
 };
 
-/** `implement.outputs`: the `implementResult` output, under the session's name. */
+/** `implement.outputs()`: the `implementResult` output, under the session's name. */
 export type ImplementOutputs = Readonly<
   Record<"implement", OutputObjectDefinition<ImplementResult>>
 >;

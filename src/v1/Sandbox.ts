@@ -1,4 +1,4 @@
-import type { OutputDefinition } from "../Output.js";
+import type { OutputDefinition } from "./Output.js";
 import type { FinishReport, FinishReportDestination } from "./FinishReport.js";
 import type { SessionRecordPointer } from "./SessionRecord.js";
 import type { SandboxProvider } from "./SandboxProvider.js";

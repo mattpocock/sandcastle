@@ -12,7 +12,10 @@ import type {
 import { createSandbox, verifyFinishReport } from "@ai-hero/sandcastle/v1";
 import type { FakeSandboxProvider } from "@ai-hero/sandcastle/v1/testing";
 import { fakeSandbox } from "@ai-hero/sandcastle/v1/testing";
-import type { ImplementInput } from "@ai-hero/sandcastle/v1/tasks";
+import type {
+  ImplementInput,
+  ReviewResult,
+} from "@ai-hero/sandcastle/v1/tasks";
 import { implement } from "@ai-hero/sandcastle/v1/tasks";
 import type { FinishReportReceiver } from "./helpers/finishReportReceiver.js";
 import { finishReportReceiver } from "./helpers/finishReportReceiver.js";
@@ -208,6 +211,28 @@ describe.skipIf(process.platform === "win32")("the implement task (v1)", () => {
     );
   });
 
+  it("takes the review's comments as round 2's feedback, each one in the prompt", async () => {
+    const { prompt } = await run({
+      ...base(),
+      ticket: "42",
+      branch: "main",
+      feedback: [
+        "widget.ts: name the constant `WIDGET_COUNT`.",
+        "README.md: document the widget.",
+      ] satisfies ReviewResult["comments"],
+    });
+
+    expect(prompt).toContain("- widget.ts: name the constant `WIDGET_COUNT`.");
+    expect(prompt).toContain("- README.md: document the widget.");
+  });
+
+  it("doesn't ask the agent to call the implement skill, which only a slash command can run", async () => {
+    const { prompt } = await run({ ...base(), ticket: "42" });
+
+    expect(prompt.startsWith("/implement 42")).toBe(true);
+    expect(prompt).not.toContain('skill "implement"');
+  });
+
   it("rejects a branch the remote doesn't have", async () => {
     await expect(
       run({ ...base(), ticket: "42", branch: "no-such-branch" }),
@@ -241,7 +266,13 @@ describe.skipIf(process.platform === "win32")("the implement task (v1)", () => {
       ticket: "42",
       feedback: "Fix it.",
     };
-    expect([both, stray]).toHaveLength(2);
+    const untracked: ImplementInput = {
+      ...base(),
+      ticket: "42",
+      // @ts-expect-error: every bundled task needs the tracker.
+      skillsContext: {},
+    };
+    expect([both, stray, untracked]).toHaveLength(3);
   });
 
   it("tells a headless agent how to finish: blocked on an unfetchable ticket, agent-chosen seams, PR evidence", async () => {
@@ -367,7 +398,7 @@ describe.skipIf(process.platform === "win32")("the implement task (v1)", () => {
       body: delivery.body,
       headers: delivery.headers,
       secret,
-      outputs: implement.outputs,
+      outputs: implement.outputs(),
     });
 
     const { output } = succeeded(report).sessions.implement;

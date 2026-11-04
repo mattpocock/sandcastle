@@ -9,7 +9,7 @@ import type {
   StatusOptions,
 } from "./Sandbox.js";
 import type { ProviderSandbox } from "./SandboxProvider.js";
-import type { OutputDefinition } from "../Output.js";
+import type { OutputDefinition } from "./Output.js";
 import type {
   OutputType,
   SessionOptions,

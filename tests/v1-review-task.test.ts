@@ -266,6 +266,17 @@ describe.skipIf(process.platform === "win32")("the review task (v1)", () => {
     );
   });
 
+  it("requires skillsContext.tracker", () => {
+    const untracked: ReviewInput = {
+      repo: "o/widgets",
+      pr: 7,
+      githubToken: TOKEN,
+      // @ts-expect-error: every bundled task needs the tracker.
+      skillsContext: {},
+    };
+    expect(untracked.pr).toBe(7);
+  });
+
   // A detached run spawns the supervisor and delivers over HTTP, which is
   // slow under coverage; the timeout is slack, not a wait.
   describe("review.outputs", { timeout: 30_000 }, () => {
@@ -308,7 +319,7 @@ describe.skipIf(process.platform === "win32")("the review task (v1)", () => {
 
       const report = await verifyFinishReport({
         ...delivered,
-        outputs: review.outputs,
+        outputs: review.outputs(),
       });
 
       const returned: ReviewResult = succeeded(report).sessions.review.output;

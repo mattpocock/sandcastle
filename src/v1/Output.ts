@@ -1,8 +1,24 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import type {
-  OutputObjectDefinition,
-  OutputStringDefinition,
-} from "../Output.js";
+
+/** A session's JSON output, validated against a Standard Schema. Make one with `Output.object`. */
+export interface OutputObjectDefinition<T> {
+  readonly _tag: "object";
+  /** The tag the agent prints its result between. */
+  readonly tag: string;
+  readonly schema: StandardSchemaV1<unknown, T>;
+}
+
+/** A session's text output. Make one with `Output.string`. */
+export interface OutputStringDefinition {
+  readonly _tag: "string";
+  /** The tag the agent prints its result between. */
+  readonly tag: string;
+}
+
+/** Either kind of session output. */
+export type OutputDefinition =
+  | OutputObjectDefinition<unknown>
+  | OutputStringDefinition;
 
 /**
  * Structured output for a session. The agent prints its result between

@@ -3,7 +3,7 @@ import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { SessionRecord } from "@ai-hero/sandcastle/v1";
+import type { RecordRedaction, SessionRecord } from "@ai-hero/sandcastle/v1";
 import { createSandbox, verifyFinishReport } from "@ai-hero/sandcastle/v1";
 import type { FakeSandboxProvider } from "@ai-hero/sandcastle/v1/testing";
 import { fakeAgent, fakeSandbox } from "@ai-hero/sandcastle/v1/testing";
@@ -56,7 +56,10 @@ const leaky = (sessionId: string) =>
     ],
   });
 
-const REDACT = { envVars: ["API_TOKEN"], patterns: [PASSWORD] };
+const REDACT = {
+  envVars: ["API_TOKEN"],
+  values: [PASSWORD],
+} satisfies RecordRedaction;
 
 const isRecord = (value: unknown): value is SessionRecord =>
   typeof value === "object" &&

@@ -7,16 +7,49 @@
 import { StandardSchemaV1 } from '@standard-schema/spec';
 
 // @public
+export type AgentName = "claude-code" | "codex" | "cursor" | "opencode" | "copilot" | "pi";
+
+// @public
+export interface AgentProvider {
+    readonly model: string;
+    readonly name: AgentName;
+}
+
+// @public
+export type AgentStreamEvent = {
+    readonly type: "text";
+    readonly text: string;
+} | {
+    readonly type: "toolCall";
+    readonly name: string;
+    readonly args: string;
+};
+
+// @public
+export interface ExecOptions {
+    readonly abortSignal?: AbortSignal;
+    readonly allowFailure?: boolean;
+    readonly command: string;
+    readonly env?: Readonly<Record<string, string>>;
+    readonly sudo?: boolean;
+    readonly workingDirectory?: string;
+}
+
+// @public
+export interface ExecResult<Code extends number = number> {
+    readonly exitCode: Code;
+    readonly stderr: string;
+    readonly stdout: string;
+}
+
+// @public
 export const general: GeneralTask;
 
-// Warning: (ae-forgotten-export) The symbol "OutputDefinition" needs to be exported by the entry point tasks.d.ts
-//
 // @public
 export interface GeneralInput<O extends OutputDefinition | undefined = undefined> {
     readonly githubToken?: string;
     readonly output?: O;
     readonly prompt: string;
-    // Warning: (ae-forgotten-export) The symbol "SessionRecordOptions" needs to be exported by the entry point tasks.d.ts
     readonly record?: SessionRecordOptions;
     readonly repo?: string;
     readonly setup?: readonly string[];
@@ -34,9 +67,6 @@ export interface GeneralTask {
         (): OutputMap;
         <const O extends OutputDefinition>(output: O): GeneralOutputs<O>;
     };
-    // Warning: (ae-forgotten-export) The symbol "Sandbox" needs to be exported by the entry point tasks.d.ts
-    // Warning: (ae-forgotten-export) The symbol "SessionProcess" needs to be exported by the entry point tasks.d.ts
-    // Warning: (ae-forgotten-export) The symbol "OutputType" needs to be exported by the entry point tasks.d.ts
     readonly start: <const O extends OutputDefinition | undefined = undefined>(sandbox: Sandbox, input: GeneralInput<O>) => Promise<SessionProcess<OutputType<O>>>;
 }
 
@@ -55,8 +85,6 @@ export interface ImplementCommon {
 // @public
 export type ImplementInput = ImplementCommon & ImplementWork & ImplementRound;
 
-// Warning: (ae-forgotten-export) The symbol "OutputObjectDefinition" needs to be exported by the entry point tasks.d.ts
-//
 // @public
 export type ImplementOutputs = Readonly<Record<"implement", OutputObjectDefinition<ImplementResult>>>;
 
@@ -77,14 +105,14 @@ export type ImplementRound = {
     readonly feedback?: never;
 } | {
     readonly branch: string;
-    readonly feedback?: string;
+    readonly feedback?: string | readonly string[];
 };
 
 // @public
 export interface ImplementTask {
     readonly limits: TaskLimits;
     readonly name: "implement";
-    readonly outputs: ImplementOutputs;
+    readonly outputs: () => ImplementOutputs;
     readonly start: (sandbox: Sandbox, input: ImplementInput) => Promise<SessionProcess<ImplementResult>>;
 }
 
@@ -96,6 +124,59 @@ export type ImplementWork = {
     readonly prompt: string;
     readonly ticket?: never;
 };
+
+// @public
+export interface NativeSessionFile {
+    readonly content: string;
+    readonly fileName: string;
+    readonly format: NativeSessionFormat;
+}
+
+// @public
+export type NativeSessionFormat = "claude-code-jsonl";
+
+// @public
+export type OutputDefinition = OutputObjectDefinition<unknown> | OutputStringDefinition;
+
+// @public
+export type OutputMap = Readonly<Record<string, OutputDefinition>>;
+
+// @public
+export interface OutputObjectDefinition<T> {
+    // (undocumented)
+    readonly schema: StandardSchemaV1<unknown, T>;
+    readonly tag: string;
+    // (undocumented)
+    readonly _tag: "object";
+}
+
+// @public
+export interface OutputStringDefinition {
+    readonly tag: string;
+    // (undocumented)
+    readonly _tag: "string";
+}
+
+// @public
+export type OutputType<O extends OutputDefinition | undefined> = O extends OutputObjectDefinition<infer T> ? T : O extends OutputStringDefinition ? string : undefined;
+
+// @public
+export type RecordedEvent = {
+    readonly type: "text";
+    readonly text: string;
+    readonly at: string;
+} | {
+    readonly type: "toolCall";
+    readonly name: string;
+    readonly args: string;
+    readonly at: string;
+};
+
+// @public
+export interface RecordRedaction {
+    readonly envVars?: readonly string[];
+    readonly values?: readonly string[];
+}
 
 // @public
 export const review: ReviewTask;
@@ -126,8 +207,134 @@ export interface ReviewResult {
 export interface ReviewTask {
     readonly limits: TaskLimits;
     readonly name: "review";
-    readonly outputs: ReviewOutputs;
+    readonly outputs: () => ReviewOutputs;
     readonly start: (sandbox: Sandbox, input: ReviewInput) => Promise<SessionProcess<ReviewResult>>;
+}
+
+// @public
+export interface Sandbox<Native = unknown> extends AsyncDisposable {
+    readonly canDetach: boolean;
+    readonly close: () => Promise<void>;
+    readonly exec: {
+        (command: string | (ExecOptions & {
+            readonly allowFailure?: false;
+        })): Promise<ExecResult<0>>;
+        (options: ExecOptions & {
+            readonly allowFailure: true;
+        }): Promise<ExecResult>;
+    };
+    readonly killTime: Date;
+    readonly native: Native;
+    readonly readTextFile: (options: {
+        readonly path: string;
+    }) => Promise<string | null>;
+    readonly sandboxId: string;
+    readonly session: <const O extends OutputDefinition | undefined = undefined>(options: SessionOptions<O>) => Promise<SessionResult<OutputType<O>>>;
+    readonly spawnSession: <const O extends OutputDefinition | undefined = undefined>(options: SessionOptions<O>) => Promise<SessionProcess<OutputType<O>>>;
+    readonly workingDirectory: string;
+    readonly writeTextFile: (options: {
+        readonly path: string;
+        readonly content: string;
+    }) => Promise<void>;
+}
+
+// @public
+export interface SessionContextWindow {
+    readonly limit?: number;
+    readonly tokens: number;
+}
+
+// @public
+export type SessionExitReason = "completed" | "closing-tag" | "failed" | "idle-timeout" | "aborted" | "time-limit";
+
+// @public
+export interface SessionOptions<O extends OutputDefinition | undefined = OutputDefinition | undefined> {
+    readonly abortSignal?: AbortSignal;
+    readonly agent: AgentProvider;
+    readonly completionTimeoutSeconds?: number;
+    readonly continueSession?: SessionResult;
+    readonly env?: Readonly<Record<string, string>>;
+    readonly idleTimeoutSeconds?: number;
+    readonly name?: string;
+    readonly output?: O;
+    readonly prompt: string;
+    readonly record?: SessionRecordOptions;
+    readonly workingDirectory?: string;
+}
+
+// @public
+export interface SessionProcess<O = unknown> {
+    readonly events: AsyncIterable<AgentStreamEvent>;
+    readonly kill: () => Promise<void>;
+    readonly name: string;
+    readonly wait: () => Promise<SessionResult<O>>;
+}
+
+// @public
+export interface SessionRecord {
+    readonly agent: string;
+    readonly detachId?: string;
+    readonly endedAt: string;
+    readonly events: readonly RecordedEvent[];
+    readonly eventsVersion: 1;
+    readonly exitReason: SessionExitReason;
+    readonly id: string;
+    readonly labels: Readonly<Record<string, string>>;
+    readonly model: string;
+    readonly name: string;
+    readonly native?: NativeSessionFile;
+    readonly sandboxId: string;
+    readonly sessionId?: string;
+    readonly startedAt: string;
+    readonly type: "sandcastle.session-record";
+    readonly usage?: SessionUsage;
+    readonly version: 1;
+}
+
+// @public
+export interface SessionRecordOptions {
+    readonly directory?: {
+        readonly path: string;
+    };
+    readonly labels?: Readonly<Record<string, string>>;
+    readonly onRecord?: (record: SessionRecord) => void | Promise<void>;
+    readonly redact?: RecordRedaction;
+    readonly upload?: {
+        readonly url: string;
+        readonly headers?: Readonly<Record<string, string>>;
+    };
+    readonly webhook?: {
+        readonly url: string;
+        readonly secret: string;
+    };
+}
+
+// @public
+export interface SessionResult<O = unknown> {
+    readonly agent: string;
+    // (undocumented)
+    readonly contextWindow?: SessionContextWindow;
+    readonly exitReason: "completed" | "closing-tag";
+    readonly finalMessage: string;
+    readonly name: string;
+    readonly output: O;
+    readonly outputTail: string;
+    readonly sessionId?: string;
+    // (undocumented)
+    readonly usage?: SessionUsage;
+    readonly workingDirectory: string;
+}
+
+// @public
+export interface SessionUsage {
+    // (undocumented)
+    readonly cacheCreationInputTokens: number;
+    // (undocumented)
+    readonly cacheReadInputTokens: number;
+    // (undocumented)
+    readonly inputTokens: number;
+    // (undocumented)
+    readonly outputTokens: number;
 }
 
 // @public
@@ -149,10 +356,6 @@ export type Tracker = {
     readonly name: string;
     readonly instructions: string;
 };
-
-// Warnings were encountered during analysis:
-//
-// dist/v1/tasks.d.ts:79:9 - (ae-forgotten-export) The symbol "OutputMap" needs to be exported by the entry point tasks.d.ts
 
 // (No @packageDocumentation comment for this package)
 

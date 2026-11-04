@@ -9,13 +9,16 @@ export interface ImplementPromptInput {
   /** True when the branch was created for this run. */
   readonly newBranch: boolean;
   /** The review's comments, for round 2. */
-  readonly feedback: string | undefined;
+  readonly feedback: string | readonly string[] | undefined;
 }
 
+// The slash command runs the `implement` skill; the skill can't be called
+// with the Skill tool (it sets `disable-model-invocation`), so the prompt
+// never asks for that.
 const entry = (work: ImplementPromptInput["work"]): string =>
   "ticket" in work
-    ? `/implement ${work.ticket}\n\nStart by calling the Skill tool with skill "implement", for ticket ${work.ticket}. If you can't fetch the ticket, don't guess at it: stop, with status \`blocked\`.`
-    : `/implement ${work.prompt.trim()}\n\nStart by calling the Skill tool with skill "implement", for the work described above.`;
+    ? `/implement ${work.ticket}\n\nIf you can't fetch the ticket, don't guess at it: stop, with status \`blocked\`.`
+    : `/implement ${work.prompt.trim()}`;
 
 const branchLine = (input: ImplementPromptInput): string =>
   input.newBranch
@@ -31,11 +34,17 @@ const STEPS = [
   "- If nothing needed changing, don't open a PR.",
 ].join("\n");
 
-const feedbackBlock = (feedback: string): string =>
+/** The comments, one bullet each when there are several. */
+const feedbackText = (feedback: string | readonly string[]): string =>
+  typeof feedback === "string"
+    ? feedback.trim()
+    : feedback.map((comment) => `- ${comment.trim()}`).join("\n");
+
+const feedbackBlock = (feedback: string | readonly string[]): string =>
   [
     "This is round 2. A review of this branch's PR left the comments below. Address them on the same branch, push, and update the PR.",
     "<review-feedback>",
-    feedback.trim(),
+    feedbackText(feedback),
     "</review-feedback>",
   ].join("\n");
 

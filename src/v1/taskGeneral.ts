@@ -1,4 +1,4 @@
-import type { OutputDefinition } from "../Output.js";
+import type { OutputDefinition } from "./Output.js";
 import { claudeCode } from "./agents.js";
 import type { OutputMap } from "./FinishReport.js";
 import type { Sandbox } from "./Sandbox.js";
