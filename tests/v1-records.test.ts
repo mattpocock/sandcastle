@@ -289,6 +289,44 @@ describe.skipIf(process.platform === "win32")("session records (v1)", () => {
     expectRedacted(record);
   });
 
+  it.each([
+    ["a double quote", 'pa"ss-word-1'],
+    ["a backslash", "pa\\ss-word-2"],
+    ["a newline", "pa\nss-word-3"],
+  ])(
+    "a secret containing %s is masked in tool-call args and the transcript, where it appears JSON-escaped",
+    async (_label, secret) => {
+      const received: SessionRecord[] = [];
+      const sandbox = await createSandbox({ provider });
+
+      await sandbox.session({
+        agent: fakeAgent({
+          lines: [
+            init("s-escaped"),
+            toolUse(`echo ${secret}`),
+            assistant(`It was ${secret}.`),
+            result("Done."),
+          ],
+        }),
+        prompt: "Go.",
+        record: {
+          onRecord: (record) => {
+            received.push(record);
+          },
+          redact: { patterns: [secret] },
+        },
+      });
+
+      const record = only(received);
+      const escaped = JSON.stringify(secret).slice(1, -1);
+      const everything = `${JSON.stringify(record)}\n${nativeText(record)}`;
+      expect(everything).not.toContain(escaped);
+      expect(everything).not.toContain(secret);
+      const call = record.events.find((event) => event.type === "toolCall");
+      expect(call).toMatchObject({ args: "echo [REDACTED]" });
+    },
+  );
+
   it("a function sink that throws fails the session's wait()", async () => {
     const sandbox = await createSandbox({ provider });
 
