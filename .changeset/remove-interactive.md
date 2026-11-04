@@ -1,5 +1,5 @@
 ---
-"@ai-hero/sandcastle": minor
+"@ai-hero/sandcastle": major
 ---
 
 **BREAKING:** Remove `interactive()`, `Worktree.interactive()` and `Sandbox.interactive()`, along with `InteractiveOptions`, `InteractiveResult`, `WorktreeInteractiveOptions`, `SandboxInteractiveOptions`, `SandboxInteractiveResult`, `InteractiveExecOptions`, the optional `AgentProvider.buildInteractiveArgs`, the optional `interactiveExec` on sandbox handles and `NativeInteractiveNotSupportedError` (see ADR 0021). Migration: there is no in-library replacement for a TTY agent session — create a worktree with `createWorktree()` and run the agent CLI yourself in `wt.worktreePath`, or use `run()` / `createSandbox()` + `sandbox.run()` for unattended work.
