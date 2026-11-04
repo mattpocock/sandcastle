@@ -106,6 +106,11 @@ const handOver = async (
       abortSignal,
     )
     .catch((error: unknown) => {
+      // Once the supervisor holds the work, the detach has happened: an
+      // abort or a broken call after that must not leave the handle holding.
+      if (carried !== undefined) {
+        return;
+      }
       abortSignal?.throwIfAborted();
       throw refuse(
         "supervisor-unreachable",
@@ -113,8 +118,8 @@ const handOver = async (
         error,
       );
     });
-  abortSignal?.throwIfAborted();
   if (carried === undefined) {
+    abortSignal?.throwIfAborted();
     throw refuse(
       "supervisor-unreachable",
       `the session supervisor refused: ${problem}`,

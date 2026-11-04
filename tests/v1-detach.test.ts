@@ -13,6 +13,7 @@ import type {
 import {
   claudeCode,
   createSandbox,
+  createSandboxProvider,
   DetachError,
   FinishReportVerificationError,
   Output,
@@ -22,6 +23,7 @@ import {
 import type { FakeSandboxProvider } from "@ai-hero/sandcastle/v1/testing";
 import { fakeAgent, fakeSandbox } from "@ai-hero/sandcastle/v1/testing";
 import type { FinishReportReceiver } from "./helpers/finishReportReceiver.js";
+import { localProviderSandbox } from "./helpers/localProviderSandbox.js";
 import {
   finishReportReceiver,
   hostPath,
@@ -497,6 +499,59 @@ describe.skipIf(process.platform === "win32")(
         ),
       );
       expect(texts.join("\n")).not.toContain(keyOf(secret));
+    });
+
+    it("an abort that lands after the supervisor confirms it holds the work is ignored: detach() resolves and the handle lets go", async () => {
+      const dir = await mkdtemp(path.join(rootDir, "abort-race-"));
+      const local = localProviderSandbox(dir);
+      const controller = new AbortController();
+      // Aborts the moment the supervisor's "detached" reply reaches the host,
+      // before the call that carried it has finished.
+      const abortingProvider = createSandboxProvider({
+        name: "aborting",
+        create: async () => ({
+          sandboxId: "sbx-abort-race",
+          workingDirectory: dir,
+          killTime: new Date(Date.now() + 3_600_000),
+          native: undefined,
+          readTextFile: local.readTextFile,
+          writeTextFile: local.writeTextFile,
+          close: local.close,
+          exec: async (options) =>
+            local.exec({
+              ...options,
+              onLine: (line) => {
+                options.onLine?.(line);
+                if (line.includes('"type":"detached"')) {
+                  controller.abort();
+                }
+              },
+            }),
+        }),
+        detach: {
+          spawnDetached: async (_sandbox, options) => {
+            void local.exec(options).catch(() => undefined);
+          },
+          get: async () => undefined,
+        },
+      });
+      try {
+        const sandbox = await createSandbox({ provider: abortingProvider });
+        await sandbox.spawnSession({ agent: stuck("s-race"), prompt: "Work." });
+
+        const receipt = await sandbox.detach({
+          abortSignal: controller.signal,
+        });
+
+        expect(controller.signal.aborted).toBe(true);
+        expect(receipt.carriedOn).toMatchObject([{ kind: "session" }]);
+        await expect(sandbox.exec("true")).rejects.toMatchObject({
+          _tag: "SandboxDetachedError",
+          detachId: receipt.detachId,
+        });
+      } finally {
+        await local.close();
+      }
     });
 
     it.runIf(process.platform === "linux")(
