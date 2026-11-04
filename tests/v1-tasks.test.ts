@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -27,7 +27,7 @@ import { bareRepo, spied, stubClaude } from "./helpers/taskWorld.js";
 // Bundled tasks through `/v1/tasks`, on the fake sandbox with a local bare git
 // repo standing in for GitHub. The task's agent is the real `claudeCode`, so
 // a stub `claude` on the sandbox's PATH stands in for the CLI: it records the
-// env, working directory and prompt it was run with, then prints a recorded
+// env, real working directory and prompt it was run with, then prints a recorded
 // stream. The fake sandbox needs `sh` and POSIX process groups, and the
 // supervisor bundle comes from the build, so these skip on Windows.
 
@@ -143,7 +143,7 @@ describe.skipIf(process.platform === "win32")("bundled tasks (v1)", () => {
       readFile(workOf(sandbox, "widgets", "ran-setup"), "utf8"),
     ).resolves.toBe("");
     await expect(claude.read("agent-cwd.txt")).resolves.toBe(
-      `${workOf(sandbox, "widgets")}\n`,
+      `${await realpath(workOf(sandbox, "widgets"))}\n`,
     );
     await expect(claude.read("agent-argv.txt")).resolves.toContain(
       "--model sonnet",
@@ -164,7 +164,7 @@ describe.skipIf(process.platform === "win32")("bundled tasks (v1)", () => {
 
     expect(done.finalMessage).toBe("ok");
     await expect(claude.read("agent-cwd.txt")).resolves.toBe(
-      `${workOf(sandbox)}\n`,
+      `${await realpath(workOf(sandbox))}\n`,
     );
     await expect(
       general.start(sandbox, {

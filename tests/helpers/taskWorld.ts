@@ -30,7 +30,7 @@ export const stubClaude = async (
   const script = [
     "#!/bin/sh",
     `env > "${dir}/agent-env.txt"`,
-    `pwd > "${dir}/agent-cwd.txt"`,
+    `pwd -P > "${dir}/agent-cwd.txt"`,
     `printf '%s\\n' "$*" > "${dir}/agent-argv.txt"`,
     `cat > "${dir}/agent-prompt.txt"`,
     `cat "${dir}/first.jsonl"`,

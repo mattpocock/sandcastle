@@ -5,7 +5,7 @@ import type { OutputType, SessionProcess } from "./Session.js";
 import { installSkills } from "./skills/installSkills.js";
 import type { Skill } from "./skills/Skill.js";
 import type { TaskLimits, TaskRun, TaskSkillsContext } from "./Task.js";
-import { latestDeadlineMs, setTaskDeadline } from "./taskDeadline.js";
+import { latestDeadlineMs, setTaskDeadline } from "./detachDeadline.js";
 import { taskPrompt } from "./taskPrompt.js";
 import { cloneRepo } from "./taskRepo.js";
 
