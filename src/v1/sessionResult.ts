@@ -1,4 +1,4 @@
-import type { OutputDefinition } from "../Output.js";
+import type { OutputDefinition } from "./Output.js";
 import type { SessionResult } from "./Session.js";
 import { SessionFailedError } from "./SessionFailedError.js";
 import { StructuredOutputError } from "./StructuredOutputError.js";

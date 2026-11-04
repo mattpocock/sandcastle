@@ -37,12 +37,17 @@ export interface FakeSandboxOptions {
     readonly rootDir?: string;
 }
 
-// Warning: (ae-forgotten-export) The symbol "SandboxProvider" needs to be exported by the entry point testing.d.ts
-//
 // @public
 export interface FakeSandboxProvider extends SandboxProvider<FakeSandboxNative, true>, AsyncDisposable {
     readonly closeAll: () => Promise<void>;
     readonly pathOf: (sandboxId: string) => string;
+}
+
+// @public
+export interface SandboxProvider<Native = unknown, CanDetach extends boolean = boolean> {
+    readonly [nativeType]?: Native;
+    readonly canDetach: CanDetach;
+    readonly name: string;
 }
 
 // (No @packageDocumentation comment for this package)

@@ -1,5 +1,5 @@
 import { shellEscape } from "../AgentProvider.js";
-import type { OutputDefinition } from "../Output.js";
+import type { OutputDefinition } from "./Output.js";
 import type { Sandbox } from "./Sandbox.js";
 import type { TaskRun } from "./Task.js";
 import { cloneRepo } from "./taskRepo.js";

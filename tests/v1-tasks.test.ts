@@ -18,8 +18,12 @@ import {
 } from "@ai-hero/sandcastle/v1";
 import type { FakeSandboxProvider } from "@ai-hero/sandcastle/v1/testing";
 import { fakeSandbox } from "@ai-hero/sandcastle/v1/testing";
-import type { GeneralInput } from "@ai-hero/sandcastle/v1/tasks";
-import { general } from "@ai-hero/sandcastle/v1/tasks";
+import type {
+  GeneralInput,
+  ImplementOutputs,
+  ReviewOutputs,
+} from "@ai-hero/sandcastle/v1/tasks";
+import { general, implement, review } from "@ai-hero/sandcastle/v1/tasks";
 import type { FinishReportReceiver } from "./helpers/finishReportReceiver.js";
 import { finishReportReceiver } from "./helpers/finishReportReceiver.js";
 import { bareRepo, spied, stubClaude } from "./helpers/taskWorld.js";
@@ -97,6 +101,15 @@ describe.skipIf(process.platform === "win32")("bundled tasks (v1)", () => {
 
   const workOf = (sandbox: Sandbox, ...rest: string[]): string =>
     path.join(provider.pathOf(sandbox.sandboxId), "work", ...rest);
+
+  it("gives every bundled task the same outputs shape: a function returning its definitions by session name", () => {
+    const implementOutputs: ImplementOutputs = implement.outputs();
+    const reviewOutputs: ReviewOutputs = review.outputs();
+    expect(Object.keys(implementOutputs)).toStrictEqual(["implement"]);
+    expect(Object.keys(reviewOutputs)).toStrictEqual(["review"]);
+    expect(general.outputs()).toStrictEqual({});
+    expect(Object.keys(general.outputs(VERDICT))).toStrictEqual(["general"]);
+  });
 
   it("exports general with start, outputs and limits", () => {
     expect(general.start).toBeTypeOf("function");

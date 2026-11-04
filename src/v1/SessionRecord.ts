@@ -77,7 +77,7 @@ export interface SessionRecord {
  */
 export interface RecordRedaction {
   /** Literal strings to mask (not regular expressions). */
-  readonly patterns?: readonly string[];
+  readonly values?: readonly string[];
   /** Env var names whose values, as the session saw them, are masked. */
   readonly envVars?: readonly string[];
 }

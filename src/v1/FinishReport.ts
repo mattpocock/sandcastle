@@ -1,4 +1,4 @@
-import type { OutputDefinition } from "../Output.js";
+import type { OutputDefinition } from "./Output.js";
 import type {
   OutputType,
   SessionContextWindow,
@@ -73,25 +73,35 @@ export type SessionReports<O extends OutputMap = OutputMap> = {
   readonly [K in keyof O]: SessionReport<OutputType<O[K]>>;
 } & Readonly<Record<string, SessionReport>>;
 
-interface DetachedWorkBase<O extends OutputMap> {
+/** What succeeded and failed detached work both carry. */
+export interface DetachedWorkBase<Sessions> {
   /** The provider's sandbox id. */
   readonly sandboxId: string;
   /** From the `DetachReceipt`. Also the `webhook-id`: dedupe deliveries on it. */
   readonly detachId: string;
   /** Every session carried on past the detach, by name. */
-  readonly sessions: SessionReports<O>;
+  readonly sessions: Sessions;
   /** Every process carried on past the detach. */
   readonly processes: readonly ProcessReport[];
 }
 
+/**
+ * Session reports by name in failed work. A session named in `O` that ended
+ * well has its output validated and typed; one that didn't has `undefined`.
+ */
+export type FailedSessionReports<O extends OutputMap = OutputMap> = {
+  readonly [K in keyof O]?: SessionReport<OutputType<O[K]> | undefined>;
+} & Readonly<Record<string, SessionReport>>;
+
 /** Every carried-on session ended well. */
 export interface SucceededDetachedWork<O extends OutputMap = OutputMap>
-  extends DetachedWorkBase<O> {
+  extends DetachedWorkBase<SessionReports<O>> {
   readonly status: "succeeded";
 }
 
 /** Something carried on past the detach failed. The rest still ran to its end. */
-export interface FailedDetachedWork extends DetachedWorkBase<OutputMap> {
+export interface FailedDetachedWork<O extends OutputMap = OutputMap>
+  extends DetachedWorkBase<FailedSessionReports<O>> {
   readonly status: "failed";
   readonly failure: {
     readonly reason: FailureReason;
@@ -115,7 +125,7 @@ export interface FinishReport<O extends OutputMap = OutputMap> {
   readonly version: 1;
   /** When the work finished, ISO 8601. */
   readonly timestamp: string;
-  readonly data: SucceededDetachedWork<O> | FailedDetachedWork;
+  readonly data: SucceededDetachedWork<O> | FailedDetachedWork<O>;
 }
 
 /** Options for `verifyFinishReport`. */

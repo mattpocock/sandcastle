@@ -101,7 +101,7 @@ export const RecordRequest = Schema.Struct({
   sandboxId: Schema.String,
   labels: Labels,
   redact: Schema.Struct({
-    patterns: Schema.Array(Schema.String),
+    values: Schema.Array(Schema.String),
     envVars: Schema.Array(Schema.String),
   }),
   webhookUrl: Schema.optional(Schema.String),

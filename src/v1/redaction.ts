@@ -25,20 +25,20 @@ const forms = (secret: string): readonly string[] => {
 };
 
 /**
- * The redactor for `patterns` and the values `envVars` have in `env`, masking
+ * The redactor for `values` and the values `envVars` have in `env`, masking
  * each literally and JSON-escaped. Longer secrets are masked first, so one
  * that contains another is masked whole. Empty strings and unset vars mask
  * nothing.
  */
 export const redactor = (
   redaction: {
-    readonly patterns: readonly string[];
+    readonly values: readonly string[];
     readonly envVars: readonly string[];
   },
   env: Readonly<Record<string, string | undefined>>,
 ): Redact => {
   const secrets = Arr.sort(
-    [...redaction.patterns, ...redaction.envVars.map((name) => env[name] ?? "")]
+    [...redaction.values, ...redaction.envVars.map((name) => env[name] ?? "")]
       .filter((secret) => secret !== "")
       .flatMap((secret) => forms(secret)),
     LONGEST_FIRST,

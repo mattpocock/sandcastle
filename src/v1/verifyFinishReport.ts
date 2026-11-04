@@ -1,5 +1,5 @@
 import { DateTime, Either, Schema } from "effect";
-import type { OutputDefinition } from "../Output.js";
+import type { OutputDefinition } from "./Output.js";
 import type {
   FinishReport,
   OutputMap,
@@ -97,33 +97,46 @@ const validOutput = async (
   return validated.value;
 };
 
-/** The report's sessions, with each named in `outputs` validated, when it succeeded. */
+/** True when the session ended well, so its output, if any, is its result. */
+const endedWell = (session: SessionReport): boolean =>
+  session.exitReason === "completed" || session.exitReason === "closing-tag";
+
+/**
+ * The report's sessions, with each named in `outputs` validated. On a
+ * succeeded report every one must be there; on a failed one, only the
+ * sessions that ended well with an output are validated.
+ */
 const typedSessions = async (
   report: FinishReport,
   outputs: OutputMap,
 ): Promise<Record<string, SessionReport>> => {
   const { sessions } = report.data;
-  if (report.data.status !== "succeeded") {
-    return { ...sessions };
-  }
+  const succeeded = report.data.status === "succeeded";
   const validated = await Promise.all(
     Object.entries(outputs).map(async ([name, definition]) => {
       const session = sessions[name];
       if (session === undefined) {
-        throw reject("output-invalid", `it has no session named "${name}"`);
+        if (succeeded) {
+          throw reject("output-invalid", `it has no session named "${name}"`);
+        }
+        return [];
+      }
+      if (!succeeded && (!endedWell(session) || session.output === undefined)) {
+        return [[name, { ...session, output: undefined }] as const];
       }
       const output = await validOutput(session, definition);
-      return [name, { ...session, output }] as const;
+      return [[name, { ...session, output }] as const];
     }),
   );
-  return { ...sessions, ...Object.fromEntries(validated) };
+  return { ...sessions, ...Object.fromEntries(validated.flat()) };
 };
 
 /**
  * Checks a finish report's Standard Webhooks signature and timestamp, and
  * returns it parsed. Pass `outputs`, the same `Output` definitions you gave
  * the sessions, by session name, to validate each one's structured output
- * and get it typed (only on a succeeded report). Rejects with
+ * and get it typed. On a failed report, only the sessions that ended well
+ * with an output are validated; the rest have `undefined`. Rejects with
  * `FinishReportVerificationError`. Replays inside the tolerance window
  * aren't caught here: dedupe on `data.detachId`.
  */
