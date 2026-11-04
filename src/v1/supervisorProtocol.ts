@@ -1,4 +1,13 @@
 import { Schema } from "effect";
+import {
+  ExitReason,
+  RecordPointer,
+  RecordRequest,
+  SessionRecordSchema,
+  Usage,
+} from "./sessionRecordSchema.js";
+
+export { ExitReason } from "./sessionRecordSchema.js";
 
 // The messages between the host and the session supervisor, shared by both
 // sides. The host writes one request as a JSON file into the supervisor's
@@ -58,6 +67,7 @@ export const SessionRequest = Schema.Struct({
     }),
   ),
   resumeSessionId: Schema.optional(Schema.String),
+  record: Schema.optional(RecordRequest),
 });
 
 /** Start one agent session. */
@@ -106,23 +116,6 @@ export const StreamEvent = Schema.Union(
   }),
 );
 
-/** How a session ended. */
-export const ExitReason = Schema.Literal(
-  "completed",
-  "closing-tag",
-  "failed",
-  "idle-timeout",
-  "aborted",
-  "time-limit",
-);
-
-const Usage = Schema.Struct({
-  inputTokens: Schema.Number,
-  outputTokens: Schema.Number,
-  cacheReadInputTokens: Schema.Number,
-  cacheCreationInputTokens: Schema.Number,
-});
-
 /** The structured output the supervisor found: parsed, or why not. */
 export const ExtractedOutput = Schema.Union(
   Schema.Struct({
@@ -157,6 +150,8 @@ export const SessionOutcome = Schema.Struct({
     }),
   ),
   output: Schema.optional(ExtractedOutput),
+  /** Where its record went from inside the sandbox, when it had one. */
+  record: Schema.optional(RecordPointer),
 });
 
 /** Everything the supervisor knows about a session once it has ended. */
@@ -181,6 +176,11 @@ export const Reply = Schema.Union(
   Schema.Struct({ type: Schema.Literal("error"), message: Schema.String }),
   Schema.Struct({ type: Schema.Literal("started") }),
   Schema.Struct({ type: Schema.Literal("event"), event: StreamEvent }),
+  /** The session's record, before `ended`, when the host has sinks of its own. */
+  Schema.Struct({
+    type: Schema.Literal("record"),
+    record: SessionRecordSchema,
+  }),
   Schema.Struct({ type: Schema.Literal("ended"), outcome: SessionOutcome }),
 );
 

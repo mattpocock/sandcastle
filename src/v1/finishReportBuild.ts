@@ -32,6 +32,7 @@ const sessionReport = ({ request, outcome }: EndedSession): SessionReport => ({
   output: outcome.output?.found === true ? outcome.output.value : undefined,
   finalMessage: outcome.finalMessage,
   outputTail: outcome.outputTail,
+  ...(outcome.record === undefined ? {} : { record: outcome.record }),
 });
 
 const REASONS = {

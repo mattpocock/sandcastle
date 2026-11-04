@@ -5,6 +5,7 @@ import type {
   SessionExitReason,
   SessionUsage,
 } from "./Session.js";
+import type { SessionRecordPointer } from "./SessionRecord.js";
 
 /**
  * Where the session supervisor POSTs the finish report for detached work, as
@@ -52,6 +53,8 @@ export interface SessionReport<O = unknown> {
   readonly finalMessage: string;
   /** The last few KB the agent printed. */
   readonly outputTail: string;
+  /** Where the session's record went, when it had a `record` with a webhook or upload sink. */
+  readonly record?: SessionRecordPointer;
 }
 
 /** A spawned process carried on past a detach. */
