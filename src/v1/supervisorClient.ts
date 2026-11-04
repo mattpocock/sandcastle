@@ -2,7 +2,7 @@ import { once } from "node:events";
 import { readFile, rm } from "node:fs/promises";
 import type { Socket } from "node:net";
 import { connect } from "node:net";
-import { Effect, Schedule } from "effect";
+import { Data, Effect, Schedule } from "effect";
 import { SOCKET } from "./supervisorDaemon.js";
 
 // The short-lived half of the session supervisor: the host runs it with
@@ -10,14 +10,19 @@ import { SOCKET } from "./supervisorDaemon.js";
 // supervisor over its socket, deletes the file, and prints the replies on
 // stdout, where the host reads them through the exec stream.
 
-const connectOnce = Effect.async<Socket, Error>((resume) => {
+/** The supervisor's socket refused the connection, or isn't there yet. */
+class SupervisorUnreachable extends Data.TaggedError("SupervisorUnreachable")<{
+  readonly cause: Error;
+}> {}
+
+const connectOnce = Effect.async<Socket, SupervisorUnreachable>((resume) => {
   const socket = connect(SOCKET);
   socket.once("connect", () => {
     socket.removeAllListeners("error");
     resume(Effect.succeed(socket));
   });
   socket.once("error", (error) => {
-    resume(Effect.fail(error));
+    resume(Effect.fail(new SupervisorUnreachable({ cause: error })));
   });
 });
 
