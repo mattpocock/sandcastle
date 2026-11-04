@@ -22,6 +22,7 @@ export default defineConfig({
     "sandboxes/sprites": "src/sandboxes/sprites.ts",
     v1: "src/v1.ts",
     "v1/testing": "src/v1/testing.ts",
+    "v1/sandboxes/daytona": "src/v1/sandboxes/daytona.ts",
   },
   format: ["esm"],
   outDir: "dist",
