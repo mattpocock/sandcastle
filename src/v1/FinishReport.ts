@@ -108,6 +108,11 @@ export interface FailedDetachedWork extends DetachedWorkBase<OutputMap> {
  */
 export interface FinishReport<O extends OutputMap = OutputMap> {
   readonly type: "sandcastle.detached.finished";
+  /**
+   * The report's format. `verifyFinishReport` rejects a report of any version
+   * it doesn't read.
+   */
+  readonly version: 1;
   /** When the work finished, ISO 8601. */
   readonly timestamp: string;
   readonly data: SucceededDetachedWork<O> | FailedDetachedWork;

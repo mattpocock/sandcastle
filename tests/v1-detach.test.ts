@@ -369,7 +369,49 @@ describe.skipIf(process.platform === "win32")(
       // A Headers object works as well as a plain record.
       await expect(
         verifyFinishReport({ body, headers: new Headers(headers), secret }),
-      ).resolves.toMatchObject({ data: { status: "succeeded" } });
+      ).resolves.toMatchObject({ version: 1, data: { status: "succeeded" } });
+    });
+
+    it("verifyFinishReport rejects a correctly signed report of a version it doesn't read", async () => {
+      const hook = await listening();
+      const secret = freshSecret();
+      const sandbox = await createSandbox({ provider });
+      await sandbox.spawnSession({ agent: stuck("s-version"), prompt: "Go." });
+      const { detachId } = await sandbox.detach({
+        deadlineMinutes: 0.01,
+        finishReport: { url: hook.url, secret },
+      });
+      const { body } = await hook.first();
+      const report: unknown = JSON.parse(body);
+      expect(report).toMatchObject({ version: 1 });
+      /** `body` with its version replaced, signed now with the right secret. */
+      const resigned = (version: number | undefined) => {
+        const changed = JSON.stringify({ ...Object(report), version });
+        const timestamp = String(Math.floor(Date.now() / 1000));
+        const mac = createHmac("sha256", Buffer.from(keyOf(secret), "base64"))
+          .update(`${detachId}.${timestamp}.${changed}`)
+          .digest("base64");
+        return {
+          body: changed,
+          secret,
+          headers: {
+            "webhook-id": detachId,
+            "webhook-timestamp": timestamp,
+            "webhook-signature": `v1,${mac}`,
+          },
+        };
+      };
+
+      await expect(verifyFinishReport(resigned(1))).resolves.toMatchObject({
+        version: 1,
+      });
+      await expect(verifyFinishReport(resigned(2))).rejects.toMatchObject({
+        _tag: "FinishReportVerificationError",
+        reason: "malformed-body",
+      });
+      await expect(
+        verifyFinishReport(resigned(undefined)),
+      ).rejects.toMatchObject({ reason: "malformed-body" });
     });
 
     it("the default deadline fires before the kill time and reports time-limit", async () => {

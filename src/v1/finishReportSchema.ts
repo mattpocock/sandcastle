@@ -40,6 +40,7 @@ const work = {
 export const FinishReportJson = Schema.parseJson(
   Schema.Struct({
     type: Schema.Literal("sandcastle.detached.finished"),
+    version: Schema.Literal(1),
     timestamp: Schema.String,
     data: Schema.Union(
       Schema.Struct({ ...work, status: Schema.Literal("succeeded") }),

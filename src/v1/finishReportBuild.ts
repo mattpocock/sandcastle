@@ -81,6 +81,7 @@ export const buildFinishReport = (
     .find((found) => found !== undefined);
   return {
     type: "sandcastle.detached.finished",
+    version: 1,
     timestamp,
     data:
       failure === undefined
