@@ -6,7 +6,7 @@ import { Output } from "../Output.js";
 export interface ReviewResult {
   /** `changes-requested` on any hard standards violation or any missing, partial or wrong requirement. */
   readonly verdict: "approve" | "changes-requested";
-  /** The findings behind `changes-requested`, one self-contained string each; empty on `approve`. Pass them to the next implement round. */
+  /** The findings behind `changes-requested`, one self-contained string each; empty on `approve`. Join them into the next implement round's `feedback`. */
   readonly comments: readonly string[];
   /** The review's one-line summary. */
   readonly summary: string;

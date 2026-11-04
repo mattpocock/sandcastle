@@ -77,6 +77,7 @@ export const review: ReviewTask = {
         ),
       output: REVIEW_RESULT,
       repo: input.repo,
+      branch: undefined,
       githubToken: input.githubToken,
       skillsContext: input.skillsContext,
       setup: input.setup ?? [],

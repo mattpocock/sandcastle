@@ -2,6 +2,7 @@ import type { OutputDefinition } from "../Output.js";
 import type { AgentProvider } from "./agents.js";
 import type { SessionRecordOptions } from "./SessionRecord.js";
 import type { Skill, Tracker } from "./skills/Skill.js";
+import type { TaskBranch } from "./taskBranch.js";
 
 export type { Tracker } from "./skills/Skill.js";
 
@@ -37,12 +38,15 @@ export interface TaskRun<O extends OutputDefinition | undefined> {
   readonly skills: readonly Skill[];
   /**
    * The task's own prompt, before the parts every task adds. A function gets
-   * the clone's directory once it's cloned, may prepare it (check out a
-   * branch), and returns the prompt; it runs before the skills and setup.
+   * the clone's directory once it's cloned and on its branch, may prepare it
+   * (check out a pull request), and returns the prompt; it runs before the
+   * skills and setup.
    */
   readonly prompt: string | ((clone: string) => Promise<string>);
   readonly output: O | undefined;
   readonly repo: string | undefined;
+  /** The branch to work on in the clone; `undefined` keeps the one cloned. */
+  readonly branch: TaskBranch | undefined;
   readonly githubToken: string | undefined;
   readonly skillsContext: TaskSkillsContext;
   readonly setup: readonly string[];

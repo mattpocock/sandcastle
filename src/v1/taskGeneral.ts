@@ -90,6 +90,7 @@ export const general: GeneralTask = {
       prompt: input.prompt,
       output: input.output,
       repo: input.repo,
+      branch: undefined,
       githubToken: input.githubToken,
       skillsContext: input.skillsContext,
       setup: input.setup ?? [],
