@@ -104,5 +104,10 @@ export async function createSandbox(
       throw failedCreate(provider.name, error, made.sandboxId);
     },
   );
-  return sandboxHandle(made, provider.canDetach, supervisor);
+  return sandboxHandle({
+    sandbox: made,
+    canDetach: provider.canDetach,
+    supervisor,
+    timeLimitMinutes: options.timeLimitMinutes ?? DEFAULT_TIME_LIMIT_MINUTES,
+  });
 }

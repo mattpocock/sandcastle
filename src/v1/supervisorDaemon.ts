@@ -4,7 +4,9 @@ import type { Server, Socket } from "node:net";
 import { createServer } from "node:net";
 import { createInterface } from "node:readline";
 import { Either, Schema } from "effect";
-import type { Reply, Request } from "./supervisorProtocol.js";
+import type { SealingKeys } from "./sealedSecret.js";
+import { makeSealingKeys, openSecret } from "./sealedSecret.js";
+import type { DetachRequest, Reply, Request } from "./supervisorProtocol.js";
 import { RequestJson } from "./supervisorProtocol.js";
 import { SessionRegistry } from "./supervisorRegistry.js";
 
@@ -35,15 +37,47 @@ const answer = async (socket: Socket, done: Promise<void>): Promise<void> => {
   socket.end();
 };
 
-const handle = (
-  request: Request,
-  socket: Socket,
-  context: { readonly registry: SessionRegistry; readonly server: Server },
+interface Context {
+  readonly registry: SessionRegistry;
+  readonly server: Server;
+  readonly keys: SealingKeys;
+}
+
+/** Carries the running sessions on; the supervisor stops once they're reported. */
+const detach = (
+  request: DetachRequest,
+  send: (reply: Reply) => void,
+  context: Context,
 ): void => {
+  const sealed = request.finishReport?.sealedSecret;
+  const secret =
+    sealed === undefined
+      ? undefined
+      : openSecret(context.keys.privateKey, sealed);
+  if (sealed !== undefined && secret === undefined) {
+    send({ type: "error", message: "the finish report secret didn't open" });
+    return;
+  }
+  const carriedOn = context.registry.detach(request, secret, () => {
+    context.server.close();
+  });
+  send({ type: "detached", carriedOn });
+};
+
+const handle = (request: Request, socket: Socket, context: Context): void => {
   const send = sender(socket);
   switch (request.type) {
     case "hello": {
-      send({ type: "hello", pid: process.pid });
+      send({
+        type: "hello",
+        pid: process.pid,
+        publicKey: context.keys.publicKey,
+      });
+      socket.end();
+      return;
+    }
+    case "detach": {
+      detach(request, send, context);
       socket.end();
       return;
     }
@@ -66,7 +100,7 @@ const handle = (
 };
 
 const onConnection =
-  (context: { readonly registry: SessionRegistry; readonly server: Server }) =>
+  (context: Context) =>
   (socket: Socket): void => {
     socket.on("error", () => undefined);
     const lines = createInterface({ input: socket });
@@ -88,9 +122,12 @@ export const runDaemon = async (): Promise<void> => {
     ["sessions", "replays"].map(async (dir) => mkdir(dir, { recursive: true })),
   );
   await rm(SOCKET, { force: true });
+  // Made before it listens, so the host learns the public half before any
+  // session can run: a session can't swap in its own.
+  const keys = await makeSealingKeys();
   const registry = new SessionRegistry();
   const server = createServer();
-  server.on("connection", onConnection({ registry, server }));
+  server.on("connection", onConnection({ registry, server, keys }));
   const closed = once(server, "close");
   server.listen(SOCKET);
   await closed;

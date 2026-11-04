@@ -50,7 +50,7 @@ It is built with the public `createSandboxProvider`, the same contract a provide
 ## Deferred
 
 - **`fakeAgent`**, the agent that replays recorded streams. It is the input to sessions, whose agent descriptor the supervisor change designs (an agent must be serialisable to cross into the sandbox). Shipping it before that would fix its shape blind. It lands with sessions, with its own short review, before the detached-session tests; whether recorded fixtures ship inside the package is a separate one-way door for that review.
-- **The detach deadline margin.** The detach change computes its default deadline from `killTime`; with a seconds-long time limit a fixed margin would put the deadline in the past, so that change scales the margin down or makes it settable.
+- **The detach deadline margin.** The detach change computes its default deadline from `killTime`; with a seconds-long time limit a fixed margin would put the deadline in the past, so that change scales the margin down or makes it settable. Resolved in [ADR 0028](0028-v1-detach-deadline-and-finish-report.md): the margin is 5 minutes or a quarter of the time limit, whichever is shorter.
 - A non-POSIX fake.
 
 ## Consequences

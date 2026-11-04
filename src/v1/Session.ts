@@ -53,13 +53,18 @@ export interface SessionOptions<
   readonly abortSignal?: AbortSignal;
 }
 
-/** How a session ended. `closing-tag`: it printed its output's closing tag and went quiet, so it was stopped and counts as done. */
+/**
+ * How a session ended. `closing-tag`: it printed its output's closing tag and
+ * went quiet, so it was stopped and counts as done. `time-limit`: it was
+ * carried on past a detach and the detach deadline stopped it.
+ */
 export type SessionExitReason =
   | "completed"
   | "closing-tag"
   | "failed"
   | "idle-timeout"
-  | "aborted";
+  | "aborted"
+  | "time-limit";
 
 /** Token counts for a session's last model call. */
 export interface SessionUsage {

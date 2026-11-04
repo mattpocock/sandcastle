@@ -21,8 +21,8 @@ import type {
 
 /** A session the supervisor is running. */
 export interface RunningSession {
-  /** Stops the agent; the outcome is then `aborted`. */
-  readonly kill: Effect.Effect<void>;
+  /** Stops the agent; the outcome's exit reason is then `reason`. */
+  readonly kill: (reason: "aborted" | "time-limit") => Effect.Effect<void>;
   /** Resolves once the session has ended. */
   readonly outcome: Effect.Effect<SessionOutcome>;
 }
@@ -78,7 +78,7 @@ const watch = (context: Context): Effect.Effect<Watched> =>
         return yield* stopped(
           context,
           { stream, started },
-          { reason: "aborted" },
+          { reason: item.reason },
         );
       }
       if (item._tag === "exit") {
@@ -158,7 +158,10 @@ export const startSession = (options: {
       Effect.cached,
     );
     return {
-      kill: Queue.offer(process.items, { _tag: "kill" }).pipe(Effect.asVoid),
+      kill: (reason) =>
+        Queue.offer(process.items, { _tag: "kill", reason }).pipe(
+          Effect.asVoid,
+        ),
       outcome,
     };
   });
