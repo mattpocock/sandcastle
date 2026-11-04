@@ -285,6 +285,44 @@ describe.skipIf(process.platform === "win32")(
       expect(down.attempts()).toBe(1);
     });
 
+    it("reattaching to close() right after the finish report arrives doesn't wait on the exiting supervisor", async () => {
+      const hook = await listening();
+      const sandbox = await createSandbox({ provider });
+      await sandbox.spawnSession({
+        agent: answering,
+        prompt: "Reply in <answer> tags.",
+        completionTimeoutSeconds: 600,
+      });
+      await sandbox.detach({
+        finishReport: {
+          url: hook.url,
+          secret: "whsec_c2FuZGNhc3RsZS1yZWF0dGFjaC10ZXN0",
+        },
+      });
+      const watching = await reattach({
+        provider,
+        sandboxId: sandbox.sandboxId,
+      });
+      await endAgents(watching, supervisorDir(provider, sandbox.sandboxId));
+      await hook.first();
+
+      // The supervisor is exiting now: an orchestrator closes the sandbox
+      // as soon as the report is in.
+      const started = performance.now();
+      const reattached = await reattach({
+        provider: fakeSandbox({ rootDir }),
+        sandboxId: sandbox.sandboxId,
+      });
+      await reattached.close();
+      const took = performance.now() - started;
+
+      await expect(
+        reattachSandbox({ provider, sandboxId: sandbox.sandboxId }),
+      ).rejects.toBeInstanceOf(SandboxUnavailableError);
+      // It used to keep knocking on the exited supervisor for 15 s.
+      expect(took).toBeLessThan(3000);
+    }, 30_000);
+
     it("rejects with SandboxUnavailableError when the sandbox is gone, and resolves undefined when its supervisor is", async () => {
       await expect(
         reattachSandbox({ provider, sandboxId: "fake-never-made" }),
