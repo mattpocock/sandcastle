@@ -15,4 +15,16 @@ export type {
   GeneralOutputs,
   GeneralTask,
 } from "./taskGeneral.js";
+export type {
+  ImplementOutputs,
+  ImplementResult,
+} from "./implementResult.js";
+export { implement } from "./taskImplement.js";
+export type {
+  ImplementCommon,
+  ImplementInput,
+  ImplementRound,
+  ImplementTask,
+  ImplementWork,
+} from "./taskImplement.js";
 export type { TaskLimits, TaskSkillsContext, Tracker } from "./Task.js";

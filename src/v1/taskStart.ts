@@ -6,8 +6,8 @@ import { installSkills } from "./skills/installSkills.js";
 import type { Skill } from "./skills/Skill.js";
 import type { TaskLimits, TaskRun, TaskSkillsContext } from "./Task.js";
 import { latestDeadlineMs, setTaskDeadline } from "./detachDeadline.js";
+import { prepareRepo } from "./taskBranch.js";
 import { taskPrompt } from "./taskPrompt.js";
-import { cloneRepo } from "./taskRepo.js";
 
 // The bundled task contract: what every task's `start` does, in order.
 
@@ -78,7 +78,7 @@ const runSetup = async (
 
 /**
  * Starts a bundled task: clones its repo with the token in that command's env
- * only, installs its skills, runs the setup commands in the clone, then
+ * only, checks out its branch, installs its skills, runs the setup commands in the clone, then
  * spawns one session named after the task and resolves once it runs. The
  * handle's default detach deadline becomes the task's.
  */
@@ -88,10 +88,7 @@ export const startTask = async <O extends OutputDefinition | undefined>(
 ): Promise<SessionProcess<OutputType<O>>> => {
   checkTracker(run.name, run.skillsContext);
   const deadline = taskDeadline(sandbox, run.name, run.limits);
-  const directory =
-    run.repo === undefined
-      ? undefined
-      : await cloneRepo(sandbox, run.repo, run.githubToken);
+  const directory = await prepareRepo(sandbox, run);
   await install(sandbox, run.skills, run.skillsContext);
   await runSetup(sandbox, run.setup, directory);
   setTaskDeadline(sandbox, deadline);

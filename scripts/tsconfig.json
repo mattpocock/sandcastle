@@ -17,7 +17,6 @@
     "api-report.ts",
     "ensure-build.ts",
     "entry-points.ts",
-    "check-skills-mirror*.ts",
-    "v1-skills.test.ts"
+    "check-skills-mirror*.ts"
   ]
 }
