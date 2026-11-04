@@ -32,3 +32,13 @@ The secret must not sit in a request file, even briefly: sessions run as the sam
 - Each call costs a file write and an exec round trip. Fine for sessions; `exec` itself still goes straight to the provider.
 - The sandbox needs Node.js (already a v1 requirement).
 - Agents are named by id plus options (`claudeCode(model, options)` records a descriptor), because a function can't cross into the sandbox; custom agent providers can't run in v1.
+
+## Trust model (2026-11-04): open, to decide before 1.0.0
+
+The control socket is unauthenticated. Any process running as the sandbox user, the agent included, can connect to it and send any request the host can: `session`, `kill`, `shutdown`, `detach`. So an agent can stop its own or a sibling session, shut the supervisor down, or detach the sandbox with a destination and secret of its own choosing. It can't read a finish-report secret the host sealed (only the supervisor's memory opens one), but it can make the run end early or report somewhere else. Request files and the supervisor's directory are as open to it.
+
+This is left open for the maintainer to decide before 1.0.0. The options:
+
+- **Status quo: the agent is trusted within its sandbox.** The sandbox is the boundary; anything that runs in it, the agent included, may steer the work in it. Cheapest, and consistent with the agent already holding the sandbox's env and files. Must be written down for users as such.
+- **A per-start token held only by the host channel.** The supervisor makes a random token at start and returns it in the `hello` reply only once; every later request must carry it. The host's request files would then hold it, so it is only as private as those files and the window before the client deletes them (a session could race to read one), and `hello` must refuse a second caller.
+- **Socket ownership and permissions.** Run the supervisor as a different user from the agent, with the socket and its directory readable only by that user and the host's exec. Strongest, but needs every provider to run commands as a second user (or `sudo`), which v1 doesn't ask of them.

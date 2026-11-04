@@ -13,6 +13,7 @@ import type {
 import {
   claudeCode,
   createSandbox,
+  createSandboxProvider,
   DetachError,
   FinishReportVerificationError,
   Output,
@@ -22,6 +23,7 @@ import {
 import type { FakeSandboxProvider } from "@ai-hero/sandcastle/v1/testing";
 import { fakeAgent, fakeSandbox } from "@ai-hero/sandcastle/v1/testing";
 import type { FinishReportReceiver } from "./helpers/finishReportReceiver.js";
+import { localProviderSandbox } from "./helpers/localProviderSandbox.js";
 import {
   finishReportReceiver,
   hostPath,
@@ -75,6 +77,45 @@ const succeeded = <O extends OutputMap>(
 
 const listRecursive = async (dir: string): Promise<string[]> =>
   readdir(dir, { recursive: true }).catch((): string[] => []);
+
+/**
+ * A provider running commands in `dir` that aborts `controller` the moment
+ * the supervisor's "detached" reply reaches the host, before the call that
+ * carried it has finished.
+ */
+const abortingOnDetached = (
+  dir: string,
+  local: ReturnType<typeof localProviderSandbox>,
+  controller: AbortController,
+) =>
+  createSandboxProvider({
+    name: "aborting",
+    create: async () => ({
+      sandboxId: "sbx-abort-race",
+      workingDirectory: dir,
+      killTime: new Date(Date.now() + 3_600_000),
+      native: undefined,
+      readTextFile: local.readTextFile,
+      writeTextFile: local.writeTextFile,
+      close: local.close,
+      exec: async (options) =>
+        local.exec({
+          ...options,
+          onLine: (line) => {
+            options.onLine?.(line);
+            if (line.includes('"type":"detached"')) {
+              controller.abort();
+            }
+          },
+        }),
+    }),
+    detach: {
+      spawnDetached: async (_sandbox, options) => {
+        void local.exec(options).catch(() => undefined);
+      },
+      get: async () => undefined,
+    },
+  });
 
 describe.skipIf(process.platform === "win32")(
   "detach (v1)",
@@ -367,7 +408,53 @@ describe.skipIf(process.platform === "win32")(
       // A Headers object works as well as a plain record.
       await expect(
         verifyFinishReport({ body, headers: new Headers(headers), secret }),
-      ).resolves.toMatchObject({ data: { status: "succeeded" } });
+      ).resolves.toMatchObject({ version: 1, data: { status: "succeeded" } });
+    });
+
+    it("verifyFinishReport rejects a correctly signed report of a version it doesn't read", async () => {
+      const hook = await listening();
+      const secret = freshSecret();
+      const sandbox = await createSandbox({ provider });
+      await sandbox.spawnSession({ agent: stuck("s-version"), prompt: "Go." });
+      const { detachId } = await sandbox.detach({
+        deadlineMinutes: 0.01,
+        finishReport: { url: hook.url, secret },
+      });
+      const { body } = await hook.first();
+      expect(JSON.parse(body)).toMatchObject({ version: 1 });
+      expect(body).toContain('"version":1,');
+      /** `body` with its version field replaced, signed now with the right secret. */
+      const resigned = (version: string) => {
+        const changed = body.replace('"version":1,', version);
+        const timestamp = String(Math.floor(Date.now() / 1000));
+        const mac = createHmac("sha256", Buffer.from(keyOf(secret), "base64"))
+          .update(`${detachId}.${timestamp}.${changed}`)
+          .digest("base64");
+        return {
+          body: changed,
+          secret,
+          headers: {
+            "webhook-id": detachId,
+            "webhook-timestamp": timestamp,
+            "webhook-signature": `v1,${mac}`,
+          },
+        };
+      };
+
+      await expect(
+        verifyFinishReport(resigned('"version":1,')),
+      ).resolves.toMatchObject({
+        version: 1,
+      });
+      await expect(
+        verifyFinishReport(resigned('"version":2,')),
+      ).rejects.toMatchObject({
+        _tag: "FinishReportVerificationError",
+        reason: "malformed-body",
+      });
+      await expect(verifyFinishReport(resigned(""))).rejects.toMatchObject({
+        reason: "malformed-body",
+      });
     });
 
     it("the default deadline fires before the kill time and reports time-limit", async () => {
@@ -497,6 +584,30 @@ describe.skipIf(process.platform === "win32")(
         ),
       );
       expect(texts.join("\n")).not.toContain(keyOf(secret));
+    });
+
+    it("an abort that lands after the supervisor confirms it holds the work is ignored: detach() resolves and the handle lets go", async () => {
+      const dir = await mkdtemp(path.join(rootDir, "abort-race-"));
+      const local = localProviderSandbox(dir);
+      const controller = new AbortController();
+      const abortingProvider = abortingOnDetached(dir, local, controller);
+      try {
+        const sandbox = await createSandbox({ provider: abortingProvider });
+        await sandbox.spawnSession({ agent: stuck("s-race"), prompt: "Work." });
+
+        const receipt = await sandbox.detach({
+          abortSignal: controller.signal,
+        });
+
+        expect(controller.signal.aborted).toBe(true);
+        expect(receipt.carriedOn).toMatchObject([{ kind: "session" }]);
+        await expect(sandbox.exec("true")).rejects.toMatchObject({
+          _tag: "SandboxDetachedError",
+          detachId: receipt.detachId,
+        });
+      } finally {
+        await local.close();
+      }
     });
 
     it.runIf(process.platform === "linux")(

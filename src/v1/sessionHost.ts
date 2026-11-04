@@ -99,26 +99,23 @@ const follow = async (shared: Shared, live: Live): Promise<void> => {
   Queue.unsafeOffer(live.queue, END);
 };
 
-const start = async (
+const start = (
   request: SessionRequest,
   options: SessionOptions,
-): Promise<Live> => ({
-  request,
-  options,
-  queue: await Effect.runPromise(
-    Queue.unbounded<AgentStreamEvent | typeof END>(),
-  ),
-  started: Deferred.unsafeMake<true>(FiberId.none),
-  ended: Deferred.unsafeMake<SessionOutcome, Ended>(FiberId.none),
-});
+): Effect.Effect<Live> =>
+  Effect.map(Queue.unbounded<AgentStreamEvent | typeof END>(), (queue) => ({
+    request,
+    options,
+    queue,
+    started: Deferred.unsafeMake<true>(FiberId.none),
+    ended: Deferred.unsafeMake<SessionOutcome, Ended>(FiberId.none),
+  }));
 
-/** Resolves once the agent has started, or once it ended without starting. */
-const startedOrEnded = async (live: Live): Promise<"started" | "ended"> =>
-  Effect.runPromise(
-    Effect.raceFirst(
-      Effect.as(Deferred.await(live.started), "started" as const),
-      Effect.as(Effect.either(Deferred.await(live.ended)), "ended" as const),
-    ),
+/** Succeeds once the agent has started, or once it ended without starting. */
+const startedOrEnded = (live: Live): Effect.Effect<"started" | "ended"> =>
+  Effect.raceFirst(
+    Effect.as(Deferred.await(live.started), "started" as const),
+    Effect.as(Effect.either(Deferred.await(live.ended)), "ended" as const),
   );
 
 /** The process handle for a session that's following `live`. */
@@ -181,11 +178,14 @@ const abortedBeforeStart = (name: string): SessionFailedError =>
  */
 const letGo = (
   shared: Shared,
-  running: ReadonlyMap<string, Live>,
+  running: Running,
   error: SandboxDetachedError,
 ): void => {
   shared.detached = error;
   for (const live of running.values()) {
+    if (live === "starting") {
+      continue;
+    }
     Deferred.unsafeDone(live.ended, Exit.fail(error));
     Queue.unsafeOffer(live.queue, END);
   }
@@ -206,18 +206,23 @@ const killOnAbort = (
   );
 };
 
-/** `session()` and `spawnSession()` for one sandbox. */
-export const sessionHost = (
-  link: SupervisorLink,
+/** A session's name is taken from the moment its spawn is accepted ("starting") until the supervisor's answer for it is over, or its spawn fails. */
+type Running = Map<string, Live | "starting">;
+
+const free = (running: Running, name: string, slot: Live | "starting") => {
+  if (running.get(name) === slot) {
+    running.delete(name);
+  }
+};
+
+/** `spawnSession()` for one sandbox. */
+const spawner = (
+  shared: Shared,
+  running: Running,
   context: Omit<Parameters<typeof sessionRequest>[1], "name">,
 ) => {
   let count = 0;
-  const running = new Map<string, Live>();
-  const shared: Shared = { link, letGo: new AbortController() };
-
-  const spawnSession = async (
-    options: SessionOptions,
-  ): Promise<SessionProcess> => {
+  return async (options: SessionOptions): Promise<SessionProcess> => {
     count += 1;
     const name = options.name ?? `session-${count}`;
     if (running.has(name)) {
@@ -229,19 +234,41 @@ export const sessionHost = (
     if (options.abortSignal?.aborted === true) {
       throw abortedBeforeStart(name);
     }
-    const live = await start(request, options);
-    running.set(name, live);
-    void follow(shared, live).finally(() => {
-      running.delete(name);
-    });
-    const spawned = sessionProcess(shared, live, options.output);
-    killOnAbort(spawned, options.abortSignal);
-    if ((await startedOrEnded(live)) === "ended") {
-      // It ended before printing anything: if it failed, it couldn't start.
-      await spawned.wait();
+    // Taken before the first await, so a second spawn of the name is refused.
+    let slot: Live | "starting" = "starting";
+    running.set(name, slot);
+    try {
+      const { spawned, how } = await Effect.gen(function* () {
+        const live = yield* start(request, options);
+        slot = live;
+        running.set(name, live);
+        void follow(shared, live).finally(() => {
+          free(running, name, live);
+        });
+        const process = sessionProcess(shared, live, options.output);
+        killOnAbort(process, options.abortSignal);
+        return { spawned: process, how: yield* startedOrEnded(live) };
+      }).pipe(Effect.runPromise);
+      if (how === "ended") {
+        // It ended before printing anything: if it failed, it couldn't start.
+        await spawned.wait();
+      }
+      return spawned;
+    } catch (error) {
+      free(running, name, slot);
+      throw error;
     }
-    return spawned;
   };
+};
+
+/** `session()` and `spawnSession()` for one sandbox. */
+export const sessionHost = (
+  link: SupervisorLink,
+  context: Omit<Parameters<typeof sessionRequest>[1], "name">,
+) => {
+  const running: Running = new Map();
+  const shared: Shared = { link, letGo: new AbortController() };
+  const spawnSession = spawner(shared, running, context);
 
   const session = async (options: SessionOptions): Promise<SessionResult> =>
     spawnSession(options).then(async (spawned) => spawned.wait());

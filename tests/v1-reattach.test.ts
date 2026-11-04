@@ -97,12 +97,13 @@ describe.skipIf(process.platform === "win32")(
     });
 
     /** A receiver that always answers 503 with `Retry-After: 60`. */
-    const busyReceiver = async () => {
+    /** A receiver that always answers 503, asking for a retry after `retryAfter` seconds. */
+    const busyReceiver = async (retryAfter = "60") => {
       let attempts = 0;
       const server = createServer((request, response) => {
         attempts += 1;
         request.resume();
-        response.writeHead(503, { "retry-after": "60" }).end();
+        response.writeHead(503, { "retry-after": retryAfter }).end();
       });
       server.listen(0, "127.0.0.1");
       await once(server, "listening");
@@ -251,6 +252,36 @@ describe.skipIf(process.platform === "win32")(
         delivery: "gave-up",
         finishReport: { data: { detachId: receipt.detachId } },
       });
+      expect(down.attempts()).toBe(1);
+    });
+
+    it("delivery gives up rather than start an attempt whose timeout could run past the kill time", async () => {
+      // A retry in 35 s lands inside the one-minute kill time, but that
+      // attempt's own 30 s timeout could not: it is never started.
+      const down = await busyReceiver("35");
+      const sandbox = await createSandbox({ provider, timeLimitMinutes: 1 });
+      await sandbox.spawnSession({
+        agent: answering,
+        prompt: "Reply in <answer> tags.",
+        completionTimeoutSeconds: 600,
+      });
+      await sandbox.detach({
+        finishReport: {
+          url: down.url,
+          secret: "whsec_c2FuZGNhc3RsZS1yZWF0dGFjaC10ZXN0",
+        },
+      });
+      const watching = await reattach({
+        provider,
+        sandboxId: sandbox.sandboxId,
+      });
+
+      await endAgents(watching, supervisorDir(provider, sandbox.sandboxId));
+      await statusUntil(
+        watching,
+        (status) => status.detached?.delivery === "gave-up",
+      );
+
       expect(down.attempts()).toBe(1);
     });
 

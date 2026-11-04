@@ -15,9 +15,20 @@ const LONGEST_FIRST = Order.mapInput(
 export type Redact = (text: string) => string;
 
 /**
- * The redactor for `values` and the values `envVars` have in `env`. Longer
- * secrets are masked first, so one that contains another is masked whole.
- * Empty strings and unset vars mask nothing.
+ * A secret as it appears literally, and as it appears inside a JSON string
+ * (tool-call args and transcript lines are JSON), where `"`, `\` and control
+ * characters are escaped.
+ */
+const forms = (secret: string): readonly string[] => {
+  const escaped = JSON.stringify(secret).slice(1, -1);
+  return escaped === secret ? [secret] : [secret, escaped];
+};
+
+/**
+ * The redactor for `values` and the values `envVars` have in `env`, masking
+ * each literally and JSON-escaped. Longer secrets are masked first, so one
+ * that contains another is masked whole. Empty strings and unset vars mask
+ * nothing.
  */
 export const redactor = (
   redaction: {
@@ -27,10 +38,9 @@ export const redactor = (
   env: Readonly<Record<string, string | undefined>>,
 ): Redact => {
   const secrets = Arr.sort(
-    [
-      ...redaction.values,
-      ...redaction.envVars.map((name) => env[name] ?? ""),
-    ].filter((secret) => secret !== ""),
+    [...redaction.values, ...redaction.envVars.map((name) => env[name] ?? "")]
+      .filter((secret) => secret !== "")
+      .flatMap((secret) => forms(secret)),
     LONGEST_FIRST,
   );
   return (text) =>

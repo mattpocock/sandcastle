@@ -224,6 +224,57 @@ describe.skipIf(process.platform === "win32")("sessions (v1)", () => {
     });
   });
 
+  it("two sessions spawned at once with one name: one runs, the other is refused", async () => {
+    const sandbox = await createSandbox({ provider });
+    const spawn = async (sessionId: string) =>
+      sandbox.spawnSession({
+        name: "twin",
+        agent: fakeAgent({ lines: [init(sessionId)], hang: true }),
+        prompt: "Work forever.",
+      });
+
+    const outcomes = await Promise.all(
+      [spawn("s-twin-1"), spawn("s-twin-2")].map(async (spawning) =>
+        spawning.then(
+          (spawned) => ({ ran: spawned.name }),
+          (error: unknown) => ({ refused: error }),
+        ),
+      ),
+    );
+
+    expect(outcomes).toHaveLength(2);
+    expect(outcomes).toStrictEqual(
+      expect.arrayContaining([
+        { ran: "twin" },
+        {
+          refused: new TypeError(
+            'session: a session named "twin" is already running',
+          ),
+        },
+      ]),
+    );
+  });
+
+  it("a session name is free again once spawning it failed", async () => {
+    const sandbox = await createSandbox({ provider });
+
+    await expect(
+      sandbox.spawnSession({
+        name: "retry",
+        agent: claudeCode("claude-opus-4-8"),
+        prompt: "Hello",
+        env: { PATH: "/nowhere" },
+      }),
+    ).rejects.toBeInstanceOf(SessionFailedError);
+    await expect(
+      sandbox.session({
+        name: "retry",
+        agent: fakeAgent({ lines: replying("s-retry", "Again.") }),
+        prompt: "Hello",
+      }),
+    ).resolves.toMatchObject({ finalMessage: "Again." });
+  });
+
   it("spawnSession() rejects when the agent can't start", async () => {
     const sandbox = await createSandbox({ provider });
 

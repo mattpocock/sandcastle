@@ -1,7 +1,14 @@
 import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -46,6 +53,14 @@ export interface FakeDaytonaState {
   autoDestroyAt: string | undefined;
   createError: Error | undefined;
   createFolderError: Error | undefined;
+  /** Thrown by the next `createSession` calls, while set. */
+  createSessionError: Error | undefined;
+  /** While set, `getSessionCommand` reports no exit code, as Daytona may. */
+  exitCodeUnknown: boolean;
+  /** Each folder created, with the mode asked for. */
+  folders: { readonly path: string; readonly mode: string }[];
+  /** Each `setFilePermissions` call. */
+  permissions: { readonly path: string; readonly mode: string | undefined }[];
 }
 
 const fresh = (root: string): FakeDaytonaState => ({
@@ -60,6 +75,10 @@ const fresh = (root: string): FakeDaytonaState => ({
   autoDestroyAt: "ttl",
   createError: undefined,
   createFolderError: undefined,
+  createSessionError: undefined,
+  exitCodeUnknown: false,
+  folders: [],
+  permissions: [],
 });
 
 /** The fake's records, shared by the mocked module and the test. */
@@ -151,6 +170,9 @@ const processApi = (sandbox: FakeSdkSandbox) => ({
     return { exitCode, result: running.out.map((o) => o.chunk).join("") };
   },
   createSession: async (sessionId: string) => {
+    if (fakeDaytona.createSessionError !== undefined) {
+      throw fakeDaytona.createSessionError;
+    }
     sandbox.sessions.set(sessionId, new Map());
   },
   executeSessionCommand: async (
@@ -172,9 +194,10 @@ const processApi = (sandbox: FakeSdkSandbox) => ({
       (chunk: string) => void,
     ]
   ) => followLogs(commandOf(sandbox, sessionId, cmdId), onStdout, onStderr),
-  getSessionCommand: async (sessionId: string, cmdId: string) => ({
-    exitCode: await commandOf(sandbox, sessionId, cmdId).closed,
-  }),
+  getSessionCommand: async (sessionId: string, cmdId: string) => {
+    const exitCode = await commandOf(sandbox, sessionId, cmdId).closed;
+    return fakeDaytona.exitCodeUnknown ? {} : { exitCode };
+  },
   deleteSession: async (sessionId: string) => {
     fakeDaytona.sessionsDeleted.push(sessionId);
     for (const running of sessionOf(sandbox, sessionId).values()) {
@@ -197,11 +220,29 @@ const fsApi = () => ({
     readFile(remotePath).catch(() => {
       throw notFound(remotePath);
     }),
-  createFolder: async (remotePath: string) => {
+  createFolder: async (remotePath: string, mode: string) => {
     if (fakeDaytona.createFolderError !== undefined) {
       throw fakeDaytona.createFolderError;
     }
-    await mkdir(remotePath, { recursive: true });
+    fakeDaytona.folders.push({ path: remotePath, mode });
+    await mkdir(remotePath, {
+      recursive: true,
+      mode: Number.parseInt(mode, 8),
+    });
+  },
+  setFilePermissions: async (
+    remotePath: string,
+    permissions: { readonly mode?: string },
+  ) => {
+    fakeDaytona.permissions.push({ path: remotePath, mode: permissions.mode });
+    if (permissions.mode !== undefined) {
+      await chmod(remotePath, Number.parseInt(permissions.mode, 8));
+    }
+  },
+  deleteFile: async (remotePath: string, recursive?: boolean) => {
+    await rm(remotePath, { recursive: recursive === true }).catch(() => {
+      throw notFound(remotePath);
+    });
   },
 });
 

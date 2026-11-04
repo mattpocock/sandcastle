@@ -11,8 +11,9 @@ import type { SessionCommand } from "./daytonaSessionWatch.js";
 import { watchSessionShell } from "./daytonaSessionWatch.js";
 
 // Running commands in a Daytona sandbox. Daytona's exec has no stdin, and its
-// streamed (session) exec has no env, so both travel as files in the sandbox
-// that the command deletes as it starts.
+// streamed (session) exec has no env, so both travel as files in a private
+// folder in the sandbox, which the command deletes as it starts, and the host
+// deletes again once it's done with the command, in case it never started.
 
 /** A sandbox, and what every command in it gets. */
 export interface DaytonaExecContext {
@@ -26,17 +27,8 @@ export interface DaytonaExecContext {
 const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 /** The exit code of a command killed through its abort signal (SIGTERM). */
 const ABORTED_EXIT_CODE = 143;
-
-/** Uploads `content` to a fresh file under /tmp and returns its path. */
-const uploadTemp = async (
-  sandbox: DaytonaSandbox,
-  kind: string,
-  content: string,
-): Promise<string> => {
-  const path = `/tmp/sandcastle-${kind}-${randomUUID()}`;
-  await sandbox.fs.uploadFile(Buffer.from(content, "utf8"), path);
-  return path;
-};
+/** The exit code of a command Daytona reported no exit code for. */
+const UNKNOWN_EXIT_CODE = 1;
 
 /** Lines that export `env` when sourced, or `undefined` when it's empty. */
 const envScript = (
@@ -56,34 +48,68 @@ const envScript = (
     .join("");
 };
 
+/** Deletes a command's private folder, if it still exists. Never rejects. */
+const discard = async (
+  sandbox: DaytonaSandbox,
+  folder: string | undefined,
+): Promise<void> => {
+  if (folder !== undefined) {
+    await sandbox.fs.deleteFile(folder, true).catch(() => undefined);
+  }
+};
+
+/** Uploads the env and stdin files into a folder only the sandbox user can read. */
+const uploadFiles = async (
+  sandbox: DaytonaSandbox,
+  folder: string,
+  files: { readonly env?: string; readonly stdin?: string },
+): Promise<void> => {
+  await sandbox.fs.createFolder(folder, "700");
+  await Promise.all(
+    Object.entries(files).map(async ([name, content]) => {
+      const path = `${folder}/${name}`;
+      await sandbox.fs.uploadFile(Buffer.from(content, "utf8"), path);
+      await sandbox.fs.setFilePermissions(path, { mode: "600" });
+    }),
+  );
+};
+
 /**
  * `command` ready for Daytona: in a subshell (so a top-level `exit` can't end
  * a session's shell, which would leave its log stream open forever), in its
  * directory, with its env sourced from a file and stdin redirected from one,
- * each file removed before the command runs. With `sudo`, all of it runs as
- * root.
+ * their folder removed before the command runs. With `sudo`, all of it runs
+ * as root.
  */
 const prepare = async (
   context: DaytonaExecContext,
   options: Omit<ProviderExecOptions, "onLine" | "abortSignal">,
-): Promise<string> => {
-  const { sandbox, workingDirectory } = context;
-  const script = envScript({ ...context.env, ...options.env });
-  const envFile =
-    script === undefined ? undefined : await uploadTemp(sandbox, "env", script);
-  const cwd = options.workingDirectory ?? workingDirectory;
+): Promise<{ readonly command: string; readonly folder?: string }> => {
+  const env = envScript({ ...context.env, ...options.env });
+  const { stdin } = options;
+  const folder =
+    env === undefined && stdin === undefined
+      ? undefined
+      : `/tmp/sandcastle-${randomUUID()}`;
+  if (folder !== undefined) {
+    await uploadFiles(context.sandbox, folder, {
+      ...(env === undefined ? {} : { env }),
+      ...(stdin === undefined ? {} : { stdin }),
+    }).catch(async (error: unknown) => {
+      await discard(context.sandbox, folder);
+      throw error;
+    });
+  }
   const inner = [
-    ...(envFile === undefined ? [] : [`. ${envFile}; rm -f ${envFile}`]),
-    `cd ${shellEscape(cwd)} || exit 1`,
+    ...(env === undefined ? [] : [`. ${folder}/env`]),
+    ...(folder === undefined ? [] : [`rm -rf ${folder}`]),
+    `cd ${shellEscape(options.workingDirectory ?? context.workingDirectory)} || exit 1`,
     options.command,
   ].join("\n");
   const elevated =
     options.sudo === true ? `sudo sh -c ${shellEscape(inner)}` : inner;
-  if (options.stdin === undefined) {
-    return `(\n${elevated}\n)`;
-  }
-  const stdinFile = await uploadTemp(sandbox, "stdin", options.stdin);
-  return `(\nrm -f ${stdinFile}\n${elevated}\n) < ${stdinFile}`;
+  const redirect = stdin === undefined ? "" : ` < ${folder}/stdin`;
+  return { command: `(\n${elevated}\n)${redirect}`, folder };
 };
 
 /** Daytona's stream of a command's output failed. */
@@ -198,8 +224,15 @@ const streamed = async (
       return output.result(ABORTED_EXIT_CODE);
     }
     output.flush();
-    const info = await sandbox.process.getSessionCommand(sessionId, cmdId);
-    return output.result(info.exitCode ?? 0);
+    const { exitCode } = await sandbox.process.getSessionCommand(
+      sessionId,
+      cmdId,
+    );
+    if (exitCode === undefined) {
+      output.onStderr("Daytona reported no exit code for the command.\n");
+      return output.result(UNKNOWN_EXIT_CODE);
+    }
+    return output.result(exitCode);
   } finally {
     // Deleting the session kills whatever it still runs.
     await sandbox.process.deleteSession(sessionId).catch(() => undefined);
@@ -219,16 +252,21 @@ export const daytonaExec = async (
   context: DaytonaExecContext,
   options: ProviderExecOptions,
 ): Promise<ProviderExecResult> => {
-  const command = await prepare(context, options);
-  if (options.onLine !== undefined || options.abortSignal !== undefined) {
-    return streamed(context.sandbox, command, options);
+  const { command, folder } = await prepare(context, options);
+  try {
+    if (options.onLine !== undefined || options.abortSignal !== undefined) {
+      return await streamed(context.sandbox, command, options);
+    }
+    const response = await context.sandbox.process.executeCommand(command);
+    return {
+      exitCode: response.exitCode,
+      stdout: response.result,
+      stderr: response.exitCode === 0 ? "" : response.result,
+    };
+  } finally {
+    // Gone already unless the command never got to remove it.
+    await discard(context.sandbox, folder);
   }
-  const response = await context.sandbox.process.executeCommand(command);
-  return {
-    exitCode: response.exitCode,
-    stdout: response.result,
-    stderr: response.exitCode === 0 ? "" : response.result,
-  };
 };
 
 /**
@@ -240,11 +278,18 @@ export const spawnInSession = async (
   context: DaytonaExecContext,
   options: Pick<ProviderExecOptions, "command" | "workingDirectory" | "env">,
 ): Promise<void> => {
-  const command = await prepare(context, options);
+  const { command, folder } = await prepare(context, options);
   const sessionId = `sandcastle-detached-${randomUUID()}`;
-  await context.sandbox.process.createSession(sessionId);
-  await context.sandbox.process.executeSessionCommand(sessionId, {
-    command,
-    runAsync: true,
-  });
+  try {
+    await context.sandbox.process.createSession(sessionId);
+    await context.sandbox.process.executeSessionCommand(sessionId, {
+      command,
+      runAsync: true,
+    });
+  } catch (error) {
+    // It never started, so it never removed its files. Once it has started
+    // it removes them itself: deleting them here would race it.
+    await discard(context.sandbox, folder);
+    throw error;
+  }
 };
