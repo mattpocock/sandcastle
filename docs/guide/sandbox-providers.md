@@ -47,7 +47,7 @@ You can also [create your own provider](#custom-sandbox-providers) using `create
 
 ## Native sandboxes: `bwrap()` and `seatbelt()`
 
-A native sandbox contains the agent with your OS's own process sandbox instead of a container: Bubblewrap on Linux and WSL2, Seatbelt on macOS. There's no image to build and no daemon to run. Each `exec` is a fresh sandboxed process that runs your host's own tools, read-only.
+A native [sandbox](./glossary.md#sandbox) contains the agent with your OS's own process sandbox instead of a container: Bubblewrap on Linux and WSL2, Seatbelt on macOS. There's no image to build and no daemon to run. Each `exec` is a fresh sandboxed process that runs your host's own tools, read-only.
 
 - **Files.** The agent can write only the repo (or its worktree), the git dirs Sandcastle mounts, a private temp dir and a private home. Your home directory, SSH keys, agent logins and other repos are hidden. The repo appears at its real host path, as it does under `noSandbox()`.
 - **Toolchain.** Every directory on your host `PATH` is readable, plus the install root of each executable symlinked from one, so a `claude` in `~/.local/bin` or an nvm-installed `codex` just works. The install root is the executable's package when it's installed under a `node_modules` dir, and otherwise only the executable's own directory, so an `npm link`ed checkout isn't exposed. A `PATH` entry equal to your home directory or an ancestor of it, and an install root holding a `.git`, are never mounted. Add other paths with `mounts`.

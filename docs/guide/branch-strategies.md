@@ -147,9 +147,9 @@ With `branchStrategy: { type: "merge-to-head" }`, each `wt.run()` merges the age
 
 | Option                     | Type                   | Default | Description                                                                                                                          |
 | -------------------------- | ---------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `agent`                    | AgentProvider          | —       | **Required.** Agent provider                                                                                                         |
-| `sandbox`                  | SandboxProvider        | —       | **Required.** Sandbox provider (AFK agents must be sandboxed)                                                                        |
-| `prompt`                   | string                 | —       | Prompt as a string (mutually exclusive with `promptFile`)                                                                            |
+| `agent`                    | AgentProvider          | —       | **Required.** [Agent provider](./glossary.md#agent-provider)                                                                         |
+| `sandbox`                  | SandboxProvider        | —       | **Required.** [Sandbox provider](./glossary.md#sandbox-provider) (AFK agents must be sandboxed)                                      |
+| `prompt`                   | string                 | —       | [Prompt](./glossary.md#prompt) as a string (mutually exclusive with `promptFile`)                                                    |
 | `promptFile`               | string                 | —       | Path to prompt file                                                                                                                  |
 | `maxIterations`            | number                 | 1       | Maximum iterations to run                                                                                                            |
 | `completionSignal`         | string \| string[]     | —       | Substring(s) to stop the iteration loop early                                                                                        |
