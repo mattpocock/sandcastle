@@ -1,4 +1,5 @@
 import { access } from "node:fs/promises";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CreateSandboxError,
@@ -170,6 +171,65 @@ describe.skipIf(process.platform === "win32")("daytona() (v1)", () => {
     await expect(
       Promise.all(envFiles.map(async (file) => exists(file.path))),
     ).resolves.toStrictEqual([false]);
+  });
+
+  it("writes a command's env file where only the sandbox user can read it", async () => {
+    await using sandbox = await createSandbox({
+      provider: daytona(),
+      env: { SANDBOX_TOKEN: "tok-mode" },
+    });
+
+    await sandbox.exec("true");
+
+    const envFile = fakeDaytona.uploads
+      .filter(({ content }) => content.includes("SANDBOX_TOKEN"))
+      .at(-1);
+    expect(envFile).toBeDefined();
+    const file = envFile?.path ?? "";
+    expect(fakeDaytona.folders).toContainEqual({
+      path: path.posix.dirname(file),
+      mode: "700",
+    });
+    expect(fakeDaytona.permissions).toContainEqual({ path: file, mode: "600" });
+  });
+
+  it("removes a command's env file when its session can't be created", async () => {
+    await using sandbox = await createSandbox({
+      provider: daytona(),
+      env: { SANDBOX_TOKEN: "tok-orphan" },
+    });
+    const before = fakeDaytona.uploads.length;
+    fakeDaytona.createSessionError = new Error("session quota reached");
+
+    await expect(
+      sandbox.exec({
+        command: "true",
+        abortSignal: new AbortController().signal,
+      }),
+    ).rejects.toThrow("session quota reached");
+
+    fakeDaytona.createSessionError = undefined;
+    const left = fakeDaytona.uploads.slice(before);
+    expect(left).toHaveLength(1);
+    await expect(
+      Promise.all(left.map(async (file) => exists(file.path))),
+    ).resolves.toStrictEqual([false]);
+  });
+
+  it("fails a streamed command whose exit code Daytona doesn't report", async () => {
+    await using sandbox = await createSandbox({ provider: daytona() });
+    fakeDaytona.exitCodeUnknown = true;
+
+    const result = await sandbox.exec({
+      command: "echo done",
+      allowFailure: true,
+      abortSignal: new AbortController().signal,
+    });
+
+    fakeDaytona.exitCodeUnknown = false;
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stdout).toBe("done\n");
+    expect(result.stderr).toMatch(/no exit code/u);
   });
 
   it("keeps a streamed command's stderr apart from its stdout", async () => {
