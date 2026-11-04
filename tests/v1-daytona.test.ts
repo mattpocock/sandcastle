@@ -181,16 +181,23 @@ describe.skipIf(process.platform === "win32")("daytona() (v1)", () => {
 
     await sandbox.exec("true");
 
-    const envFile = fakeDaytona.uploads
+    const envFiles = fakeDaytona.uploads
       .filter(({ content }) => content.includes("SANDBOX_TOKEN"))
-      .at(-1);
-    expect(envFile).toBeDefined();
-    const file = envFile?.path ?? "";
-    expect(fakeDaytona.folders).toContainEqual({
-      path: path.posix.dirname(file),
-      mode: "700",
-    });
-    expect(fakeDaytona.permissions).toContainEqual({ path: file, mode: "600" });
+      .map((upload) => upload.path);
+    expect(envFiles).not.toHaveLength(0);
+    expect(fakeDaytona.folders).toStrictEqual(
+      expect.arrayContaining(
+        envFiles.map((file) => ({
+          path: path.posix.dirname(file),
+          mode: "700",
+        })),
+      ),
+    );
+    expect(fakeDaytona.permissions).toStrictEqual(
+      expect.arrayContaining(
+        envFiles.map((file) => ({ path: file, mode: "600" })),
+      ),
+    );
   });
 
   it("removes a command's env file when its session can't be created", async () => {

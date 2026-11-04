@@ -291,7 +291,7 @@ describe.skipIf(process.platform === "win32")("session records (v1)", () => {
 
   it.each([
     ["a double quote", 'pa"ss-word-1'],
-    ["a backslash", "pa\\ss-word-2"],
+    ["a backslash", String.raw`pa\ss-word-2`],
     ["a newline", "pa\nss-word-3"],
   ])(
     "a secret containing %s is masked in tool-call args and the transcript, where it appears JSON-escaped",

@@ -210,20 +210,26 @@ describe.skipIf(process.platform === "win32")("sessions (v1)", () => {
         prompt: "Work forever.",
       });
 
-    const settled = await Promise.allSettled([
-      spawn("s-twin-1"),
-      spawn("s-twin-2"),
-    ]);
-
-    const ran = settled.flatMap((s) => (s.status === "fulfilled" ? [s] : []));
-    const refused = settled.flatMap((s) =>
-      s.status === "rejected" ? [s.reason] : [],
+    const outcomes = await Promise.all(
+      [spawn("s-twin-1"), spawn("s-twin-2")].map(async (spawning) =>
+        spawning.then(
+          (spawned) => ({ ran: spawned.name }),
+          (error: unknown) => ({ refused: error }),
+        ),
+      ),
     );
-    expect(ran).toHaveLength(1);
-    expect(refused).toStrictEqual([
-      new TypeError('session: a session named "twin" is already running'),
-    ]);
-    await Promise.all(ran.map(async ({ value }) => value.kill()));
+
+    expect(outcomes).toHaveLength(2);
+    expect(outcomes).toStrictEqual(
+      expect.arrayContaining([
+        { ran: "twin" },
+        {
+          refused: new TypeError(
+            'session: a session named "twin" is already running',
+          ),
+        },
+      ]),
+    );
   });
 
   it("a session name is free again once spawning it failed", async () => {

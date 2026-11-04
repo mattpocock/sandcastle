@@ -78,6 +78,45 @@ const succeeded = <O extends OutputMap>(
 const listRecursive = async (dir: string): Promise<string[]> =>
   readdir(dir, { recursive: true }).catch((): string[] => []);
 
+/**
+ * A provider running commands in `dir` that aborts `controller` the moment
+ * the supervisor's "detached" reply reaches the host, before the call that
+ * carried it has finished.
+ */
+const abortingOnDetached = (
+  dir: string,
+  local: ReturnType<typeof localProviderSandbox>,
+  controller: AbortController,
+) =>
+  createSandboxProvider({
+    name: "aborting",
+    create: async () => ({
+      sandboxId: "sbx-abort-race",
+      workingDirectory: dir,
+      killTime: new Date(Date.now() + 3_600_000),
+      native: undefined,
+      readTextFile: local.readTextFile,
+      writeTextFile: local.writeTextFile,
+      close: local.close,
+      exec: async (options) =>
+        local.exec({
+          ...options,
+          onLine: (line) => {
+            options.onLine?.(line);
+            if (line.includes('"type":"detached"')) {
+              controller.abort();
+            }
+          },
+        }),
+    }),
+    detach: {
+      spawnDetached: async (_sandbox, options) => {
+        void local.exec(options).catch(() => undefined);
+      },
+      get: async () => undefined,
+    },
+  });
+
 describe.skipIf(process.platform === "win32")(
   "detach (v1)",
   { timeout: 30_000 },
@@ -382,11 +421,11 @@ describe.skipIf(process.platform === "win32")(
         finishReport: { url: hook.url, secret },
       });
       const { body } = await hook.first();
-      const report: unknown = JSON.parse(body);
-      expect(report).toMatchObject({ version: 1 });
-      /** `body` with its version replaced, signed now with the right secret. */
-      const resigned = (version: number | undefined) => {
-        const changed = JSON.stringify({ ...Object(report), version });
+      expect(JSON.parse(body)).toMatchObject({ version: 1 });
+      expect(body).toContain('"version":1,');
+      /** `body` with its version field replaced, signed now with the right secret. */
+      const resigned = (version: string) => {
+        const changed = body.replace('"version":1,', version);
         const timestamp = String(Math.floor(Date.now() / 1000));
         const mac = createHmac("sha256", Buffer.from(keyOf(secret), "base64"))
           .update(`${detachId}.${timestamp}.${changed}`)
@@ -402,16 +441,20 @@ describe.skipIf(process.platform === "win32")(
         };
       };
 
-      await expect(verifyFinishReport(resigned(1))).resolves.toMatchObject({
+      await expect(
+        verifyFinishReport(resigned('"version":1,')),
+      ).resolves.toMatchObject({
         version: 1,
       });
-      await expect(verifyFinishReport(resigned(2))).rejects.toMatchObject({
+      await expect(
+        verifyFinishReport(resigned('"version":2,')),
+      ).rejects.toMatchObject({
         _tag: "FinishReportVerificationError",
         reason: "malformed-body",
       });
-      await expect(
-        verifyFinishReport(resigned(undefined)),
-      ).rejects.toMatchObject({ reason: "malformed-body" });
+      await expect(verifyFinishReport(resigned(""))).rejects.toMatchObject({
+        reason: "malformed-body",
+      });
     });
 
     it("the default deadline fires before the kill time and reports time-limit", async () => {
@@ -547,36 +590,7 @@ describe.skipIf(process.platform === "win32")(
       const dir = await mkdtemp(path.join(rootDir, "abort-race-"));
       const local = localProviderSandbox(dir);
       const controller = new AbortController();
-      // Aborts the moment the supervisor's "detached" reply reaches the host,
-      // before the call that carried it has finished.
-      const abortingProvider = createSandboxProvider({
-        name: "aborting",
-        create: async () => ({
-          sandboxId: "sbx-abort-race",
-          workingDirectory: dir,
-          killTime: new Date(Date.now() + 3_600_000),
-          native: undefined,
-          readTextFile: local.readTextFile,
-          writeTextFile: local.writeTextFile,
-          close: local.close,
-          exec: async (options) =>
-            local.exec({
-              ...options,
-              onLine: (line) => {
-                options.onLine?.(line);
-                if (line.includes('"type":"detached"')) {
-                  controller.abort();
-                }
-              },
-            }),
-        }),
-        detach: {
-          spawnDetached: async (_sandbox, options) => {
-            void local.exec(options).catch(() => undefined);
-          },
-          get: async () => undefined,
-        },
-      });
+      const abortingProvider = abortingOnDetached(dir, local, controller);
       try {
         const sandbox = await createSandbox({ provider: abortingProvider });
         await sandbox.spawnSession({ agent: stuck("s-race"), prompt: "Work." });

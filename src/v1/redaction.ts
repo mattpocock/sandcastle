@@ -40,7 +40,7 @@ export const redactor = (
   const secrets = Arr.sort(
     [...redaction.patterns, ...redaction.envVars.map((name) => env[name] ?? "")]
       .filter((secret) => secret !== "")
-      .flatMap(forms),
+      .flatMap((secret) => forms(secret)),
     LONGEST_FIRST,
   );
   return (text) =>
