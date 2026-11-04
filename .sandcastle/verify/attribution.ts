@@ -5,10 +5,10 @@
  */
 
 /** A world's run id, as `createWorld` makes it: <yyyymmdd>-<hhmmss>-<4hex>. */
-export const RUN_ID = /\d{8}-\d{6}-[0-9a-f]{4}/g;
+export const RUN_ID = /\d{8}-\d{6}-[0-9a-f]{4}/gu;
 
 export const runIdsIn = (text: string): string[] => [
-  ...new Set(text.match(RUN_ID) ?? []),
+  ...new Set(text.match(RUN_ID)),
 ];
 
 export interface WorldSpan {
@@ -33,25 +33,25 @@ export interface ImageAttribution {
 
 /** Docker prints RFC 3339; podman prints Go's `2006-01-02 15:04:05.999 -0700 MST`. */
 export const parseEngineTime = (raw: string): number | undefined => {
-  const m =
-    /(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(\.\d+)?\s*(Z|[+-]\d{2}:?\d{2})?/.exec(
+  const groups =
+    /(?<date>\d{4}-\d{2}-\d{2})[T ](?<time>\d{2}:\d{2}:\d{2})(?<frac>\.\d+)?\s*(?<zone>Z|[+-]\d{2}:?\d{2})?/u.exec(
       raw.trim(),
-    );
-  if (!m) {
+    )?.groups;
+  if (groups === undefined) {
     return undefined;
   }
-  const frac = m[3] ? m[3].slice(0, 4) : "";
-  let zone = m[4] ?? "Z";
-  if (/^[+-]\d{4}$/.test(zone)) {
+  const frac = groups.frac?.slice(0, 4) ?? "";
+  let zone = groups.zone ?? "Z";
+  if (/^[+-]\d{4}$/u.test(zone)) {
     zone = `${zone.slice(0, 3)}:${zone.slice(3)}`;
   }
-  const t = Date.parse(`${m[1]}T${m[2]}${frac}${zone}`);
+  const t = Date.parse(`${groups.date}T${groups.time}${frac}${zone}`);
   return Number.isNaN(t) ? undefined : t;
 };
 
 const liveAt = (w: WorldSpan, t: number, now: number): boolean =>
   Date.parse(w.createdAt) <= t &&
-  t <= (w.cleanedAt ? Date.parse(w.cleanedAt) : now);
+  t <= (w.cleanedAt === undefined ? now : Date.parse(w.cleanedAt));
 
 /**
  * Attribute an image that is new since `self` was created. `others` are the
@@ -59,10 +59,10 @@ const liveAt = (w: WorldSpan, t: number, now: number): boolean =>
  */
 export const attributeImage = (
   image: { readonly ref: string; readonly created?: string },
-  self: WorldSpan,
-  others: readonly WorldSpan[],
+  worlds: { readonly self: WorldSpan; readonly others: readonly WorldSpan[] },
   now: string,
 ): ImageAttribution => {
+  const { self, others } = worlds;
   const ids = runIdsIn(image.ref);
   if (ids.includes(self.runId)) {
     return { kind: "own", detail: "this world's, cleanup removes it" };
@@ -73,14 +73,15 @@ export const attributeImage = (
       detail: `named for world ${ids.join(", ")}, not this one`,
     };
   }
-  if (!/^(localhost\/)?sandcastle:/.test(image.ref)) {
+  if (!/^(?:localhost\/)?sandcastle:/u.test(image.ref)) {
     return {
       kind: "unrelated",
       detail: "new since the world began, not a Sandcastle image",
     };
   }
   const nowT = Date.parse(now);
-  const t = image.created ? parseEngineTime(image.created) : undefined;
+  const t =
+    image.created === undefined ? undefined : parseEngineTime(image.created);
   if (t !== undefined && t < Date.parse(self.createdAt)) {
     return {
       kind: "unrelated",
@@ -120,7 +121,7 @@ export const sharedTmpEntryIsWorlds = (
 /** The next `LEDGER-<n>.md` in a world dir; earlier ledgers are never overwritten. */
 export const ledgerFileName = (existing: readonly string[]): string => {
   const ns = existing
-    .map((f) => /^LEDGER-(\d+)\.md$/.exec(f)?.[1])
+    .map((f) => /^LEDGER-(?<n>\d+)\.md$/u.exec(f)?.groups?.n)
     .filter((n): n is string => Boolean(n))
     .map(Number);
   return `LEDGER-${ns.length > 0 ? Math.max(...ns) + 1 : 1}.md`;

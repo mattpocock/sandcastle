@@ -94,7 +94,7 @@ Instead, create a config layer using Effect for that function, then instantiate 
 
 ## The lint ratchet
 
-`npm run lint` runs oxlint (every category but `restriction` and `nursery` as errors, type-aware, `.oxlintrc.json`) and every Effect language service diagnostic (the `tsconfig.json` plugin). The compiler itself is not ratcheted: `npm run typecheck` passes clean. Run `npm run build` first: the scripts in `.sandcastle/` and `.factory/` import `@ai-hero/sandcastle`, whose types come from `dist`, and without them type-aware rules report false `no-unsafe-*` violations. Code that broke a rule when the linter landed is counted, per file and rule, in `scripts/lint-baseline.json`. `scripts/lint-ratchet.ts` holds the code to that baseline, and the baseline only ever shrinks:
+`npm run lint` runs oxlint (every category but `restriction` and `nursery` as errors, type-aware, `.oxlintrc.json`) and every Effect language service diagnostic (the `tsconfig.json` plugin). `npm run typecheck` (src/ and tests/) passes clean; the compiler errors in the tooling in `.sandcastle/` are ratcheted the same way, in `scripts/typecheck-baseline.json`. Run `npm run build` first: the scripts in `.sandcastle/` and `.factory/` import `@ai-hero/sandcastle`, whose types come from `dist`, and without them type-aware rules report false `no-unsafe-*` violations. Code that broke a rule when the linter landed is counted, per file and rule, in `scripts/lint-baseline.json`. `scripts/lint-ratchet.ts` holds the code to that baseline, and the baseline only ever shrinks:
 
 - A new violation fails — a count going up, or a file or rule the baseline lacks. Fix it. Never raise the baseline.
 - A fixed violation passes. Lowering the baseline in the same PR is optional: after every push to `main`, the `lint-shrink` workflow runs `npm run lint:shrink` (which lowers counts and drops entries at zero but never raises one) and opens or updates a "chore(lint): shrink baseline" PR. Leave `scripts/lint-baseline.json` alone in fix PRs so they don't conflict with each other.
@@ -102,7 +102,23 @@ Instead, create a config layer using Effect for that function, then instantiate 
 
 No disable comments (`eslint-disable`, `oxlint-disable`, `@ts-ignore`, `@ts-expect-error`, `@effect-diagnostics`) outside the reviewed allowlist in `scripts/lint-ratchet-config.ts`; each one counts as `ratchet/disable-comment`. The same file names the Effect entry points (the only modules that may call `Effect.runPromise` and friends) and the test-only Effect exemptions. `.oxlintrc.json` may not grow a per-file override.
 
-To pay down debt, pick a rule or a file from `npm run lint:report` and fix every violation of it. Fix behaviour-neutrally, one rule or one file per PR; `oxlint --fix` sweeps of one rule across the repo are fine.
+Host-side git goes through `hostGit()` (`src/hostGit.ts`): a raw `git` spawn in any other `src/` file counts as `ratchet/raw-git-spawn`.
+
+To pay down debt, pick a rule or a file from `npm run lint:report` and fix every violation of it. It counts live, the same way `npm run lint` does (building `dist/` first when stale), and shows each baseline count beside it (`live / baseline`); the baseline itself lags until the lint-shrink PR lands, so never scope work from `scripts/lint-baseline.json` or a bare `npx oxlint` run. Fix behaviour-neutrally, one rule or one file per PR; `oxlint --fix` sweeps of one rule across the repo are fine.
+
+Tests may not assert a property's absence with `toMatchObject({ k: undefined })`: it passes where `k` is set to `undefined` and fails where `k` is omitted, so it can be green on one platform and red on another. Use `expect(x).not.toHaveProperty("k")`. Each one counts as `ratchet/match-object-undefined`.
+
+### New-file budget
+
+A new file has no baseline, so it meets every cap at zero. The ones a new `src/` file hits first:
+
+- `import/max-dependencies`: 10 imports.
+- `max-lines`: 300 lines, blanks and comments included.
+- `max-lines-per-function`: 50 lines; `max-statements`: 20; `complexity`: 15.
+- `node/no-sync`: no `fs.*Sync` or `execSync` outside tests. Inline disables are not allowed in `src/` either.
+- `effect/asyncFunction`: no `async` functions outside the entry points in `scripts/lint-ratchet-config.ts`. Return an Effect.
+
+Split helpers into their own files before writing, not after the ratchet fails. Check one file with `npx oxlint <file>`.
 
 ---
 
@@ -112,7 +128,15 @@ To pay down debt, pick a rule or a file from `npm run lint:report` and fix every
 
 New tests go in `tests/` and use only the public API: `@ai-hero/sandcastle` and its `exports` subpaths, imported by package name. dependency-cruiser (`.dependency-cruiser.mjs`) enforces this, and `src/` never imports from `tests/`. The unit tests elsewhere in `src/` are legacy. The test ratchet (`scripts/test-baseline.json`, checked by `npm run lint`) fails on any new test file outside `tests/`, and the legacy count only shrinks. The tests of the repo's own tooling (`scripts/`, `.sandcastle/`) are out of scope.
 
+Tests that need a real Docker or Podman engine go in `tests/local/`, under the same rules. `npm test` and CI never run them (CI has no container engine); `npm run test:local` does, and it must pass before a release (`docs/agents/releasing.md`). It fails, rather than skips, when an engine is missing. Keep `tests/local/` to what only a real container can show: anything that runs without an engine belongs in `tests/`.
+
+Tests in `tests/` have no type assertions (`as T`, `<T>x`); `as const` is fine. The test ratchet counts them (`ratchet/test-type-assertion`), from zero. Build a value of the real type, or narrow with `expect` or a type guard. The legacy tests use them freely, so drop them when porting one.
+
 A migration PR may delete a legacy test only when `npm run coverage:gate -- <file>` passes: every line only that file covers must now be covered by `tests/`. Paste its output into the PR body.
+
+The line coverage `tests/` reaches over `src/` only rises: `npm run coverage:floor` (a CI step) fails more than 0.1 points below the floor in `scripts/coverage-baseline.json` (platforms map a few lines differently). New `src/` code therefore needs a test in `tests/`; a legacy test next to it does not count. Never lower the floor; the lint-shrink workflow raises it after each push to main.
+
+Never delete a test to satisfy the test ratchet. When a change trips the ratchet on a legacy test, either port its cases to a public-API test in `tests/` first (the deletion then follows the rule above), or leave the test where it is — it stays in the baseline, which is fine. The ratchet counts files, not cases: deleting a test lowers the count while the behaviour it guarded silently loses coverage, and CI can't tell. Reviewers enforce this; send back any PR that deletes a test without porting its cases.
 
 Never extend or loosen the public API to suit a test. The only test-motivated surface allowed is the test helpers entry point, which a later PR designs. If a test can't reach something through the public API, that code is either dead or missing a real public seam.
 
@@ -176,6 +200,11 @@ Mock at **system boundaries** only:
 **Never mock your own classes/modules or internal collaborators.** If something is hard to test without mocking internals, redesign the interface.
 
 Prefer SDK-style interfaces over generic fetchers at boundaries — each function is independently mockable with a single return shape, no conditional logic in test setup.
+
+A sandbox provider's SDK is such a boundary. In `tests/`, fake it one of two ways:
+
+- **Fake the network, run the real SDK**, when the SDK takes a base URL or uses `fetch`: `tests/e2b.test.ts` (a local server) and `tests/sprites.test.ts` (stubbed `fetch` and `WebSocket`). Prefer this: it also tests how the provider drives the SDK.
+- **Mock the module**, when it doesn't: copy `tests/modal.test.ts`. It shows `vi.mock(import("modal"), …)` in the `import()` form, keeps state in `vi.hoisted`, and types the fake constructor as `vi.fn<(params: P) => ReturnType<UntypedMock>>`. That typing satisfies both `require-mock-type-parameters` and `no-unnecessary-type-arguments` without an `as`.
 
 ### TDD Workflow: Vertical Slices
 

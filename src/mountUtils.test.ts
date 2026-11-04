@@ -117,13 +117,13 @@ describe("resolveSandboxPath", () => {
 
   it("throws when ~ is used but sandboxHomedir is undefined", () => {
     expect(() => resolveSandboxPath("~/.npm")).toThrow(
-      /sandboxPath.*tilde.*sandboxHomedir/i,
+      /sandboxPath.*tilde.*sandboxHomedir/iu,
     );
   });
 
   it("throws when ~ alone is used but sandboxHomedir is undefined", () => {
     expect(() => resolveSandboxPath("~")).toThrow(
-      /sandboxPath.*tilde.*sandboxHomedir/i,
+      /sandboxPath.*tilde.*sandboxHomedir/iu,
     );
   });
 });
@@ -174,7 +174,7 @@ describe("resolveUserMounts", () => {
       resolveUserMounts([
         { hostPath: "/existing/path", sandboxPath: "~/.npm" },
       ]),
-    ).toThrow(/sandboxPath.*tilde.*sandboxHomedir/i);
+    ).toThrow(/sandboxPath.*tilde.*sandboxHomedir/iu);
   });
 
   it("resolves hostPath tilde via os.homedir() regardless of sandboxHomedir", () => {
@@ -192,8 +192,7 @@ describe("normalizeMounts", () => {
       const mounts = [{ hostPath: "/repo/.git", sandboxPath: "/repo/.git" }];
       const result = normalizeMounts(
         mounts,
-        "/repo",
-        SANDBOX_REPO_DIR,
+        { worktreeHostPath: "/repo", sandboxRepoDir: SANDBOX_REPO_DIR },
         "linux",
       );
       expect(result).toStrictEqual(mounts);
@@ -208,8 +207,10 @@ describe("normalizeMounts", () => {
       ];
       const result = normalizeMounts(
         mounts,
-        "/home/user/project",
-        SANDBOX_REPO_DIR,
+        {
+          worktreeHostPath: "/home/user/project",
+          sandboxRepoDir: SANDBOX_REPO_DIR,
+        },
         "darwin",
       );
       expect(result[0]?.sandboxPath).toBe("/home/user/project/.git");
@@ -226,8 +227,10 @@ describe("normalizeMounts", () => {
       ];
       const result = normalizeMounts(
         mounts,
-        String.raw`C:\Users\project`,
-        SANDBOX_REPO_DIR,
+        {
+          worktreeHostPath: String.raw`C:\Users\project`,
+          sandboxRepoDir: SANDBOX_REPO_DIR,
+        },
         "win32",
       );
       expect(result[0]?.hostPath).toBe("C:/Users/project/.git");
@@ -242,8 +245,10 @@ describe("normalizeMounts", () => {
       ];
       const result = normalizeMounts(
         mounts,
-        String.raw`C:\Users\project`,
-        SANDBOX_REPO_DIR,
+        {
+          worktreeHostPath: String.raw`C:\Users\project`,
+          sandboxRepoDir: SANDBOX_REPO_DIR,
+        },
         "win32",
       );
       expect(result[0]?.sandboxPath).toBe(`${SANDBOX_REPO_DIR}/.git`);
@@ -262,8 +267,10 @@ describe("normalizeMounts", () => {
       ];
       const result = normalizeMounts(
         mounts,
-        String.raw`C:\Users\project`,
-        SANDBOX_REPO_DIR,
+        {
+          worktreeHostPath: String.raw`C:\Users\project`,
+          sandboxRepoDir: SANDBOX_REPO_DIR,
+        },
         "win32",
       );
       expect(result[0]?.hostPath).toBe("C:/Users/project");
@@ -288,8 +295,10 @@ describe("normalizeMounts", () => {
       ];
       const result = normalizeMounts(
         mounts,
-        String.raw`C:\Users\worktrees\my-wt`,
-        SANDBOX_REPO_DIR,
+        {
+          worktreeHostPath: String.raw`C:\Users\worktrees\my-wt`,
+          sandboxRepoDir: SANDBOX_REPO_DIR,
+        },
         "win32",
       );
       // worktree mount: hostPath normalized, sandboxPath already POSIX
@@ -313,8 +322,10 @@ describe("normalizeMounts", () => {
       ];
       const result = normalizeMounts(
         mounts,
-        String.raw`C:\Users\project`,
-        SANDBOX_REPO_DIR,
+        {
+          worktreeHostPath: String.raw`C:\Users\project`,
+          sandboxRepoDir: SANDBOX_REPO_DIR,
+        },
         "win32",
       );
       expect(result[0]?.readonly).toBe(true);
@@ -329,8 +340,10 @@ describe("normalizeMounts", () => {
       ];
       const result = normalizeMounts(
         mounts,
-        String.raw`C:\Users\project`,
-        SANDBOX_REPO_DIR,
+        {
+          worktreeHostPath: String.raw`C:\Users\project`,
+          sandboxRepoDir: SANDBOX_REPO_DIR,
+        },
         "win32",
       );
       expect(result[0]?.hostPath).toBe("C:/Users/project/cache");
@@ -696,7 +709,7 @@ describe("processFileMountParents", () => {
     ];
     expect(() =>
       processFileMountParents(mounts, sandboxHomedir, fileStatFn),
-    ).toThrow(/parent directory.*\/opt\/foo.*outside the sandbox home/i);
+    ).toThrow(/parent directory.*\/opt\/foo.*outside the sandbox home/iu);
   });
 
   it("error message includes remediation guidance", () => {
@@ -708,7 +721,7 @@ describe("processFileMountParents", () => {
     ];
     expect(() =>
       processFileMountParents(mounts, sandboxHomedir, fileStatFn),
-    ).toThrow(/mount the parent directory instead.*or rebuild/i);
+    ).toThrow(/mount the parent directory instead.*or rebuild/iu);
   });
 
   it("returns empty array for directory mounts", () => {

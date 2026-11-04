@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile, mkdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Exit } from "effect";
+import { Cause, Chunk, Effect, Exit } from "effect";
 import { assert, describe, expect, it, vi } from "vitest";
 import { copyToWorktree, getCopyOnWriteFlags } from "./CopyToWorktree.js";
 import { CopyToWorktreeError, CopyToWorktreeTimeoutError } from "./errors.js";
@@ -194,16 +194,17 @@ describe("copyToWorktree", () => {
       await vi.advanceTimersByTimeAsync(customTimeout + 100);
 
       const exit = await exitPromise;
-      // The copy may succeed before the timeout fires on fast systems,
-      // but if it times out, the error should carry the custom timeout value
-      if (Exit.isFailure(exit) && exit.cause._tag === "Fail") {
-        const { error } = exit.cause;
+      // The copy may succeed before the timeout fires on fast systems
+      // (no failures), but if it times out, the error should carry the
+      // custom timeout value
+      const failures = Exit.match(exit, {
+        onSuccess: () => [],
+        onFailure: (cause) => Chunk.toArray(Cause.failures(cause)),
+      });
+      for (const error of failures) {
         expect(error).toBeInstanceOf(CopyToWorktreeTimeoutError);
-        if (error instanceof CopyToWorktreeTimeoutError) {
-          expect(error.timeoutMs).toBe(customTimeout);
-        }
+        expect(error).toHaveProperty("timeoutMs", customTimeout);
       }
-      // If it succeeds, that's also fine — the timeout just didn't fire
     } finally {
       vi.useRealTimers();
       await rm(hostDir, { recursive: true, force: true });
@@ -212,7 +213,7 @@ describe("copyToWorktree", () => {
   });
 
   it.skipIf(process.platform === "win32")(
-    "kills the cp process when the copy times out",
+    "kills the cp process when the copy times out, and spawns no fallback cp",
     async () => {
       const hostDir = await mkdtemp(join(tmpdir(), "cw-test-"));
       const worktreeDir = await mkdtemp(join(tmpdir(), "cw-wt-"));
@@ -220,9 +221,10 @@ describe("copyToWorktree", () => {
       // cp blocks opening a FIFO destination that has no reader.
       const dest = join(worktreeDir, "stuck.txt");
       execFileSync("mkfifo", [dest]);
+      const cpPattern = `cp .*${dest}`;
       const cpAlive = () => {
         try {
-          execFileSync("pgrep", ["-f", `cp .*${dest}`]);
+          execFileSync("pgrep", ["-f", cpPattern]);
           return true;
         } catch {
           return false;
@@ -235,14 +237,18 @@ describe("copyToWorktree", () => {
         );
         expect(Exit.isFailure(exit)).toBe(true);
 
-        const deadline = Date.now() + 2000;
-        while (cpAlive() && Date.now() < deadline) {
-          await new Promise((r) => setTimeout(r, 50));
-        }
+        // Yield to the event loop so the killed cp's exit callback runs: a
+        // fallback cp spawned from it would block on the FIFO forever.
+        await new Promise((r) => setTimeout(r, 500));
         expect(cpAlive()).toBe(false);
       } finally {
-        // Unblock any surviving cp by opening the FIFO for reading.
-        execFileSync("sh", ["-c", `timeout 1 cat "${dest}" || true`]);
+        // Kill any surviving cp before deleting the FIFO: once the FIFO is
+        // unlinked nothing can open it for reading, so cp would never exit.
+        try {
+          execFileSync("pkill", ["-KILL", "-f", cpPattern]);
+        } catch {
+          // No cp left to kill.
+        }
         await rm(hostDir, { recursive: true, force: true });
         await rm(worktreeDir, { recursive: true, force: true });
       }

@@ -8,7 +8,7 @@ export const outputDir = (): string => process.env.OUTPUT_DIR ?? "/tmp";
 
 export const required = (name: string): string => {
   const value = process.env[name];
-  if (!value) {
+  if (value === undefined || value === "") {
     console.error(`Missing required env var: ${name}`);
     process.exit(1);
   }
@@ -82,14 +82,18 @@ export const standardSchema = <T>(
   },
 });
 
+/** A plain JSON object (not null, not an array). */
+export const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
 export const asRecord = (
   value: unknown,
   label: string,
 ): Record<string, unknown> => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (!isRecord(value)) {
     throw new Error(`${label} must be an object`);
   }
-  return value as Record<string, unknown>;
+  return value;
 };
 
 export const asString = (value: unknown, label: string): string => {
@@ -102,9 +106,28 @@ export const asString = (value: unknown, label: string): string => {
 export const asOptionalString = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim().length > 0 ? value : undefined;
 
+/** A JSON text field: the string itself, or `fallback` for anything else. */
+export const textOr = (value: unknown, fallback: string): string =>
+  typeof value === "string" ? value : fallback;
+
 export const asArray = (value: unknown, label: string): unknown[] => {
   if (!Array.isArray(value)) {
     throw new TypeError(`${label} must be an array`);
   }
   return value;
+};
+
+/** Run a schema built by `standardSchema` synchronously, throwing on failure. */
+export const validate = <T>(
+  schema: StandardSchemaV1<unknown, T>,
+  value: unknown,
+): T => {
+  const result = schema["~standard"].validate(value);
+  if (result instanceof Promise) {
+    throw new TypeError("Schema validation must be synchronous");
+  }
+  if (result.issues) {
+    throw new Error(result.issues.map((issue) => issue.message).join("; "));
+  }
+  return result.value;
 };

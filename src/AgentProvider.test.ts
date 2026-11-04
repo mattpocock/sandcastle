@@ -16,6 +16,24 @@ import { ForkNotSupportedError } from "./errors.js";
 import type { BindMountSandboxHandle } from "./SandboxProvider.js";
 
 /** Parses session usage, failing the test if the provider cannot. */
+/** How a console argument reads: an Error's message, anything else stringified. */
+const consoleText = (value: unknown): string =>
+  value instanceof Error ? value.message : String(value);
+
+/** Decorates `base` so copying out any path ending in `suffix` fails. */
+const failingCopyFileOut = (
+  base: BindMountSandboxHandle,
+  suffix: string,
+): BindMountSandboxHandle => ({
+  ...base,
+  copyFileOut: async (sandboxPath, destPath) => {
+    if (sandboxPath.endsWith(suffix)) {
+      throw new Error("simulated copyFileOut failure");
+    }
+    return base.copyFileOut(sandboxPath, destPath);
+  },
+});
+
 const parseSessionUsage = (provider: AgentProvider, content: string) => {
   assert(
     provider.parseSessionUsage !== undefined,
@@ -62,7 +80,8 @@ describe("claudeCode factory", () => {
   it("buildPrintCommand delivers prompt via stdin, not argv", () => {
     const provider = claudeCode("claude-opus-4-8");
     const { command, stdin } = provider.buildPrintCommand(opts("do something"));
-    expect(command).toContain("-p -");
+    expect(command).not.toMatch(/ -p\b/u);
+    expect(command).not.toMatch(/ -$/u);
     expect(command).not.toContain("'do something'");
     expect(stdin).toBe("do something");
   });
@@ -766,7 +785,7 @@ describe("codex factory", () => {
   });
 
   it("supports all codex effort levels", () => {
-    for (const effort of ["low", "medium", "high", "xhigh"] as const) {
+    for (const effort of ["low", "medium", "high", "xhigh", "max"] as const) {
       const provider = codex("gpt-5.4-mini", { effort });
       expect(provider.buildPrintCommand(opts("test")).command).toContain(
         `model_reasoning_effort="${effort}"`,
@@ -1067,7 +1086,7 @@ describe("cursor factory", () => {
     const provider = cursor("claude-sonnet-4-6");
     const huge = "x".repeat(120 * 1024 + 1);
     expect(() => provider.buildPrintCommand(opts(huge))).toThrow(
-      /Cursor print-mode prompt/,
+      /Cursor print-mode prompt/u,
     );
   });
 
@@ -1773,7 +1792,7 @@ describe("copilot factory", () => {
     const provider = copilot("claude-sonnet-4.5");
     const huge = "x".repeat(120 * 1024 + 1);
     expect(() => provider.buildPrintCommand(opts(huge))).toThrow(
-      /Copilot print-mode prompt/,
+      /Copilot print-mode prompt/u,
     );
   });
 
@@ -2616,25 +2635,13 @@ describe("sessionStorage", () => {
       const errors: string[] = [];
       const originalError = console.error;
       console.error = (msg: unknown, ...rest: unknown[]) => {
-        errors.push(
-          [msg, ...rest]
-            .map((v) => (v instanceof Error ? v.message : String(v)))
-            .join(" "),
-        );
+        errors.push([msg, ...rest].map((v) => consoleText(v)).join(" "));
       };
 
       try {
         // Decorate the fs handle: make copyFileOut fail for the bad subagent.
         const base = fsBindMountHandle();
-        const handle: BindMountSandboxHandle = {
-          ...base,
-          copyFileOut: async (sandboxPath, destPath) => {
-            if (sandboxPath.endsWith("agent-bad.jsonl")) {
-              throw new Error("simulated copyFileOut failure");
-            }
-            return base.copyFileOut(sandboxPath, destPath);
-          },
-        };
+        const handle = failingCopyFileOut(base, "agent-bad.jsonl");
 
         // Main capture must succeed; the bad subagent must not abort the run.
         const provider = claudeCode("claude-opus-4-8", {

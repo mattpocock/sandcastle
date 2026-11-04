@@ -10,7 +10,7 @@ import {
   resolveGitMounts,
   SANDBOX_REPO_DIR,
 } from "./SandboxFactory.js";
-import type { MountEntry } from "./SandboxFactory.js";
+import type { MountEntry, SandboxService } from "./SandboxFactory.js";
 import { patchGitMountsForWindows, removeMountTempDirs } from "./mountUtils.js";
 import { runHostHooks } from "./SandboxLifecycle.js";
 import type { SandboxHooks } from "./SandboxLifecycle.js";
@@ -146,9 +146,7 @@ export interface WorktreeCreateSandboxOptions {
   readonly timeouts?: Timeouts;
   /** @internal Test-only overrides to bypass the sandbox provider. */
   readonly _test?: {
-    readonly buildSandbox?: (
-      sandboxDir: string,
-    ) => import("./SandboxFactory.js").SandboxService;
+    readonly buildSandbox?: (sandboxDir: string) => SandboxService;
   };
 }
 
@@ -166,6 +164,172 @@ export interface Worktree {
   /** Auto cleanup via `await using`. */
   [Symbol.asyncDispose](): Promise<void>;
 }
+
+/**
+ * @internal The env for a worktree's sandbox: `.sandcastle/.env` merged with
+ * the agent's and sandbox provider's env, then the caller's `overrides`.
+ */
+const resolveWorktreeEnv = (
+  hostRepoDir: string,
+  sources: {
+    readonly agentProviderEnv: Record<string, string>;
+    readonly sandboxProviderEnv: Record<string, string>;
+    readonly overrides: Record<string, string> | undefined;
+  },
+) =>
+  resolveEnv(hostRepoDir).pipe(
+    Effect.map((resolvedEnv) => ({
+      ...mergeProviderEnv({
+        resolvedEnv,
+        agentProviderEnv: sources.agentProviderEnv,
+        sandboxProviderEnv: sources.sandboxProviderEnv,
+      }),
+      ...sources.overrides,
+    })),
+  );
+
+/** @internal The host repo's git mounts, patched for a Windows worktree (ADR-0006). */
+const resolveWorktreeGitMounts = (hostRepoDir: string, worktreePath: string) =>
+  resolveGitMounts(join(hostRepoDir, ".git")).pipe(
+    Effect.flatMap((rawGitMounts) =>
+      patchGitMountsForWindows(rawGitMounts, worktreePath, SANDBOX_REPO_DIR),
+    ),
+  );
+
+/**
+ * @internal Starts the sandbox for `worktree.run()`. Returns its handle, the
+ * repo dir inside it, and the git mounts (bind-mount only) whose temp dirs
+ * must be removed once the sandbox closes.
+ */
+const startWorktreeRunSandbox = (
+  sandboxProvider: SandboxProvider,
+  target: {
+    readonly hostRepoDir: string;
+    readonly worktreePath: string;
+    readonly env: Record<string, string>;
+    readonly copyPaths: string[] | undefined;
+  },
+) =>
+  Effect.gen(function* () {
+    const { hostRepoDir, worktreePath, env } = target;
+    const noMounts: MountEntry[] = [];
+    if (sandboxProvider.tag === "isolated") {
+      const startResult = yield* startSandbox({
+        provider: sandboxProvider,
+        hostRepoDir: worktreePath,
+        env,
+        copyPaths: target.copyPaths,
+        copySourceDir: hostRepoDir,
+      });
+      return { ...toStarted(startResult), gitMounts: noMounts };
+    }
+    if (sandboxProvider.tag === "none") {
+      const startResult = yield* startSandbox({
+        provider: sandboxProvider,
+        hostRepoDir,
+        env,
+        worktreeOrRepoPath: worktreePath,
+      });
+      return { ...toStarted(startResult), gitMounts: noMounts };
+    }
+    const gitMounts = yield* resolveWorktreeGitMounts(
+      hostRepoDir,
+      worktreePath,
+    );
+    const startResult = yield* startSandbox({
+      provider: sandboxProvider,
+      hostRepoDir,
+      env,
+      worktreeOrRepoPath: worktreePath,
+      gitMounts,
+      repoDir: SANDBOX_REPO_DIR,
+    });
+    return { ...toStarted(startResult), gitMounts };
+  });
+
+/** @internal A started sandbox's handle and the repo dir inside it. */
+const toStarted = (startResult: {
+  readonly handle:
+    | BindMountSandboxHandle
+    | IsolatedSandboxHandle
+    | NoSandboxHandle;
+  readonly worktreePath: string;
+}): {
+  readonly handle:
+    | BindMountSandboxHandle
+    | IsolatedSandboxHandle
+    | NoSandboxHandle;
+  readonly sandboxRepoDir: string;
+} => ({ handle: startResult.handle, sandboxRepoDir: startResult.worktreePath });
+
+/**
+ * @internal A SandboxFactory layer that reuses a sandbox `worktree.run()`
+ * already started. An isolated sandbox syncs its commits back to the host
+ * worktree.
+ */
+const reuseStartedSandboxLayer = (
+  sandboxProvider: SandboxProvider,
+  handle: BindMountSandboxHandle | IsolatedSandboxHandle | NoSandboxHandle,
+  paths: {
+    readonly hostWorktreePath: string;
+    readonly sandboxRepoPath: string;
+  },
+) => {
+  const applyToHost =
+    sandboxProvider.tag === "isolated"
+      ? () => syncOut(paths.hostWorktreePath, handle as IsolatedSandboxHandle)
+      : () => Effect.void;
+  // Pre-narrow the bind-mount handle for the orchestrator's session-capture
+  // path. Gated on the provider tag so we never hand a NoSandbox/Isolated
+  // handle (which lack copyFileIn/copyFileOut) to AgentSessionStorage.
+  const bindMountHandle =
+    sandboxProvider.tag === "bind-mount"
+      ? (handle as BindMountSandboxHandle)
+      : undefined;
+  return reuseSandboxFactoryLayer(
+    { ...paths, applyToHost, bindMountHandle },
+    makeSandboxFromHandle(handle),
+  );
+};
+
+/**
+ * @internal A `worktree.run()`'s logging (default: a file under
+ * `.sandcastle/logs/`) and its display: file logging prints the startup
+ * banner and writes to the log file, anything else uses the terminal.
+ */
+const resolveWorktreeRunDisplay = (
+  opts: WorktreeRunOptions,
+  hostRepoDir: string,
+  branch: string,
+): {
+  readonly resolvedLogging: LoggingOption;
+  readonly runDisplayLayer: Layer.Layer<Display>;
+} => {
+  const resolvedLogging: LoggingOption = opts.logging ?? {
+    type: "file",
+    path: join(
+      hostRepoDir,
+      ".sandcastle",
+      "logs",
+      buildLogFilename(branch, undefined, opts.name),
+    ),
+  };
+  if (resolvedLogging.type !== "file") {
+    return { resolvedLogging, runDisplayLayer: ClackDisplay.layer };
+  }
+  printFileDisplayStartup({
+    logPath: resolvedLogging.path,
+    agentName: opts.name,
+    branch,
+  });
+  return {
+    resolvedLogging,
+    runDisplayLayer: Layer.provide(
+      FileDisplay.layer(resolvedLogging.path),
+      NodeFileSystem.layer,
+    ),
+  };
+};
 
 /**
  * Creates a git worktree as an independent, first-class worktree.
@@ -213,8 +377,9 @@ export const createWorktree = async (
       );
     }
     // Run host.onWorktreeReady hooks after copyToWorktree, before sandbox creation
-    if (options.hooks?.host?.onWorktreeReady?.length) {
-      yield* runHostHooks(options.hooks.host.onWorktreeReady, info.path);
+    const onWorktreeReady = options.hooks?.host?.onWorktreeReady;
+    if (onWorktreeReady !== undefined && onWorktreeReady.length > 0) {
+      yield* runHostHooks(onWorktreeReady, info.path);
     }
     return { hostRepoDir: repoDir, worktreeInfo: info };
   }).pipe(Effect.provide(NodeContext.layer), Effect.runPromise);
@@ -266,14 +431,17 @@ export const createWorktree = async (
 
     validateTimeoutOptions(opts);
 
-    if (opts.resumeSession && maxIterations > 1) {
+    const isResuming =
+      opts.resumeSession !== undefined && opts.resumeSession !== "";
+
+    if (isResuming && maxIterations > 1) {
       throw new Error(
         "resumeSession cannot be combined with maxIterations > 1. " +
           "Resume applies to iteration 1 only; multi-iteration resume semantics are not supported.",
       );
     }
 
-    if (opts.resumeSession) {
+    if (isResuming) {
       await assertResumeSessionExists({
         provider,
         sandboxTag: sandboxProvider.tag,
@@ -289,13 +457,11 @@ export const createWorktree = async (
       const isInlinePrompt = resolved.source === "inline";
 
       // 2. Resolve env vars
-      const resolvedEnv = yield* resolveEnv(hostRepoDir);
-      const env = mergeProviderEnv({
-        resolvedEnv,
+      const effectiveEnv = yield* resolveWorktreeEnv(hostRepoDir, {
         agentProviderEnv: provider.env,
         sandboxProviderEnv: sandboxProvider.env,
+        overrides: opts.env,
       });
-      const effectiveEnv = { ...env, ...opts.env };
 
       // 3. Prompt args substitution (skipped for inline prompts — passthrough)
       const userArgs = opts.promptArgs ?? {};
@@ -322,114 +488,34 @@ export const createWorktree = async (
         );
       }
 
-      // 4. Start sandbox
-      // Temp dirs behind the git mounts, removed once the sandbox is closed.
-      const mountsToClean: MountEntry[] = [];
-      let handle:
-        | BindMountSandboxHandle
-        | IsolatedSandboxHandle
-        | NoSandboxHandle;
-      let sandboxRepoDir: string;
-
-      if (sandboxProvider.tag === "isolated") {
-        const startResult = yield* startSandbox({
-          provider: sandboxProvider,
-          hostRepoDir: worktreeInfo.path,
-          env: effectiveEnv,
-          copyPaths: options.copyToWorktree,
-          copySourceDir: hostRepoDir,
-        });
-        handle = startResult.handle;
-        sandboxRepoDir = startResult.worktreePath;
-      } else if (sandboxProvider.tag === "none") {
-        const startResult = yield* startSandbox({
-          provider: sandboxProvider,
-          hostRepoDir,
-          env: effectiveEnv,
-          worktreeOrRepoPath: worktreeInfo.path,
-        });
-        handle = startResult.handle;
-        sandboxRepoDir = startResult.worktreePath;
-      } else {
-        const gitPath = join(hostRepoDir, ".git");
-        const rawGitMounts = yield* resolveGitMounts(gitPath);
-        const gitMounts = yield* patchGitMountsForWindows(
-          rawGitMounts,
-          worktreeInfo.path,
-          SANDBOX_REPO_DIR,
-        );
-        mountsToClean.push(...gitMounts);
-        const startResult = yield* startSandbox({
-          provider: sandboxProvider,
-          hostRepoDir,
-          env: effectiveEnv,
-          worktreeOrRepoPath: worktreeInfo.path,
-          gitMounts,
-          repoDir: SANDBOX_REPO_DIR,
-        });
-        handle = startResult.handle;
-        sandboxRepoDir = startResult.worktreePath;
-      }
-
-      const sandbox = makeSandboxFromHandle(handle);
-      const applyToHost =
-        sandboxProvider.tag === "isolated"
-          ? () => syncOut(worktreeInfo.path, handle as IsolatedSandboxHandle)
-          : () => Effect.void;
+      // 4. Start sandbox. `mountsToClean` are the temp dirs behind the git
+      // mounts, removed once the sandbox is closed.
+      const {
+        handle,
+        sandboxRepoDir,
+        gitMounts: mountsToClean,
+      } = yield* startWorktreeRunSandbox(sandboxProvider, {
+        hostRepoDir,
+        worktreePath: worktreeInfo.path,
+        env: effectiveEnv,
+        copyPaths: options.copyToWorktree,
+      });
 
       // 5. Resolve logging
-      const resolvedLogging: LoggingOption = opts.logging ?? {
-        type: "file",
-        path: join(
-          hostRepoDir,
-          ".sandcastle",
-          "logs",
-          buildLogFilename(worktreeInfo.branch, undefined, opts.name),
-        ),
-      };
-
-      const runDisplayLayer =
-        resolvedLogging.type === "file"
-          ? (() => {
-              printFileDisplayStartup({
-                logPath: resolvedLogging.path,
-                agentName: opts.name,
-                branch: worktreeInfo.branch,
-              });
-              return Layer.provide(
-                FileDisplay.layer(resolvedLogging.path),
-                NodeFileSystem.layer,
-              );
-            })()
-          : ClackDisplay.layer;
-
-      // Pre-narrow the bind-mount handle for the orchestrator's session-capture
-      // path. Gated on the provider tag so we never hand a NoSandbox/Isolated
-      // handle (which lack copyFileIn/copyFileOut) to AgentSessionStorage.
-      const bindMountHandle =
-        sandboxProvider.tag === "bind-mount"
-          ? (handle as BindMountSandboxHandle)
-          : undefined;
+      const { resolvedLogging, runDisplayLayer } = resolveWorktreeRunDisplay(
+        opts,
+        hostRepoDir,
+        worktreeInfo.branch,
+      );
 
       // 6. Build a SandboxFactory that reuses the started sandbox
-      const reuseFactoryLayer = reuseSandboxFactoryLayer(
-        {
+      const runLayer = Layer.mergeAll(
+        reuseStartedSandboxLayer(sandboxProvider, handle, {
           hostWorktreePath: worktreeInfo.path,
           sandboxRepoPath: sandboxRepoDir,
-          applyToHost,
-          bindMountHandle,
-        },
-        sandbox,
-      );
-
-      const streamEmitterLayer = agentStreamEmitterLayer(
-        buildAgentStreamHandler(resolvedLogging),
-      );
-
-      const runLayer = Layer.mergeAll(
-        reuseFactoryLayer,
+        }),
         runDisplayLayer,
-        streamEmitterLayer,
+        agentStreamEmitterLayer(buildAgentStreamHandler(resolvedLogging)),
       );
 
       // 7. Run orchestration

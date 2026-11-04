@@ -7,7 +7,7 @@ This document is for contributors adding support for a new **issue tracker** (e.
 3. [Scaffold integration](#scaffold-integration) — how the entry plugs into `sandcastle init`.
 4. [Implementation checklist](#implementation-checklist) — every file to touch.
 
-For terminology (**issue tracker**, **task**, **template argument**, etc.), see [`CONTEXT.md`](../../CONTEXT.md).
+For terminology (**issue tracker**, **task**, **template argument**, etc.), see [`GLOSSARY.md`](../../GLOSSARY.md).
 
 ## What an issue tracker integration actually is
 
@@ -108,4 +108,4 @@ For a new issue tracker `foo`:
 - [ ] `FOO_TOOLS` Dockerfile-snippet constant in `src/InitService.ts`.
 - [ ] Tests in `src/InitService.test.ts` covering: entry is listed by `listIssueTrackers`, `getIssueTracker("foo")` returns the entry with the expected `templateArgs`, `.env.example` includes the token line, generated prompts contain the substituted commands.
 - [ ] Changeset in `.changeset/` (patch, since pre-1.0). See [`CLAUDE.md`](../../CLAUDE.md).
-- [ ] `README.md` update if the public-facing list of supported issue trackers is mentioned there.
+- [ ] `docs/guide/` update if the public-facing list of supported issue trackers is mentioned there.

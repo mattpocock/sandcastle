@@ -9,5 +9,13 @@
     "declarationMap": false,
     "plugins": []
   },
-  "include": ["lint-ratchet*.ts", "coverage-gate.ts", "api-report.ts"]
+  "include": [
+    "lint-ratchet*.ts",
+    "coverage-gate*.ts",
+    "coverage-e2e.ts",
+    "coverage-floor*.ts",
+    "api-report.ts",
+    "ensure-build.ts",
+    "entry-points.ts"
+  ]
 }

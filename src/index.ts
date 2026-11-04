@@ -50,6 +50,7 @@ export type {
 export { CwdError } from "./CwdError.js";
 export type { ForkNotSupportedError } from "./ForkNotSupportedError.js";
 export { SyncOutPathError } from "./SyncOutPathError.js";
+export { NativeSandboxUnavailableError } from "./NativeSandboxUnavailableError.js";
 export {
   claudeCode,
   codex,

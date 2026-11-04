@@ -15,8 +15,6 @@ setupTerminalCleanup();
 
 const mainLayer = Layer.merge(NodeContext.layer, ClackDisplay.layer);
 
-cli(process.argv).pipe(
-  withFriendlyErrors,
-  Effect.provide(mainLayer),
-  NodeRuntime.runMain,
+NodeRuntime.runMain(
+  cli(process.argv).pipe(withFriendlyErrors, Effect.provide(mainLayer)),
 );

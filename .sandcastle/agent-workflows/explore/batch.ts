@@ -1,5 +1,10 @@
-import type { StandardSchemaV1 } from "@standard-schema/spec";
-import { asArray, asRecord, asString, standardSchema } from "../shared/common";
+import {
+  asArray,
+  asRecord,
+  asString,
+  standardSchema,
+  textOr,
+} from "../shared/common";
 
 /**
  * Pure model of one batch explore run: the issues it covers, the agent's
@@ -75,10 +80,11 @@ const asIssueNumber = (value: unknown, label: string): number => {
 };
 
 const asTag = (value: unknown, label: string): Tag => {
-  if (!TAGS.includes(value as Tag)) {
+  const tag = TAGS.find((candidate) => candidate === value);
+  if (tag === undefined) {
     throw new Error(`${label} must be one of ${TAGS.join(" | ")}`);
   }
-  return value as Tag;
+  return tag;
 };
 
 /** Throws unless `numbers` contains every batch issue exactly once and nothing else. */
@@ -117,18 +123,18 @@ export const parseBatch = (raw: unknown): BatchIssue[] =>
       const author = asRecord(record.author ?? {}, "issue author");
       return {
         number: asIssueNumber(record.number, "issue number"),
-        title: String(record.title ?? ""),
-        body: String(record.body ?? ""),
-        author: String(author.login ?? "unknown"),
-        createdAt: String(record.createdAt ?? ""),
-        url: String(record.url ?? ""),
+        title: textOr(record.title, ""),
+        body: textOr(record.body, ""),
+        author: textOr(author.login, "unknown"),
+        createdAt: textOr(record.createdAt, ""),
+        url: textOr(record.url, ""),
         comments: asArray(record.comments ?? [], "issue comments").map(
           (comment) => {
             const c = asRecord(comment, "issue comment");
             const commentAuthor = asRecord(c.author ?? {}, "comment author");
             return {
-              author: String(commentAuthor.login ?? "unknown"),
-              body: String(c.body ?? ""),
+              author: textOr(commentAuthor.login, "unknown"),
+              body: textOr(c.body, ""),
             };
           },
         ),
@@ -159,6 +165,33 @@ export const renderIssues = (issues: readonly BatchIssue[]): string =>
 // ---------------------------------------------------------------------------
 // Agent output schemas
 // ---------------------------------------------------------------------------
+
+/**
+ * Every `duplicate_of` points at another issue in the plan that is not itself
+ * a duplicate, so there are no chains.
+ */
+const assertNoDuplicateChains = (issues: readonly PlanEntry[]): void => {
+  const byNumber = new Map(issues.map((entry) => [entry.number, entry]));
+  for (const entry of issues) {
+    const target = entry.duplicate_of;
+    if (target === null) {
+      continue;
+    }
+    const label = `#${entry.number} duplicate_of #${target}`;
+    if (target === entry.number) {
+      throw new Error(`${label}: an issue cannot duplicate itself`);
+    }
+    const targetEntry = byNumber.get(target);
+    if (!targetEntry) {
+      throw new Error(`${label}: target is not in this batch`);
+    }
+    if (targetEntry.duplicate_of !== null) {
+      throw new Error(
+        `${label}: target is itself a duplicate of #${targetEntry.duplicate_of} — point straight at the oldest issue, no chains`,
+      );
+    }
+  }
+};
 
 /**
  * The final plan, validated as a whole against the batch. This is both the
@@ -192,45 +225,13 @@ export const planSchema = (batch: readonly BatchIssue[]) => {
       "issues",
     );
 
-    const byNumber = new Map(issues.map((entry) => [entry.number, entry]));
-    for (const entry of issues) {
-      const target = entry.duplicate_of;
-      if (target === null) continue;
-      const label = `#${entry.number} duplicate_of #${target}`;
-      if (target === entry.number) {
-        throw new Error(`${label}: an issue cannot duplicate itself`);
-      }
-      const targetEntry = byNumber.get(target);
-      if (!targetEntry) {
-        throw new Error(`${label}: target is not in this batch`);
-      }
-      if (targetEntry.duplicate_of !== null) {
-        throw new Error(
-          `${label}: target is itself a duplicate of #${targetEntry.duplicate_of} — point straight at the oldest issue, no chains`,
-        );
-      }
-    }
+    assertNoDuplicateChains(issues);
 
     return {
       issues,
       patterns: typeof record.patterns === "string" ? record.patterns : "",
     };
   });
-};
-
-/** Run a schema built by `standardSchema` synchronously, throwing on failure. */
-export const validate = <T>(
-  schema: StandardSchemaV1<unknown, T>,
-  value: unknown,
-): T => {
-  const result = schema["~standard"].validate(value);
-  if (result instanceof Promise) {
-    throw new TypeError("Schema validation must be synchronous");
-  }
-  if (result.issues) {
-    throw new Error(result.issues.map((issue) => issue.message).join("; "));
-  }
-  return result.value;
 };
 
 // ---------------------------------------------------------------------------
@@ -260,7 +261,9 @@ export const planEffects = (plan: Plan): GitHubEffect[] => {
     .filter((entry) => entry.duplicate_of === null)
     .sort((a, b) => a.number - b.number);
   const duplicates = plan.issues
-    .filter((entry) => entry.duplicate_of !== null)
+    .filter(
+      (e): e is PlanEntry & { duplicate_of: number } => e.duplicate_of !== null,
+    )
     .sort((a, b) => a.number - b.number);
 
   const effects: GitHubEffect[] = [];
@@ -280,7 +283,7 @@ export const planEffects = (plan: Plan): GitHubEffect[] => {
       {
         kind: "close-duplicate",
         issue: entry.number,
-        duplicateOf: entry.duplicate_of!,
+        duplicateOf: entry.duplicate_of,
       },
     );
   }

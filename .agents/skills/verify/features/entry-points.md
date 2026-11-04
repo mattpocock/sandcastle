@@ -36,7 +36,7 @@ const r = await run({
   - The log ends `Run complete: agent finished after N iteration(s).`, or `…reached N iteration(s) without completion signal.` when the prompt never asks for `<promise>COMPLETE</promise>`. That is still a successful run.
   - The ledger shows no worktree and no container.
 
-## `createSandbox(options)` (`src/createSandbox.ts:731`)
+## `createSandbox(options)` (`src/createSandbox.ts:1074`)
 
 ```ts
 await using sb = await createSandbox({ branch: "verify/x", sandbox: docker() });
@@ -56,7 +56,7 @@ const r = await sb.run({ agent: claudeCode("claude-haiku-5-5"), prompt: "…" })
   - The commits are on `verify/x`, and the host's checked-out branch didn't move.
   - After `close()`, the ledger shows no container and no worktree, and `verify/x` remains (expected).
 
-## `createWorktree(options)` (`src/createWorktree.ts:174`)
+## `createWorktree(options)` (`src/createWorktree.ts:341`)
 
 ```ts
 await using wt = await createWorktree({

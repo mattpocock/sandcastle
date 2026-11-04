@@ -34,8 +34,8 @@ const parseLine = (value: unknown, record: Record<string, unknown>): number => {
     return value;
   }
   const lineRange = asOptionalString(record.lineRange);
-  const firstLine = lineRange?.match(/\d+/)?.[0];
-  if (firstLine) {
+  const firstLine = lineRange?.match(/\d+/u)?.[0];
+  if (firstLine !== undefined) {
     return Number(firstLine);
   }
   throw new Error(
@@ -65,9 +65,11 @@ export const reviewOutputSchema = standardSchema<ReviewOutput>((value) => {
   return {
     summary: asString(record.summary, "summary"),
     inlineComments: asArray(record.inlineComments ?? [], "inlineComments").map(
-      parseInlineComment,
+      (comment) => parseInlineComment(comment),
     ),
-    replies: asArray(record.replies ?? [], "replies").map(parseReply),
+    replies: asArray(record.replies ?? [], "replies").map((reply) =>
+      parseReply(reply),
+    ),
   };
 });
 
@@ -76,12 +78,12 @@ export const implementPrOutputSchema = standardSchema<ImplementPrOutput>(
     const record = asRecord(value, "implement PR output");
     return {
       threadReplies: asArray(record.threadReplies ?? [], "threadReplies").map(
-        parseReply,
+        (reply) => parseReply(reply),
       ),
       newInlineComments: asArray(
         record.newInlineComments ?? [],
         "newInlineComments",
-      ).map(parseInlineComment),
+      ).map((comment) => parseInlineComment(comment)),
       topLevelComments: asArray(
         record.topLevelComments ?? [],
         "topLevelComments",

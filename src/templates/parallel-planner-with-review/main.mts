@@ -161,25 +161,23 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     }),
   );
 
-  // Log any agents that threw (network error, sandbox crash, etc.).
-  for (const [i, outcome] of settled.entries()) {
-    if (outcome.status === "rejected") {
+  // Log any agents that threw (network error, sandbox crash, etc.), and
+  // only pass branches that actually produced commits to the merge phase.
+  // An agent that ran successfully but made no commits has nothing to merge.
+  const completedIssues: typeof issues = [];
+  for (const [i, issue] of issues.entries()) {
+    const outcome = settled[i];
+    if (outcome?.status === "rejected") {
       console.error(
-        `  ✗ ${issues[i]!.id} (${issues[i]!.branch}) failed: ${outcome.reason}`,
+        `  ✗ ${issue.id} (${issue.branch}) failed: ${outcome.reason}`,
       );
+    } else if (
+      outcome?.status === "fulfilled" &&
+      outcome.value.commits.length > 0
+    ) {
+      completedIssues.push(issue);
     }
   }
-
-  // Only pass branches that actually produced commits to the merge phase.
-  // An agent that ran successfully but made no commits has nothing to merge.
-  const completedIssues = settled
-    .map((outcome, i) => ({ outcome, issue: issues[i]! }))
-    .filter(
-      (entry) =>
-        entry.outcome.status === "fulfilled" &&
-        entry.outcome.value.commits.length > 0,
-    )
-    .map((entry) => entry.issue);
 
   const completedBranches = completedIssues.map((i) => i.branch);
 

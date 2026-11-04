@@ -14,11 +14,13 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { z } from "zod";
 import type { WorldSpan } from "./attribution.ts";
 import { classifyEnv } from "./envLeaks.ts";
 import type { EnvLeak } from "./envLeaks.ts";
 import { redact, REPO_ROOT, secretsIn, sh } from "./lib.ts";
+import { observeWorldBwraps } from "./nativeSandboxes.ts";
 
 export const WORLDS_ROOT = join(tmpdir(), "sandcastle-verify");
 const REAL_HOME = homedir();
@@ -53,14 +55,47 @@ export interface World {
   cleanedAt?: string;
 }
 
+const BaselineSchema: z.ZodType<Baseline> = z.object({
+  remoteRefs: z.record(z.string(), z.string()),
+  checkoutStatus: z.array(z.string()),
+  containers: z.array(z.string()),
+  images: z.array(z.string()),
+  tmpEntries: z.array(z.string()),
+});
+
+/** The shape of `world.json`, checked whenever one is read back. */
+const WorldSchema: z.ZodType<World> = z.object({
+  runId: z.string(),
+  dir: z.string(),
+  project: z.string(),
+  remote: z.string(),
+  home: z.string(),
+  tmp: z.string().optional(),
+  logs: z.string(),
+  image: z.string(),
+  sandcastleRoot: z.string(),
+  sandcastleCommit: z.string(),
+  sandcastleDirty: z.boolean(),
+  createdAt: z.string(),
+  canary: z.string(),
+  baseline: BaselineSchema,
+  cleanedAt: z.string().optional(),
+});
+
+/** Just the lifetime of a world, so a foreign world.json still yields a span. */
+const WorldSpanSchema: z.ZodType<WorldSpan> = z.object({
+  runId: z.string(),
+  createdAt: z.string(),
+  cleanedAt: z.string().optional(),
+});
+
 const stamp = (d: Date): string =>
-  d.toISOString().replaceAll(/[-:]/g, "").replace("T", "-").slice(0, 15);
+  d.toISOString().replaceAll(/[-:]/gu, "").replace("T", "-").slice(0, 15);
 
 const must = (
   command: string,
   args: string[],
-  cwd: string,
-  timeoutMs?: number,
+  { cwd, timeoutMs }: { readonly cwd: string; readonly timeoutMs?: number },
 ): string => {
   const r = sh(command, args, { cwd, timeoutMs });
   if (r.code !== 0) {
@@ -75,6 +110,25 @@ const must = (
 
 export const ENGINES = ["docker", "podman"] as const;
 export type Engine = (typeof ENGINES)[number];
+
+/**
+ * Split `<engine>:<rest>` entries, as listContainers/listImages print them,
+ * keeping the whole entry too. Entries naming no known engine are dropped.
+ */
+export const engineEntries = (
+  entries: readonly string[],
+): {
+  readonly entry: string;
+  readonly engine: Engine;
+  readonly rest: string;
+}[] =>
+  entries.flatMap((entry) => {
+    const at = entry.indexOf(":");
+    const engine = ENGINES.find((e) => e === entry.slice(0, at));
+    return engine === undefined
+      ? []
+      : [{ entry, engine, rest: entry.slice(at + 1) }];
+  });
 
 export const engineUp = (engine: Engine): boolean =>
   sh(engine, ["info"], { timeoutMs: 30_000 }).code === 0;
@@ -107,7 +161,9 @@ export const listImages = (): string[] =>
 /** Sandcastle's own temp entries (sandcastle-bundle-*, -git-*, -copyin-*) in `dir`. */
 export const listTmpEntries = (dir: string = tmpdir()): string[] =>
   existsSync(dir)
-    ? readdirSync(dir).filter((n) => /^sandcastle-(bundle|git|copyin)-/.test(n))
+    ? readdirSync(dir).filter((n) =>
+        /^sandcastle-(?:bundle|git|copyin)-/u.test(n),
+      )
     : [];
 
 /** When `engine` built image `id`, as the engine prints it. */
@@ -143,6 +199,68 @@ export const checkoutStatus = (): string[] =>
 
 // --- Creating and loading ------------------------------------------------------
 
+/** Pack the Sandcastle under test into `dir`, as npm would publish it. */
+const packSandcastle = (dir: string): string =>
+  join(
+    dir,
+    must("npm", ["pack", "--silent", "--pack-destination", dir], {
+      cwd: REPO_ROOT,
+      timeoutMs: 300_000,
+    })
+      .split("\n")
+      .pop() ?? "",
+  );
+
+/**
+ * A fresh project at `project` with `tgz` installed, committed and pushed to
+ * a new bare `remote`.
+ */
+const initProject = ({
+  project,
+  projectName,
+  remote,
+  tgz,
+}: {
+  readonly project: string;
+  readonly projectName: string;
+  readonly remote: string;
+  readonly tgz: string;
+}): void => {
+  writeFileSync(
+    join(project, "package.json"),
+    `${JSON.stringify(
+      { name: projectName, private: true, type: "module" },
+      null,
+      2,
+    )}\n`,
+  );
+  writeFileSync(join(project, ".gitignore"), "node_modules\n");
+  writeFileSync(join(project, "README.md"), `# ${projectName}\n`);
+  const git = (...args: string[]) => must("git", args, { cwd: project });
+  git("init", "-q", "-b", "main");
+  git("config", "user.email", "verify@sandcastle.local");
+  git("config", "user.name", "Sandcastle Verify");
+  must(
+    "npm",
+    [
+      "install",
+      "--no-audit",
+      "--no-fund",
+      "--prefer-offline",
+      "--save-dev",
+      tgz,
+    ],
+    { cwd: project, timeoutMs: 600_000 },
+  );
+  git("add", "-A");
+  git("commit", "-q", "-m", "initial commit");
+  must("git", ["init", "-q", "--bare", "-b", "main", remote], {
+    cwd: dirname(remote),
+  });
+  git("remote", "add", "origin", remote);
+  git("push", "-q", "-u", "origin", "main");
+};
+
 /** Create a world from this checkout's current `dist`. */
 export const createWorld = (): World => {
   if (!existsSync(join(REPO_ROOT, "dist", "main.js"))) {
@@ -162,48 +280,7 @@ export const createWorld = (): World => {
   for (const d of [project, home, logs, tmp]) {
     mkdirSync(d, { recursive: true });
   }
-
-  // The Sandcastle under test, packed as npm would publish it.
-  const tgz = must(
-    "npm",
-    ["pack", "--silent", "--pack-destination", dir],
-    REPO_ROOT,
-    300_000,
-  )
-    .split("\n")
-    .pop()!;
-
-  writeFileSync(
-    join(project, "package.json"),
-    `${JSON.stringify(
-      { name: projectName, private: true, type: "module" },
-      null,
-      2,
-    )}\n`,
-  );
-  writeFileSync(join(project, ".gitignore"), "node_modules\n");
-  writeFileSync(join(project, "README.md"), `# ${projectName}\n`);
-  must("git", ["init", "-q", "-b", "main"], project);
-  must("git", ["config", "user.email", "verify@sandcastle.local"], project);
-  must("git", ["config", "user.name", "Sandcastle Verify"], project);
-  must(
-    "npm",
-    [
-      "install",
-      "--no-audit",
-      "--no-fund",
-      "--prefer-offline",
-      "--save-dev",
-      join(dir, tgz),
-    ],
-    project,
-    600_000,
-  );
-  must("git", ["add", "-A"], project);
-  must("git", ["commit", "-q", "-m", "initial commit"], project);
-  must("git", ["init", "-q", "--bare", "-b", "main", remote], dir);
-  must("git", ["remote", "add", "origin", remote], project);
-  must("git", ["push", "-q", "-u", "origin", "main"], project);
+  initProject({ project, projectName, remote, tgz: packSandcastle(dir) });
 
   const world: World = {
     runId,
@@ -215,7 +292,7 @@ export const createWorld = (): World => {
     tmp,
     image: `sandcastle:${projectName}`,
     sandcastleRoot: REPO_ROOT,
-    sandcastleCommit: must("git", ["rev-parse", "HEAD"], REPO_ROOT),
+    sandcastleCommit: must("git", ["rev-parse", "HEAD"], { cwd: REPO_ROOT }),
     sandcastleDirty: checkoutStatus().length > 0,
     createdAt: now.toISOString(),
     canary: `canary-${randomBytes(12).toString("hex")}`,
@@ -240,7 +317,7 @@ export const saveWorld = (world: World): void => {
 
 /** The world `runId`, which this checkout must have created. */
 export const loadWorld = (runId: string | undefined): World => {
-  if (!runId || !/^\d{8}-\d{6}-[0-9a-f]{4}$/.test(runId)) {
+  if (!runId || !/^\d{8}-\d{6}-[0-9a-f]{4}$/u.test(runId)) {
     throw new Error(
       `a run id is required (the one \`npm run verify:world\` printed), got ${JSON.stringify(runId ?? "")}`,
     );
@@ -249,7 +326,7 @@ export const loadWorld = (runId: string | undefined): World => {
   if (!existsSync(file)) {
     throw new Error(`no world ${runId} under ${WORLDS_ROOT}`);
   }
-  const world = JSON.parse(readFileSync(file, "utf8")) as World;
+  const world = WorldSchema.parse(JSON.parse(readFileSync(file, "utf8")));
   if (world.sandcastleRoot !== REPO_ROOT) {
     throw new Error(
       `world ${runId} belongs to the checkout ${world.sandcastleRoot}, not this one`,
@@ -269,9 +346,9 @@ export const worldTmp = (world: World): string =>
 export const allWorldSpans = (): WorldSpan[] =>
   (existsSync(WORLDS_ROOT) ? readdirSync(WORLDS_ROOT) : []).flatMap((id) => {
     try {
-      const w = JSON.parse(
-        readFileSync(join(WORLDS_ROOT, id, "world.json"), "utf8"),
-      ) as World;
+      const w = WorldSpanSchema.parse(
+        JSON.parse(readFileSync(join(WORLDS_ROOT, id, "world.json"), "utf8")),
+      );
       return [
         { runId: w.runId, createdAt: w.createdAt, cleanedAt: w.cleanedAt },
       ];
@@ -290,7 +367,7 @@ export const liveWorlds = (): World[] =>
         return undefined;
       }
     })
-    .filter((w): w is World => Boolean(w) && !w.cleanedAt);
+    .filter((w): w is World => w !== undefined && w.cleanedAt === undefined);
 
 // --- Running inside a world ------------------------------------------------------
 
@@ -328,7 +405,10 @@ export const declaredKeys = (world: World): Set<string> => {
   return new Set(
     readFileSync(file, "utf8")
       .split("\n")
-      .map((l) => /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(l)?.[1])
+      .map(
+        (l) =>
+          /^\s*(?<key>[A-Za-z_][A-Za-z0-9_]*)\s*=/u.exec(l)?.groups?.["key"],
+      )
       .filter((k): k is string => Boolean(k)),
   );
 };
@@ -341,15 +421,31 @@ export interface Observation {
   readonly leaks: EnvLeak[];
 }
 
+const ObservationSchema: z.ZodType<Observation> = z.object({
+  at: z.string(),
+  container: z.string(),
+  image: z.string(),
+  envNames: z.array(z.string()),
+  leaks: z.array(z.object({ name: z.string(), reason: z.string() })),
+});
+
+/** The parts of `docker|podman inspect` output the ledger reads. */
+const InspectSchema = z.object({
+  Config: z
+    .object({
+      Env: z.array(z.string()).optional(),
+      Image: z.string().optional(),
+    })
+    .optional(),
+  Mounts: z.array(z.object({ Source: z.string().optional() })).optional(),
+});
+
 const inspect = (engine: Engine, name: string) => {
   const r = sh(engine, ["inspect", name, "--format", "{{json .}}"]);
   if (r.code !== 0) {
     return undefined;
   }
-  const j = JSON.parse(r.stdout) as {
-    Config?: { Env?: string[]; Image?: string };
-    Mounts?: { Source?: string }[];
-  };
+  const j = InspectSchema.parse(JSON.parse(r.stdout));
   return {
     image: j.Config?.Image ?? "?",
     env: (j.Config?.Env ?? []).map((e) => {
@@ -369,28 +465,62 @@ export const worldContainer = (world: World, engine: Engine, name: string) => {
   return info;
 };
 
-/**
- * Run a command inside the world: cwd is the project, env is the world's.
- * Output streams through, redacted, and is logged under logs/. While it runs,
- * every sandcastle-* container that mounts the world is inspected once and its
- * env checked for leaks, into observed.jsonl (names only, never values).
- */
-export const runInWorld = async (
-  world: World,
-  label: string,
-  command: string,
-  args: readonly string[],
-): Promise<number> => {
-  mkdirSync(worldTmp(world), { recursive: true });
-  const env = worldEnv(world);
-  const seq = readdirSync(world.logs).length + 1;
-  const log = join(world.logs, `${String(seq).padStart(2, "0")}-${label}.log`);
-  appendFileSync(log, `$ ${[command, ...args].join(" ")}\n`);
+/** Append an observation to observed.jsonl and print its verdict. */
+const recordObservation = (world: World, obs: Observation): void => {
+  appendFileSync(join(world.dir, "observed.jsonl"), `${JSON.stringify(obs)}\n`);
+  const verdict =
+    obs.leaks.length === 0
+      ? "env ok"
+      : `ENV LEAK: ${obs.leaks.map((l) => l.name).join(", ")}`;
+  process.stderr.write(
+    `[verify] observed ${obs.container} (${obs.image}): ${verdict}\n`,
+  );
+};
 
-  const seen = new Set<string>(world.baseline.containers);
+/** Observes the world's new bwraps (see nativeSandboxes.ts), one tick at a time. */
+const bwrapObserver = (
+  world: World,
+  hostSecrets: ReadonlyMap<string, string>,
+  seen: Set<string>,
+): (() => Promise<void>) => {
+  let inFlight = false;
+  return async () => {
+    if (inFlight) {
+      return;
+    }
+    inFlight = true;
+    try {
+      const found = await observeWorldBwraps(
+        world.dir,
+        { declared: declaredKeys(world), hostSecrets, canary: world.canary },
+        seen,
+      );
+      for (const o of found) {
+        recordObservation(world, {
+          at: new Date().toISOString(),
+          container: o.key,
+          image: `host toolchain, ${o.command}`,
+          envNames: o.envNames,
+          leaks: o.leaks,
+        });
+      }
+    } finally {
+      inFlight = false;
+    }
+  };
+};
+
+/**
+ * Observes the world's new sandcastle-* containers on `engines`, one tick at a
+ * time: each is inspected once and, if it mounts the world, its env checked.
+ */
+const containerObserver = (
+  world: World,
+  hostSecrets: ReadonlyMap<string, string>,
+  seen: Set<string>,
+): (() => void) => {
   const engines = ENGINES.filter(engineUp);
-  const hostSecrets = secretsIn(process.env);
-  const observe = () => {
+  return () => {
     for (const engine of engines) {
       const names = sh(engine, [
         "ps",
@@ -411,7 +541,7 @@ export const runInWorld = async (
           continue;
         }
         seen.add(key);
-        const obs: Observation = {
+        recordObservation(world, {
           at: new Date().toISOString(),
           container: key,
           image: info.image,
@@ -421,20 +551,71 @@ export const runInWorld = async (
             hostSecrets,
             canary: world.canary,
           }),
-        };
-        appendFileSync(
-          join(world.dir, "observed.jsonl"),
-          `${JSON.stringify(obs)}\n`,
-        );
-        const verdict =
-          obs.leaks.length === 0
-            ? "env ok"
-            : `ENV LEAK: ${obs.leaks.map((l) => l.name).join(", ")}`;
-        process.stderr.write(
-          `[verify] observed ${key} (${info.image}): ${verdict}\n`,
-        );
+        });
       }
     }
+  };
+};
+
+/** Stream `from` into `to` and the log, line by line, redacted. */
+const pipeRedacted = (
+  from: NodeJS.ReadableStream,
+  to: NodeJS.WriteStream,
+  { log, canary }: { readonly log: string; readonly canary: string },
+): void => {
+  let buf = "";
+  from.setEncoding("utf8");
+  from.on("data", (chunk: string) => {
+    buf += chunk;
+    const lines = buf.split("\n");
+    buf = lines.pop() ?? "";
+    for (const line of lines) {
+      const clean = `${redact(line).split(canary).join("<CANARY>")}\n`;
+      to.write(clean);
+      appendFileSync(log, clean);
+    }
+  });
+  from.on("end", () => {
+    if (buf) {
+      const clean = `${redact(buf)}\n`;
+      to.write(clean);
+      appendFileSync(log, clean);
+    }
+  });
+};
+
+/** A command to run inside the world; `label` names its log file. */
+export interface WorldCommand {
+  readonly label: string;
+  readonly command: string;
+  readonly args: readonly string[];
+}
+
+/**
+ * Run a command inside the world: cwd is the project, env is the world's.
+ * Output streams through, redacted, and is logged under logs/. While it runs,
+ * every sandcastle-* container that mounts the world, and every bwrap that
+ * names a path in it, is inspected once and its env checked for leaks, into
+ * observed.jsonl (names only, never values).
+ */
+export const runInWorld = async (
+  world: World,
+  { label, command, args }: WorldCommand,
+): Promise<number> => {
+  mkdirSync(worldTmp(world), { recursive: true });
+  const env = worldEnv(world);
+  const seq = readdirSync(world.logs).length + 1;
+  const log = join(world.logs, `${String(seq).padStart(2, "0")}-${label}.log`);
+  appendFileSync(log, `$ ${[command, ...args].join(" ")}\n`);
+
+  const seen = new Set<string>(world.baseline.containers);
+  const hostSecrets = secretsIn(process.env);
+  const observeContainers = containerObserver(world, hostSecrets, seen);
+  const observeBwraps = bwrapObserver(world, hostSecrets, seen);
+  const observe = () => {
+    observeContainers();
+    // Native sandboxes: no container, so read the sandboxed process's env.
+    void observeBwraps();
   };
 
   const child = spawn(command, args, {
@@ -442,29 +623,8 @@ export const runInWorld = async (
     env,
     stdio: ["inherit", "pipe", "pipe"],
   });
-  const pipe = (from: NodeJS.ReadableStream, to: NodeJS.WriteStream) => {
-    let buf = "";
-    from.setEncoding("utf8");
-    from.on("data", (chunk: string) => {
-      buf += chunk;
-      const lines = buf.split("\n");
-      buf = lines.pop()!;
-      for (const line of lines) {
-        const clean = `${redact(line).split(world.canary).join("<CANARY>")}\n`;
-        to.write(clean);
-        appendFileSync(log, clean);
-      }
-    });
-    from.on("end", () => {
-      if (buf) {
-        const clean = `${redact(buf)}\n`;
-        to.write(clean);
-        appendFileSync(log, clean);
-      }
-    });
-  };
-  pipe(child.stdout, process.stdout);
-  pipe(child.stderr, process.stderr);
+  pipeRedacted(child.stdout, process.stdout, { log, canary: world.canary });
+  pipeRedacted(child.stderr, process.stderr, { log, canary: world.canary });
   const timer = setInterval(observe, 1000);
   const code = await new Promise<number>((resolve) => {
     child.on("close", (c) => {
@@ -490,5 +650,5 @@ export const observations = (world: World): Observation[] => {
   return readFileSync(file, "utf8")
     .split("\n")
     .filter(Boolean)
-    .map((l) => JSON.parse(l) as Observation);
+    .map((l) => ObservationSchema.parse(JSON.parse(l)));
 };

@@ -45,7 +45,7 @@ describe("mergeProviderEnv", () => {
         agentProviderEnv: { SHARED: "from-agent" },
         sandboxProviderEnv: { SHARED: "from-sandbox" },
       }),
-    ).toThrow(/overlapping env/i);
+    ).toThrow(/overlapping env/iu);
     expect(() =>
       mergeProviderEnv({
         resolvedEnv: {},

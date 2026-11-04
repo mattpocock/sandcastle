@@ -7,18 +7,20 @@
  */
 
 import { execSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { readFile, unlink, writeFile, mkdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { Writable } from "node:stream";
 import { createIsolatedSandboxProvider } from "../SandboxProvider.js";
 import type {
   ExecResult,
   IsolatedSandboxHandle,
   IsolatedSandboxProvider,
 } from "../SandboxProvider.js";
-import { BoundedTail, MAX_TAIL_CHARS } from "../boundedTail.js";
+import type { SandboxInstance } from "@vercel/sandbox";
+import { MAX_TAIL_CHARS } from "../boundedTail.js";
+import { resolveVercelAuth } from "./vercelAuth.js";
+import { execBuffered, execStreamed, withStdin } from "./vercelExec.js";
+import type { RunCommandParams } from "./vercelExec.js";
 
 /** Worktree path inside the Vercel sandbox. */
 const VERCEL_REPO_PATH = "/vercel/sandbox/workspace";
@@ -132,46 +134,6 @@ export interface VercelOptions {
 }
 
 /**
- * Resolve the auth params for `Sandbox.create()`.
- *
- * `@vercel/sandbox` only accepts a token as an explicit param, together with
- * `teamId` and `projectId` (all three or none); otherwise it falls back to
- * OIDC. So read `VERCEL_TOKEN`, `VERCEL_TEAM_ID` and `VERCEL_PROJECT_ID`
- * here, explicit options first.
- */
-const resolveVercelAuth = (
-  options: VercelOptions | undefined,
-): { token?: string; teamId?: string; projectId?: string } => {
-  const { env } = process;
-  const token = options?.token || env.VERCEL_TOKEN || undefined;
-
-  if (!token) {
-    // No token: the SDK's OIDC flow, which may use team/project ids as hints.
-    return {
-      ...(options?.teamId ? { teamId: options.teamId } : {}),
-      ...(options?.projectId ? { projectId: options.projectId } : {}),
-    };
-  }
-
-  const teamId = options?.teamId || env.VERCEL_TEAM_ID || undefined;
-  const projectId = options?.projectId || env.VERCEL_PROJECT_ID || undefined;
-  const missing = [
-    teamId ? null : "VERCEL_TEAM_ID (or the teamId option)",
-    projectId ? null : "VERCEL_PROJECT_ID (or the projectId option)",
-  ].filter((name): name is string => name !== null);
-
-  if (missing.length > 0) {
-    const source = options?.token ? "the token option" : "VERCEL_TOKEN";
-    throw new Error(
-      `vercel(): ${source} is set, but a Vercel token also needs a team and project id. ` +
-        `Missing: ${missing.join(", ")}.`,
-    );
-  }
-
-  return { token, teamId, projectId };
-};
-
-/**
  * Run the setup of a sandbox that `create()` has just made. If it fails, stop
  * the sandbox before rethrowing: no handle exists yet, so neither Sandcastle's
  * teardown nor `close()` can reach it, and it would run until Vercel's
@@ -193,6 +155,123 @@ const setUpOrStop = async (
   }
 };
 
+/** The `Sandbox.create` params: SDK pass-through options, env and auth. */
+const toCreateParams = (
+  options: VercelOptions | undefined,
+  env: Record<string, string>,
+): Record<string, unknown> => {
+  const o = options ?? {};
+  const passThrough: Record<string, unknown> = {
+    source: o.source,
+    ports: o.ports,
+    resources: o.resources,
+    networkPolicy: o.networkPolicy,
+    // runtime takes precedence over the template convenience alias
+    runtime: o.runtime ?? o.template,
+    // prefer explicit timeout, fall back to the timeoutMs alias
+    timeout: o.timeout ?? o.timeoutMs,
+  };
+  return {
+    // An unset option (or an empty runtime) is left out for the SDK default.
+    ...Object.fromEntries(
+      Object.entries(passThrough).filter(
+        ([, value]) => value !== undefined && value !== "",
+      ),
+    ),
+    env,
+    ...resolveVercelAuth(options),
+  };
+};
+
+/** Copy a host directory in as a tarball, unpacked at `sandboxPath`. */
+const copyDirIn = async (
+  sandbox: SandboxInstance,
+  hostPath: string,
+  sandboxPath: string,
+): Promise<void> => {
+  const tarPath = join(tmpdir(), `sandcastle-copyin-${Date.now()}.tar.gz`);
+  execSync(`tar -czf "${tarPath}" -C "${hostPath}" .`);
+  try {
+    const tarContent = await readFile(tarPath);
+    const sandboxTarPath = `/tmp/sandcastle-copyin-${Date.now()}.tar.gz`;
+    await sandbox.writeFiles([{ path: sandboxTarPath, content: tarContent }]);
+    await sandbox.runCommand({
+      cmd: "sh",
+      args: [
+        "-c",
+        `mkdir -p "${sandboxPath}" && tar -xzf "${sandboxTarPath}" -C "${sandboxPath}" && rm -f "${sandboxTarPath}"`,
+      ],
+    });
+  } finally {
+    await unlink(tarPath).catch(() => undefined);
+  }
+};
+
+/**
+ * Create the worktree folder with its parents: Vercel's default image has no
+ * /vercel/sandbox (its user's home is /vercel), and `mkDir` isn't recursive.
+ */
+const makeWorktreeDir = async (sandbox: SandboxInstance): Promise<void> => {
+  const mkdirResult = await sandbox.runCommand({
+    cmd: "mkdir",
+    args: ["-p", VERCEL_REPO_PATH],
+  });
+  if (mkdirResult.exitCode !== 0) {
+    const stderr = await mkdirResult.stderr();
+    throw new Error(
+      `vercel(): could not create ${VERCEL_REPO_PATH}: ${stderr.trim()}`,
+    );
+  }
+};
+
+/** The Sandcastle handle over a Vercel sandbox whose worktree folder exists. */
+const makeHandle = (
+  sandbox: SandboxInstance,
+  maxOutputTailChars: number,
+): IsolatedSandboxHandle => ({
+  worktreePath: VERCEL_REPO_PATH,
+  // `@vercel/sandbox` 2 renamed the sandbox's id from `sandboxId` to `name`.
+  sandboxId: sandbox.name ?? sandbox.sandboxId,
+
+  exec: async (command, opts): Promise<ExecResult> => {
+    const params: RunCommandParams = {
+      cmd: "sh",
+      args: ["-c", await withStdin(sandbox, command, opts?.stdin)],
+      cwd: opts?.cwd ?? VERCEL_REPO_PATH,
+      ...(opts?.sudo === true ? { sudo: true } : {}),
+    };
+    return opts?.onLine
+      ? execStreamed(sandbox, params, {
+          onLine: opts.onLine,
+          maxOutputTailChars,
+        })
+      : execBuffered(sandbox, params);
+  },
+
+  copyIn: async (hostPath, sandboxPath): Promise<void> => {
+    const info = await stat(hostPath);
+    if (info.isDirectory()) {
+      await copyDirIn(sandbox, hostPath, sandboxPath);
+    } else {
+      const content = await readFile(hostPath);
+      await sandbox.writeFiles([{ path: sandboxPath, content }]);
+    }
+  },
+
+  copyFileOut: async (sandboxPath, hostPath): Promise<void> => {
+    const buffer = await sandbox.readFileToBuffer({ path: sandboxPath });
+    if (!buffer) {
+      throw new Error(`File not found in Vercel sandbox: ${sandboxPath}`);
+    }
+    await mkdir(dirname(hostPath), { recursive: true });
+    await writeFile(hostPath, buffer);
+  },
+
+  close: async (): Promise<void> => {
+    await sandbox.stop();
+  },
+});
+
 /**
  * Create a Vercel isolated sandbox provider.
  *
@@ -206,194 +285,12 @@ export const vercel = (options?: VercelOptions): IsolatedSandboxProvider =>
     name: "vercel",
     env: options?.env,
     create: async (createOptions): Promise<IsolatedSandboxHandle> => {
-      const maxOutputTailChars = options?.maxOutputTailChars ?? MAX_TAIL_CHARS;
       // Dynamic import so the peer dependency is only loaded at runtime
       const { Sandbox } = await import("@vercel/sandbox");
-
-      const createParams: Record<string, unknown> = {};
-
-      // Pass through SDK options
-      if (options?.source) createParams.source = options.source;
-      if (options?.ports) createParams.ports = options.ports;
-      if (options?.resources) createParams.resources = options.resources;
-      if (options?.networkPolicy)
-        createParams.networkPolicy = options.networkPolicy;
-      // runtime takes precedence over the template convenience alias
-      const resolvedRuntime = options?.runtime ?? options?.template;
-      if (resolvedRuntime) createParams.runtime = resolvedRuntime;
-
-      // Timeout: prefer explicit timeout, fall back to timeoutMs alias
-      const timeoutValue = options?.timeout ?? options?.timeoutMs;
-      if (timeoutValue !== undefined) createParams.timeout = timeoutValue;
-
-      // Merge provider env with Sandcastle env
-      createParams.env = createOptions.env;
-
-      Object.assign(createParams, resolveVercelAuth(options));
-
-      const sandbox = await Sandbox.create(createParams);
-
-      // Create the worktree folder with its parents: Vercel's default image
-      // has no /vercel/sandbox (its user's home is /vercel), and `mkDir`
-      // isn't recursive.
-      await setUpOrStop(sandbox, async () => {
-        const mkdirResult = await sandbox.runCommand({
-          cmd: "mkdir",
-          args: ["-p", VERCEL_REPO_PATH],
-        });
-        if (mkdirResult.exitCode !== 0) {
-          const stderr = await mkdirResult.stderr();
-          throw new Error(
-            `vercel(): could not create ${VERCEL_REPO_PATH}: ${stderr.trim()}`,
-          );
-        }
-      });
-
-      const handle: IsolatedSandboxHandle = {
-        worktreePath: VERCEL_REPO_PATH,
-
-        exec: async (
-          command: string,
-          opts?: {
-            onLine?: (line: string) => void;
-            cwd?: string;
-            sudo?: boolean;
-            stdin?: string;
-          },
-        ): Promise<ExecResult> => {
-          let effectiveCommand = command;
-          if (opts?.stdin !== undefined) {
-            // `runCommand` gives a command no stdin unless it is detached:
-            // the command reads EOF. So write stdin to a file in the sandbox
-            // and redirect it in (a file, not an argument, keeps clear of the
-            // per-arg size limit). The redirect opens the file before the
-            // group runs, so the group can delete it straight away and leave
-            // nothing behind.
-            const stdinPath = `/tmp/sandcastle-stdin-${randomUUID()}`;
-            await sandbox.writeFiles([
-              { path: stdinPath, content: Buffer.from(opts.stdin) },
-            ]);
-            effectiveCommand = `{ rm -f ${stdinPath}; ${command}\n} < ${stdinPath}`;
-          }
-          if (opts?.onLine) {
-            const { onLine } = opts;
-            const stdoutTail = new BoundedTail(maxOutputTailChars, "\n");
-            const stderrTail = new BoundedTail(maxOutputTailChars, "");
-            let partial = "";
-
-            const stdoutWritable = new Writable({
-              write(chunk: Buffer, _encoding, callback) {
-                const text = partial + chunk.toString();
-                const lines = text.split("\n");
-                partial = lines.pop() ?? "";
-                for (const line of lines) {
-                  stdoutTail.push(line);
-                  onLine(line);
-                }
-                callback();
-              },
-              final(callback) {
-                if (partial) {
-                  stdoutTail.push(partial);
-                  onLine(partial);
-                  partial = "";
-                }
-                callback();
-              },
-            });
-
-            const stderrWritable = new Writable({
-              write(chunk: Buffer, _encoding, callback) {
-                stderrTail.push(chunk.toString());
-                callback();
-              },
-            });
-
-            const result = await sandbox.runCommand({
-              cmd: "sh",
-              args: ["-c", effectiveCommand],
-              cwd: opts?.cwd ?? VERCEL_REPO_PATH,
-              stdout: stdoutWritable,
-              stderr: stderrWritable,
-              ...(opts?.sudo ? { sudo: true } : {}),
-            });
-
-            return {
-              stdout: stdoutTail.toString(),
-              stderr: stderrTail.toString(),
-              exitCode: result.exitCode,
-            };
-          }
-
-          const result = await sandbox.runCommand({
-            cmd: "sh",
-            args: ["-c", effectiveCommand],
-            cwd: opts?.cwd ?? VERCEL_REPO_PATH,
-            ...(opts?.sudo ? { sudo: true } : {}),
-          });
-
-          const stdout = await result.stdout();
-          const stderr = await result.stderr();
-
-          return {
-            stdout,
-            stderr,
-            exitCode: result.exitCode,
-          };
-        },
-
-        copyIn: async (
-          hostPath: string,
-          sandboxPath: string,
-        ): Promise<void> => {
-          const info = await stat(hostPath);
-          if (info.isDirectory()) {
-            const tarPath = join(
-              tmpdir(),
-              `sandcastle-copyin-${Date.now()}.tar.gz`,
-            );
-            execSync(`tar -czf "${tarPath}" -C "${hostPath}" .`);
-            try {
-              const tarContent = await readFile(tarPath);
-              const sandboxTarPath = `/tmp/sandcastle-copyin-${Date.now()}.tar.gz`;
-              await sandbox.writeFiles([
-                { path: sandboxTarPath, content: tarContent },
-              ]);
-              await sandbox.runCommand({
-                cmd: "sh",
-                args: [
-                  "-c",
-                  `mkdir -p "${sandboxPath}" && tar -xzf "${sandboxTarPath}" -C "${sandboxPath}" && rm -f "${sandboxTarPath}"`,
-                ],
-              });
-            } finally {
-              await unlink(tarPath).catch(() => {});
-            }
-          } else {
-            const content = await readFile(hostPath);
-            await sandbox.writeFiles([{ path: sandboxPath, content }]);
-          }
-        },
-
-        copyFileOut: async (
-          sandboxPath: string,
-          hostPath: string,
-        ): Promise<void> => {
-          const buffer = await sandbox.readFileToBuffer({
-            path: sandboxPath,
-          });
-          if (!buffer) {
-            throw new Error(`File not found in Vercel sandbox: ${sandboxPath}`);
-          }
-          await mkdir(dirname(hostPath), { recursive: true });
-          await writeFile(hostPath, buffer);
-        },
-
-        close: async (): Promise<void> => {
-          await sandbox.stop();
-        },
-      };
-
-      return handle;
+      const sandbox = await Sandbox.create(
+        toCreateParams(options, createOptions.env),
+      );
+      await setUpOrStop(sandbox, async () => makeWorktreeDir(sandbox));
+      return makeHandle(sandbox, options?.maxOutputTailChars ?? MAX_TAIL_CHARS);
     },
   });

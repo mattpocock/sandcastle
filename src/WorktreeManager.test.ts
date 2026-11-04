@@ -36,10 +36,10 @@ const initRepo = async (dir: string) => {
 
 const commitFile = async (
   dir: string,
-  name: string,
-  content: string,
+  file: { readonly name: string; readonly content: string },
   message: string,
 ) => {
+  const { name, content } = file;
   await writeFile(join(dir, name), content);
   await execAsync(`git add "${name}"`, { cwd: dir });
   await execAsync(`git commit -m "${message}"`, { cwd: dir });
@@ -55,7 +55,11 @@ const getBranch = async (dir: string) => {
 const setupRepo = async () => {
   const repoDir = await mkdtemp(join(tmpdir(), "wt-repo-"));
   await initRepo(repoDir);
-  await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+  await commitFile(
+    repoDir,
+    { name: "hello.txt", content: "hello" },
+    "initial commit",
+  );
   return repoDir;
 };
 
@@ -71,14 +75,17 @@ const setupRepoWithOrigin = async () => {
 
   const repoDir = await mkdtemp(join(tmpdir(), "wt-repo-"));
   await initRepo(repoDir);
-  await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+  await commitFile(
+    repoDir,
+    { name: "hello.txt", content: "hello" },
+    "initial commit",
+  );
   await execAsync(`git remote add origin "${remoteDir}"`, { cwd: repoDir });
   await execAsync("git push -u origin main", { cwd: repoDir });
 
   const pushOrigin = async (
     branch: string,
-    fileName: string,
-    content: string,
+    file: { readonly name: string; readonly content: string },
     message: string,
   ) => {
     const cloneDir = await mkdtemp(join(tmpdir(), "wt-clone-"));
@@ -88,7 +95,7 @@ const setupRepoWithOrigin = async () => {
     });
     await execAsync('git config user.name "Test"', { cwd: cloneDir });
     await execAsync(`git checkout ${branch}`, { cwd: cloneDir });
-    await commitFile(cloneDir, fileName, content, message);
+    await commitFile(cloneDir, file, message);
     await execAsync(`git push origin ${branch}`, { cwd: cloneDir });
   };
 
@@ -128,7 +135,7 @@ describe("sanitizeName", () => {
 describe("generateTempBranchName", () => {
   it("returns a string in sandcastle/<YYYYMMDD-HHMMSS>-<random> format", () => {
     const name = generateTempBranchName();
-    expect(name).toMatch(/^sandcastle\/\d{8}-\d{6}-[0-9a-f]{6}$/);
+    expect(name).toMatch(/^sandcastle\/\d{8}-\d{6}-[0-9a-f]{6}$/u);
   });
 
   it("returns different names when called at different times", async () => {
@@ -148,12 +155,12 @@ describe("generateTempBranchName", () => {
 
   it("includes sanitized name when provided", () => {
     const name = generateTempBranchName("my-run");
-    expect(name).toMatch(/^sandcastle\/my-run\/\d{8}-\d{6}-[0-9a-f]{6}$/);
+    expect(name).toMatch(/^sandcastle\/my-run\/\d{8}-\d{6}-[0-9a-f]{6}$/u);
   });
 
   it("sanitizes the name in the branch", () => {
     const name = generateTempBranchName("My Run!");
-    expect(name).toMatch(/^sandcastle\/my-run-\/\d{8}-\d{6}-[0-9a-f]{6}$/);
+    expect(name).toMatch(/^sandcastle\/my-run-\/\d{8}-\d{6}-[0-9a-f]{6}$/u);
   });
 });
 
@@ -180,26 +187,30 @@ describe("WorktreeManager.create", () => {
   it("creates a sandcastle/<timestamp>-<random> branch when no branch is specified", async () => {
     const repoDir = await setupRepo();
     const { branch } = await run(create(repoDir));
-    expect(branch).toMatch(/^sandcastle\/\d{8}-\d{6}-[0-9a-f]{6}$/);
+    expect(branch).toMatch(/^sandcastle\/\d{8}-\d{6}-[0-9a-f]{6}$/u);
   });
 
   it("includes name in branch when name is specified", async () => {
     const repoDir = await setupRepo();
     const { branch } = await run(create(repoDir, { name: "my-run" }));
-    expect(branch).toMatch(/^sandcastle\/my-run\/\d{8}-\d{6}-[0-9a-f]{6}$/);
+    expect(branch).toMatch(/^sandcastle\/my-run\/\d{8}-\d{6}-[0-9a-f]{6}$/u);
   });
 
   it("includes name in worktree directory when name is specified", async () => {
     const repoDir = await setupRepo();
     const { path } = await run(create(repoDir, { name: "my-run" }));
-    expect(path).toMatch(/sandcastle-my-run-\d{8}-\d{6}-[0-9a-f]{6}$/);
+    expect(path).toMatch(/sandcastle-my-run-\d{8}-\d{6}-[0-9a-f]{6}$/u);
   });
 
   it("checks out the specified branch when branch is given", async () => {
     const repoDir = await setupRepo();
     // Create a branch first
     await execAsync("git checkout -b feature/my-feature", { cwd: repoDir });
-    await commitFile(repoDir, "feature.txt", "x", "feature commit");
+    await commitFile(
+      repoDir,
+      { name: "feature.txt", content: "x" },
+      "feature commit",
+    );
     await execAsync("git checkout main", { cwd: repoDir });
 
     const { path, branch } = await run(
@@ -216,13 +227,13 @@ describe("WorktreeManager.create", () => {
     const { stdout } = await execAsync("git rev-parse --abbrev-ref HEAD", {
       cwd: path,
     });
-    expect(stdout.trim()).toMatch(/^sandcastle\//);
+    expect(stdout.trim()).toMatch(/^sandcastle\//u);
   });
 
   it("reuses existing clean worktree for the same branch", async () => {
     const repoDir = await setupRepo();
     await execAsync("git checkout -b my-branch", { cwd: repoDir });
-    await commitFile(repoDir, "x.txt", "x", "branch commit");
+    await commitFile(repoDir, { name: "x.txt", content: "x" }, "branch commit");
     await execAsync("git checkout main", { cwd: repoDir });
 
     const first = await run(create(repoDir, { branch: "my-branch" }));
@@ -244,7 +255,7 @@ describe("WorktreeManager.create", () => {
   it("reuses dirty worktree with a warning", async () => {
     const repoDir = await setupRepo();
     await execAsync("git checkout -b my-branch", { cwd: repoDir });
-    await commitFile(repoDir, "x.txt", "x", "branch commit");
+    await commitFile(repoDir, { name: "x.txt", content: "x" }, "branch commit");
     await execAsync("git checkout main", { cwd: repoDir });
 
     const first = await run(create(repoDir, { branch: "my-branch" }));
@@ -269,10 +280,18 @@ describe("WorktreeManager.create", () => {
   it("parallel runs on different branches work without interference", async () => {
     const repoDir = await setupRepo();
     await execAsync("git checkout -b branch-a", { cwd: repoDir });
-    await commitFile(repoDir, "a.txt", "a", "branch-a commit");
+    await commitFile(
+      repoDir,
+      { name: "a.txt", content: "a" },
+      "branch-a commit",
+    );
     await execAsync("git checkout main", { cwd: repoDir });
     await execAsync("git checkout -b branch-b", { cwd: repoDir });
-    await commitFile(repoDir, "b.txt", "b", "branch-b commit");
+    await commitFile(
+      repoDir,
+      { name: "b.txt", content: "b" },
+      "branch-b commit",
+    );
     await execAsync("git checkout main", { cwd: repoDir });
 
     const [wtA, wtB] = await Promise.all([
@@ -315,7 +334,11 @@ describe("WorktreeManager.create", () => {
     const repoDir = await setupRepo();
 
     // Create a second commit on main so HEAD differs from the base
-    await commitFile(repoDir, "second.txt", "second", "second commit");
+    await commitFile(
+      repoDir,
+      { name: "second.txt", content: "second" },
+      "second commit",
+    );
 
     // Record the first commit's SHA (the one before "second commit")
     const { stdout: baseSha } = await execAsync("git rev-parse HEAD~1", {
@@ -346,14 +369,22 @@ describe("WorktreeManager.create", () => {
 
     // Create a branch with a known commit
     await execAsync("git checkout -b existing-branch", { cwd: repoDir });
-    await commitFile(repoDir, "on-branch.txt", "x", "branch commit");
+    await commitFile(
+      repoDir,
+      { name: "on-branch.txt", content: "x" },
+      "branch commit",
+    );
     const { stdout: branchHead } = await execAsync("git rev-parse HEAD", {
       cwd: repoDir,
     });
     await execAsync("git checkout main", { cwd: repoDir });
 
     // Add another commit on main to use as baseBranch
-    await commitFile(repoDir, "main2.txt", "y", "main commit 2");
+    await commitFile(
+      repoDir,
+      { name: "main2.txt", content: "y" },
+      "main commit 2",
+    );
     const { stdout: mainHead } = await execAsync("git rev-parse HEAD", {
       cwd: repoDir,
     });
@@ -378,7 +409,7 @@ describe("WorktreeManager.create", () => {
     const { repoDir, pushOrigin } = await setupRepoWithOrigin();
 
     await execAsync("git checkout -b my-branch", { cwd: repoDir });
-    await commitFile(repoDir, "x.txt", "x", "branch commit");
+    await commitFile(repoDir, { name: "x.txt", content: "x" }, "branch commit");
     await execAsync("git push -u origin my-branch", { cwd: repoDir });
     await execAsync("git checkout main", { cwd: repoDir });
 
@@ -388,7 +419,11 @@ describe("WorktreeManager.create", () => {
     });
 
     // Someone else pushes a new commit to origin/my-branch
-    await pushOrigin("my-branch", "new.txt", "new", "new origin commit");
+    await pushOrigin(
+      "my-branch",
+      { name: "new.txt", content: "new" },
+      "new origin commit",
+    );
 
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     const second = await run(create(repoDir, { branch: "my-branch" }));
@@ -416,20 +451,28 @@ describe("WorktreeManager.create", () => {
     const { repoDir, pushOrigin } = await setupRepoWithOrigin();
 
     await execAsync("git checkout -b my-branch", { cwd: repoDir });
-    await commitFile(repoDir, "x.txt", "x", "branch commit");
+    await commitFile(repoDir, { name: "x.txt", content: "x" }, "branch commit");
     await execAsync("git push -u origin my-branch", { cwd: repoDir });
     await execAsync("git checkout main", { cwd: repoDir });
 
     const first = await run(create(repoDir, { branch: "my-branch" }));
 
     // Add an unpushed commit in the worktree
-    await commitFile(first.path, "local.txt", "local", "local-only commit");
+    await commitFile(
+      first.path,
+      { name: "local.txt", content: "local" },
+      "local-only commit",
+    );
     const { stdout: localSha } = await execAsync("git rev-parse HEAD", {
       cwd: first.path,
     });
 
     // Also push a different new commit to origin → true divergence
-    await pushOrigin("my-branch", "remote.txt", "remote", "remote-only commit");
+    await pushOrigin(
+      "my-branch",
+      { name: "remote.txt", content: "remote" },
+      "remote-only commit",
+    );
 
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     const second = await run(create(repoDir, { branch: "my-branch" }));
@@ -456,7 +499,7 @@ describe("WorktreeManager.create", () => {
     const { repoDir, pushOrigin } = await setupRepoWithOrigin();
 
     await execAsync("git checkout -b my-branch", { cwd: repoDir });
-    await commitFile(repoDir, "x.txt", "x", "branch commit");
+    await commitFile(repoDir, { name: "x.txt", content: "x" }, "branch commit");
     await execAsync("git push -u origin my-branch", { cwd: repoDir });
     await execAsync("git checkout main", { cwd: repoDir });
 
@@ -470,7 +513,11 @@ describe("WorktreeManager.create", () => {
 
     // Origin moves forward — but because the worktree is dirty, refresh
     // should be skipped so the uncommitted change isn't disturbed.
-    await pushOrigin("my-branch", "new.txt", "new", "new origin commit");
+    await pushOrigin(
+      "my-branch",
+      { name: "new.txt", content: "new" },
+      "new origin commit",
+    );
 
     const second = await run(create(repoDir, { branch: "my-branch" }));
 
@@ -490,7 +537,7 @@ describe("WorktreeManager.create", () => {
     // No origin remote at all — `git fetch origin <branch>` will fail.
     const repoDir = await setupRepo();
     await execAsync("git checkout -b my-branch", { cwd: repoDir });
-    await commitFile(repoDir, "x.txt", "x", "branch commit");
+    await commitFile(repoDir, { name: "x.txt", content: "x" }, "branch commit");
     await execAsync("git checkout main", { cwd: repoDir });
 
     const first = await run(create(repoDir, { branch: "my-branch" }));
@@ -518,14 +565,18 @@ describe("WorktreeManager.create", () => {
     const { repoDir } = await setupRepoWithOrigin();
 
     await execAsync("git checkout -b my-branch", { cwd: repoDir });
-    await commitFile(repoDir, "x.txt", "x", "branch commit");
+    await commitFile(repoDir, { name: "x.txt", content: "x" }, "branch commit");
     await execAsync("git push -u origin my-branch", { cwd: repoDir });
     await execAsync("git checkout main", { cwd: repoDir });
 
     const first = await run(create(repoDir, { branch: "my-branch" }));
 
     // Local commit; origin/my-branch stays put.
-    await commitFile(first.path, "local.txt", "local", "local-only commit");
+    await commitFile(
+      first.path,
+      { name: "local.txt", content: "local" },
+      "local-only commit",
+    );
     const { stdout: localSha } = await execAsync("git rev-parse HEAD", {
       cwd: first.path,
     });
@@ -553,8 +604,16 @@ describe("WorktreeManager.create", () => {
     const { repoDir, pushOrigin } = await setupRepoWithOrigin();
 
     await execAsync("git checkout -b my-branch", { cwd: repoDir });
-    await commitFile(repoDir, "a.txt", "a", "branch commit 1");
-    await commitFile(repoDir, "b.txt", "b", "branch commit 2");
+    await commitFile(
+      repoDir,
+      { name: "a.txt", content: "a" },
+      "branch commit 1",
+    );
+    await commitFile(
+      repoDir,
+      { name: "b.txt", content: "b" },
+      "branch commit 2",
+    );
     await execAsync("git push -u origin my-branch", { cwd: repoDir });
     await execAsync("git checkout main", { cwd: repoDir });
 
@@ -582,7 +641,11 @@ describe("WorktreeManager.create", () => {
     expect(status.trim()).toBe("");
 
     // Move origin forward so the buggy code would have something to ff to.
-    await pushOrigin("my-branch", "new.txt", "new", "new origin commit");
+    await pushOrigin(
+      "my-branch",
+      { name: "new.txt", content: "new" },
+      "new origin commit",
+    );
 
     const second = await run(create(repoDir, { branch: "my-branch" }));
     expect(second.path).toBe(first.path);
@@ -608,13 +671,17 @@ describe("WorktreeManager.create", () => {
   it("reuses worktree with unpushed commits (not considered dirty)", async () => {
     const repoDir = await setupRepo();
     await execAsync("git checkout -b my-branch", { cwd: repoDir });
-    await commitFile(repoDir, "x.txt", "x", "branch commit");
+    await commitFile(repoDir, { name: "x.txt", content: "x" }, "branch commit");
     await execAsync("git checkout main", { cwd: repoDir });
 
     const first = await run(create(repoDir, { branch: "my-branch" }));
 
     // Add a committed (but unpushed) change — should NOT count as dirty
-    await commitFile(first.path, "extra.txt", "extra", "extra commit");
+    await commitFile(
+      first.path,
+      { name: "extra.txt", content: "extra" },
+      "extra commit",
+    );
 
     const second = await run(create(repoDir, { branch: "my-branch" }));
 
@@ -631,8 +698,7 @@ describe("WorktreeManager.create", () => {
     await execAsync("git checkout -b feat/rebase-test", { cwd: repoDir });
     await commitFile(
       repoDir,
-      "conflict.txt",
-      "branch-content",
+      { name: "conflict.txt", content: "branch-content" },
       "branch commit",
     );
     await execAsync("git checkout main", { cwd: repoDir });
@@ -640,8 +706,7 @@ describe("WorktreeManager.create", () => {
     // Create a conflicting commit on main so rebase will pause
     await commitFile(
       repoDir,
-      "conflict.txt",
-      "main-content",
+      { name: "conflict.txt", content: "main-content" },
       "main conflicting commit",
     );
 
@@ -676,13 +741,13 @@ describe("WorktreeManager.create", () => {
     const repoDir = await setupRepo();
     // "main" is the currently checked-out branch in the main working tree
     const err = await runFail(create(repoDir, { branch: "main" }));
-    expect(err.message).toMatch(/already checked out/i);
+    expect(err.message).toMatch(/already checked out/iu);
     // The error should explain why this happens (sandcastle uses worktrees,
     // git forbids the same branch in two worktrees) and what to do about it,
     // not propose smart recovery.
-    expect(err.message).toMatch(/worktree/i);
-    expect(err.message).toMatch(/branch.*merge-to-head/i);
-    expect(err.message).toMatch(/different branch/i);
+    expect(err.message).toMatch(/worktree/iu);
+    expect(err.message).toMatch(/branch.*merge-to-head/iu);
+    expect(err.message).toMatch(/different branch/iu);
   });
 
   it("does not write upstream tracking config even when autoSetupMerge is enabled", async () => {

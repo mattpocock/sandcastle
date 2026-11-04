@@ -4,6 +4,10 @@ import { resolve } from "node:path";
 import { DockerError, ImageNotFoundError } from "./errors.js";
 import { formatVolumeMount } from "./mountUtils.js";
 import type { SelinuxLabel } from "./mountUtils.js";
+import type { LinuxCapability } from "./LinuxCapability.js";
+
+// Re-exported so docker.ts gets it with the lifecycle it already imports.
+export type { LinuxCapability } from "./LinuxCapability.js";
 
 const dockerExec = (args: string[]): Effect.Effect<string, DockerError> =>
   Effect.async((resume) => {
@@ -46,9 +50,11 @@ export const buildImage = (
     const buildArgFlags = Object.entries(options?.buildArgs ?? {}).flatMap(
       ([k, v]) => ["--build-arg", `${k}=${v}`],
     );
-    const buildContext = options?.dockerfile
-      ? ["-f", resolve(options.dockerfile), process.cwd()]
-      : [resolve(dockerfileDir)];
+    const dockerfile = options?.dockerfile;
+    const buildContext =
+      dockerfile !== undefined && dockerfile !== ""
+        ? ["-f", resolve(dockerfile), process.cwd()]
+        : [resolve(dockerfileDir)];
     yield* dockerExec([
       "build",
       "-t",
@@ -73,6 +79,8 @@ export interface StartContainerOptions {
   readonly network?: string | readonly string[];
   /** Supplementary groups to add the container user to. Passed as `--group-add` flags. */
   readonly groups?: readonly (string | number)[];
+  /** Linux capabilities to drop from the container. Passed as `--cap-drop` flags. */
+  readonly capDrop?: readonly LinuxCapability[];
   /** Host devices to expose to the container. Passed as `--device` flags. */
   readonly devices?: readonly string[];
   /** Limit CPU resources via `--cpus` (e.g. `1.5`). Fractional values allowed. */
@@ -124,13 +132,22 @@ export const startContainer = (
       formatVolumeMount(mount, selinuxLabel),
     ]);
 
-    const workdirFlags = options?.workdir ? ["-w", options.workdir] : [];
-    const userFlags = options?.user ? ["--user", options.user] : [];
-    const networks = options?.network ? [options.network].flat() : [];
+    const workdir = options?.workdir;
+    const workdirFlags =
+      workdir !== undefined && workdir !== "" ? ["-w", workdir] : [];
+    const user = options?.user;
+    const userFlags = user !== undefined && user !== "" ? ["--user", user] : [];
+    const network = options?.network;
+    const networks =
+      network === undefined || network === "" ? [] : [network].flat();
     const networkFlags = networks.flatMap((n) => ["--network", n]);
     const groupAddFlags = (options?.groups ?? []).flatMap((g) => [
       "--group-add",
       String(g),
+    ]);
+    const capDropFlags = (options?.capDrop ?? []).flatMap((cap) => [
+      "--cap-drop",
+      cap,
     ]);
     const deviceFlags = (options?.devices ?? []).flatMap((d) => [
       "--device",
@@ -150,6 +167,7 @@ export const startContainer = (
       ...userFlags,
       ...networkFlags,
       ...groupAddFlags,
+      ...capDropFlags,
       ...deviceFlags,
       ...cpusFlags,
       imageName,

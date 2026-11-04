@@ -50,7 +50,7 @@ export const assertResumeSessionExists = async (params: {
 
   if (sandboxTag === "none") {
     const found = await provider.sessionStorage.findByIdOnHost(resumeSession);
-    if (!found.path) {
+    if (found.path === undefined) {
       throw new Error(
         `resumeSession "${resumeSession}" not found under ${found.searchedRoot}`,
       );
@@ -68,9 +68,9 @@ export const assertResumeSessionExists = async (params: {
       resumeSession,
     );
     throw new Error(
-      sessionPath
-        ? `resumeSession "${resumeSession}" not found: expected session file at ${sessionPath}`
-        : `resumeSession "${resumeSession}" not found`,
+      sessionPath === undefined
+        ? `resumeSession "${resumeSession}" not found`
+        : `resumeSession "${resumeSession}" not found: expected session file at ${sessionPath}`,
     );
   }
 };

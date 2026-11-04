@@ -28,7 +28,6 @@ import {
 import type { SandboxProvider, BranchStrategy } from "./SandboxProvider.js";
 import { resolveEnv } from "./EnvResolver.js";
 import { formatErrorMessage } from "./ErrorHandler.js";
-import type { SandboxError } from "./errors.js";
 import { agentStreamEmitterLayer } from "./AgentStreamEmitter.js";
 import type { AgentStreamEvent } from "./AgentStreamEmitter.js";
 import type { SandboxHooks } from "./SandboxLifecycle.js";
@@ -47,6 +46,7 @@ import type {
   OutputStringDefinition,
 } from "./Output.js";
 import { StructuredOutputError } from "./Output.js";
+import type { PromptError } from "./errors.js";
 import { extractStructuredOutput } from "./extractStructuredOutput.js";
 import { validateTimeoutOptions } from "./validateTimeouts.js";
 import { buildContextWindowLines } from "./ContextWindow.js";
@@ -96,7 +96,7 @@ export const DEFAULT_MAX_ITERATIONS = 1;
 
 /** Replace characters that are invalid or problematic in file paths with dashes. */
 export const sanitizeBranchForFilename = (branch: string): string =>
-  branch.replaceAll(/[/\\:*?"<>|]/g, "-");
+  branch.replaceAll(/[/\\:*?"<>|]/gu, "-");
 
 export interface FileDisplayStartupOptions {
   readonly logPath: string;
@@ -118,7 +118,10 @@ export const printFileDisplayStartup = (
 ): void => {
   const name = options.agentName ?? "Agent";
   const label = styleText("bold", `[${name}]`);
-  const branchPart = options.branch ? ` on branch ${options.branch}` : "";
+  const branchPart =
+    options.branch !== undefined && options.branch !== ""
+      ? ` on branch ${options.branch}`
+      : "";
   const hostRepoDir = options.hostRepoDir ?? process.cwd();
   const displayLogPath =
     hostRepoDir === process.cwd()
@@ -142,10 +145,12 @@ export const buildLogFilename = (
   name?: string,
 ): string => {
   const sanitized = sanitizeBranchForFilename(resolvedBranch);
-  const nameSuffix = name
-    ? `-${name.toLowerCase().replaceAll(/[^a-z0-9_.-]/g, "-")}`
-    : "";
-  if (targetBranch) {
+  // One dash per UTF-16 unit, as before the `u` flag on the regex below.
+  const nameSuffix =
+    name !== undefined && name !== ""
+      ? `-${name.toLowerCase().replaceAll(/[^a-z0-9_.-]/gu, (char) => "-".repeat(char.length))}`
+      : "";
+  if (targetBranch !== undefined && targetBranch !== "") {
     return `${sanitizeBranchForFilename(targetBranch)}-${sanitized}${nameSuffix}.log`;
   }
   return `${sanitized}${nameSuffix}.log`;
@@ -254,9 +259,8 @@ export const buildAgentStreamHandler = (
 ): ((event: AgentStreamEvent) => void) | undefined => {
   const userHandler =
     logging.type === "file" ? logging.onAgentStreamEvent : undefined;
-  const verboseSink = logging.verbose
-    ? buildVerboseRawLineSink(logging)
-    : undefined;
+  const verboseSink =
+    logging.verbose === true ? buildVerboseRawLineSink(logging) : undefined;
   if (!userHandler && !verboseSink) {
     return undefined;
   }
@@ -495,45 +499,13 @@ export interface RunResult {
   ) => Promise<RunResult>;
 }
 
-/** Overload: with `Output.object`, returns `RunResult` with typed `output: T`. */
-export function run<T, A extends AgentProvider>(
-  options: RunOptions<A> & { output: OutputObjectDefinition<T> },
-): Promise<RunResult & { output: T }>;
-/** Overload: with `Output.string`, returns `RunResult` with `output: string`. */
-export function run<A extends AgentProvider>(
-  options: RunOptions<A> & { output: OutputStringDefinition },
-): Promise<RunResult & { output: string }>;
-/** Overload: without `output`, returns the standard `RunResult`. */
-export function run<A extends AgentProvider>(
-  options: RunOptions<A>,
-): Promise<RunResult>;
-export async function run(
+/** Fails when the branch strategy can't be used with the other options. */
+const validateBranchOptions = (
   options: RunOptions,
-): Promise<RunResult & { output?: unknown }> {
-  // If signal is already aborted, reject immediately without any setup
-  options.signal?.throwIfAborted();
-
-  const {
-    prompt,
-    promptFile,
-    maxIterations = DEFAULT_MAX_ITERATIONS,
-    hooks,
-    agent: provider,
-  } = options;
-
-  // Derive branch strategy: explicit option > default based on provider tag
-  const branchStrategy: BranchStrategy =
-    options.branchStrategy ??
-    (options.sandbox.tag === "isolated"
-      ? { type: "merge-to-head" }
-      : { type: "head" });
-  const effectiveBranchType = branchStrategy.type;
-
-  // Validate: timeouts must be positive (0 would fire before the agent's first output)
-  validateTimeoutOptions(options);
-
+  branchType: BranchStrategy["type"],
+): void => {
   // Validate: head strategy is not supported with isolated providers
-  if (effectiveBranchType === "head" && options.sandbox.tag === "isolated") {
+  if (branchType === "head" && options.sandbox.tag === "isolated") {
     throw new Error(
       "head branch strategy is not supported with isolated providers",
     );
@@ -541,7 +513,7 @@ export async function run(
 
   // Validate: copyToWorktree is incompatible with head strategy
   if (
-    effectiveBranchType === "head" &&
+    branchType === "head" &&
     options.copyToWorktree &&
     options.copyToWorktree.length > 0
   ) {
@@ -550,9 +522,18 @@ export async function run(
         "In head mode the host working directory is bind-mounted directly.",
     );
   }
+};
+
+/** Fails on an impossible resume/fork combination; whether this run resumes. */
+const validateSessionOptions = (
+  options: RunOptions,
+  maxIterations: number,
+): boolean => {
+  const isResuming =
+    options.resumeSession !== undefined && options.resumeSession !== "";
 
   // Validate: resumeSession + maxIterations > 1 is not allowed
-  if (options.resumeSession && maxIterations > 1) {
+  if (isResuming && maxIterations > 1) {
     throw new Error(
       "resumeSession cannot be combined with maxIterations > 1. " +
         "Resume applies to iteration 1 only; multi-iteration resume semantics are not supported.",
@@ -561,16 +542,23 @@ export async function run(
 
   // Validate: forkSession only makes sense alongside resumeSession.
   // It is wired internally by RunResult.fork() and never set on its own.
-  if (options.forkSession && !options.resumeSession) {
+  if (options.forkSession === true && !isResuming) {
     throw new Error(
       "forkSession requires resumeSession. " +
         "Use RunResult.fork(prompt) to fork the last captured session.",
     );
   }
   if (options.forkSession === true) {
-    assertForkSupported(provider);
+    assertForkSupported(options.agent);
   }
+  return isResuming;
+};
 
+/** Fails on unusable structured-output options; the output retry budget. */
+const validateOutputOptions = (
+  options: RunOptions,
+  maxIterations: number,
+): number => {
   // Validate: output requires maxIterations === 1
   if (options.output && maxIterations !== 1) {
     throw new Error(
@@ -590,84 +578,222 @@ export async function run(
         `Received: ${outputMaxRetries}`,
     );
   }
-  if (outputMaxRetries > 0 && !provider.sessionStorage) {
+  if (outputMaxRetries > 0 && !options.agent.sessionStorage) {
     throw new Error(
       `output.maxRetries requires an agent provider that supports session resumption. ` +
-        `The "${provider.name}" provider does not. ` +
+        `The "${options.agent.name}" provider does not. ` +
         `Use an agent provider that supports resume, or set maxRetries to 0.`,
     );
   }
+  return outputMaxRetries;
+};
 
-  // Extract explicit branch when in branch mode
-  const branch: string | undefined =
-    branchStrategy.type === "branch" ? branchStrategy.branch : undefined;
+/**
+ * The prompt the agent gets. Inline prompts pass through to the agent
+ * literally — no substitution, no built-in arg injection. Guard against
+ * silently ignoring promptArgs.
+ */
+const buildAgentPrompt = (input: {
+  readonly rawPrompt: string;
+  readonly isInlinePrompt: boolean;
+  readonly userArgs: PromptArgs;
+  readonly sourceBranch: string;
+  readonly targetBranch: string;
+}): Effect.Effect<string, PromptError, Display> =>
+  Effect.gen(function* () {
+    if (input.isInlinePrompt) {
+      yield* validateNoArgsWithInlinePrompt(input.userArgs);
+      return input.rawPrompt;
+    }
+    yield* validateNoBuiltInArgOverride(input.userArgs);
+    const effectiveArgs = {
+      SOURCE_BRANCH: input.sourceBranch,
+      TARGET_BRANCH: input.targetBranch,
+      ...input.userArgs,
+    };
+    const builtInArgKeysSet = new Set<string>(BUILT_IN_PROMPT_ARG_KEYS);
+    return yield* substitutePromptArgs(
+      input.rawPrompt,
+      effectiveArgs,
+      builtInArgKeysSet,
+    );
+  });
 
+/** Shows how the run ended and how full each iteration's context window got. */
+const reportRunEnd = (
+  result: OrchestrateResult,
+): Effect.Effect<void, never, Display> =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    const completion = buildCompletionMessage(
+      result.completionSignal,
+      result.iterations.length,
+    );
+    yield* d.status(completion.message, completion.severity);
+
+    for (const line of buildContextWindowLines(result.iterations)) {
+      yield* d.text(line);
+    }
+  });
+
+/**
+ * A follow-up run on the last iteration's session: `resume` continues it,
+ * `fork` continues a copy.
+ */
+const followUpRun =
+  (options: RunOptions, result: OrchestrateResult, kind: "resume" | "fork") =>
+  async (
+    followUpPrompt: string,
+    followUpOptions?: ResumeRunResultOptions,
+  ): Promise<RunResult> => {
+    const lastIteration = result.iterations.at(-1);
+    if (
+      lastIteration?.sessionId === undefined ||
+      lastIteration.sessionId === ""
+    ) {
+      throw new Error(`Cannot ${kind}: no sessionId was captured`);
+    }
+    return run({
+      ...options,
+      // The follow-up prompt is inline: drop the template's arguments.
+      promptArgs: undefined,
+      // The follow-up prompt is new: structured output is opt-in per call.
+      output: undefined,
+      ...followUpOptions,
+      prompt: followUpPrompt,
+      promptFile: undefined,
+      maxIterations: 1,
+      resumeSession: lastIteration.sessionId,
+      ...(kind === "fork" ? { forkSession: true } : {}),
+    });
+  };
+
+/** The host repo dir; when resuming, also checks the session file exists there. */
+const resolveRunHostRepoDir = async (
+  options: RunOptions,
+  isResuming: boolean,
+): Promise<string> => {
   const hostRepoDir = await Effect.runPromise(
     resolveCwd(options.cwd).pipe(Effect.provide(NodeContext.layer)),
   );
-
   // Validate: resumeSession file must exist on the host
-  if (options.resumeSession) {
+  if (isResuming && options.resumeSession !== undefined) {
     await assertResumeSessionExists({
-      provider,
+      provider: options.agent,
       sandboxTag: options.sandbox.tag,
       hostRepoDir,
       resumeSession: options.resumeSession,
     });
   }
+  return hostRepoDir;
+};
 
-  // Resolve prompt
+/** Explicit branch strategy, else merge-to-head for isolated providers, else head. */
+const resolveBranchStrategy = (options: RunOptions): BranchStrategy =>
+  options.branchStrategy ??
+  (options.sandbox.tag === "isolated"
+    ? { type: "merge-to-head" }
+    : { type: "head" });
+
+/** The prompt text and whether it was inline, with the output tag checked. */
+const resolveRunPrompt = async (
+  options: RunOptions,
+): Promise<{
+  readonly rawPrompt: string;
+  readonly isInlinePrompt: boolean;
+}> => {
   const resolved = await Effect.runPromise(
-    resolvePrompt({ prompt, promptFile }).pipe(
-      Effect.provide(NodeContext.layer),
-    ),
+    resolvePrompt({
+      prompt: options.prompt,
+      promptFile: options.promptFile,
+    }).pipe(Effect.provide(NodeContext.layer)),
   );
-  const rawPrompt = resolved.text;
-  const isInlinePrompt = resolved.source === "inline";
-
   // Validate: output tag must appear in the resolved prompt
-  if (options.output) {
-    const openTag = `<${options.output.tag}>`;
-    if (!rawPrompt.includes(openTag)) {
-      throw new Error(
-        `output tag <${options.output.tag}> not found in the resolved prompt. ` +
-          "The caller must instruct the agent to emit the configured tag.",
-      );
-    }
+  if (options.output && !resolved.text.includes(`<${options.output.tag}>`)) {
+    throw new Error(
+      `output tag <${options.output.tag}> not found in the resolved prompt. ` +
+        "The caller must instruct the agent to emit the configured tag.",
+    );
   }
+  return {
+    rawPrompt: resolved.text,
+    isInlinePrompt: resolved.source === "inline",
+  };
+};
 
-  const agentName = provider.name;
+/** The branches a run works with, derived from the host's current branch. */
+interface RunBranches {
+  /** The host's current branch: the TARGET_BRANCH built-in prompt argument. */
+  readonly currentHostBranch: string;
+  /** The branch the agent works on. */
+  readonly resolvedBranch: string;
+  /** Set when using a temp branch: prefixes the log filename. */
+  readonly targetBranch: string | undefined;
+  /** The branch passed to orchestrate (see `resolveRunBranches`). */
+  readonly orchestrateBranch: string | undefined;
+}
 
-  // Resolve env vars and merge with provider env
-  const resolvedEnv = await Effect.runPromise(
-    resolveEnv(hostRepoDir).pipe(Effect.provide(NodeContext.layer)),
-  );
-  const env = mergeProviderEnv({
-    resolvedEnv,
-    agentProviderEnv: provider.env,
-    sandboxProviderEnv: options.sandbox.env,
-  });
-
-  // Always capture the host's current branch for the TARGET_BRANCH built-in
-  // prompt argument. When using a temp branch, it also prefixes the log filename.
+const resolveRunBranches = async (
+  options: RunOptions,
+  branchStrategy: BranchStrategy,
+  hostRepoDir: string,
+): Promise<RunBranches> => {
+  // Explicit branch when in branch mode
+  const branch =
+    branchStrategy.type === "branch" ? branchStrategy.branch : undefined;
   const currentHostBranch = await Effect.runPromise(
     getCurrentBranch(hostRepoDir),
   );
+  return {
+    currentHostBranch,
+    // When in merge-to-head mode, generate a temporary branch name.
+    // In head mode, use the host's current branch directly (no worktree).
+    resolvedBranch:
+      branchStrategy.type === "head"
+        ? currentHostBranch
+        : (branch ?? generateTempBranchName(options.name)),
+    // When using a temp branch, prefix the log filename with the target branch
+    // (the host's current branch) so developers can tell which branch was targeted.
+    targetBranch:
+      branchStrategy.type === "merge-to-head" ? currentHostBranch : undefined,
+    // In head mode, pass the host branch so SandboxLifecycle skips the merge step.
+    // In merge-to-head mode, branch is undefined (triggers merge). In branch mode, it's the explicit branch.
+    orchestrateBranch:
+      branchStrategy.type === "head" ? currentHostBranch : branch,
+  };
+};
 
-  // When in merge-to-head mode, generate a temporary branch name.
-  // In head mode, use the host's current branch directly (no worktree).
-  const resolvedBranch =
-    effectiveBranchType === "head"
-      ? currentHostBranch
-      : (branch ?? generateTempBranchName(options.name));
+/** Resolve env vars and merge with the agent and sandbox providers' env. */
+const resolveRunEnv = async (options: RunOptions, hostRepoDir: string) =>
+  mergeProviderEnv({
+    resolvedEnv: await Effect.runPromise(
+      resolveEnv(hostRepoDir).pipe(Effect.provide(NodeContext.layer)),
+    ),
+    agentProviderEnv: options.agent.env,
+    sandboxProviderEnv: options.sandbox.env,
+  });
 
-  // When using a temp branch, prefix the log filename with the target branch
-  // (the host's current branch) so developers can tell which branch was targeted.
-  const targetBranch =
-    effectiveBranchType === "merge-to-head" ? currentHostBranch : undefined;
+/** Shared inputs for building a run's layers and effect. */
+interface RunSetup {
+  readonly options: RunOptions;
+  readonly branchStrategy: BranchStrategy;
+  readonly hostRepoDir: string;
+  readonly maxIterations: number;
+  readonly branches: RunBranches;
+  readonly logging: LoggingOption;
+  /** Resolved env vars merged with the agent and sandbox providers' env. */
+  readonly env: Record<string, string>;
+  readonly rawPrompt: string;
+  readonly isInlinePrompt: boolean;
+}
 
-  // Resolve logging option
-  const resolvedLogging: LoggingOption = options.logging ?? {
+/** `options.logging`, else a file under .sandcastle/logs named for the branch. */
+const resolveRunLogging = (
+  options: RunOptions,
+  hostRepoDir: string,
+  { resolvedBranch, targetBranch }: RunBranches,
+): LoggingOption =>
+  options.logging ?? {
     type: "file",
     path: join(
       hostRepoDir,
@@ -676,22 +802,29 @@ export async function run(
       buildLogFilename(resolvedBranch, targetBranch, options.name),
     ),
   };
-  const displayLayer =
-    resolvedLogging.type === "file"
-      ? (() => {
-          printFileDisplayStartup({
-            logPath: resolvedLogging.path,
-            agentName: options.name,
-            branch: resolvedBranch,
-            hostRepoDir,
-          });
-          return Layer.provide(
-            FileDisplay.layer(resolvedLogging.path),
-            NodeFileSystem.layer,
-          );
-        })()
-      : ClackDisplay.layer;
 
+const buildDisplayLayer = ({
+  options,
+  hostRepoDir,
+  branches,
+  logging,
+}: RunSetup) => {
+  if (logging.type !== "file") {
+    return ClackDisplay.layer;
+  }
+  printFileDisplayStartup({
+    logPath: logging.path,
+    agentName: options.name,
+    branch: branches.resolvedBranch,
+    hostRepoDir,
+  });
+  return Layer.provide(FileDisplay.layer(logging.path), NodeFileSystem.layer);
+};
+
+/** The display, sandbox factory and agent stream layers for a run. */
+const buildRunLayer = (setup: RunSetup) => {
+  const { options, hostRepoDir, branchStrategy, branches, env } = setup;
+  const displayLayer = buildDisplayLayer(setup);
   const factoryLayer = Layer.provide(
     WorktreeDockerSandboxFactory.layer,
     Layer.mergeAll(
@@ -703,10 +836,12 @@ export async function run(
         // Create the worktree on the temp branch already shown to the user,
         // rather than letting WorktreeManager generate a second name.
         tempBranch:
-          effectiveBranchType === "merge-to-head" ? resolvedBranch : undefined,
+          branchStrategy.type === "merge-to-head"
+            ? branches.resolvedBranch
+            : undefined,
         sandboxProvider: options.sandbox,
         branchStrategy,
-        hooks,
+        hooks: options.hooks,
         signal: options.signal,
         timeouts: options.timeouts,
       }),
@@ -714,64 +849,49 @@ export async function run(
       displayLayer,
     ),
   );
-
-  const streamEmitterLayer = agentStreamEmitterLayer(
-    buildAgentStreamHandler(resolvedLogging),
-  );
-
-  const runLayer = Layer.mergeAll(
+  return Layer.mergeAll(
     factoryLayer,
     displayLayer,
-    streamEmitterLayer,
+    agentStreamEmitterLayer(buildAgentStreamHandler(setup.logging)),
   );
+};
 
-  const baseEffect = Effect.gen(function* () {
+/** Shows the run summary, builds the prompt, and orchestrates the iterations. */
+const runIterations = ({
+  options,
+  hostRepoDir,
+  maxIterations,
+  branches,
+  rawPrompt,
+  isInlinePrompt,
+}: RunSetup) =>
+  Effect.gen(function* () {
     const d = yield* Display;
     yield* d.intro(options.name ?? "sandcastle");
     const rows = buildRunSummaryRows({
       name: options.name,
-      agentName,
+      agentName: options.agent.name,
       sandboxName: options.sandbox.name,
       maxIterations,
-      branch: resolvedBranch,
+      branch: branches.resolvedBranch,
     });
     yield* d.summary("Sandcastle Run", rows);
 
-    const userArgs = options.promptArgs ?? {};
-
-    // Inline prompts pass through to the agent literally — no substitution,
-    // no built-in arg injection. Guard against silently ignoring promptArgs.
-    let resolvedPrompt: string;
-    if (isInlinePrompt) {
-      yield* validateNoArgsWithInlinePrompt(userArgs);
-      resolvedPrompt = rawPrompt;
-    } else {
-      yield* validateNoBuiltInArgOverride(userArgs);
-      const effectiveArgs = {
-        SOURCE_BRANCH: resolvedBranch,
-        TARGET_BRANCH: currentHostBranch,
-        ...userArgs,
-      };
-      const builtInArgKeysSet = new Set<string>(BUILT_IN_PROMPT_ARG_KEYS);
-      resolvedPrompt = yield* substitutePromptArgs(
-        rawPrompt,
-        effectiveArgs,
-        builtInArgKeysSet,
-      );
-    }
-
-    // In head mode, pass the host branch so SandboxLifecycle skips the merge step.
-    // In merge-to-head mode, branch is undefined (triggers merge). In branch mode, it's the explicit branch.
-    const orchestrateBranch =
-      effectiveBranchType === "head" ? currentHostBranch : branch;
+    const resolvedPrompt = yield* buildAgentPrompt({
+      rawPrompt,
+      isInlinePrompt,
+      userArgs: options.promptArgs ?? {},
+      sourceBranch: branches.resolvedBranch,
+      targetBranch: branches.currentHostBranch,
+    });
 
     const orchestrateResult = yield* orchestrate({
       hostRepoDir,
       iterations: maxIterations,
-      hooks,
+      hooks: options.hooks,
       prompt: resolvedPrompt,
-      branch: orchestrateBranch,
-      provider,
+      branch: branches.orchestrateBranch,
+      provider: options.agent,
       completionSignal: options.completionSignal,
       idleTimeoutSeconds: options.idleTimeoutSeconds,
       completionTimeoutSeconds: options.completionTimeoutSeconds,
@@ -783,147 +903,169 @@ export async function run(
       timeouts: options.timeouts,
     });
 
-    const completion = buildCompletionMessage(
-      orchestrateResult.completionSignal,
-      orchestrateResult.iterations.length,
-    );
-    yield* d.status(completion.message, completion.severity);
-
-    for (const line of buildContextWindowLines(orchestrateResult.iterations)) {
-      yield* d.text(line);
-    }
-
+    yield* reportRunEnd(orchestrateResult);
     return orchestrateResult;
   });
 
-  // In file-logging mode, write errors to the log before they propagate.
+/** Runs the iterations; with file logging, errors are written to the log first. */
+const executeRun = async (setup: RunSetup): Promise<OrchestrateResult> => {
+  const baseEffect = runIterations(setup);
   // In stdout mode (ClackDisplay), errors are already shown by withFriendlyErrors
   // in main.ts, so we skip to avoid duplicate terminal output.
   const withErrorLog =
-    resolvedLogging.type === "file"
+    setup.logging.type === "file"
       ? baseEffect.pipe(
           Effect.tapError((error) =>
             Effect.gen(function* () {
               const d = yield* Display;
-              yield* d.status(
-                formatErrorMessage(error as SandboxError),
-                "error",
-              );
+              yield* d.status(formatErrorMessage(error), "error");
             }),
           ),
         )
       : baseEffect;
-
-  let result: OrchestrateResult;
+  const runLayer = buildRunLayer(setup);
   try {
-    result = await Effect.runPromise(
-      withErrorLog.pipe(Effect.provide(runLayer)),
-    );
+    return await Effect.runPromise(withErrorLog.pipe(Effect.provide(runLayer)));
   } catch (error: unknown) {
     // If the signal was aborted, surface its reason verbatim (no wrapping)
-    options.signal?.throwIfAborted();
+    setup.options.signal?.throwIfAborted();
     throw error;
   }
+};
 
+/**
+ * Extracts structured output from a finished run. On a StructuredOutputError
+ * with retries left and a session to resume, retries with a token-efficient
+ * feedback prompt; each retry decrements maxRetries, so it terminates (#825).
+ */
+const withStructuredOutput = async (
+  options: RunOptions & { output: NonNullable<RunOptions["output"]> },
+  baseResult: RunResult,
+  outputMaxRetries: number,
+): Promise<RunResult & { output?: unknown }> => {
+  // Structured output runs are single-iteration, so the last iteration is the
+  // one that produced this stdout. Carry its session id onto the error so a
+  // caller can resume the same session to re-emit corrected output.
+  const lastIteration = baseResult.iterations.at(-1);
+  try {
+    const output = await extractStructuredOutput(
+      baseResult.stdout,
+      options.output,
+      {
+        commits: baseResult.commits,
+        branch: baseResult.branch,
+        preservedWorktreePath: baseResult.preservedWorktreePath,
+        sessionId: lastIteration?.sessionId,
+        sessionFilePath: lastIteration?.sessionFilePath,
+      },
+    );
+    return { ...baseResult, output };
+  } catch (error) {
+    if (
+      error instanceof StructuredOutputError &&
+      outputMaxRetries > 0 &&
+      error.sessionId !== undefined
+    ) {
+      const retriesRemainingAfter = outputMaxRetries - 1;
+      const retryOutput = {
+        ...options.output,
+        maxRetries: retriesRemainingAfter,
+      };
+      return run({
+        ...options,
+        prompt: buildStructuredOutputRetryFeedback(
+          error,
+          retriesRemainingAfter,
+        ),
+        promptFile: undefined,
+        promptArgs: undefined,
+        resumeSession: error.sessionId,
+        forkSession: false,
+        output: retryOutput,
+      } as RunOptions);
+    }
+    throw error;
+  }
+};
+
+/** The run's result, with its follow-ups and any structured output. */
+const finishRun = async ({
+  options,
+  result,
+  logging,
+  outputMaxRetries,
+}: {
+  readonly options: RunOptions;
+  readonly result: OrchestrateResult;
+  readonly logging: LoggingOption;
+  readonly outputMaxRetries: number;
+}): Promise<RunResult & { output?: unknown }> => {
   const baseResult = {
     ...result,
-    logFilePath:
-      resolvedLogging.type === "file" ? resolvedLogging.path : undefined,
-    resume: async (
-      followUpPrompt: string,
-      resumeOptions?: ResumeRunResultOptions,
-    ): Promise<RunResult> => {
-      const lastIteration = result.iterations.at(-1);
-      if (!lastIteration?.sessionId) {
-        throw new Error("Cannot resume: no sessionId was captured");
-      }
-      return run({
-        ...options,
-        // The follow-up prompt is inline: drop the template's arguments.
-        promptArgs: undefined,
-        // The follow-up prompt is new: structured output is opt-in per call.
-        output: undefined,
-        ...resumeOptions,
-        prompt: followUpPrompt,
-        promptFile: undefined,
-        maxIterations: 1,
-        resumeSession: lastIteration.sessionId,
-      });
-    },
-    fork: async (
-      followUpPrompt: string,
-      forkOptions?: ResumeRunResultOptions,
-    ): Promise<RunResult> => {
-      const lastIteration = result.iterations.at(-1);
-      if (!lastIteration?.sessionId) {
-        throw new Error("Cannot fork: no sessionId was captured");
-      }
-      return run({
-        ...options,
-        // The follow-up prompt is inline: drop the template's arguments.
-        promptArgs: undefined,
-        // The follow-up prompt is new: structured output is opt-in per call.
-        output: undefined,
-        ...forkOptions,
-        prompt: followUpPrompt,
-        promptFile: undefined,
-        maxIterations: 1,
-        resumeSession: lastIteration.sessionId,
-        forkSession: true,
-      });
-    },
+    logFilePath: logging.type === "file" ? logging.path : undefined,
+    resume: followUpRun(options, result, "resume"),
+    fork: followUpRun(options, result, "fork"),
   };
-
   // Extract structured output after the iteration completes (separate pass from completion signal)
-  if (options.output) {
-    // Structured output runs are single-iteration, so the last iteration is the
-    // one that produced this stdout. Carry its session id onto the error so a
-    // caller can resume the same session to re-emit corrected output.
-    const lastIteration = baseResult.iterations.at(-1);
-    try {
-      const output = await extractStructuredOutput(
-        baseResult.stdout,
-        options.output,
-        {
-          commits: baseResult.commits,
-          branch: baseResult.branch,
-          preservedWorktreePath: baseResult.preservedWorktreePath,
-          sessionId: lastIteration?.sessionId,
-          sessionFilePath: lastIteration?.sessionFilePath,
-        },
-      );
-      return { ...baseResult, output };
-    } catch (error) {
-      // Built-in retry: when maxRetries > 0 and the agent emitted a session id
-      // we can resume, recurse with a token-efficient feedback prompt. Each
-      // retry decrements maxRetries so the recursion terminates. See issue
-      // #825.
-      if (
-        error instanceof StructuredOutputError &&
-        outputMaxRetries > 0 &&
-        error.sessionId !== undefined
-      ) {
-        const retriesRemainingAfter = outputMaxRetries - 1;
-        const retryOutput = {
-          ...options.output,
-          maxRetries: retriesRemainingAfter,
-        };
-        return run({
-          ...options,
-          prompt: buildStructuredOutputRetryFeedback(
-            error,
-            retriesRemainingAfter,
-          ),
-          promptFile: undefined,
-          promptArgs: undefined,
-          resumeSession: error.sessionId,
-          forkSession: false,
-          output: retryOutput,
-        } as RunOptions);
-      }
-      throw error;
-    }
+  const { output } = options;
+  if (!output) {
+    return baseResult;
   }
+  return withStructuredOutput(
+    { ...options, output },
+    baseResult,
+    outputMaxRetries,
+  );
+};
 
-  return baseResult;
+/** Overload: with `Output.object`, returns `RunResult` with typed `output: T`. */
+export function run<T, A extends AgentProvider>(
+  options: RunOptions<A> & { output: OutputObjectDefinition<T> },
+): Promise<RunResult & { output: T }>;
+/** Overload: with `Output.string`, returns `RunResult` with `output: string`. */
+export function run<A extends AgentProvider>(
+  options: RunOptions<A> & { output: OutputStringDefinition },
+): Promise<RunResult & { output: string }>;
+/** Overload: without `output`, returns the standard `RunResult`. */
+export function run<A extends AgentProvider>(
+  options: RunOptions<A>,
+): Promise<RunResult>;
+export async function run(
+  options: RunOptions,
+): Promise<RunResult & { output?: unknown }> {
+  // If signal is already aborted, reject immediately without any setup
+  options.signal?.throwIfAborted();
+
+  const { maxIterations = DEFAULT_MAX_ITERATIONS } = options;
+  const branchStrategy = resolveBranchStrategy(options);
+
+  // Validate: timeouts must be positive (0 would fire before the agent's first output)
+  validateTimeoutOptions(options);
+  validateBranchOptions(options, branchStrategy.type);
+  const isResuming = validateSessionOptions(options, maxIterations);
+  const outputMaxRetries = validateOutputOptions(options, maxIterations);
+
+  const hostRepoDir = await resolveRunHostRepoDir(options, isResuming);
+
+  const { rawPrompt, isInlinePrompt } = await resolveRunPrompt(options);
+  const env = await resolveRunEnv(options, hostRepoDir);
+  const branches = await resolveRunBranches(
+    options,
+    branchStrategy,
+    hostRepoDir,
+  );
+  const logging = resolveRunLogging(options, hostRepoDir, branches);
+  const result = await executeRun({
+    options,
+    branchStrategy,
+    hostRepoDir,
+    maxIterations,
+    branches,
+    logging,
+    env,
+    rawPrompt,
+    isInlinePrompt,
+  });
+
+  return finishRun({ options, result, logging, outputMaxRetries });
 }
