@@ -27,4 +27,7 @@ export type {
   ImplementTask,
   ImplementWork,
 } from "./taskImplement.js";
+export { review } from "./taskReview.js";
+export type { ReviewInput, ReviewTask } from "./taskReview.js";
+export type { ReviewOutputs, ReviewResult } from "./taskReviewResult.js";
 export type { TaskLimits, TaskSkillsContext, Tracker } from "./Task.js";

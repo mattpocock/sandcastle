@@ -83,3 +83,54 @@ export const spied = (sandbox: Sandbox, calls: ExecOptions[]): Sandbox => {
   }
   return { ...sandbox, exec };
 };
+
+/**
+ * A pull request on the bare repo at `origin`: branch `branch` adds `file`
+ * on top of `main`, and `refs/pull/<number>/head` points at it, as on GitHub.
+ */
+export const pullRequest = async (
+  dir: string,
+  origin: string,
+  pr: {
+    readonly number: number;
+    readonly branch: string;
+    readonly file: string;
+  },
+): Promise<void> => {
+  const work = path.join(dir, `pr-${pr.number}`);
+  const git = (...args: string[]): void => {
+    execFileSync("git", args, { stdio: "ignore" });
+  };
+  git("clone", "--quiet", origin, work);
+  await writeFile(path.join(work, pr.file), `${pr.branch}\n`);
+  const author = ["-C", work, "-c", "user.name=t", "-c", "user.email=t@t"];
+  git(...author, "add", ".");
+  git(...author, "commit", "--quiet", "-m", `Add ${pr.file}`);
+  git(...author, "push", "--quiet", "origin", `HEAD:refs/heads/${pr.branch}`);
+  git(
+    ...author,
+    "push",
+    "--quiet",
+    "origin",
+    `HEAD:refs/pull/${pr.number}/head`,
+  );
+};
+
+/**
+ * A stub `gh` in `dir/bin`, beside `stubClaude`'s. `gh pr view` prints
+ * `view` as JSON; every call appends its argv and `GH_TOKEN` to
+ * `dir/gh-calls.txt`. Any other command fails.
+ */
+export const stubGh = async (dir: string, view: unknown): Promise<void> => {
+  const bin = path.join(dir, "bin");
+  await mkdir(bin, { recursive: true });
+  await writeFile(path.join(dir, "gh-view.json"), JSON.stringify(view));
+  const script = [
+    "#!/bin/sh",
+    `printf '%s token=%s\\n' "$*" "$GH_TOKEN" >> "${dir}/gh-calls.txt"`,
+    `[ "$1 $2" = "pr view" ] || exit 1`,
+    `cat "${dir}/gh-view.json"`,
+  ].join("\n");
+  await writeFile(path.join(bin, "gh"), `${script}\n`);
+  await chmod(path.join(bin, "gh"), 0o755);
+};

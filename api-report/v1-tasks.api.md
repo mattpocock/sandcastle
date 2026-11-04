@@ -98,6 +98,39 @@ export type ImplementWork = {
 };
 
 // @public
+export const review: ReviewTask;
+
+// @public
+export interface ReviewInput {
+    readonly githubToken: string;
+    readonly pr: number;
+    readonly record?: SessionRecordOptions;
+    readonly repo: string;
+    readonly setup?: readonly string[];
+    readonly skillsContext: TaskSkillsContext;
+}
+
+// @public
+export type ReviewOutputs = Readonly<{
+    review: OutputObjectDefinition<ReviewResult>;
+}>;
+
+// @public
+export interface ReviewResult {
+    readonly comments: readonly string[];
+    readonly summary: string;
+    readonly verdict: "approve" | "changes-requested";
+}
+
+// @public
+export interface ReviewTask {
+    readonly limits: TaskLimits;
+    readonly name: "review";
+    readonly outputs: ReviewOutputs;
+    readonly start: (sandbox: Sandbox, input: ReviewInput) => Promise<SessionProcess<ReviewResult>>;
+}
+
+// @public
 export interface TaskLimits {
     readonly deadlineMinutes: number;
     readonly timeLimitMinutes: number;
