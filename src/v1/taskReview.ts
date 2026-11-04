@@ -36,8 +36,8 @@ export interface ReviewTask {
   readonly name: "review";
   /** 30 minutes for the session; a 40-minute sandbox time limit leaves room for setup and the report. */
   readonly limits: TaskLimits;
-  /** The `Output` definitions for `verifyFinishReport`. */
-  readonly outputs: ReviewOutputs;
+  /** The `Output` definitions for `verifyFinishReport`, by session name. */
+  readonly outputs: () => ReviewOutputs;
   /**
    * Clones `repo`, checks out the pull request's branch, installs the
    * `code-review` skill, runs `setup`, then spawns the `review` session on
@@ -59,7 +59,7 @@ const LIMITS: TaskLimits = { timeLimitMinutes: 40, deadlineMinutes: 30 };
 export const review: ReviewTask = {
   name: "review",
   limits: LIMITS,
-  outputs: { review: REVIEW_RESULT },
+  outputs: () => ({ review: REVIEW_RESULT }),
   start: async (sandbox, input) =>
     startTask(sandbox, {
       name: "review",

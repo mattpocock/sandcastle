@@ -1,4 +1,4 @@
-import type { OutputDefinition } from "../Output.js";
+import type { OutputDefinition } from "./Output.js";
 import type { Tracker } from "./skills/Skill.js";
 import { trackerDoc } from "./skills/trackerDoc.js";
 

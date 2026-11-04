@@ -54,20 +54,12 @@ export type {
   OpenCodeAgentOptions,
   PiAgentOptions,
 } from "./v1/agents.js";
-export type {
-  ClaudeCodeOptions,
-  CodexOptions,
-  CopilotOptions,
-  CursorOptions,
-  OpenCodeOptions,
-  PiOptions,
-} from "./AgentProvider.js";
 export { Output } from "./v1/Output.js";
 export type {
   OutputDefinition,
   OutputObjectDefinition,
   OutputStringDefinition,
-} from "./Output.js";
+} from "./v1/Output.js";
 export type {
   AgentStreamEvent,
   OutputType,
@@ -87,7 +79,9 @@ export { verifyFinishReport } from "./v1/verifyFinishReport.js";
 export { FinishReportVerificationError } from "./v1/FinishReportVerificationError.js";
 export type { FinishReportVerificationFailure } from "./v1/FinishReportVerificationError.js";
 export type {
+  DetachedWorkBase,
   FailedDetachedWork,
+  FailedSessionReports,
   FailureReason,
   FinishReport,
   FinishReportDestination,

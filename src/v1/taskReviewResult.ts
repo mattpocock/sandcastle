@@ -1,18 +1,18 @@
 import { Schema } from "effect";
-import type { OutputObjectDefinition } from "../Output.js";
-import { Output } from "../Output.js";
+import type { OutputObjectDefinition } from "./Output.js";
+import { Output } from "./Output.js";
 
 /** What a review run hands back: one verdict, the findings behind it, and a summary. */
 export interface ReviewResult {
   /** `changes-requested` on any hard standards violation or any missing, partial or wrong requirement. */
   readonly verdict: "approve" | "changes-requested";
-  /** The findings behind `changes-requested`, one self-contained string each; empty on `approve`. Join them into the next implement round's `feedback`. */
+  /** The findings behind `changes-requested`, one self-contained string each; empty on `approve`. Pass them as the next implement round's `feedback`. */
   readonly comments: readonly string[];
   /** The review's one-line summary. */
   readonly summary: string;
 }
 
-/** `review.outputs`: the `reviewResult` output, under the session's name. */
+/** `review.outputs()`: the `reviewResult` output, under the session's name. */
 export type ReviewOutputs = Readonly<{
   review: OutputObjectDefinition<ReviewResult>;
 }>;

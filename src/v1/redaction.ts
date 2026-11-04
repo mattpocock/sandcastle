@@ -15,20 +15,20 @@ const LONGEST_FIRST = Order.mapInput(
 export type Redact = (text: string) => string;
 
 /**
- * The redactor for `patterns` and the values `envVars` have in `env`. Longer
+ * The redactor for `values` and the values `envVars` have in `env`. Longer
  * secrets are masked first, so one that contains another is masked whole.
  * Empty strings and unset vars mask nothing.
  */
 export const redactor = (
   redaction: {
-    readonly patterns: readonly string[];
+    readonly values: readonly string[];
     readonly envVars: readonly string[];
   },
   env: Readonly<Record<string, string | undefined>>,
 ): Redact => {
   const secrets = Arr.sort(
     [
-      ...redaction.patterns,
+      ...redaction.values,
       ...redaction.envVars.map((name) => env[name] ?? ""),
     ].filter((secret) => secret !== ""),
     LONGEST_FIRST,

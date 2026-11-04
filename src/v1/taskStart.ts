@@ -1,5 +1,5 @@
 import { DateTime, Effect, Either } from "effect";
-import type { OutputDefinition } from "../Output.js";
+import type { OutputDefinition } from "./Output.js";
 import type { Sandbox } from "./Sandbox.js";
 import type { OutputType, SessionProcess } from "./Session.js";
 import { installSkills } from "./skills/installSkills.js";

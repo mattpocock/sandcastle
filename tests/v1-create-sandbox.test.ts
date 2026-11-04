@@ -6,6 +6,7 @@ import type {
   ProviderCreateOptions,
   ProviderExecOptions,
   ProviderSandbox,
+  SandboxProvider,
 } from "@ai-hero/sandcastle/v1";
 import { localProviderSandbox } from "./helpers/localProviderSandbox.js";
 import {
@@ -231,6 +232,16 @@ describe.skipIf(process.platform === "win32")("createSandbox (v1)", () => {
       expect(sandbox.sandboxId).toBe("sbx-1");
     }
     expect(recorded.closes).toBe(1);
+  });
+
+  it("takes no cwd for a remote sandbox (types)", () => {
+    const start = async (remote: SandboxProvider<unknown, true>) =>
+      createSandbox({
+        provider: remote,
+        // @ts-expect-error a remote sandbox has no host directory to start in
+        cwd: "/repo",
+      });
+    expect(start).toBeTypeOf("function");
   });
 
   it("has no providerOptions and no detach on a local sandbox (types)", async () => {

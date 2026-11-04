@@ -52,10 +52,11 @@ export type ImplementRound =
       /** An existing branch to work on, e.g. the one round 1 reported. */
       readonly branch: string;
       /**
-       * The review's comments, for round 2. The session is a fresh one on
-       * `branch`, with these in its prompt; nothing is resumed.
+       * The review's comments, for round 2: pass `ReviewResult.comments` as
+       * it is, or your own text. The session is a fresh one on `branch`,
+       * with these in its prompt; nothing is resumed.
        */
-      readonly feedback?: string;
+      readonly feedback?: string | readonly string[];
     };
 
 /** What `implement.start` takes. */
@@ -67,8 +68,8 @@ export interface ImplementTask {
   readonly name: "implement";
   /** 90 minutes for the session; a 100-minute sandbox time limit leaves room for setup and the report. */
   readonly limits: TaskLimits;
-  /** The `Output` definitions for `verifyFinishReport`. */
-  readonly outputs: ImplementOutputs;
+  /** The `Output` definitions for `verifyFinishReport`, by session name. */
+  readonly outputs: () => ImplementOutputs;
   /**
    * Clones `repo`, creates a branch from the default branch (or checks out
    * `branch`), installs the `implement`, `tdd`, `codebase-design`,
@@ -133,6 +134,6 @@ const start: ImplementTask["start"] = async (sandbox, input) => {
 export const implement: ImplementTask = {
   name: "implement",
   limits: LIMITS,
-  outputs: { implement: IMPLEMENT_RESULT },
+  outputs: () => ({ implement: IMPLEMENT_RESULT }),
   start,
 };

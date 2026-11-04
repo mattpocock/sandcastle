@@ -1,4 +1,4 @@
-import type { OutputDefinition } from "../Output.js";
+import type { OutputDefinition } from "./Output.js";
 import type { AgentProvider } from "./agents.js";
 import type { SessionRecordOptions } from "./SessionRecord.js";
 import type { Skill, Tracker } from "./skills/Skill.js";

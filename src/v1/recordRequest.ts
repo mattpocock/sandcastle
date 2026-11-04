@@ -55,7 +55,7 @@ const check = (options: SessionRecordOptions): void => {
     );
   }
   checkStrings("record.labels", options.labels ?? {});
-  checkStrings("record.redact.patterns", options.redact?.patterns ?? []);
+  checkStrings("record.redact.values", options.redact?.values ?? []);
   checkStrings("record.redact.envVars", options.redact?.envVars ?? []);
 };
 
@@ -89,7 +89,7 @@ export const recordRequest = (
     sandboxId: target.sandboxId,
     labels: { ...options.labels },
     redact: {
-      patterns: [...(options.redact?.patterns ?? [])],
+      values: [...(options.redact?.values ?? [])],
       envVars: [...(options.redact?.envVars ?? [])],
     },
     ...(options.webhook === undefined

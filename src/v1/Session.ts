@@ -2,7 +2,7 @@ import type {
   OutputDefinition,
   OutputObjectDefinition,
   OutputStringDefinition,
-} from "../Output.js";
+} from "./Output.js";
 import type { AgentProvider } from "./agents.js";
 import type { SessionRecordOptions } from "./SessionRecord.js";
 
