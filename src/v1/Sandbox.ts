@@ -1,5 +1,6 @@
 import type { OutputDefinition } from "../Output.js";
-import type { FinishReportDestination } from "./FinishReport.js";
+import type { FinishReport, FinishReportDestination } from "./FinishReport.js";
+import type { SessionRecordPointer } from "./SessionRecord.js";
 import type { SandboxProvider } from "./SandboxProvider.js";
 import type {
   OutputType,
@@ -161,6 +162,77 @@ export interface DetachReceipt {
   readonly reportsTo: string | false;
 }
 
+/**
+ * How the last detach's finish report is getting on: `not-finished` while its
+ * work runs, `delivering` while it is being sent, then `delivered`, `gone`
+ * (the receiver answered 410) or `gave-up` (out of time before the kill
+ * time). `no-destination` when the detach had none: it was only written.
+ */
+export type FinishReportDelivery =
+  | "not-finished"
+  | "delivering"
+  | "delivered"
+  | "gone"
+  | "gave-up"
+  | "no-destination";
+
+/** A session that has ended in the sandbox. */
+export interface EndedWork {
+  readonly kind: "session";
+  /** The session's name. */
+  readonly name: string;
+  /** The built-in agent's id, e.g. `"claude-code"`. */
+  readonly agent: string;
+  /** How it ended, as its result or the finish report says. */
+  readonly exitReason:
+    | "completed"
+    | "closing-tag"
+    | "failed"
+    | "idle-timeout"
+    | "aborted"
+    | "time-limit";
+  /** Where its record went from inside the sandbox, and how delivery went, when it had in-sandbox sinks. */
+  readonly record?: SessionRecordPointer;
+}
+
+/** Options for `status()`. */
+export interface StatusOptions {
+  /** How many trailing lines of the session supervisor's log to return. Default 50. */
+  readonly logLines?: number;
+}
+
+/**
+ * A look inside a sandbox, read from the session supervisor's files. It is
+ * never a finish signal when a detach has a finish report destination: the
+ * report that arrives there is the one source of truth, and `finishReport`
+ * here is for finding one that never arrived.
+ */
+export interface SandboxStatus {
+  /** The provider's sandbox id. */
+  readonly sandboxId: string;
+  /** When the provider will kill the sandbox and everything in it. */
+  readonly killTime: Date;
+  /** Spawned sessions still running, held or carried on past a detach. */
+  readonly running: readonly RunningWork[];
+  /** Sessions that have ended, in the order they ended. */
+  readonly ended: readonly EndedWork[];
+  /** The last detach, if there was one. */
+  readonly detached?: {
+    readonly detachId: string;
+    /** When the supervisor took the work on, by the sandbox's clock. */
+    readonly detachedAt: Date;
+    /** When it stops whatever is still running and reports `time-limit`, by the sandbox's clock. */
+    readonly deadline: Date;
+    /** The URL the finish report goes to, or `false` for fire-and-forget. */
+    readonly reportsTo: string | false;
+    readonly delivery: FinishReportDelivery;
+    /** The finish report, once written: read from its file in the sandbox, whether or not it was delivered. */
+    readonly finishReport?: FinishReport;
+  };
+  /** The last lines of the session supervisor's log. */
+  readonly logs: readonly string[];
+}
+
 /** A sandbox from a provider that can detach. */
 export interface DetachableSandbox<Native = unknown> extends Sandbox<Native> {
   /** Always `true`. */
@@ -177,4 +249,27 @@ export interface DetachableSandbox<Native = unknown> extends Sandbox<Native> {
    * rejects with `SandboxDetachedError` and `close()` does nothing.
    */
   readonly detach: (options?: DetachOptions) => Promise<DetachReceipt>;
+  /**
+   * What's running, what has ended, the last detach and its finish report,
+   * and the supervisor's log tail, read from the supervisor's files. Works
+   * after a detach too, and on a reattached handle after the supervisor has
+   * exited. Rejects with `SandboxUnavailableError` once the sandbox has ended.
+   */
+  readonly status: (options?: StatusOptions) => Promise<SandboxStatus>;
+}
+
+/** Options for `reattachSandbox`. */
+export interface ReattachSandboxOptions<Native = unknown> {
+  /** A provider like the one that made the sandbox, with the same credentials. Only detachable providers can reattach. */
+  readonly provider: SandboxProvider<Native, true>;
+  /** From `DetachReceipt.sandboxId` or `sandbox.sandboxId`. */
+  readonly sandboxId: string;
+  /**
+   * Env for this handle's `exec` calls, under each call's own env. Sandcastle
+   * doesn't store the env a sandbox was created with (it's secrets), so a
+   * provider that can't read it back (Daytona) runs the reattached handle's
+   * commands with only this. Sessions are unaffected: they run under the
+   * supervisor, which kept the env it was started with.
+   */
+  readonly env?: Readonly<Record<string, string>>;
 }

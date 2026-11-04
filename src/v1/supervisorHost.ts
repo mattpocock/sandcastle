@@ -30,6 +30,8 @@ export interface SupervisorLink {
   readonly shutdown: () => Promise<void>;
   /** The supervisor's public key, from its hello: finish-report secrets are sealed to it. */
   readonly publicKey: string;
+  /** Its directory in the sandbox, where it keeps its status, reports and log. */
+  readonly directory: string;
 }
 
 const decodeReply = Schema.decodeUnknownEither(ReplyJson);
@@ -75,30 +77,22 @@ const callOn =
     }
   };
 
-/** Copies the supervisor into the sandbox, starts it and waits until it answers. */
-export const startSupervisor = async (
+/** The supervisor's directory in the sandbox, checking Node is there to run it. */
+export const supervisorDirectory = async (
   sandbox: ProviderSandbox,
-  spawnDetached: SpawnDetached | undefined,
-): Promise<SupervisorLink> => {
-  const home = await sandboxHome(sandbox);
-  const directory = posix.join(
-    home,
+): Promise<string> =>
+  posix.join(
+    await sandboxHome(sandbox),
     ".sandcastle",
     "supervisor",
     sandbox.sandboxId.replaceAll(/[^A-Za-z0-9._-]/gu, "_"),
   );
-  await sandbox.writeTextFile({
-    path: posix.join(directory, "supervisor.mjs"),
-    content: await supervisorBundle(),
-  });
-  const command = `cd ${shellEscape(directory)} && exec node supervisor.mjs daemon >> supervisor.log 2>&1`;
-  if (spawnDetached === undefined) {
-    // Held for the sandbox's life; closing the sandbox ends it.
-    void sandbox.exec({ command }).catch(() => undefined);
-  } else {
-    // Detached from the start, so letting go of the handle never drops it.
-    await spawnDetached(sandbox, { command });
-  }
+
+/** A link to the supervisor running in `directory`, once it has said hello. */
+export const linkTo = async (
+  sandbox: ProviderSandbox,
+  directory: string,
+): Promise<SupervisorLink> => {
   const call = callOn(sandbox, directory);
   let publicKey = "";
   await call({ type: "hello" }, (reply) => {
@@ -112,6 +106,7 @@ export const startSupervisor = async (
   return {
     call,
     publicKey,
+    directory,
     shutdown: async () =>
       Effect.runPromise(
         Effect.tryPromise(async () =>
@@ -119,4 +114,37 @@ export const startSupervisor = async (
         ).pipe(Effect.timeout(SHUTDOWN_TIMEOUT), Effect.ignore),
       ),
   };
+};
+
+/** A link to a supervisor that has exited: its files can be read, nothing more. */
+export const exitedLink = (directory: string): SupervisorLink => ({
+  call: async () => {
+    throw new Error(
+      "the session supervisor has exited: its detached work has been reported",
+    );
+  },
+  publicKey: "",
+  directory,
+  shutdown: async () => undefined,
+});
+
+/** Copies the supervisor into the sandbox, starts it and waits until it answers. */
+export const startSupervisor = async (
+  sandbox: ProviderSandbox,
+  spawnDetached: SpawnDetached | undefined,
+): Promise<SupervisorLink> => {
+  const directory = await supervisorDirectory(sandbox);
+  await sandbox.writeTextFile({
+    path: posix.join(directory, "supervisor.mjs"),
+    content: await supervisorBundle(),
+  });
+  const command = `cd ${shellEscape(directory)} && exec node supervisor.mjs daemon >> supervisor.log 2>&1`;
+  if (spawnDetached === undefined) {
+    // Held for the sandbox's life; closing the sandbox ends it.
+    void sandbox.exec({ command }).catch(() => undefined);
+  } else {
+    // Detached from the start, so letting go of the handle never drops it.
+    await spawnDetached(sandbox, { command });
+  }
+  return linkTo(sandbox, directory);
 };
