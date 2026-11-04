@@ -35,8 +35,12 @@ export interface TaskRun<O extends OutputDefinition | undefined> {
   readonly limits: TaskLimits;
   readonly agent: AgentProvider;
   readonly skills: readonly Skill[];
-  /** The task's own prompt, before the parts every task adds. */
-  readonly prompt: string;
+  /**
+   * The task's own prompt, before the parts every task adds. A function gets
+   * the clone's directory once it's cloned, may prepare it (check out a
+   * branch), and returns the prompt; it runs before the skills and setup.
+   */
+  readonly prompt: string | ((clone: string) => Promise<string>);
   readonly output: O | undefined;
   readonly repo: string | undefined;
   readonly githubToken: string | undefined;

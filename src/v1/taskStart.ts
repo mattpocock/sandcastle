@@ -76,11 +76,26 @@ const runSetup = async (
     )
     .then(() => undefined);
 
+/** The task's own prompt, prepared in the clone when it's a function. */
+const taskBody = async (
+  prompt: TaskRun<OutputDefinition | undefined>["prompt"],
+  directory: string | undefined,
+): Promise<string> => {
+  if (typeof prompt === "string") {
+    return prompt;
+  }
+  if (directory === undefined) {
+    throw new TypeError("A task that prepares its clone needs a repo");
+  }
+  return prompt(directory);
+};
+
 /**
  * Starts a bundled task: clones its repo with the token in that command's env
- * only, installs its skills, runs the setup commands in the clone, then
- * spawns one session named after the task and resolves once it runs. The
- * handle's default detach deadline becomes the task's.
+ * only, prepares the clone and the prompt, installs its skills, runs the
+ * setup commands in the clone, then spawns one session named after the task
+ * and resolves once it runs. The handle's default detach deadline becomes the
+ * task's.
  */
 export const startTask = async <O extends OutputDefinition | undefined>(
   sandbox: Sandbox,
@@ -92,6 +107,7 @@ export const startTask = async <O extends OutputDefinition | undefined>(
     run.repo === undefined
       ? undefined
       : await cloneRepo(sandbox, run.repo, run.githubToken);
+  const body = await taskBody(run.prompt, directory);
   await install(sandbox, run.skills, run.skillsContext);
   await runSetup(sandbox, run.setup, directory);
   setTaskDeadline(sandbox, deadline);
@@ -99,7 +115,7 @@ export const startTask = async <O extends OutputDefinition | undefined>(
     name: run.name,
     agent: run.agent,
     prompt: taskPrompt({
-      body: run.prompt,
+      body,
       tracker: run.skillsContext.tracker,
       output: run.output,
     }),
