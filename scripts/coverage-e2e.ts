@@ -10,6 +10,7 @@ import { execFile } from "node:child_process";
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import {
   coverableLinesFromIstanbul,
@@ -128,6 +129,36 @@ const readDist = async (): Promise<Map<string, string>> => {
   );
 };
 
+/**
+ * The session supervisor runs from a byte-for-byte copy of dist/supervisor.js
+ * that createSandbox writes into each sandbox, as `supervisor.mjs` under the
+ * sandbox user's `.sandcastle/supervisor/<sandboxId>/`. Count a copy as the
+ * built file, so its lines map back to src/ through dist's source map.
+ */
+const SUPERVISOR_COPY =
+  /[\\/]\.sandcastle[\\/]supervisor[\\/][^\\/]+[\\/]supervisor\.mjs$/u;
+
+const isScript = (value: unknown): value is { url: string } =>
+  typeof value === "object" &&
+  value !== null &&
+  "url" in value &&
+  typeof value.url === "string";
+
+/** Rewrites, in place, the URL of each supervisor copy in a parsed report. */
+const withSupervisorCopiesAsBuilt = (json: unknown): unknown => {
+  if (typeof json !== "object" || json === null || !("result" in json)) {
+    return json;
+  }
+  const built = pathToFileURL(path.join(ROOT, "dist", "supervisor.js")).href;
+  const scripts: unknown[] = Array.isArray(json.result) ? json.result : [];
+  for (const script of scripts) {
+    if (isScript(script) && SUPERVISOR_COPY.test(script.url)) {
+      script.url = built;
+    }
+  }
+  return json;
+};
+
 /** Covered src/ lines per process that wrote a report into `dir`. */
 const subprocessLines = async (dir: string): Promise<Lines[]> => {
   const dist = await readDist();
@@ -137,7 +168,9 @@ const subprocessLines = async (dir: string): Promise<Lines[]> => {
       const json: unknown = JSON.parse(
         await readFile(path.join(dir, name), "utf8"),
       );
-      return linesFromV8(json, ROOT, (file) => dist.get(file));
+      return linesFromV8(withSupervisorCopiesAsBuilt(json), ROOT, (file) =>
+        dist.get(file),
+      );
     }),
   );
   return perProcess.filter((lines) => lines.size > 0);

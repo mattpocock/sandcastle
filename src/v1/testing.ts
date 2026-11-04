@@ -11,3 +11,6 @@ export type {
   FakeSandboxProvider,
 } from "./fakeSandbox.js";
 export type { FakeSandboxNative } from "./fakeSandboxInstance.js";
+export { fakeAgent } from "./fakeAgent.js";
+export type { FakeAgentScript } from "./fakeAgent.js";
+export type { AgentName, AgentProvider } from "./agents.js";

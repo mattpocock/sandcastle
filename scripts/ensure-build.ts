@@ -21,13 +21,19 @@ const INPUTS = [
   "package.json",
   "package-lock.json",
   "tsup.config.ts",
+  "tsup.supervisor.config.ts",
   "tsconfig.json",
   "scripts/copy-templates.mjs",
   "scripts/check-public-types-effect-free.mjs",
 ];
 
 /** What the build writes that the tests and lint need. */
-const OUTPUTS = ["dist/main.js", "dist/index.js", "dist/index.d.ts"];
+const OUTPUTS = [
+  "dist/main.js",
+  "dist/index.js",
+  "dist/index.d.ts",
+  "dist/supervisor.js",
+];
 
 /** Newest mtime under `p` (a file or a directory), or 0 if absent. */
 const newestMtime = async (p: string): Promise<number> => {

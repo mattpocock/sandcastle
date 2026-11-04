@@ -1,6 +1,15 @@
 import { ExecFailedError } from "./ExecFailedError.js";
 import type { ExecOptions, ExecResult, Sandbox } from "./Sandbox.js";
 import type { ProviderSandbox } from "./SandboxProvider.js";
+import type { OutputDefinition } from "../Output.js";
+import type {
+  OutputType,
+  SessionOptions,
+  SessionProcess,
+  SessionResult,
+} from "./Session.js";
+import { sessionHost } from "./sessionHost.js";
+import type { SupervisorLink } from "./supervisorHost.js";
 
 const exec = async (
   sandbox: ProviderSandbox,
@@ -35,16 +44,42 @@ const execOn = (sandbox: ProviderSandbox): Sandbox["exec"] => {
   return run;
 };
 
+type Sessions = ReturnType<typeof sessionHost>;
+
+// The overloads type a session's output from its definition; underneath, the
+// host handles any definition and the schema validates the value.
+const sessionOn = (sessions: Sessions): Sandbox["session"] => {
+  function run<const O extends OutputDefinition | undefined = undefined>(
+    options: SessionOptions<O>,
+  ): Promise<SessionResult<OutputType<O>>>;
+  function run(options: SessionOptions): Promise<SessionResult> {
+    return sessions.session(options);
+  }
+  return run;
+};
+
+const spawnSessionOn = (sessions: Sessions): Sandbox["spawnSession"] => {
+  function run<const O extends OutputDefinition | undefined = undefined>(
+    options: SessionOptions<O>,
+  ): Promise<SessionProcess<OutputType<O>>>;
+  function run(options: SessionOptions): Promise<SessionProcess> {
+    return sessions.spawnSession(options);
+  }
+  return run;
+};
+
 /** Wraps a provider's sandbox in the handle users hold. */
 export const sandboxHandle = <Native>(
   sandbox: ProviderSandbox<Native>,
   canDetach: boolean,
+  supervisor: SupervisorLink,
 ): Sandbox<Native> => {
   let closing: Promise<void> | undefined;
   const close = (): Promise<void> => {
-    closing ??= sandbox.close();
+    closing ??= supervisor.shutdown().then(async () => sandbox.close());
     return closing;
   };
+  const sessions = sessionHost(supervisor, sandbox.workingDirectory);
   const handle: Sandbox<Native> = {
     sandboxId: sandbox.sandboxId,
     workingDirectory: sandbox.workingDirectory,
@@ -55,6 +90,8 @@ export const sandboxHandle = <Native>(
     readTextFile: (options) => sandbox.readTextFile({ path: options.path }),
     writeTextFile: (options) =>
       sandbox.writeTextFile({ path: options.path, content: options.content }),
+    session: sessionOn(sessions),
+    spawnSession: spawnSessionOn(sessions),
     close,
     [Symbol.asyncDispose]: close,
   };

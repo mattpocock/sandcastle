@@ -62,3 +62,19 @@ It is built with the public `createSandboxProvider`, the same contract a provide
 ## Review (first pass)
 
 An independent review approved the direction (real dirs, real processes, built on the public `createSandboxProvider`, closed env, no failure-injection options) with six changes, all adopted above: file-backed state with a shared `rootDir`; `closeAll()`, with the requested sweep of expired sandboxes done instead by a per-sandbox reaper process that enforces the kill time even after a crash; the deadline margin left to the detach change; containment with a private `TMPDIR`; a pinned shape; no `killAfterMs`.
+
+## Addendum: `fakeAgent` (added with sessions)
+
+```ts
+fakeAgent(script: {
+  format?: AgentName;        // whose stream format; default "claude-code"
+  lines: readonly string[];  // raw stream lines, printed in order
+  exitCode?: number;         // default 0
+  hang?: boolean;            // keep running after the last line; default false
+}): AgentProvider;
+```
+
+- **Same shape as a real agent.** It returns the same `AgentProvider` value `claudeCode()` does, a descriptor the session supervisor rebuilds inside the sandbox, with the script attached. The supervisor runs the real agent's command line and stream parser; only the binary is swapped for the bundle replaying the script. So timeouts, structured output and parsing are tested for real.
+- **Claude Code's resume, faithfully.** In `claude-code` format it writes the session file where Claude Code would (under the sandbox user's home, keyed by working directory), and a `--resume <id>` that can't find its file fails as the CLI does. `continueSession` therefore works only in the same sandbox and directory, as with the real agent.
+- **Inline lines only; no named fixtures.** Recorded fixtures shipping inside the package is a one-way door with no user asking for it yet. Users pass lines (read from their own recordings).
+- **Not added:** per-line delays, scripted tool effects, different replies per turn. A test that needs them can run two sessions, or use `hang`.

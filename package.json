@@ -63,7 +63,7 @@
     "sandcastle": "dist/main.js"
   },
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && tsup --config tsup.supervisor.config.ts",
     "postbuild": "node scripts/copy-templates.mjs && node scripts/check-public-types-effect-free.mjs",
     "pretest": "tsx scripts/ensure-build.ts",
     "test": "vitest run",

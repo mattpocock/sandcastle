@@ -1,4 +1,11 @@
+import type { OutputDefinition } from "../Output.js";
 import type { SandboxProvider } from "./SandboxProvider.js";
+import type {
+  OutputType,
+  SessionOptions,
+  SessionProcess,
+  SessionResult,
+} from "./Session.js";
 
 /** Options for `createSandbox`. */
 export interface CreateSandboxOptions<
@@ -84,6 +91,24 @@ export interface Sandbox<Native = unknown> extends AsyncDisposable {
     readonly path: string;
     readonly content: string;
   }) => Promise<void>;
+  /**
+   * Run one agent session and wait for its result. Rejects with
+   * `SessionFailedError`, or `StructuredOutputError` when its output is
+   * missing or doesn't match the schema.
+   */
+  readonly session: <const O extends OutputDefinition | undefined = undefined>(
+    options: SessionOptions<O>,
+  ) => Promise<SessionResult<OutputType<O>>>;
+  /**
+   * Start one agent session and resolve once the agent is running. Rejects
+   * with `SessionFailedError` when it can't start. Stream its `events`,
+   * `wait()` for its result, or `kill()` it.
+   */
+  readonly spawnSession: <
+    const O extends OutputDefinition | undefined = undefined,
+  >(
+    options: SessionOptions<O>,
+  ) => Promise<SessionProcess<OutputType<O>>>;
   /** End the sandbox and kill everything in it. Safe to call twice. */
   readonly close: () => Promise<void>;
 }

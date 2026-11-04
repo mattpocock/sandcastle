@@ -112,7 +112,10 @@ const extractString = (
  * Find the content between the **last** `<tag>` and `</tag>` pair in text.
  * Returns `undefined` if the tag is not found.
  */
-const findLastTagContent = (text: string, tag: string): string | undefined => {
+export const findLastTagContent = (
+  text: string,
+  tag: string,
+): string | undefined => {
   const openTag = `<${tag}>`;
   const closeTag = `</${tag}>`;
 
@@ -151,7 +154,7 @@ const findLastTagContent = (text: string, tag: string): string | undefined => {
  *
  * If no fence is detected, returns the input unchanged (already trimmed by caller).
  */
-const unwrapFences = (text: string): string => {
+export const unwrapFences = (text: string): string => {
   // Match ```json ... ``` or ``` ... ``` (with optional language hint)
   const fenced = /^```(?:json)?\s*\n(?<body>[\s\S]*?)\n\s*```\s*$/u.exec(text)
     ?.groups?.body;
