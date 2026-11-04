@@ -14,3 +14,7 @@ The completion timeout is gated strictly on the completion signal. A process tha
 ## Consequences
 
 Force-completing abandons the hanging process. For container-based sandbox providers, container teardown (`docker rm -f`) kills it. For the no-sandbox provider, `close()` is a no-op and there is no `proc.kill()` anywhere in the codebase, so the abandoned agent process and its children leak on the host. This extends an existing timeout/abort-path leak to the common success case and may warrant an explicit process kill in follow-up.
+
+## Amended by ADR 0026
+
+v1 sessions arm the same grace window on the closing tag of the session's `output` (ADR 0026), inside the session supervisor. There the hanging process is killed with its whole process group, so the leak above doesn't apply to v1.

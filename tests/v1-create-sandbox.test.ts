@@ -1,9 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import type {
   ProviderCreateOptions,
   ProviderExecOptions,
   ProviderSandbox,
 } from "@ai-hero/sandcastle/v1";
+import { localProviderSandbox } from "./helpers/localProviderSandbox.js";
 import {
   CreateSandboxError,
   createSandbox,
@@ -12,6 +16,9 @@ import {
 
 // createSandbox() through a provider built with the public contract. The fake
 // provider's tests (v1-fakeSandbox.test.ts) cover real processes and files.
+// createSandbox starts the session supervisor, so these providers run
+// commands for real (sh, in a temp dir), and the supervisor bundle comes from
+// the build: the Windows job runs from src without one, so they skip there.
 
 interface Recorded {
   readonly creates: ProviderCreateOptions[];
@@ -19,25 +26,45 @@ interface Recorded {
   closes: number;
 }
 
-const recordingSandbox = (
+let dirs: string[] = [];
+let locals: ReturnType<typeof localProviderSandbox>[] = [];
+
+afterEach(async () => {
+  // The supervisor each sandbox started runs until its sandbox is closed.
+  await Promise.all(locals.map(async (local) => local.close()));
+  locals = [];
+  await Promise.all(
+    dirs.map(async (dir) => rm(dir, { recursive: true, force: true })),
+  );
+  dirs = [];
+});
+
+const recordingSandbox = async (
   recorded: Recorded,
   overrides: Partial<ProviderSandbox<{ readonly vendor: string }>> = {},
-): ProviderSandbox<{ readonly vendor: string }> => ({
-  sandboxId: "sbx-1",
-  workingDirectory: "/work",
-  killTime: new Date("2030-01-01T00:00:00Z"),
-  native: { vendor: "recording" },
-  exec: async (options) => {
-    recorded.execs.push(options);
-    return { exitCode: 0, stdout: "", stderr: "" };
-  },
-  readTextFile: async () => null,
-  writeTextFile: async () => undefined,
-  close: async () => {
-    recorded.closes += 1;
-  },
-  ...overrides,
-});
+): Promise<ProviderSandbox<{ readonly vendor: string }>> => {
+  const dir = await mkdtemp(path.join(tmpdir(), "sandcastle-v1-recording-"));
+  dirs.push(dir);
+  const local = localProviderSandbox(dir);
+  locals.push(local);
+  return {
+    sandboxId: "sbx-1",
+    workingDirectory: dir,
+    killTime: new Date("2030-01-01T00:00:00Z"),
+    native: { vendor: "recording" },
+    exec: async (options) => {
+      recorded.execs.push(options);
+      return local.exec(options);
+    },
+    readTextFile: local.readTextFile,
+    writeTextFile: local.writeTextFile,
+    close: async () => {
+      recorded.closes += 1;
+      await local.close();
+    },
+    ...overrides,
+  };
+};
 
 const recordingProvider = (
   overrides: Partial<ProviderSandbox<{ readonly vendor: string }>> = {},
@@ -53,7 +80,7 @@ const recordingProvider = (
   return { provider, recorded };
 };
 
-describe("createSandbox (v1)", () => {
+describe.skipIf(process.platform === "win32")("createSandbox (v1)", () => {
   it("hands the provider exactly the env and time limit it was given", async () => {
     const { provider, recorded } = recordingProvider();
 
@@ -83,7 +110,7 @@ describe("createSandbox (v1)", () => {
     const sandbox = await createSandbox({ provider });
 
     expect(sandbox.sandboxId).toBe("sbx-1");
-    expect(sandbox.workingDirectory).toBe("/work");
+    expect(sandbox.workingDirectory).toBe(dirs[0]);
     expect(sandbox.killTime).toStrictEqual(new Date("2030-01-01T00:00:00Z"));
     expect(sandbox.native.vendor).toBe("recording");
     expect(sandbox.canDetach).toBe(false);
@@ -92,16 +119,17 @@ describe("createSandbox (v1)", () => {
   it("passes exec options through to the provider", async () => {
     const { provider, recorded } = recordingProvider();
     const sandbox = await createSandbox({ provider });
+    await sandbox.writeTextFile({ path: "sub/.keep", content: "" });
 
     await sandbox.exec({
-      command: "make",
+      command: "true",
       workingDirectory: "sub",
       env: { ONLY: "this" },
       sudo: true,
     });
 
-    expect(recorded.execs[0]).toMatchObject({
-      command: "make",
+    expect(recorded.execs.at(-1)).toMatchObject({
+      command: "true",
       workingDirectory: "sub",
       env: { ONLY: "this" },
       sudo: true,
@@ -157,6 +185,20 @@ describe("createSandbox (v1)", () => {
     await expect(createSandbox({ provider })).rejects.toBeInstanceOf(
       CreateSandboxError,
     );
+    expect(recorded.closes).toBe(1);
+  });
+
+  it("rejects with CreateSandboxError, closing the sandbox, when it can't run the session supervisor", async () => {
+    const { provider, recorded } = recordingProvider({
+      exec: async () => ({ exitCode: 127, stdout: "", stderr: "not found" }),
+    });
+
+    const error: unknown = await createSandbox({ provider }).catch(
+      (error_: unknown) => error_,
+    );
+
+    expect(error).toBeInstanceOf(CreateSandboxError);
+    expect(error).toHaveProperty("message", expect.stringContaining("node"));
     expect(recorded.closes).toBe(1);
   });
 

@@ -5,6 +5,26 @@
 ```ts
 
 // @public
+export type AgentName = "claude-code" | "codex" | "cursor" | "opencode" | "copilot" | "pi";
+
+// @public
+export interface AgentProvider {
+    readonly model: string;
+    readonly name: AgentName;
+}
+
+// @public
+export const fakeAgent: (script: FakeAgentScript) => AgentProvider;
+
+// @public
+export interface FakeAgentScript {
+    readonly exitCode?: number;
+    readonly format?: AgentName;
+    readonly hang?: boolean;
+    readonly lines: readonly string[];
+}
+
+// @public
 export const fakeSandbox: (options?: FakeSandboxOptions) => FakeSandboxProvider;
 
 // @public

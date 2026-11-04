@@ -129,6 +129,13 @@ export interface SandboxProvider<
 /** What `createSandbox` needs from a provider's config, with `Native` erased. */
 interface ProviderInternals {
   readonly create: (options: ProviderCreateOptions) => Promise<ProviderSandbox>;
+  /** Starts detached work in a sandbox this provider made; absent when it can't detach. */
+  readonly spawnDetached:
+    | ((
+        sandbox: ProviderSandbox,
+        options: Parameters<DetachCapability["spawnDetached"]>[1],
+      ) => Promise<void>)
+    | undefined;
 }
 
 const internals = new WeakMap<object, ProviderInternals>();
@@ -149,7 +156,27 @@ export function createSandboxProvider<Native>(
     name: config.name,
     canDetach: config.detach !== undefined,
   };
-  internals.set(provider, { create: config.create });
+  const made = new WeakMap<ProviderSandbox, ProviderSandbox<Native>>();
+  const { detach } = config;
+  internals.set(provider, {
+    create: async (options) => {
+      const sandbox = await config.create(options);
+      made.set(sandbox, sandbox);
+      return sandbox;
+    },
+    // Native is erased past this point, so a sandbox is looked up again to
+    // hand the capability the one its own provider made.
+    spawnDetached:
+      detach === undefined
+        ? undefined
+        : async (sandbox, options) => {
+            const own = made.get(sandbox);
+            if (own === undefined) {
+              throw new TypeError(`${config.name}: not one of its sandboxes`);
+            }
+            await detach.spawnDetached(own, options);
+          },
+  });
   return provider;
 }
 

@@ -7,6 +7,7 @@ import type {
 import { sandboxHandle } from "./sandboxHandle.js";
 import type { ProviderSandbox } from "./SandboxProvider.js";
 import { providerInternals } from "./SandboxProvider.js";
+import { startSupervisor } from "./supervisorHost.js";
 
 const DEFAULT_TIME_LIMIT_MINUTES = 60;
 const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/u;
@@ -42,6 +43,15 @@ const unusable = (
   return undefined;
 };
 
+/** Closes a sandbox creation has given up on; its own failure doesn't matter. */
+const closeQuietly = async (made: ProviderSandbox): Promise<void> => {
+  try {
+    await made.close();
+  } catch {
+    // Creation has already failed; that's the error to report.
+  }
+};
+
 const failedCreate = (
   name: string,
   cause: unknown,
@@ -56,7 +66,8 @@ const failedCreate = (
 /**
  * Create a sandbox on `provider` and get a handle to it. Nothing is read from
  * your repo or a `.env` file: the sandbox starts empty, with exactly the `env`
- * you pass. Rejects with `CreateSandboxError`; whatever was created by then
+ * you pass. The session supervisor is copied in and started, so the sandbox
+ * needs `node` on its PATH. Rejects with `CreateSandboxError`; whatever was created by then
  * has been closed.
  *
  * Supports `await using`: leaving the block closes the sandbox.
@@ -84,8 +95,14 @@ export async function createSandbox(
     });
   const problem = unusable(made, abortSignal);
   if (problem !== undefined) {
-    await made.close().catch(() => undefined);
+    await closeQuietly(made);
     throw failedCreate(provider.name, new Error(problem), made.sandboxId);
   }
-  return sandboxHandle(made, provider.canDetach);
+  const supervisor = await startSupervisor(made, config.spawnDetached).catch(
+    async (error: unknown) => {
+      await closeQuietly(made);
+      throw failedCreate(provider.name, error, made.sandboxId);
+    },
+  );
+  return sandboxHandle(made, provider.canDetach, supervisor);
 }
