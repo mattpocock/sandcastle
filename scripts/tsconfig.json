@@ -16,6 +16,8 @@
     "coverage-floor*.ts",
     "api-report.ts",
     "ensure-build.ts",
-    "entry-points.ts"
+    "entry-points.ts",
+    "check-skills-mirror*.ts",
+    "v1-skills.test.ts"
   ]
 }
