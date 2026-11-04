@@ -7,6 +7,8 @@
  */
 
 export { createSandbox } from "./v1/createSandbox.js";
+export { reattachSandbox } from "./v1/reattachSandbox.js";
+export { SandboxUnavailableError } from "./v1/SandboxUnavailableError.js";
 export { CreateSandboxError } from "./v1/CreateSandboxError.js";
 export { ExecFailedError } from "./v1/ExecFailedError.js";
 export type {
@@ -14,10 +16,15 @@ export type {
   DetachableSandbox,
   DetachOptions,
   DetachReceipt,
+  EndedWork,
   ExecOptions,
   ExecResult,
+  FinishReportDelivery,
+  ReattachSandboxOptions,
   RunningWork,
   Sandbox,
+  SandboxStatus,
+  StatusOptions,
 } from "./v1/Sandbox.js";
 export { createSandboxProvider } from "./v1/SandboxProvider.js";
 export type {

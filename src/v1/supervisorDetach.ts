@@ -6,7 +6,11 @@ import type { EndedSession } from "./finishReportBuild.js";
 import { buildFinishReport } from "./finishReportBuild.js";
 import { deliver as send } from "./httpDelivery.js";
 import { FinishReportJson } from "./finishReportSchema.js";
-import type { DetachRequest, SessionRequest } from "./supervisorProtocol.js";
+import type {
+  DetachRequest,
+  FinishReportDelivery,
+  SessionRequest,
+} from "./supervisorProtocol.js";
 import type { RunningSession } from "./supervisorSession.js";
 import { signingKey } from "./webhookSignature.js";
 
@@ -71,6 +75,8 @@ export interface Detached {
   readonly secret: string | undefined;
   /** Called once the report is written and delivered. */
   readonly finished: () => void;
+  /** Told how the finish report is getting on, for `status()`. */
+  readonly delivery: (state: FinishReportDelivery) => Promise<void>;
 }
 
 const encodeReport = Schema.encode(FinishReportJson);
@@ -83,15 +89,26 @@ const deliver = (
 ): Effect.Effect<string> => {
   const { request, secret } = detached;
   const key = secret === undefined ? undefined : signingKey(secret);
-  if (request.finishReport === undefined || key === undefined) {
-    return Effect.succeed("written");
+  const url = request.finishReport?.url;
+  if (url === undefined || key === undefined) {
+    return Effect.promise(async () => detached.delivery("no-destination")).pipe(
+      Effect.as("written"),
+    );
   }
-  return send({
-    url: request.finishReport.url,
+  const sent = send({
+    url,
     method: { kind: "webhook", key, id: request.detachId },
     body,
     giveUpMs: remainingMs,
-  }).pipe(Effect.provide(FetchHttpClient.layer));
+  }).pipe(
+    Effect.tap((result) =>
+      Effect.promise(async () => detached.delivery(result)),
+    ),
+    Effect.provide(FetchHttpClient.layer),
+  );
+  return Effect.promise(async () => detached.delivery("delivering")).pipe(
+    Effect.andThen(sent),
+  );
 };
 
 /** Carries the sessions on to the end, then writes and delivers the finish report. */

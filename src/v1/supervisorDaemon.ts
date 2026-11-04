@@ -16,6 +16,7 @@ import type {
 } from "./supervisorProtocol.js";
 import { RequestJson } from "./supervisorProtocol.js";
 import { SessionRegistry } from "./supervisorRegistry.js";
+import { StatusBoard } from "./supervisorStatus.js";
 
 // The session supervisor's long-running half. It runs in its own directory
 // inside the sandbox and listens on a Unix socket there (a relative path, so
@@ -52,11 +53,11 @@ interface Context {
 }
 
 /** Carries the running sessions on; the supervisor stops once they're reported. */
-const detach = (
+const detach = async (
   request: DetachRequest,
   send: (reply: Reply) => void,
   context: Context,
-): void => {
+): Promise<void> => {
   const sealed = request.finishReport?.sealedSecret;
   const secret =
     sealed === undefined
@@ -66,7 +67,7 @@ const detach = (
     send({ type: "error", message: "the finish report secret didn't open" });
     return;
   }
-  const carriedOn = context.registry.detach(request, secret, () => {
+  const carriedOn = await context.registry.detach(request, secret, () => {
     context.server.close();
   });
   send({ type: "detached", carriedOn });
@@ -126,8 +127,9 @@ const handle = (request: Request, socket: Socket, context: Context): void => {
       return;
     }
     case "detach": {
-      detach(request, send, context);
-      socket.end();
+      void detach(request, send, context).finally(() => {
+        socket.end();
+      });
       return;
     }
     case "session": {
@@ -172,10 +174,14 @@ export const runDaemon = async (): Promise<void> => {
   // Made before it listens, so the host learns the public half before any
   // session can run: a session can't swap in its own.
   const keys = await makeSealingKeys();
-  const registry = new SessionRegistry();
+  const board = new StatusBoard();
+  // On disk before it answers: a reattach finds the supervisor by this file.
+  await board.flushed();
+  const registry = new SessionRegistry(board);
   const server = createServer();
   server.on("connection", onConnection({ registry, server, keys }));
   const closed = once(server, "close");
   server.listen(SOCKET);
   await closed;
+  await board.exited();
 };
