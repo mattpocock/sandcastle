@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { Effect } from "effect";
@@ -34,9 +34,19 @@ export const sessionUsage = (
   if (agent.parseSessionUsage === undefined || sessionId === undefined) {
     return Effect.succeed(stream.usage);
   }
-  return Effect.tryPromise(() =>
-    readFile(claudeSessionFile(workingDirectory, sessionId), "utf8"),
-  ).pipe(
+  // The agent names its project by the directory as it sees it, which can
+  // be the resolved path where the given one runs through a symlink (macOS's
+  // temp dir), so try both.
+  const read = (directory: string) =>
+    Effect.tryPromise(() =>
+      readFile(claudeSessionFile(directory, sessionId), "utf8"),
+    );
+  return read(workingDirectory).pipe(
+    Effect.orElse(() =>
+      Effect.tryPromise(() => realpath(workingDirectory)).pipe(
+        Effect.flatMap(read),
+      ),
+    ),
     Effect.map((content) => agent.parseSessionUsage?.(content) ?? stream.usage),
     Effect.orElseSucceed(() => stream.usage),
   );
