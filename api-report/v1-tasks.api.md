@@ -41,6 +41,63 @@ export interface GeneralTask {
 }
 
 // @public
+export const implement: ImplementTask;
+
+// @public
+export interface ImplementCommon {
+    readonly githubToken: string;
+    readonly record?: SessionRecordOptions;
+    readonly repo: string;
+    readonly setup?: readonly string[];
+    readonly skillsContext: TaskSkillsContext;
+}
+
+// @public
+export type ImplementInput = ImplementCommon & ImplementWork & ImplementRound;
+
+// Warning: (ae-forgotten-export) The symbol "OutputObjectDefinition" needs to be exported by the entry point tasks.d.ts
+//
+// @public
+export type ImplementOutputs = Readonly<Record<"implement", OutputObjectDefinition<ImplementResult>>>;
+
+// @public
+export interface ImplementResult {
+    readonly branch: string;
+    readonly pr?: {
+        readonly number: number;
+        readonly url: string;
+    };
+    readonly status: "pr-opened" | "pr-updated" | "no-changes" | "blocked";
+    readonly summary: string;
+}
+
+// @public
+export type ImplementRound = {
+    readonly branch?: undefined;
+    readonly feedback?: never;
+} | {
+    readonly branch: string;
+    readonly feedback?: string;
+};
+
+// @public
+export interface ImplementTask {
+    readonly limits: TaskLimits;
+    readonly name: "implement";
+    readonly outputs: ImplementOutputs;
+    readonly start: (sandbox: Sandbox, input: ImplementInput) => Promise<SessionProcess<ImplementResult>>;
+}
+
+// @public
+export type ImplementWork = {
+    readonly ticket: string;
+    readonly prompt?: never;
+} | {
+    readonly prompt: string;
+    readonly ticket?: never;
+};
+
+// @public
 export interface TaskLimits {
     readonly deadlineMinutes: number;
     readonly timeLimitMinutes: number;

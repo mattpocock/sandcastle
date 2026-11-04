@@ -2,6 +2,7 @@ import type { OutputDefinition } from "../Output.js";
 import type { AgentProvider } from "./agents.js";
 import type { SessionRecordOptions } from "./SessionRecord.js";
 import type { Skill, Tracker } from "./skills/Skill.js";
+import type { TaskBranch } from "./taskBranch.js";
 
 export type { Tracker } from "./skills/Skill.js";
 
@@ -39,6 +40,8 @@ export interface TaskRun<O extends OutputDefinition | undefined> {
   readonly prompt: string;
   readonly output: O | undefined;
   readonly repo: string | undefined;
+  /** The branch to work on in the clone; `undefined` keeps the one cloned. */
+  readonly branch: TaskBranch | undefined;
   readonly githubToken: string | undefined;
   readonly skillsContext: TaskSkillsContext;
   readonly setup: readonly string[];
