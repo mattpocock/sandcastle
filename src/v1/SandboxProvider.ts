@@ -136,6 +136,10 @@ interface ProviderInternals {
         options: Parameters<DetachCapability["spawnDetached"]>[1],
       ) => Promise<void>)
     | undefined;
+  /** Gets one of its sandboxes by id; absent when it can't detach. */
+  readonly get:
+    | ((sandboxId: string) => Promise<ProviderSandbox | undefined>)
+    | undefined;
 }
 
 const internals = new WeakMap<object, ProviderInternals>();
@@ -175,6 +179,16 @@ export function createSandboxProvider<Native>(
               throw new TypeError(`${config.name}: not one of its sandboxes`);
             }
             await detach.spawnDetached(own, options);
+          },
+    get:
+      detach === undefined
+        ? undefined
+        : async (sandboxId) => {
+            const found = await detach.get(sandboxId);
+            if (found !== undefined) {
+              made.set(found, found);
+            }
+            return found;
           },
   });
   return provider;

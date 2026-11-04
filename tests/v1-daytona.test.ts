@@ -4,6 +4,8 @@ import {
   CreateSandboxError,
   createSandbox,
   Output,
+  reattachSandbox,
+  SandboxUnavailableError,
   verifyFinishReport,
 } from "@ai-hero/sandcastle/v1";
 import { daytona } from "@ai-hero/sandcastle/v1/sandboxes/daytona";
@@ -306,5 +308,58 @@ describe.skipIf(process.platform === "win32")("daytona() (v1)", () => {
         supervisorSessions.includes(id),
       ),
     ).toStrictEqual([]);
+  });
+
+  it("reattaches by id, ignoring `create`: status() reads the detached run, exec gets the env passed again, and a gone sandbox is unavailable", async () => {
+    const sandbox = await createSandbox({
+      provider: daytona(),
+      env: { SANDBOX_TOKEN: "for-sessions" },
+    });
+    await sandbox.spawnSession({
+      name: "implement",
+      agent: fakeAgent({
+        lines: [
+          JSON.stringify({ type: "system", subtype: "init", session_id: "s" }),
+        ],
+        hang: true,
+      }),
+      prompt: "Work.",
+    });
+    const receipt = await sandbox.detach();
+    const creates = fakeDaytona.createCalls.length;
+
+    const reattached = await reattachSandbox({
+      provider: daytona({ create: { snapshot: "never-used" } }),
+      sandboxId: receipt.sandboxId,
+      env: { SANDBOX_TOKEN: "passed-again" },
+    });
+
+    expect(fakeDaytona.createCalls).toHaveLength(creates);
+    expect(reattached).toMatchObject({
+      sandboxId: sandbox.sandboxId,
+      workingDirectory: sandbox.workingDirectory,
+      killTime: sandbox.killTime,
+    });
+    await expect(reattached?.status()).resolves.toMatchObject({
+      running: [{ kind: "session", name: "implement", agent: "claude-code" }],
+      detached: { detachId: receipt.detachId, delivery: "not-finished" },
+    });
+    await expect(
+      reattached?.exec('printf %s "$SANDBOX_TOKEN"'),
+    ).resolves.toMatchObject({
+      stdout: "passed-again",
+    });
+
+    await reattached?.close();
+    expect(fakeDaytona.deleted).toStrictEqual([sandbox.sandboxId]);
+    await expect(
+      reattachSandbox({ provider: daytona(), sandboxId: sandbox.sandboxId }),
+    ).rejects.toBeInstanceOf(SandboxUnavailableError);
+    await expect(
+      reattachSandbox({ provider: daytona(), sandboxId: "dtn-never-made" }),
+    ).rejects.toMatchObject({
+      _tag: "SandboxUnavailableError",
+      sandboxId: "dtn-never-made",
+    });
   });
 });

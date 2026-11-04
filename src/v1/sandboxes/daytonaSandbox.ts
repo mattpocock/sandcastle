@@ -188,7 +188,8 @@ export const createDaytonaSandbox = async (
 /**
  * An existing Daytona sandbox by id, or `undefined` once it's gone. Its
  * commands get only their own env: the env the sandbox was created with
- * isn't kept anywhere it could be read back from.
+ * isn't kept anywhere it could be read back from, so `reattachSandbox`
+ * takes it again.
  */
 export const getDaytonaSandbox = async (
   client: DaytonaClient,

@@ -8,6 +8,7 @@ import {
 } from "./sessionRecordSchema.js";
 
 export { ExitReason } from "./sessionRecordSchema.js";
+export type { FinishReportDelivery } from "./supervisorStatusSchema.js";
 
 // The messages between the host and the session supervisor, shared by both
 // sides. The host writes one request as a JSON file into the supervisor's

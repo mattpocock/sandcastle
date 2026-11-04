@@ -6,6 +6,7 @@ import type {
   ExecOptions,
   ExecResult,
   Sandbox,
+  StatusOptions,
 } from "./Sandbox.js";
 import type { ProviderSandbox } from "./SandboxProvider.js";
 import type { OutputDefinition } from "../Output.js";
@@ -15,6 +16,7 @@ import type {
   SessionProcess,
   SessionResult,
 } from "./Session.js";
+import { readStatus } from "./sandboxStatus.js";
 import { sessionHost } from "./sessionHost.js";
 import type { SupervisorLink } from "./supervisorHost.js";
 import { registerHandleDeadline, taskDeadlineOf } from "./taskDeadline.js";
@@ -151,6 +153,9 @@ const withDetach = <Native>(
       }
       return detach(options);
     },
+    // Reads files only, so it works after a detach too.
+    status: async (options?: StatusOptions) =>
+      readStatus(parts.sandbox, parts.supervisor.directory, options),
   });
 };
 
