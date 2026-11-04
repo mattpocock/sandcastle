@@ -1,4 +1,6 @@
+import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -69,6 +71,7 @@ describe.skipIf(process.platform === "win32")(
     let rootDir = "";
     let provider: FakeSandboxProvider = fakeSandbox();
     let receivers: FinishReportReceiver[] = [];
+    let closers: (() => Promise<void>)[] = [];
 
     const listening = async (statuses?: readonly number[]) => {
       const made = await finishReportReceiver(statuses);
@@ -81,7 +84,33 @@ describe.skipIf(process.platform === "win32")(
       provider = fakeSandbox({ rootDir });
     });
 
+    /** A receiver that always answers 503 with `Retry-After: 60`. */
+    const busyReceiver = async () => {
+      let attempts = 0;
+      const server = createServer((request, response) => {
+        attempts += 1;
+        request.resume();
+        response.writeHead(503, { "retry-after": "60" }).end();
+      });
+      server.listen(0, "127.0.0.1");
+      await once(server, "listening");
+      const address = server.address();
+      const port =
+        address === null || typeof address === "string" ? 0 : address.port;
+      closers.push(async () => {
+        server.closeAllConnections();
+        server.close();
+        await once(server, "close");
+      });
+      return {
+        url: `http://127.0.0.1:${port}/finished`,
+        attempts: () => attempts,
+      };
+    };
+
     afterEach(async () => {
+      await Promise.all(closers.map(async (close) => close()));
+      closers = [];
       await provider.closeAll();
       await Promise.all(receivers.map(async (made) => made.close()));
       receivers = [];
@@ -170,12 +199,10 @@ describe.skipIf(process.platform === "win32")(
     });
 
     it("an undelivered finish report is readable through status() from a fresh reattach", async () => {
-      // Nothing listens there any more: delivery backs off (1 s, 2 s…) and
-      // gives up once the next try would land past the kill time.
-      const down = await listening();
-      await down.close();
-      receivers = [];
-      const sandbox = await createSandbox({ provider, timeLimitMinutes: 0.1 });
+      // The receiver asks for a retry a minute from now, past the kill time,
+      // so delivery gives up after one try, well before the sandbox ends.
+      const down = await busyReceiver();
+      const sandbox = await createSandbox({ provider, timeLimitMinutes: 1 });
       await sandbox.spawnSession({
         name: "implement",
         agent: answering,
@@ -209,8 +236,8 @@ describe.skipIf(process.platform === "win32")(
         delivery: "gave-up",
         finishReport: { data: { detachId: receipt.detachId } },
       });
-      expect(down.deliveries).toStrictEqual([]);
-    }, 20_000);
+      expect(down.attempts()).toBe(1);
+    });
 
     it("rejects with SandboxUnavailableError when the sandbox is gone, and resolves undefined when its supervisor is", async () => {
       await expect(
