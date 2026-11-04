@@ -4,12 +4,14 @@ on:
   push:
     branches:
       - main
+      - release/v1
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
   release:
     name: Release
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -41,3 +43,40 @@ jobs:
           title: "Version Packages (run npm run test:local before merging)"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Every push to release/v1 publishes a snapshot of the next major under the
+  # `v1-next` dist-tag (e.g. 1.0.0-v1-next.20261104120000), so v1 can be
+  # installed with `npm install @ai-hero/sandcastle@v1-next` before it ships.
+  # (Not plain `v1`: npm rejects dist-tags that parse as a semver range.)
+  # The versioning stays in this run's checkout: nothing is committed, pushed
+  # or tagged, and `latest` is untouched. It lives in this file because npm
+  # trusted publishing is bound to release.yml.
+  snapshot:
+    name: Publish v1 snapshot
+    if: github.ref == 'refs/heads/release/v1' && github.repository == 'mattpocock/sandcastle'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Before the build: tsup bakes package.json's version into dist.
+      - name: Version snapshot
+        run: npx changeset version --snapshot v1-next
+
+      - name: Build
+        run: npm run build
+
+      - name: Publish snapshot to npm
+        run: npx changeset publish --tag v1-next --no-git-tag
