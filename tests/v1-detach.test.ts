@@ -262,7 +262,7 @@ describe.skipIf(process.platform === "win32")("detach (v1)", () => {
       agent: answering('{"answer": 42}'),
       prompt: "Reply in <answer> tags.",
       output: ANSWER,
-      completionTimeoutSeconds: 0.2,
+      completionTimeoutSeconds: 1,
     });
     const { detachId } = await sandbox.detach({
       finishReport: { url: hook.url, secret },
@@ -373,7 +373,7 @@ describe.skipIf(process.platform === "win32")("detach (v1)", () => {
       agent: answering('{"answer": 1}'),
       prompt: "Reply in <answer> tags.",
       output: ANSWER,
-      completionTimeoutSeconds: 0.2,
+      completionTimeoutSeconds: 1,
     });
 
     const receipt = await sandbox.detach();

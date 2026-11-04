@@ -11,6 +11,10 @@ import type { FakeSandboxProvider } from "@ai-hero/sandcastle/v1/testing";
 
 /** One POST the receiver got. */
 export interface Delivery {
+  /** The HTTP method: `POST` for webhooks, `PUT` for uploads. */
+  readonly method: string;
+  /** The path and query string it was sent to. */
+  readonly url: string;
   readonly headers: Record<string, string>;
   readonly body: string;
 }
@@ -36,6 +40,8 @@ export const finishReportReceiver = async (
     request.on("end", () => {
       const status = statuses[deliveries.length] ?? 200;
       deliveries.push({
+        method: request.method ?? "",
+        url: request.url ?? "",
         headers: flatHeaders(request.headers),
         body: Buffer.concat(chunks).toString("utf8"),
       });

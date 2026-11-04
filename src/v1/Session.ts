@@ -4,6 +4,7 @@ import type {
   OutputStringDefinition,
 } from "../Output.js";
 import type { AgentProvider } from "./agents.js";
+import type { SessionRecordOptions } from "./SessionRecord.js";
 
 /** The value a session's `output` definition produces. */
 export type OutputType<O extends OutputDefinition | undefined> =
@@ -49,6 +50,11 @@ export interface SessionOptions<
   readonly workingDirectory?: string;
   /** Extra env for this session only, on top of the sandbox's env. */
   readonly env?: Readonly<Record<string, string>>;
+  /**
+   * Send the session's record (its native transcript plus its events) to
+   * these sinks when it ends, redacted inside the sandbox first. Default none.
+   */
+  readonly record?: SessionRecordOptions;
   /** Stops the agent. `session()` and `wait()` then reject with `SessionFailedError` (`aborted`). */
   readonly abortSignal?: AbortSignal;
 }

@@ -152,6 +152,20 @@ const withDetach = <Native>(
   });
 };
 
+/** Runs the sandbox's sessions, and their records, through its supervisor. */
+const sessionsOn = (
+  sandbox: ProviderSandbox,
+  supervisor: SupervisorLink,
+): Sessions =>
+  sessionHost(supervisor, {
+    workingDirectory: sandbox.workingDirectory,
+    record: {
+      sandboxId: sandbox.sandboxId,
+      killTime: sandbox.killTime,
+      publicKey: supervisor.publicKey,
+    },
+  });
+
 /** Wraps a provider's sandbox in the handle users hold. */
 export const sandboxHandle = <Native>({
   sandbox,
@@ -169,7 +183,7 @@ export const sandboxHandle = <Native>({
         : Promise.resolve();
     return closing;
   };
-  const sessions = sessionHost(supervisor, sandbox.workingDirectory);
+  const sessions = sessionsOn(sandbox, supervisor);
   const { guard } = calls;
   const handle: Sandbox<Native> = {
     sandboxId: sandbox.sandboxId,

@@ -8,6 +8,7 @@ import type {
 } from "./Session.js";
 import type { SandboxDetachedError } from "./SandboxDetachedError.js";
 import { SessionFailedError } from "./SessionFailedError.js";
+import { startHostSinks, whenSunk } from "./recordHostSinks.js";
 import { sessionRequest } from "./sessionRequest.js";
 import { lostSession, sessionResult } from "./sessionResult.js";
 import type { SupervisorLink } from "./supervisorHost.js";
@@ -26,17 +27,24 @@ class SupervisorLost extends Data.TaggedError("SupervisorLost")<{
   readonly cause: unknown;
 }> {}
 
+/** A host sink (directory or function) failed on the session's record. */
+class RecordSinkFailed extends Data.TaggedError("RecordSinkFailed")<{
+  readonly cause: unknown;
+}> {}
+
+type Ended = SupervisorLost | RecordSinkFailed | SandboxDetachedError;
+
 const END = Symbol("end");
 
 /** One session as the host follows it. */
 interface Live {
   readonly request: SessionRequest;
+  readonly options: SessionOptions;
   readonly queue: Queue.Queue<AgentStreamEvent | typeof END>;
   readonly started: Deferred.Deferred<true>;
-  readonly ended: Deferred.Deferred<
-    SessionOutcome,
-    SupervisorLost | SandboxDetachedError
-  >;
+  readonly ended: Deferred.Deferred<SessionOutcome, Ended>;
+  /** The host sinks running on the session's record, once it has arrived. */
+  sinking?: Promise<void>;
 }
 
 /** What the host shares across a sandbox's sessions. */
@@ -55,8 +63,19 @@ const onReply =
       Deferred.unsafeDone(live.started, Exit.succeed(true));
     } else if (reply.type === "event") {
       Queue.unsafeOffer(live.queue, reply.event);
+    } else if (reply.type === "record") {
+      live.sinking = startHostSinks(live.options.record, reply.record);
     } else if (reply.type === "ended") {
-      Deferred.unsafeDone(live.ended, Exit.succeed(reply.outcome));
+      // The session ends for the host once its host sinks are done.
+      const { outcome } = reply;
+      whenSunk(live.sinking, (failure) => {
+        Deferred.unsafeDone(
+          live.ended,
+          failure === undefined
+            ? Exit.succeed(outcome)
+            : Exit.fail(new RecordSinkFailed(failure)),
+        );
+      });
     } else if (reply.type === "error") {
       const cause = new Error(reply.message);
       Deferred.unsafeDone(live.ended, Exit.fail(new SupervisorLost({ cause })));
@@ -73,21 +92,24 @@ const follow = async (shared: Shared, live: Live): Promise<void> => {
   } catch (error) {
     cause = error;
   }
+  // The host sinks settle `ended` themselves.
+  await live.sinking?.catch(() => undefined);
   // A no-op when the session has already ended.
   Deferred.unsafeDone(live.ended, Exit.fail(new SupervisorLost({ cause })));
   Queue.unsafeOffer(live.queue, END);
 };
 
-const start = async (request: SessionRequest): Promise<Live> => ({
+const start = async (
+  request: SessionRequest,
+  options: SessionOptions,
+): Promise<Live> => ({
   request,
+  options,
   queue: await Effect.runPromise(
     Queue.unbounded<AgentStreamEvent | typeof END>(),
   ),
   started: Deferred.unsafeMake<true>(FiberId.none),
-  ended: Deferred.unsafeMake<
-    SessionOutcome,
-    SupervisorLost | SandboxDetachedError
-  >(FiberId.none),
+  ended: Deferred.unsafeMake<SessionOutcome, Ended>(FiberId.none),
 });
 
 /** Resolves once the agent has started, or once it ended without starting. */
@@ -121,6 +143,9 @@ const sessionProcess = (
             return ended.right;
           }
           const error = ended.left;
+          if (error._tag === "RecordSinkFailed") {
+            throw error.cause;
+          }
           throw error._tag === "SupervisorLost"
             ? lostSession(request, error.cause)
             : error;
@@ -182,7 +207,10 @@ const killOnAbort = (
 };
 
 /** `session()` and `spawnSession()` for one sandbox. */
-export const sessionHost = (link: SupervisorLink, workingDirectory: string) => {
+export const sessionHost = (
+  link: SupervisorLink,
+  context: Omit<Parameters<typeof sessionRequest>[1], "name">,
+) => {
   let count = 0;
   const running = new Map<string, Live>();
   const shared: Shared = { link, letGo: new AbortController() };
@@ -197,11 +225,11 @@ export const sessionHost = (link: SupervisorLink, workingDirectory: string) => {
         `session: a session named "${name}" is already running`,
       );
     }
-    const request = sessionRequest(options, { name, workingDirectory });
+    const request = sessionRequest(options, { ...context, name });
     if (options.abortSignal?.aborted === true) {
       throw abortedBeforeStart(name);
     }
-    const live = await start(request);
+    const live = await start(request, options);
     running.set(name, live);
     void follow(shared, live).finally(() => {
       running.delete(name);

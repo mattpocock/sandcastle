@@ -4,7 +4,7 @@ import { FetchHttpClient } from "@effect/platform";
 import { Clock, DateTime, Duration, Effect, Schema } from "effect";
 import type { EndedSession } from "./finishReportBuild.js";
 import { buildFinishReport } from "./finishReportBuild.js";
-import { deliverFinishReport } from "./finishReportDelivery.js";
+import { deliver as send } from "./httpDelivery.js";
 import { FinishReportJson } from "./finishReportSchema.js";
 import type { DetachRequest, SessionRequest } from "./supervisorProtocol.js";
 import type { RunningSession } from "./supervisorSession.js";
@@ -86,10 +86,9 @@ const deliver = (
   if (request.finishReport === undefined || key === undefined) {
     return Effect.succeed("written");
   }
-  return deliverFinishReport({
+  return send({
     url: request.finishReport.url,
-    key,
-    id: request.detachId,
+    method: { kind: "webhook", key, id: request.detachId },
     body,
     giveUpMs: remainingMs,
   }).pipe(Effect.provide(FetchHttpClient.layer));

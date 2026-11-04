@@ -91,3 +91,13 @@ export type {
   SucceededDetachedWork,
   VerifyFinishReportOptions,
 } from "./v1/FinishReport.js";
+export type {
+  NativeSessionFile,
+  NativeSessionFormat,
+  RecordDeliveryStatus,
+  RecordedEvent,
+  RecordRedaction,
+  SessionRecord,
+  SessionRecordOptions,
+  SessionRecordPointer,
+} from "./v1/SessionRecord.js";
