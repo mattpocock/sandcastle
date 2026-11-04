@@ -58,6 +58,10 @@
       "import": "./dist/v1/testing.js",
       "types": "./dist/v1/testing.d.ts"
     },
+    "./v1/tasks": {
+      "import": "./dist/v1/tasks.js",
+      "types": "./dist/v1/tasks.d.ts"
+    },
     "./v1/sandboxes/daytona": {
       "import": "./dist/v1/sandboxes/daytona.js",
       "types": "./dist/v1/sandboxes/daytona.d.ts"

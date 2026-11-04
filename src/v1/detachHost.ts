@@ -31,6 +31,8 @@ export interface DetachContext {
   readonly sandbox: ProviderSandbox;
   readonly link: SupervisorLink;
   readonly timeLimitMinutes: number;
+  /** A bundled task's default deadline for this handle, if one started on it. */
+  readonly taskDeadline: () => number | undefined;
   /** Awaited calls on the handle that haven't settled. */
   readonly pendingCalls: () => number;
   /** Sessions the host is following. */
@@ -144,14 +146,11 @@ const detachRequest = (
 ): { readonly request: DetachRequest; readonly deadline: number } => {
   const { sandbox } = context;
   const now = DateTime.unsafeNow().epochMillis;
-  const fallback = defaultDeadlineMs(
-    sandbox.killTime,
-    context.timeLimitMinutes,
-  );
+  const latest = defaultDeadlineMs(sandbox.killTime, context.timeLimitMinutes);
   const deadline =
     options.deadlineMinutes === undefined
-      ? fallback
-      : Math.min(fallback, now + options.deadlineMinutes * 60_000);
+      ? Math.min(latest, context.taskDeadline() ?? latest)
+      : Math.min(latest, now + options.deadlineMinutes * 60_000);
   const { finishReport } = options;
   const request: DetachRequest = {
     type: "detach",

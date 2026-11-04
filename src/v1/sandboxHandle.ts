@@ -1,4 +1,4 @@
-import { detachFrom } from "./detachHost.js";
+import { defaultDeadlineMs, detachFrom } from "./detachHost.js";
 import { ExecFailedError } from "./ExecFailedError.js";
 import type { SandboxDetachedError } from "./SandboxDetachedError.js";
 import type {
@@ -17,6 +17,7 @@ import type {
 } from "./Session.js";
 import { sessionHost } from "./sessionHost.js";
 import type { SupervisorLink } from "./supervisorHost.js";
+import { registerHandleDeadline, taskDeadlineOf } from "./taskDeadline.js";
 
 const exec = async (
   sandbox: ProviderSandbox,
@@ -134,6 +135,7 @@ const withDetach = <Native>(
     sandbox: parts.sandbox,
     link: parts.supervisor,
     timeLimitMinutes: parts.timeLimitMinutes,
+    taskDeadline: () => taskDeadlineOf(handle),
     pendingCalls: calls.pending,
     runningSessions: sessions.runningCount,
     letGo: (error) => {
@@ -203,6 +205,10 @@ export const sandboxHandle = <Native>({
     close,
     [Symbol.asyncDispose]: close,
   };
+  registerHandleDeadline(
+    handle,
+    defaultDeadlineMs(sandbox.killTime, timeLimitMinutes),
+  );
   return canDetach
     ? withDetach(handle, {
         parts: { sandbox, supervisor, timeLimitMinutes },
