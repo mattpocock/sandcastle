@@ -274,7 +274,8 @@ describe.skipIf(process.platform === "win32")("daytona() (v1)", () => {
       }),
       prompt: "Reply in <answer> tags.",
       output: ANSWER,
-      completionTimeoutSeconds: 0.5,
+      // Long enough that it is still running when detach() checks, under load.
+      completionTimeoutSeconds: 2,
     });
 
     const receipt = await sandbox.detach({
