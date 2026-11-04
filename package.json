@@ -49,6 +49,14 @@
     "./sandboxes/sprites": {
       "import": "./dist/sandboxes/sprites.js",
       "types": "./dist/sandboxes/sprites.d.ts"
+    },
+    "./v1": {
+      "import": "./dist/v1.js",
+      "types": "./dist/v1.d.ts"
+    },
+    "./v1/testing": {
+      "import": "./dist/v1/testing.js",
+      "types": "./dist/v1/testing.d.ts"
     }
   },
   "bin": {

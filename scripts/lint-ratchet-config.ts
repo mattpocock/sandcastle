@@ -15,6 +15,9 @@ export const ENTRY_POINTS: readonly string[] = [
   "src/createSandbox.ts",
   "src/createWorktree.ts",
   "src/sandboxes/*.ts",
+  // v1's public promise API (createSandbox, the handle) and its testing fake,
+  // which wraps Node child processes like the providers above.
+  "src/v1/*.ts",
 ];
 
 /** Mirrors the second override in .oxlintrc.json. */

@@ -20,6 +20,8 @@ export default defineConfig({
     "sandboxes/bwrap": "src/sandboxes/bwrap.ts",
     "sandboxes/seatbelt": "src/sandboxes/seatbelt.ts",
     "sandboxes/sprites": "src/sandboxes/sprites.ts",
+    v1: "src/v1.ts",
+    "v1/testing": "src/v1/testing.ts",
   },
   format: ["esm"],
   outDir: "dist",
