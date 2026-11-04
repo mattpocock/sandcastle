@@ -14,7 +14,7 @@ import { BoundedTail } from "../boundedTail.js";
 export type AgentItem =
   | { readonly _tag: "line"; readonly line: string }
   | { readonly _tag: "exit"; readonly code: number; readonly error?: string }
-  | { readonly _tag: "kill" };
+  | { readonly _tag: "kill"; readonly reason: "aborted" | "time-limit" };
 
 /** A running agent process. */
 export interface AgentProcess {

@@ -28,6 +28,8 @@ export interface SupervisorLink {
   ) => Promise<void>;
   /** Stops every session and the supervisor. Never rejects. */
   readonly shutdown: () => Promise<void>;
+  /** The supervisor's public key, from its hello: finish-report secrets are sealed to it. */
+  readonly publicKey: string;
 }
 
 const decodeReply = Schema.decodeUnknownEither(ReplyJson);
@@ -98,9 +100,18 @@ export const startSupervisor = async (
     await spawnDetached(sandbox, { command });
   }
   const call = callOn(sandbox, directory);
-  await call({ type: "hello" }, () => undefined);
+  let publicKey = "";
+  await call({ type: "hello" }, (reply) => {
+    if (reply.type === "hello") {
+      ({ publicKey } = reply);
+    }
+  });
+  if (publicKey === "") {
+    throw new Error("the session supervisor didn't say hello");
+  }
   return {
     call,
+    publicKey,
     shutdown: async () =>
       Effect.runPromise(
         Effect.tryPromise(async () =>

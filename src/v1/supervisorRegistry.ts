@@ -5,8 +5,13 @@ import { Effect } from "effect";
 import { shellEscape } from "../AgentProvider.js";
 import { agentFromDescriptor } from "./agentFromDescriptor.js";
 import type { ReplayFile } from "./fakeAgentReplay.js";
-import type { Reply, SessionRequest } from "./supervisorProtocol.js";
-import type { RunningSession } from "./supervisorSession.js";
+import type { CarriedSession } from "./supervisorDetach.js";
+import { carryOn } from "./supervisorDetach.js";
+import type {
+  DetachRequest,
+  Reply,
+  SessionRequest,
+} from "./supervisorProtocol.js";
 import { startSession } from "./supervisorSession.js";
 
 // The sessions the supervisor is running, by request id.
@@ -36,7 +41,8 @@ const commandFor = (
 
 /** The sessions the supervisor is running. */
 export class SessionRegistry {
-  private readonly running = new Map<string, RunningSession>();
+  private readonly running = new Map<string, CarriedSession>();
+  private detached = false;
 
   /** Starts a session, sending its replies; calls `done` once it has ended. */
   start(
@@ -44,6 +50,12 @@ export class SessionRegistry {
     send: (reply: Reply) => void,
     done: () => void,
   ): void {
+    if (this.detached) {
+      // Only work spawned before a detach carries on.
+      send({ type: "error", message: "the sandbox has been detached from" });
+      done();
+      return;
+    }
     const { running } = this;
     const program = Effect.gen(function* () {
       const command = yield* commandFor(request);
@@ -55,7 +67,7 @@ export class SessionRegistry {
         log,
         emit: send,
       });
-      running.set(request.id, session);
+      running.set(request.id, { request, session });
       const outcome = yield* session.outcome;
       running.delete(request.id);
       log.end();
@@ -73,10 +85,35 @@ export class SessionRegistry {
 
   /** Stops a session and waits for it to end. Unknown ids are fine. */
   async kill(id: string): Promise<void> {
-    const session = this.running.get(id);
+    const session = this.running.get(id)?.session;
     if (session !== undefined) {
-      await Effect.runPromise(Effect.andThen(session.kill, session.outcome));
+      await Effect.runPromise(
+        Effect.andThen(session.kill("aborted"), session.outcome),
+      );
     }
+  }
+
+  /**
+   * Carries every running session on past a detach; `finished` is called once
+   * the finish report is written and delivered. Returns the sessions carried
+   * on: none, and nothing changes, when none is running or it has already
+   * been detached.
+   */
+  detach(
+    request: DetachRequest,
+    secret: string | undefined,
+    finished: () => void,
+  ): readonly { readonly name: string; readonly agent: string }[] {
+    const carried = [...this.running.values()];
+    if (this.detached || carried.length === 0) {
+      return [];
+    }
+    this.detached = true;
+    carryOn({ carried, request, secret, finished });
+    return carried.map(({ request: session }) => ({
+      name: session.name,
+      agent: session.agent.id,
+    }));
   }
 
   /** Stops every session and waits for them to end. */

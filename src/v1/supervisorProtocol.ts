@@ -63,10 +63,32 @@ export const SessionRequest = Schema.Struct({
 /** Start one agent session. */
 export type SessionRequest = typeof SessionRequest.Type;
 
+/**
+ * Let go: carry the running sessions on, stop them at the deadline, then
+ * write the finish report and deliver it. The secret is sealed to the key the
+ * supervisor made in memory at start, so only it can open it.
+ */
+export const DetachRequest = Schema.Struct({
+  type: Schema.Literal("detach"),
+  detachId: Schema.String,
+  sandboxId: Schema.String,
+  /** From when the supervisor gets the request, so host and sandbox clocks needn't agree. */
+  deadlineMs: Schema.Number,
+  /** How long delivery may keep retrying: until the sandbox's kill time. */
+  giveUpMs: Schema.Number,
+  finishReport: Schema.optional(
+    Schema.Struct({ url: Schema.String, sealedSecret: Schema.String }),
+  ),
+});
+
+/** Let go of the running sessions. */
+export type DetachRequest = typeof DetachRequest.Type;
+
 /** Everything the host can ask the supervisor. */
 export const Request = Schema.Union(
   Schema.Struct({ type: Schema.Literal("hello") }),
   SessionRequest,
+  DetachRequest,
   Schema.Struct({ type: Schema.Literal("kill"), id: Schema.String }),
   Schema.Struct({ type: Schema.Literal("shutdown") }),
 );
@@ -91,6 +113,7 @@ export const ExitReason = Schema.Literal(
   "failed",
   "idle-timeout",
   "aborted",
+  "time-limit",
 );
 
 const Usage = Schema.Struct({
@@ -141,7 +164,19 @@ export type SessionOutcome = typeof SessionOutcome.Type;
 
 /** One line the supervisor sends back. */
 export const Reply = Schema.Union(
-  Schema.Struct({ type: Schema.Literal("hello"), pid: Schema.Number }),
+  Schema.Struct({
+    type: Schema.Literal("hello"),
+    pid: Schema.Number,
+    /** The public half of the key pair the supervisor made in memory at start (PEM). */
+    publicKey: Schema.String,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("detached"),
+    /** The sessions it now holds; empty when nothing was running, and then nothing changed. */
+    carriedOn: Schema.Array(
+      Schema.Struct({ name: Schema.String, agent: Schema.String }),
+    ),
+  }),
   Schema.Struct({ type: Schema.Literal("ok") }),
   Schema.Struct({ type: Schema.Literal("error"), message: Schema.String }),
   Schema.Struct({ type: Schema.Literal("started") }),

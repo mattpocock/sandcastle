@@ -1,4 +1,5 @@
 import type { OutputDefinition } from "../Output.js";
+import type { FinishReportDestination } from "./FinishReport.js";
 import type { SandboxProvider } from "./SandboxProvider.js";
 import type {
   OutputType,
@@ -113,8 +114,67 @@ export interface Sandbox<Native = unknown> extends AsyncDisposable {
   readonly close: () => Promise<void>;
 }
 
+/** Options for `detach()`. */
+export interface DetachOptions {
+  /**
+   * Where the session supervisor POSTs the signed finish report once the
+   * carried-on work ends. Leave it out for fire-and-forget: the agent reports
+   * for itself (opens the PR, comments on the ticket). Either way the report
+   * is written to a file in the sandbox.
+   */
+  readonly finishReport?: FinishReportDestination;
+  /**
+   * Stop the carried-on work this many minutes from now (fractions allowed)
+   * and report `time-limit`. Clamped to the default: the kill time minus a
+   * margin of 5 minutes, or a quarter of the time limit when that's shorter,
+   * which leaves room to deliver the report before the sandbox is killed.
+   */
+  readonly deadlineMinutes?: number;
+  /** Aborts the detach itself. You keep the handle; `close()` still ends everything. */
+  readonly abortSignal?: AbortSignal;
+}
+
+/** Spawned work still running in a sandbox. */
+export interface RunningWork {
+  readonly kind: "session";
+  /** The session's name. */
+  readonly name: string;
+  /** The built-in agent's id, e.g. `"claude-code"`. */
+  readonly agent: string;
+}
+
+/**
+ * Proof that you've let go of a sandbox and its spawned work carries on
+ * without you. It means "started", nothing more: the finish arrives at your
+ * finish report destination, or nowhere (fire-and-forget).
+ */
+export interface DetachReceipt {
+  /** The provider's sandbox id. */
+  readonly sandboxId: string;
+  /** Made fresh per detach. The finish report and its `webhook-id` carry it. */
+  readonly detachId: string;
+  /** When the session supervisor stops whatever is still running and reports `time-limit`. */
+  readonly deadline: Date;
+  /** The work carrying on: every spawned session still running at the detach. */
+  readonly carriedOn: readonly RunningWork[];
+  /** The URL the finish report goes to, or `false` for fire-and-forget. */
+  readonly reportsTo: string | false;
+}
+
 /** A sandbox from a provider that can detach. */
 export interface DetachableSandbox<Native = unknown> extends Sandbox<Native> {
   /** Always `true`. */
   readonly canDetach: true;
+  /**
+   * Let go of the sandbox while its spawned sessions carry on under the
+   * session supervisor. Resolves once the supervisor holds them. Only work
+   * spawned before the detach carries on. When the last of it ends, or the
+   * deadline passes, the supervisor writes the finish report to a file in the
+   * sandbox and POSTs it to `finishReport`, if given.
+   *
+   * Rejects with `DetachError` when nothing is running or an awaited call on
+   * the handle is pending. After it resolves, every call on the handle
+   * rejects with `SandboxDetachedError` and `close()` does nothing.
+   */
+  readonly detach: (options?: DetachOptions) => Promise<DetachReceipt>;
 }

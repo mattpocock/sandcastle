@@ -236,11 +236,12 @@ describe.skipIf(process.platform === "win32")("createSandbox (v1)", () => {
   it("has no providerOptions and no detach on a local sandbox (types)", async () => {
     const { provider } = recordingProvider();
 
-    const sandbox = await createSandbox({
+    await createSandbox({
       provider,
       // @ts-expect-error v1 takes no providerOptions: vendor options go to the provider factory
       providerOptions: {},
     });
+    const sandbox = await createSandbox({ provider });
 
     // @ts-expect-error a provider without a detach capability makes handles without detach
     expect(sandbox.detach).toBeUndefined();

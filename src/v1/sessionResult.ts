@@ -19,7 +19,9 @@ export const sessionFailure = (
   return new SessionFailedError({
     message: `Session "${request.name}" ${outcome.started ? "failed" : "could not start"}: ${outcome.message}`,
     sessionName: request.name,
-    exitReason,
+    // Only work carried on past a detach meets its deadline, and the handle
+    // that held it has let go by then.
+    exitReason: exitReason === "time-limit" ? "aborted" : exitReason,
     started: outcome.started,
     outputTail: outcome.outputTail,
     ...(outcome.exitCode === undefined ? {} : { exitCode: outcome.exitCode }),

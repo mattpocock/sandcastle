@@ -19,7 +19,7 @@ The host must talk to it in both directions while it holds the handle, on every 
 
 ### For detach (later)
 
-The secret must not sit in a request file, even briefly: sessions run as the same user. The plan: the supervisor makes a key pair in memory at start and publishes the public half in its directory; the host seals the secret to it and sends the sealed value in the detach request. Only the supervisor's memory can open it.
+The secret must not sit in a request file, even briefly: sessions run as the same user. The supervisor makes a key pair in memory at start and returns the public half in its `hello` reply, which the host keeps; the host seals the secret to it and sends the sealed value in the detach request. Only the supervisor's memory can open it. Built as [ADR 0028](0028-v1-detach-deadline-and-finish-report.md) records (the public half travels in the hello rather than a file, which a session could replace).
 
 ## Considered options
 

@@ -11,7 +11,13 @@ import type { SessionOutcome, SessionRequest } from "./supervisorProtocol.js";
 /** How the agent's stream stopped. */
 export type StreamEnd =
   | { readonly reason: "exit"; readonly code: number; readonly error?: string }
-  | { readonly reason: "idle-timeout" | "closing-tag" | "aborted" };
+  | {
+      readonly reason:
+        | "idle-timeout"
+        | "closing-tag"
+        | "aborted"
+        | "time-limit";
+    };
 
 /** What watching the stream found. */
 export interface Watched {
@@ -58,6 +64,12 @@ const verdict = (
     }
     case "aborted": {
       return { exitReason: "aborted", message: "The session was stopped." };
+    }
+    case "time-limit": {
+      return {
+        exitReason: "time-limit",
+        message: "The detach deadline passed, so the session was stopped.",
+      };
     }
     case "exit": {
       if (end.code !== 0) {

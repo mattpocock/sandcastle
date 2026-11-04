@@ -6,6 +6,7 @@ import type {
   SessionProcess,
   SessionResult,
 } from "./Session.js";
+import type { SandboxDetachedError } from "./SandboxDetachedError.js";
 import { SessionFailedError } from "./SessionFailedError.js";
 import { sessionRequest } from "./sessionRequest.js";
 import { lostSession, sessionResult } from "./sessionResult.js";
@@ -32,7 +33,19 @@ interface Live {
   readonly request: SessionRequest;
   readonly queue: Queue.Queue<AgentStreamEvent | typeof END>;
   readonly started: Deferred.Deferred<true>;
-  readonly ended: Deferred.Deferred<SessionOutcome, SupervisorLost>;
+  readonly ended: Deferred.Deferred<
+    SessionOutcome,
+    SupervisorLost | SandboxDetachedError
+  >;
+}
+
+/** What the host shares across a sandbox's sessions. */
+interface Shared {
+  readonly link: SupervisorLink;
+  /** Aborted at a detach, ending every session's reply stream. */
+  readonly letGo: AbortController;
+  /** Set once the handle has detached. */
+  detached?: SandboxDetachedError;
 }
 
 const onReply =
@@ -51,12 +64,12 @@ const onReply =
   };
 
 /** Sends the session's request; resolves once the supervisor's answer is over. */
-const follow = async (link: SupervisorLink, live: Live): Promise<void> => {
+const follow = async (shared: Shared, live: Live): Promise<void> => {
   let cause: unknown = new Error(
     "the session supervisor ended the session without a result",
   );
   try {
-    await link.call(live.request, onReply(live));
+    await shared.link.call(live.request, onReply(live), shared.letGo.signal);
   } catch (error) {
     cause = error;
   }
@@ -71,7 +84,10 @@ const start = async (request: SessionRequest): Promise<Live> => ({
     Queue.unbounded<AgentStreamEvent | typeof END>(),
   ),
   started: Deferred.unsafeMake<true>(FiberId.none),
-  ended: Deferred.unsafeMake<SessionOutcome, SupervisorLost>(FiberId.none),
+  ended: Deferred.unsafeMake<
+    SessionOutcome,
+    SupervisorLost | SandboxDetachedError
+  >(FiberId.none),
 });
 
 /** Resolves once the agent has started, or once it ended without starting. */
@@ -85,7 +101,7 @@ const startedOrEnded = async (live: Live): Promise<"started" | "ended"> =>
 
 /** The process handle for a session that's following `live`. */
 const sessionProcess = (
-  link: SupervisorLink,
+  shared: Shared,
   live: Live,
   output: OutputDefinition | undefined,
 ): SessionProcess => {
@@ -99,15 +115,24 @@ const sessionProcess = (
       Stream.toAsyncIterable,
     ),
     wait: async () => {
-      result ??= Effect.runPromise(
-        Deferred.await(live.ended).pipe(
-          Effect.mapError((lost) => lostSession(request, lost.cause)),
-        ),
-      ).then(async (outcome) => sessionResult(request, outcome, output));
+      result ??= Effect.runPromise(Effect.either(Deferred.await(live.ended)))
+        .then((ended) => {
+          if (ended._tag === "Right") {
+            return ended.right;
+          }
+          const error = ended.left;
+          throw error._tag === "SupervisorLost"
+            ? lostSession(request, error.cause)
+            : error;
+        })
+        .then(async (outcome) => sessionResult(request, outcome, output));
       return result;
     },
     kill: async () => {
-      killing ??= link
+      if (shared.detached !== undefined) {
+        throw shared.detached;
+      }
+      killing ??= shared.link
         .call({ type: "kill", id: request.id }, () => undefined)
         .catch(() => undefined);
       await killing;
@@ -124,10 +149,43 @@ const abortedBeforeStart = (name: string): SessionFailedError =>
     outputTail: "",
   });
 
+/**
+ * Lets go of every session after a detach: their `wait()` and `kill()`
+ * reject with `error`, their events end, and their reply streams close.
+ * The supervisor carries them on.
+ */
+const letGo = (
+  shared: Shared,
+  running: ReadonlyMap<string, Live>,
+  error: SandboxDetachedError,
+): void => {
+  shared.detached = error;
+  for (const live of running.values()) {
+    Deferred.unsafeDone(live.ended, Exit.fail(error));
+    Queue.unsafeOffer(live.queue, END);
+  }
+  shared.letGo.abort();
+};
+
+/** Stops the session when `signal` aborts; after a detach, there's nothing to stop. */
+const killOnAbort = (
+  spawned: SessionProcess,
+  signal: AbortSignal | undefined,
+): void => {
+  signal?.addEventListener(
+    "abort",
+    () => {
+      void spawned.kill().catch(() => undefined);
+    },
+    { once: true },
+  );
+};
+
 /** `session()` and `spawnSession()` for one sandbox. */
 export const sessionHost = (link: SupervisorLink, workingDirectory: string) => {
   let count = 0;
-  const running = new Set<string>();
+  const running = new Map<string, Live>();
+  const shared: Shared = { link, letGo: new AbortController() };
 
   const spawnSession = async (
     options: SessionOptions,
@@ -143,19 +201,13 @@ export const sessionHost = (link: SupervisorLink, workingDirectory: string) => {
     if (options.abortSignal?.aborted === true) {
       throw abortedBeforeStart(name);
     }
-    running.add(name);
     const live = await start(request);
-    void follow(link, live).finally(() => {
+    running.set(name, live);
+    void follow(shared, live).finally(() => {
       running.delete(name);
     });
-    const spawned = sessionProcess(link, live, options.output);
-    options.abortSignal?.addEventListener(
-      "abort",
-      () => {
-        void spawned.kill();
-      },
-      { once: true },
-    );
+    const spawned = sessionProcess(shared, live, options.output);
+    killOnAbort(spawned, options.abortSignal);
     if ((await startedOrEnded(live)) === "ended") {
       // It ended before printing anything: if it failed, it couldn't start.
       await spawned.wait();
@@ -166,5 +218,13 @@ export const sessionHost = (link: SupervisorLink, workingDirectory: string) => {
   const session = async (options: SessionOptions): Promise<SessionResult> =>
     spawnSession(options).then(async (spawned) => spawned.wait());
 
-  return { spawnSession, session };
+  return {
+    spawnSession,
+    session,
+    letGo: (error: SandboxDetachedError) => {
+      letGo(shared, running, error);
+    },
+    /** How many sessions the host is following. */
+    runningCount: () => running.size,
+  };
 };
