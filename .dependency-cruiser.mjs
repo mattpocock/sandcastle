@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
  * exports and tsup.config.ts `entry` (checked by scripts/entry-points.test.ts).
  */
 export const ENTRY_POINTS =
-  "^src/(index|sandboxes/(docker|vercel|podman|daytona|e2b|modal|no-sandbox|bwrap|seatbelt|sprites)|v1|v1/testing|v1/sandboxes/daytona)[.]ts$";
+  "^src/(index|sandboxes/(docker|vercel|podman|daytona|e2b|modal|no-sandbox|bwrap|seatbelt|sprites)|v1|v1/testing|v1/tasks|v1/sandboxes/daytona)[.]ts$";
 
 /** @type {import('dependency-cruiser').IConfiguration} */
 const config = {

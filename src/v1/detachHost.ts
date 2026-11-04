@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { DateTime } from "effect";
+import type { DetachDeadline } from "./detachDeadline.js";
+import { detachDeadline } from "./detachDeadline.js";
 import { DetachError } from "./DetachError.js";
 import type { DetachOptions, DetachReceipt } from "./Sandbox.js";
 import type { ProviderSandbox } from "./SandboxProvider.js";
@@ -13,24 +14,15 @@ import { signingKey } from "./webhookSignature.js";
 // to the supervisor with the deadline and the sealed finish-report secret,
 // and lets go once the supervisor confirms it holds them (ADR 0028).
 
-const MARGIN_MINUTES = 5;
-
-/**
- * The default deadline: the kill time minus a margin to deliver the report.
- * The margin is 5 minutes, or a quarter of the time limit when that's
- * shorter, so a seconds-long sandbox still gets a deadline before its end.
- */
-export const defaultDeadlineMs = (
-  killTime: Date,
-  timeLimitMinutes: number,
-): number =>
-  killTime.getTime() - Math.min(MARGIN_MINUTES, timeLimitMinutes / 4) * 60_000;
+export { trackDeadline } from "./detachDeadline.js";
 
 /** What `detach()` needs from the handle. */
 export interface DetachContext {
   readonly sandbox: ProviderSandbox;
   readonly link: SupervisorLink;
   readonly timeLimitMinutes: number;
+  /** The handle, whose default deadline a bundled task may have set. */
+  readonly handle: object;
   /** Awaited calls on the handle that haven't settled. */
   readonly pendingCalls: () => number;
   /** Sessions the host is following. */
@@ -141,23 +133,21 @@ const handOver = async (
 const detachRequest = (
   context: DetachContext,
   options: DetachOptions,
-): { readonly request: DetachRequest; readonly deadline: number } => {
+): { readonly request: DetachRequest; readonly deadline: DetachDeadline } => {
   const { sandbox } = context;
-  const now = DateTime.unsafeNow().epochMillis;
-  const fallback = defaultDeadlineMs(
-    sandbox.killTime,
-    context.timeLimitMinutes,
-  );
-  const deadline =
-    options.deadlineMinutes === undefined
-      ? fallback
-      : Math.min(fallback, now + options.deadlineMinutes * 60_000);
+  const deadline = detachDeadline({
+    handle: context.handle,
+    killTime: sandbox.killTime,
+    timeLimitMinutes: context.timeLimitMinutes,
+    deadlineMinutes: options.deadlineMinutes,
+  });
+  const now = deadline.nowMs;
   const { finishReport } = options;
   const request: DetachRequest = {
     type: "detach",
     detachId: randomUUID(),
     sandboxId: sandbox.sandboxId,
-    deadlineMs: Math.max(0, deadline - now),
+    deadlineMs: Math.max(0, deadline.deadlineMs - now),
     giveUpMs: Math.max(0, sandbox.killTime.getTime() - now),
     ...(finishReport === undefined
       ? {}
@@ -195,7 +185,7 @@ export const detachFrom =
     return {
       sandboxId,
       detachId,
-      deadline: DateTime.toDateUtc(DateTime.unsafeMake(deadline)),
+      deadline: deadline.deadline,
       carriedOn: carried.map(({ name, agent }) => ({
         kind: "session",
         name,

@@ -13,6 +13,7 @@
       "@ai-hero/sandcastle/sandboxes/*": ["../src/sandboxes/*.ts"],
       "@ai-hero/sandcastle/v1": ["../src/v1.ts"],
       "@ai-hero/sandcastle/v1/testing": ["../src/v1/testing.ts"],
+      "@ai-hero/sandcastle/v1/tasks": ["../src/v1/tasks.ts"],
       "@ai-hero/sandcastle/v1/sandboxes/daytona": [
         "../src/v1/sandboxes/daytona.ts"
       ]

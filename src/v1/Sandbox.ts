@@ -126,9 +126,11 @@ export interface DetachOptions {
   readonly finishReport?: FinishReportDestination;
   /**
    * Stop the carried-on work this many minutes from now (fractions allowed)
-   * and report `time-limit`. Clamped to the default: the kill time minus a
-   * margin of 5 minutes, or a quarter of the time limit when that's shorter,
-   * which leaves room to deliver the report before the sandbox is killed.
+   * and report `time-limit`. Clamped to the latest deadline: the kill time
+   * minus a margin of 5 minutes, or a quarter of the time limit when that's
+   * shorter, which leaves room to deliver the report before the sandbox is
+   * killed. Without it, the deadline is the one a bundled task's `start` set
+   * on this handle, or else that latest one.
    */
   readonly deadlineMinutes?: number;
   /** Aborts the detach itself. You keep the handle; `close()` still ends everything. */

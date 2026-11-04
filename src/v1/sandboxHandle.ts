@@ -1,4 +1,4 @@
-import { detachFrom } from "./detachHost.js";
+import { detachFrom, trackDeadline } from "./detachHost.js";
 import { ExecFailedError } from "./ExecFailedError.js";
 import type { SandboxDetachedError } from "./SandboxDetachedError.js";
 import type {
@@ -136,6 +136,7 @@ const withDetach = <Native>(
     sandbox: parts.sandbox,
     link: parts.supervisor,
     timeLimitMinutes: parts.timeLimitMinutes,
+    handle,
     pendingCalls: calls.pending,
     runningSessions: sessions.runningCount,
     letGo: (error) => {
@@ -208,6 +209,7 @@ export const sandboxHandle = <Native>({
     close,
     [Symbol.asyncDispose]: close,
   };
+  trackDeadline(handle, sandbox.killTime, timeLimitMinutes);
   return canDetach
     ? withDetach(handle, {
         parts: { sandbox, supervisor, timeLimitMinutes },
