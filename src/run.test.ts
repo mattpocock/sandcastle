@@ -41,6 +41,24 @@ import { testStubProvider } from "./sandboxes/test-shared.js";
 
 const testSandbox = testStubProvider({ name: "test" }).provider;
 
+interface StreamingExecOptions {
+  onLine?: (line: string) => void;
+  stdin?: string;
+}
+
+/**
+ * A fake sandbox exec that hands the agent run (the only exec that streams
+ * lines) to `onAgentRun` and succeeds silently for every other command.
+ */
+const execStreamingTo =
+  (onAgentRun: (onLine: (line: string) => void, stdin?: string) => void) =>
+  async (_command: string, options?: StreamingExecOptions) => {
+    if (options?.onLine) {
+      onAgentRun(options.onLine, options.stdin);
+    }
+    return { stdout: "", stderr: "", exitCode: 0 };
+  };
+
 /** An agent provider with no session storage, so it cannot resume. */
 const noResumeAgent: AgentProvider = {
   name: "no-resume-agent",
@@ -1091,7 +1109,7 @@ describe("output.maxRetries entry-time validation", () => {
         }),
       }),
     ).rejects.toThrow(
-      /output\.maxRetries requires an agent provider that supports session resumption/,
+      /output\.maxRetries requires an agent provider that supports session resumption/u,
     );
   });
 
@@ -1105,7 +1123,7 @@ describe("output.maxRetries entry-time validation", () => {
         output: Output.string({ tag: "result", maxRetries: 1 }),
       }),
     ).rejects.toThrow(
-      /output\.maxRetries requires an agent provider that supports session resumption/,
+      /output\.maxRetries requires an agent provider that supports session resumption/u,
     );
   });
 
@@ -1140,7 +1158,7 @@ describe("output.maxRetries entry-time validation", () => {
           maxRetries: 0,
         }),
       }),
-    ).rejects.not.toThrow(/output\.maxRetries requires/);
+    ).rejects.not.toThrow(/output\.maxRetries requires/u);
   });
 
   it("throws when maxRetries is negative", async () => {
@@ -1156,7 +1174,7 @@ describe("output.maxRetries entry-time validation", () => {
           maxRetries: -1,
         }),
       }),
-    ).rejects.toThrow(/non-negative integer/);
+    ).rejects.toThrow(/non-negative integer/u);
   });
 
   it("throws when maxRetries is not an integer", async () => {
@@ -1172,7 +1190,7 @@ describe("output.maxRetries entry-time validation", () => {
           maxRetries: 1.5,
         }),
       }),
-    ).rejects.toThrow(/non-negative integer/);
+    ).rejects.toThrow(/non-negative integer/u);
   });
 });
 
@@ -1488,11 +1506,13 @@ describe("merge-to-head temp branch name", () => {
         branchStrategy: { type: "merge-to-head" },
       });
 
-      const match = agentPrompt?.match(/^SOURCE=(\S+) ACTUAL=(\S+)$/);
-      assert.exists(match);
-      const [, sourceBranch, actualBranch] = match;
+      const branches = agentPrompt?.match(
+        /^SOURCE=(?<source>\S+) ACTUAL=(?<actual>\S+)$/u,
+      )?.groups;
+      const sourceBranch = branches?.["source"];
+      const actualBranch = branches?.["actual"];
       assert.isDefined(actualBranch);
-      expect(actualBranch).toMatch(/^sandcastle\//);
+      expect(actualBranch).toMatch(/^sandcastle\//u);
       expect(sourceBranch).toBe(actualBranch);
       expect(result.logFilePath).toBe(
         join(
@@ -1540,19 +1560,13 @@ describe("resume/fork after a promptFile + promptArgs run", () => {
       name: "resume-args",
       create: async () => ({
         worktreePath: process.cwd(),
-        exec: async (
-          _command: string,
-          options?: { onLine?: (line: string) => void; stdin?: string },
-        ) => {
-          if (options?.onLine) {
-            agentStdin.push(options.stdin);
-            options.onLine(
-              `{"type":"system","subtype":"init","session_id":"${sessionId}"}`,
-            );
-            options.onLine('{"type":"result","result":"ok"}');
-          }
-          return { stdout: "", stderr: "", exitCode: 0 };
-        },
+        exec: execStreamingTo((onLine, stdin) => {
+          agentStdin.push(stdin);
+          onLine(
+            `{"type":"system","subtype":"init","session_id":"${sessionId}"}`,
+          );
+          onLine('{"type":"result","result":"ok"}');
+        }),
         copyFileIn: async () => {},
         copyFileOut: async () => {},
         close: async () => {},
@@ -1689,14 +1703,14 @@ describe("resume/fork after a structured-output run", () => {
       const r = await first();
       assert.isDefined(r.resume);
       assert.isDefined(r.fork);
-      const resumed = (await r.resume("Summarise again in <summary> tags", {
+      const resumed = await r.resume("Summarise again in <summary> tags", {
         output: Output.string({ tag: "summary" }),
-      })) as { output?: unknown };
-      expect(resumed.output).toBe("all good");
+      });
+      expect(resumed).toHaveProperty("output", "all good");
 
       await expect(
         r.fork("no tag here", { output: Output.string({ tag: "summary" }) }),
-      ).rejects.toThrow(/output tag <summary> not found/);
+      ).rejects.toThrow(/output tag <summary> not found/u);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -3,7 +3,10 @@ import {
   baselineGrowth,
   compare,
   countViolations,
+  driftReport,
+  matchObjectUndefinedCount,
   shrink,
+  tscErrors,
 } from "./lint-ratchet-core.ts";
 
 const v = (file: string, rule: string) => ({ file, rule });
@@ -61,5 +64,65 @@ describe("lint ratchet", () => {
         { "a.ts": { x: 3 } },
       ),
     ).toStrictEqual(["b.ts: x 0 -> 1"]);
+  });
+
+  it("counts toMatchObject calls that give a key the value undefined", () => {
+    // Built from parts so this file does not trip the check it tests.
+    const call = "toMatchObject";
+    const absent = "undefined";
+    const source = [
+      `expect(a).${call}({ k: ${absent} });`,
+      `expect(b).${call}({`,
+      "  nested: { k: f(1) },",
+      `  other:   ${absent},`,
+      "});",
+      `expect(c).${call}({ k: 1 });`,
+      `expect(d).toBe(${absent});`,
+      `const e = { k: ${absent} };`,
+    ].join("\n");
+    expect(matchObjectUndefinedCount(source)).toBe(2);
+  });
+});
+
+describe("tscErrors", () => {
+  it("reads each error's file and code, skipping elaboration lines", () => {
+    const out = [
+      ".sandcastle/run.ts(3,7): error TS2345: Argument of type 'x' is not assignable.",
+      "  Type 'undefined' is not assignable to type 'string'.",
+      ".sandcastle/verify/lib.ts(10,1): error TS7006: Parameter 'a' implicitly has an 'any' type.",
+      "",
+    ].join("\n");
+    expect(tscErrors(out)).toStrictEqual([
+      v(".sandcastle/run.ts", "tsc/TS2345"),
+      v(".sandcastle/verify/lib.ts", "tsc/TS7006"),
+    ]);
+  });
+
+  it("finds nothing in clean output", () => {
+    expect(tscErrors("")).toStrictEqual([]);
+  });
+});
+
+describe("driftReport", () => {
+  it("ranks by the live counts and shows each baseline count alongside", () => {
+    const live = { "a.ts": { x: 3, y: 1 }, "b.ts": { x: 1 } };
+    const baseline = { "a.ts": { x: 5, y: 1 }, "c.ts": { z: 4 } };
+    expect(driftReport(live, baseline, 2).split("\n")).toStrictEqual([
+      "5 / 10 violations (live / baseline), 2 / 2 files, 2 / 3 rules",
+      "Top rules (live / baseline):",
+      "       4 /      5  x",
+      "       1 /      1  y",
+      "Top files (live / baseline):",
+      "       4 /      6  a.ts",
+      "       1 /      0  b.ts",
+    ]);
+  });
+
+  it("reports a clean tree against an empty baseline", () => {
+    expect(driftReport({}, {}, 10).split("\n")).toStrictEqual([
+      "0 / 0 violations (live / baseline), 0 / 0 files, 0 / 0 rules",
+      "Top rules (live / baseline):",
+      "Top files (live / baseline):",
+    ]);
   });
 });

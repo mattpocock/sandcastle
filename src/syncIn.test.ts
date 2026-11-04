@@ -2,14 +2,32 @@ import { exec } from "node:child_process";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { testIsolated } from "./sandboxes/test-isolated.js";
 import type { IsolatedSandboxHandle } from "./SandboxProvider.js";
 import { syncIn } from "./syncIn.js";
 
-const execAsync = promisify(exec);
+/** Runs a shell command; rejects on a non-zero exit, as `promisify(exec)` does. */
+const execAsync = (command: string, options: { cwd: string }) =>
+  new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+    exec(command, options, (error, stdout, stderr) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+  });
+
+/** A command's trimmed stdout inside the sandbox. */
+const sandboxStdout = async (
+  handle: { exec: (command: string) => Promise<{ stdout: string }> },
+  command: string,
+) => {
+  const { stdout } = await handle.exec(command);
+  return stdout.trim();
+};
 
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });
@@ -19,10 +37,10 @@ const initRepo = async (dir: string) => {
 
 const commitFile = async (
   dir: string,
-  name: string,
-  content: string,
+  file: { readonly name: string; readonly content: string },
   message: string,
 ) => {
+  const { name, content } = file;
   await writeFile(join(dir, name), content);
   await execAsync(`git add "${name}"`, { cwd: dir });
   await execAsync(`git commit -m "${message}"`, { cwd: dir });
@@ -50,7 +68,11 @@ describe("syncIn", () => {
   it("bundles a repo and clones it into the sandbox — files present", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "hello.txt", "hello world", "initial commit");
+    await commitFile(
+      hostDir,
+      { name: "hello.txt", content: "hello world" },
+      "initial commit",
+    );
 
     const provider = testIsolated();
     const handle = await provider.create({ env: {} });
@@ -67,9 +89,9 @@ describe("syncIn", () => {
   it("preserves git history after clone from bundle", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "a.txt", "a", "first commit");
-    await commitFile(hostDir, "b.txt", "b", "second commit");
-    await commitFile(hostDir, "c.txt", "c", "third commit");
+    await commitFile(hostDir, { name: "a.txt", content: "a" }, "first commit");
+    await commitFile(hostDir, { name: "b.txt", content: "b" }, "second commit");
+    await commitFile(hostDir, { name: "c.txt", content: "c" }, "third commit");
 
     const provider = testIsolated();
     const handle = await provider.create({ env: {} });
@@ -77,19 +99,17 @@ describe("syncIn", () => {
       await Effect.runPromise(syncIn(hostDir, handle));
 
       // Verify HEAD matches
-      const sandboxHead = (
-        await handle.exec("git rev-parse HEAD")
-      ).stdout.trim();
+      const sandboxHead = await sandboxStdout(handle, "git rev-parse HEAD");
       expect(sandboxHead).toBe(await getHead(hostDir));
 
       // Verify all 3 commits are present
-      const log = (await handle.exec("git log --oneline")).stdout.trim();
+      const log = await sandboxStdout(handle, "git log --oneline");
       expect(log.split("\n")).toHaveLength(3);
 
       // Verify all files present
-      expect((await handle.exec("cat a.txt")).stdout.trim()).toBe("a");
-      expect((await handle.exec("cat b.txt")).stdout.trim()).toBe("b");
-      expect((await handle.exec("cat c.txt")).stdout.trim()).toBe("c");
+      await expect(sandboxStdout(handle, "cat a.txt")).resolves.toBe("a");
+      await expect(sandboxStdout(handle, "cat b.txt")).resolves.toBe("b");
+      await expect(sandboxStdout(handle, "cat c.txt")).resolves.toBe("c");
     } finally {
       await handle.close();
     }
@@ -98,19 +118,21 @@ describe("syncIn", () => {
   it("works with repos that have unpushed commits (no remote)", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "local-only.txt", "no remote", "local commit");
+    await commitFile(
+      hostDir,
+      { name: "local-only.txt", content: "no remote" },
+      "local commit",
+    );
 
     const provider = testIsolated();
     const handle = await provider.create({ env: {} });
     try {
       await Effect.runPromise(syncIn(hostDir, handle));
 
-      const sandboxHead = (
-        await handle.exec("git rev-parse HEAD")
-      ).stdout.trim();
+      const sandboxHead = await sandboxStdout(handle, "git rev-parse HEAD");
       expect(sandboxHead).toBe(await getHead(hostDir));
 
-      const content = (await handle.exec("cat local-only.txt")).stdout.trim();
+      const content = await sandboxStdout(handle, "cat local-only.txt");
       expect(content).toBe("no remote");
     } finally {
       await handle.close();
@@ -120,7 +142,11 @@ describe("syncIn", () => {
   it("returns the current branch name", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "file.txt", "content", "initial");
+    await commitFile(
+      hostDir,
+      { name: "file.txt", content: "content" },
+      "initial",
+    );
 
     const provider = testIsolated();
     const handle = await provider.create({ env: {} });
@@ -135,9 +161,17 @@ describe("syncIn", () => {
   it("works with a non-main branch", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "file.txt", "on main", "initial");
+    await commitFile(
+      hostDir,
+      { name: "file.txt", content: "on main" },
+      "initial",
+    );
     await execAsync("git checkout -b feature-branch", { cwd: hostDir });
-    await commitFile(hostDir, "feature.txt", "feature work", "feature commit");
+    await commitFile(
+      hostDir,
+      { name: "feature.txt", content: "feature work" },
+      "feature commit",
+    );
 
     const provider = testIsolated();
     const handle = await provider.create({ env: {} });
@@ -146,14 +180,15 @@ describe("syncIn", () => {
       expect(result.branch).toBe("feature-branch");
 
       // Feature file should exist
-      expect((await handle.exec("cat feature.txt")).stdout.trim()).toBe(
+      await expect(sandboxStdout(handle, "cat feature.txt")).resolves.toBe(
         "feature work",
       );
 
       // Sandbox should be on the same branch
-      const sandboxBranch = (
-        await handle.exec("git rev-parse --abbrev-ref HEAD")
-      ).stdout.trim();
+      const sandboxBranch = await sandboxStdout(
+        handle,
+        "git rev-parse --abbrev-ref HEAD",
+      );
       expect(sandboxBranch).toBe("feature-branch");
     } finally {
       await handle.close();
@@ -163,7 +198,11 @@ describe("syncIn", () => {
   it("only syncs committed state — uncommitted changes are excluded", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "committed.txt", "committed", "initial");
+    await commitFile(
+      hostDir,
+      { name: "committed.txt", content: "committed" },
+      "initial",
+    );
 
     // Add uncommitted changes
     await writeFile(join(hostDir, "committed.txt"), "modified uncommitted");
@@ -175,11 +214,11 @@ describe("syncIn", () => {
       await Effect.runPromise(syncIn(hostDir, handle));
 
       // Committed content should be the original
-      const content = (await handle.exec("cat committed.txt")).stdout.trim();
+      const content = await sandboxStdout(handle, "cat committed.txt");
       expect(content).toBe("committed");
 
       // Untracked file should not exist
-      const ls = (await handle.exec("ls")).stdout;
+      const ls = await sandboxStdout(handle, "ls");
       expect(ls).not.toContain("untracked.txt");
     } finally {
       await handle.close();
@@ -189,7 +228,11 @@ describe("syncIn", () => {
   it("fails with a SyncError when the sandbox HEAD doesn't match the host after sync", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+    await commitFile(
+      hostDir,
+      { name: "hello.txt", content: "hello" },
+      "initial commit",
+    );
 
     const provider = testIsolated();
     const handle = await provider.create({ env: {} });

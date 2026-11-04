@@ -40,10 +40,14 @@ export const PARENT_GIT_SANDBOX_DIR = "/.sandcastle-parent-git";
 export const defaultImageName = (repoDir: string): string => {
   const dirName =
     repoDir
-      .replace(/[\\/]+$/, "")
-      .split(/[\\/]/)
+      .replace(/[\\/]+$/u, "")
+      .split(/[\\/]/u)
       .pop() ?? "local";
-  const sanitized = dirName.toLowerCase().replaceAll(/[^a-z0-9_.-]/g, "-");
+  // One dash per UTF-16 unit, as before the `u` flag, so the default image
+  // name for a directory with an astral character (e.g. an emoji) is unchanged.
+  const sanitized = dirName
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9_.-]/gu, (char) => "-".repeat(char.length));
   return `sandcastle:${sanitized || "local"}`;
 };
 
@@ -120,7 +124,7 @@ export const resolveUserMounts = (
     return {
       hostPath: resolvedHostPath,
       sandboxPath: resolveSandboxPath(m.sandboxPath, sandboxHomedir),
-      ...(m.readonly ? { readonly: true } : {}),
+      ...(m.readonly === true ? { readonly: true } : {}),
     };
   });
 
@@ -144,13 +148,13 @@ export const normalizeMounts = <
   M extends { hostPath: string; sandboxPath: string },
 >(
   mounts: M[],
-  worktreeHostPath: string,
-  sandboxRepoDir: string,
+  repo: { readonly worktreeHostPath: string; readonly sandboxRepoDir: string },
   platform: string = process.platform,
 ): M[] => {
   if (platform !== "win32") {
     return mounts;
   }
+  const { worktreeHostPath, sandboxRepoDir } = repo;
 
   const normalizedWorktree = worktreeHostPath.replaceAll("\\", "/");
 
@@ -162,7 +166,7 @@ export const normalizeMounts = <
     // sandbox paths like /mnt/data or /home/agent/workspace), leave it as-is.
     // Otherwise, normalize it — Windows-style sandboxPaths (from resolveGitMounts
     // setting sandboxPath === hostPath) need remapping.
-    if (/^[A-Za-z]:[/\\]/.test(sandboxPath) || sandboxPath.includes("\\")) {
+    if (/^[A-Za-z]:[/\\]/u.test(sandboxPath) || sandboxPath.includes("\\")) {
       // This is a Windows-style path — remap it
       const normalizedSandboxPath = sandboxPath.replaceAll("\\", "/");
 
@@ -194,7 +198,7 @@ export const normalizeMounts = <
 export const parseGitdirPath = (
   gitdirPath: string,
 ): { parentGitDir: string; worktreeName: string } => {
-  const normalized = gitdirPath.replaceAll("\\", "/").replace(/\/+$/, "");
+  const normalized = gitdirPath.replaceAll("\\", "/").replace(/\/+$/u, "");
   const segments = normalized.split("/");
   const worktreeName = segments.pop() ?? ""; // <name>
   segments.pop(); // "worktrees"
@@ -236,57 +240,91 @@ export const patchGitMountsForWindows = (
       return gitMounts;
     }
 
-    const _readFile =
-      readFile ??
-      (async (p: string) => {
-        const { readFile: rf } = await import("node:fs/promises");
-        return rf(p, "utf8");
-      });
-    const _statFile =
-      statFile ??
-      (async (p: string) => {
-        const { stat } = await import("node:fs/promises");
-        const s = await stat(p);
-        return s.isDirectory() ? ("directory" as const) : ("file" as const);
-      });
-
-    // Check the worktree's .git entry
     const gitEntryPath = join(worktreeHostPath, ".git");
-    const gitEntryType = yield* Effect.tryPromise({
-      try: () => _statFile(gitEntryPath),
-      catch: () => null,
-    }).pipe(Effect.catchAll(() => Effect.succeed(null)));
-    if (gitEntryType === null) {
+    const gitdirPath = yield* readWorktreeGitdir(gitEntryPath, {
+      readFile: readFile ?? defaultReadFile,
+      statFile: statFile ?? defaultStatFile,
+    });
+    if (gitdirPath === undefined) {
       return gitMounts;
     }
+
+    const { parentGitDir, worktreeName } = parseGitdirPath(gitdirPath);
+    const override = yield* writeGitOverride(
+      `${PARENT_GIT_SANDBOX_DIR}/worktrees/${worktreeName}`,
+    );
+    return overlayGitMounts(gitMounts, {
+      parentGitDir,
+      gitEntryPath,
+      overrideMount: {
+        ...override,
+        sandboxPath: `${sandboxRepoDir}/.git`,
+        readonly: true,
+      },
+    });
+  });
+
+const defaultReadFile = async (p: string): Promise<string> => {
+  const { readFile: rf } = await import("node:fs/promises");
+  return rf(p, "utf8");
+};
+
+const defaultStatFile = async (p: string): Promise<"file" | "directory"> => {
+  const { stat } = await import("node:fs/promises");
+  const s = await stat(p);
+  return s.isDirectory() ? ("directory" as const) : ("file" as const);
+};
+
+/**
+ * The `gitdir:` path a worktree's `.git` file points at, or `undefined` when
+ * `.git` is missing, unreadable, a directory, or not a `gitdir:` pointer.
+ */
+const readWorktreeGitdir = (
+  gitEntryPath: string,
+  fileAccess: {
+    readonly readFile: (path: string) => Promise<string>;
+    readonly statFile: (path: string) => Promise<"file" | "directory">;
+  },
+): Effect.Effect<string | undefined> =>
+  Effect.gen(function* () {
+    const { readFile, statFile } = fileAccess;
+
+    const gitEntryType = yield* Effect.tryPromise({
+      try: () => statFile(gitEntryPath),
+      catch: () => null,
+    }).pipe(Effect.catchAll(() => Effect.succeed(null)));
     // .git is a directory (normal clone): no gitdir indirection to fix.
     // `normalizeMounts` already remaps the .git mount to `${sandboxRepoDir}/.git`
     // because the host .git sits under `worktreeHostPath`. Removing this short-
     // circuit would break head mode against a normal clone.
-    if (gitEntryType === "directory") {
-      return gitMounts;
+    if (gitEntryType === null || gitEntryType === "directory") {
+      return undefined;
     }
 
-    // Read and parse the gitdir: line
     const content = yield* Effect.tryPromise({
-      try: () => _readFile(gitEntryPath),
+      try: () => readFile(gitEntryPath),
       catch: () => null,
     }).pipe(
       Effect.map((s) => s.trim()),
       Effect.catchAll(() => Effect.succeed(null)),
     );
     if (content === null) {
-      return gitMounts;
+      return undefined;
     }
-    const gitdirPath = /^gitdir:\s*(.+)$/.exec(content)?.[1];
-    if (gitdirPath === undefined) {
-      return gitMounts;
-    }
+    return /^gitdir:\s*(.+)$/u.exec(content)?.[1];
+  });
 
-    const { parentGitDir, worktreeName } = parseGitdirPath(gitdirPath);
-
-    // Create a temp file with the corrected gitdir content
-    const correctedGitdir = `${PARENT_GIT_SANDBOX_DIR}/worktrees/${worktreeName}`;
+/**
+ * Writes a `.git` override file pointing at `correctedGitdir` into a fresh
+ * temp dir. Returns the file and its temp dir.
+ */
+const writeGitOverride = (
+  correctedGitdir: string,
+): Effect.Effect<
+  { readonly hostPath: string; readonly tempDir: string },
+  WorktreeError
+> =>
+  Effect.gen(function* () {
     const tempDir = yield* Effect.tryPromise({
       try: () => mkdtemp(join(tmpdir(), "sandcastle-git-")),
       catch: (e) =>
@@ -308,47 +346,48 @@ export const patchGitMountsForWindows = (
         ]),
       ),
     );
-
-    // Build corrected mounts
-    const normalizedParentGitDir = parentGitDir.replaceAll("\\", "/");
-    const gitFileHostPath = gitEntryPath.replaceAll("\\", "/");
-
-    const correctedMounts: MountEntry[] = [];
-    let replacedGitFile = false;
-
-    for (const m of gitMounts) {
-      const normalizedHostPath = m.hostPath.replaceAll("\\", "/");
-      if (normalizedHostPath === normalizedParentGitDir) {
-        // Remap parent .git dir to deterministic sandbox path
-        correctedMounts.push({ ...m, sandboxPath: PARENT_GIT_SANDBOX_DIR });
-      } else if (normalizedHostPath === gitFileHostPath) {
-        // Replace .git file mount with corrected version (host repo is a worktree)
-        correctedMounts.push({
-          ...m,
-          hostPath: tempGitFile,
-          sandboxPath: `${sandboxRepoDir}/.git`,
-          readonly: true,
-          tempDir,
-        });
-        replacedGitFile = true;
-      } else {
-        correctedMounts.push(m);
-      }
-    }
-
-    // If the .git file wasn't in gitMounts (Sandcastle-created worktree),
-    // add an overlay mount for the corrected .git file
-    if (!replacedGitFile) {
-      correctedMounts.push({
-        hostPath: tempGitFile,
-        sandboxPath: `${sandboxRepoDir}/.git`,
-        readonly: true,
-        tempDir,
-      });
-    }
-
-    return correctedMounts;
+    return { hostPath: tempGitFile, tempDir };
   });
+
+/**
+ * Remaps the parent `.git` dir mount to `PARENT_GIT_SANDBOX_DIR` and puts
+ * `overrideMount` in place of the worktree's `.git` file mount, or adds it
+ * when there is none (a Sandcastle-created worktree).
+ */
+const overlayGitMounts = (
+  gitMounts: MountEntry[],
+  paths: {
+    readonly parentGitDir: string;
+    readonly gitEntryPath: string;
+    readonly overrideMount: MountEntry;
+  },
+): MountEntry[] => {
+  const normalizedParentGitDir = paths.parentGitDir.replaceAll("\\", "/");
+  const gitFileHostPath = paths.gitEntryPath.replaceAll("\\", "/");
+
+  const correctedMounts: MountEntry[] = [];
+  let replacedGitFile = false;
+
+  for (const m of gitMounts) {
+    const normalizedHostPath = m.hostPath.replaceAll("\\", "/");
+    if (normalizedHostPath === normalizedParentGitDir) {
+      // Remap parent .git dir to deterministic sandbox path
+      correctedMounts.push({ ...m, sandboxPath: PARENT_GIT_SANDBOX_DIR });
+    } else if (normalizedHostPath === gitFileHostPath) {
+      // Replace .git file mount with corrected version (host repo is a worktree)
+      correctedMounts.push({ ...m, ...paths.overrideMount });
+      replacedGitFile = true;
+    } else {
+      correctedMounts.push(m);
+    }
+  }
+
+  if (!replacedGitFile) {
+    correctedMounts.push(paths.overrideMount);
+  }
+
+  return correctedMounts;
+};
 
 /**
  * Removes the temp dirs `patchGitMountsForWindows` created for `mounts`
@@ -382,7 +421,10 @@ export const formatVolumeMount = (
   selinuxLabel: SelinuxLabel | undefined,
 ): string => {
   const base = `${mount.hostPath}:${mount.sandboxPath}`;
-  const options = [mount.readonly ? "ro" : undefined, selinuxLabel || undefined]
+  const options = [
+    mount.readonly === true ? "ro" : undefined,
+    selinuxLabel === false ? undefined : selinuxLabel,
+  ]
     .filter((option): option is string => option !== undefined)
     .join(",");
 

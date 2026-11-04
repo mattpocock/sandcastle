@@ -1,12 +1,19 @@
 import * as fs from "node:fs";
 import { execFileSync } from "node:child_process";
-import { fail, gh, required, writeJson } from "../shared/common";
+import {
+  asArray,
+  asRecord,
+  fail,
+  gh,
+  required,
+  validate,
+  writeJson,
+} from "../shared/common";
 import {
   EXPLORE_LABEL,
   parseBatch,
   planEffects,
   planSchema,
-  validate,
   VERDICT_LABEL,
 } from "./batch";
 import type { GitHubEffect, Plan } from "./batch";
@@ -28,7 +35,7 @@ const AGENT_PAT = process.env.AGENT_PAT ?? "";
 
 const summary = (markdown: string): void => {
   const file = process.env.GITHUB_STEP_SUMMARY;
-  if (file) {
+  if (file !== undefined && file !== "") {
     fs.appendFileSync(file, `${markdown}\n`);
   } else {
     console.log(markdown);
@@ -47,9 +54,10 @@ const ghWith = (args: string[], options: { token?: string; input?: string }) =>
     encoding: "utf8",
     input: options.input,
     stdio: ["pipe", "pipe", "pipe"],
-    env: options.token
-      ? { ...process.env, GH_TOKEN: options.token }
-      : undefined,
+    env:
+      options.token !== undefined && options.token !== ""
+        ? { ...process.env, GH_TOKEN: options.token }
+        : undefined,
   });
 
 const outcome = (entry: Plan["issues"][number]): string =>
@@ -59,24 +67,50 @@ const outcome = (entry: Plan["issues"][number]): string =>
 
 const describe = (effect: GitHubEffect): string => {
   switch (effect.kind) {
-    case "comment":
+    case "comment": {
       return `#${effect.issue}: comment`;
-    case "swap-label":
+    }
+    case "swap-label": {
       return `#${effect.issue}: swap \`${EXPLORE_LABEL}\` → \`${effect.to}\``;
-    case "close-duplicate":
+    }
+    case "close-duplicate": {
       return `#${effect.issue}: remove \`${EXPLORE_LABEL}\`, close as duplicate of #${effect.duplicateOf}`;
+    }
+  }
+};
+
+/** Drop `agent:explore` and close as a duplicate (falling back to "not planned"). */
+const closeAsDuplicate = (issue: string): void => {
+  ghWith(["issue", "edit", issue, "--remove-label", EXPLORE_LABEL], {});
+  try {
+    ghWith(
+      [
+        "api",
+        "--method",
+        "PATCH",
+        `repos/${GH_REPO}/issues/${issue}`,
+        "-f",
+        "state=closed",
+        "-f",
+        "state_reason=duplicate",
+      ],
+      {},
+    );
+  } catch {
+    ghWith(["issue", "close", issue, "--reason", "not planned"], {});
   }
 };
 
 const apply = (effect: GitHubEffect): void => {
   const issue = String(effect.issue);
   switch (effect.kind) {
-    case "comment":
+    case "comment": {
       ghWith(["issue", "comment", issue, "--body-file", "-"], {
         input: effect.body,
       });
       return;
-    case "swap-label":
+    }
+    case "swap-label": {
       if (effect.to === "agent:implement" && !AGENT_PAT) {
         console.log(
           `::warning::AGENT_PAT is not set; adding agent:implement to #${issue} with GITHUB_TOKEN will not trigger Agent Implement.`,
@@ -97,26 +131,10 @@ const apply = (effect: GitHubEffect): void => {
         { token: effect.to === "agent:implement" ? AGENT_PAT : undefined },
       );
       return;
-    case "close-duplicate":
-      ghWith(["issue", "edit", issue, "--remove-label", EXPLORE_LABEL], {});
-      try {
-        ghWith(
-          [
-            "api",
-            "--method",
-            "PATCH",
-            `repos/${GH_REPO}/issues/${issue}`,
-            "-f",
-            "state=closed",
-            "-f",
-            "state_reason=duplicate",
-          ],
-          {},
-        );
-      } catch {
-        ghWith(["issue", "close", issue, "--reason", "not planned"], {});
-      }
-      return;
+    }
+    case "close-duplicate": {
+      closeAsDuplicate(issue);
+    }
   }
 };
 
@@ -144,7 +162,7 @@ try {
 // Every issue must still be open and still carry agent:explore — if a human
 // moved one on mid-run, don't overwrite their decision.
 const live = new Set(
-  (
+  asArray(
     JSON.parse(
       gh([
         "issue",
@@ -158,8 +176,9 @@ const live = new Set(
         "--json",
         "number",
       ]),
-    ) as { number: number }[]
-  ).map((issue) => issue.number),
+    ),
+    "open explore issues",
+  ).map((issue) => asRecord(issue, "open explore issue").number),
 );
 const stale = plan.issues.filter((entry) => !live.has(entry.number));
 if (stale.length > 0) {

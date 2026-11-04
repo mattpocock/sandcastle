@@ -1,4 +1,4 @@
-import { gh, safeSh, sh } from "./common";
+import { gh, isRecord, safeSh, sh, textOr } from "./common";
 import { parseDiffLines } from "./diff-lines";
 
 export interface ReviewThreadComment {
@@ -22,43 +22,58 @@ export interface PullRequestContext {
   readonly validReplyIds: Set<string>;
 }
 
-export const fetchPullRequestContext = (
-  prNumber: string,
-): PullRequestContext => {
-  const prView = JSON.parse(
-    gh(["pr", "view", prNumber, "--json", "title,body,comments"]),
-  ) as {
-    title: string;
-    body?: string | null;
-    comments: {
-      author?: { login: string } | null;
-      body: string;
-      createdAt?: string;
-    }[];
-  };
+/** The issue a PR body closes (`Closes #12`), or "" when it names none. */
+const linkedIssueNumber = (body: string): string =>
+  /(?:closes|fixes|resolves)\s+#(?<issue>\d+)/iu.exec(body)?.groups?.issue ??
+  "";
 
-  const issueMatch = (prView.body ?? "").match(
-    /(?:closes|fixes|resolves)\s+#(\d+)/i,
+// --- Narrowing `gh` JSON ------------------------------------------------------
+
+/** `value[key]` when `value` is an object, else undefined. */
+const field = (value: unknown, key: string): unknown =>
+  isRecord(value) ? value[key] : undefined;
+
+/** `value` as an array, or [] when it isn't one (GitHub omitted the list). */
+const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+
+const stringOrNull = (value: unknown): string | null =>
+  typeof value === "string" ? value : null;
+
+const numberOrNull = (value: unknown): number | null =>
+  typeof value === "number" ? value : null;
+
+/** The `login` of a GitHub actor (`author`, `user`), or "unknown". */
+const login = (actor: unknown): string =>
+  textOr(field(actor, "login"), "unknown");
+
+/** Unresolved review-thread comments from the `reviewThreads` GraphQL query. */
+const unresolvedThreadComments = (response: unknown): ReviewThreadComment[] => {
+  const threads = list(
+    field(
+      field(
+        field(field(field(response, "data"), "repository"), "pullRequest"),
+        "reviewThreads",
+      ),
+      "nodes",
+    ),
   );
-  const issueNumber = issueMatch?.[1] ?? "";
-  const issueTitle = issueNumber
-    ? safeSh(`gh issue view ${issueNumber} --json title --jq .title`).trim()
-    : "";
-  const linkedIssue = issueNumber
-    ? safeSh(`gh issue view ${issueNumber} --comments`)
-    : "(no linked issue found)";
+  return threads
+    .filter((thread) => field(thread, "isResolved") !== true)
+    .flatMap((thread) =>
+      list(field(field(thread, "comments"), "nodes")).map((comment) => ({
+        commentId: textOr(field(comment, "id"), ""),
+        threadId: textOr(field(thread, "id"), ""),
+        path: stringOrNull(field(comment, "path")),
+        line:
+          numberOrNull(field(comment, "line")) ??
+          numberOrNull(field(comment, "originalLine")),
+        author: login(field(comment, "author")),
+        body: textOr(field(comment, "body"), ""),
+      })),
+    );
+};
 
-  const reviews = JSON.parse(
-    gh(["api", `repos/{owner}/{repo}/pulls/${prNumber}/reviews`]),
-  ) as {
-    user?: { login: string } | null;
-    body?: string | null;
-    state: string;
-    submitted_at?: string | null;
-  }[];
-
-  const [owner, repo] = (process.env.GH_REPO ?? "").split("/");
-  const query = `
+const REVIEW_THREADS_QUERY = `
 query($owner:String!,$repo:String!,$number:Int!) {
   repository(owner:$owner,name:$repo) {
     pullRequest(number:$number) {
@@ -83,7 +98,12 @@ query($owner:String!,$repo:String!,$number:Int!) {
   }
 }`;
 
-  const threadsParsed = JSON.parse(
+/** The PR's unresolved review-thread comments, via GraphQL. */
+const fetchUnresolvedThreadComments = (
+  prNumber: string,
+): ReviewThreadComment[] => {
+  const [owner, repo] = (process.env.GH_REPO ?? "").split("/");
+  const threadsParsed: unknown = JSON.parse(
     gh([
       "api",
       "graphql",
@@ -94,75 +114,70 @@ query($owner:String!,$repo:String!,$number:Int!) {
       "-F",
       `number=${prNumber}`,
       "-f",
-      `query=${query}`,
+      `query=${REVIEW_THREADS_QUERY}`,
     ]),
-  ) as {
-    data?: {
-      repository?: {
-        pullRequest?: {
-          reviewThreads?: {
-            nodes?: {
-              id: string;
-              isResolved: boolean;
-              comments: {
-                nodes: {
-                  id: string;
-                  path: string | null;
-                  line: number | null;
-                  originalLine: number | null;
-                  body: string;
-                  author?: { login: string } | null;
-                }[];
-              };
-            }[];
-          };
-        };
-      };
-    };
-  };
-
-  const unresolvedThreads =
-    threadsParsed.data?.repository?.pullRequest?.reviewThreads?.nodes?.filter(
-      (thread) => !thread.isResolved,
-    ) ?? [];
-
-  const reviewThreads: ReviewThreadComment[] = unresolvedThreads.flatMap(
-    (thread) =>
-      thread.comments.nodes.map((comment) => ({
-        commentId: comment.id,
-        threadId: thread.id,
-        path: comment.path,
-        line: comment.line ?? comment.originalLine,
-        author: comment.author?.login ?? "unknown",
-        body: comment.body,
-      })),
   );
+  return unresolvedThreadComments(threadsParsed);
+};
 
-  const prComments = {
-    issue_comments: prView.comments.map((comment) => ({
-      author: comment.author?.login ?? "unknown",
-      body: comment.body,
-      createdAt: comment.createdAt,
+/** The linked issue's number, title and full text (with comments). */
+const fetchLinkedIssue = (
+  prBody: string,
+): Pick<PullRequestContext, "issueNumber" | "issueTitle" | "linkedIssue"> => {
+  const issueNumber = linkedIssueNumber(prBody);
+  const issueTitle = issueNumber
+    ? safeSh(`gh issue view ${issueNumber} --json title --jq .title`).trim()
+    : "";
+  const linkedIssue = issueNumber
+    ? safeSh(`gh issue view ${issueNumber} --comments`)
+    : "(no linked issue found)";
+  return { issueNumber, issueTitle, linkedIssue };
+};
+
+/** PR conversation comments, review summaries with a body, and threads. */
+const summarisePrComments = (
+  prView: unknown,
+  prNumber: string,
+  reviewThreads: readonly ReviewThreadComment[],
+) => {
+  const reviews = list(
+    JSON.parse(gh(["api", `repos/{owner}/{repo}/pulls/${prNumber}/reviews`])),
+  );
+  return {
+    issue_comments: list(field(prView, "comments")).map((comment) => ({
+      author: login(field(comment, "author")),
+      body: textOr(field(comment, "body"), ""),
+      createdAt: field(comment, "createdAt"),
     })),
     review_summaries: reviews
-      .filter((review) => review.body && review.body.trim().length > 0)
       .map((review) => ({
-        author: review.user?.login ?? "unknown",
-        state: review.state,
-        body: review.body,
-        submittedAt: review.submitted_at,
-      })),
+        author: login(field(review, "user")),
+        state: textOr(field(review, "state"), ""),
+        body: textOr(field(review, "body"), ""),
+        submittedAt: stringOrNull(field(review, "submitted_at")),
+      }))
+      .filter((review) => review.body.trim().length > 0),
     review_threads: reviewThreads,
   };
+};
 
+export const fetchPullRequestContext = (
+  prNumber: string,
+): PullRequestContext => {
+  const prView: unknown = JSON.parse(
+    gh(["pr", "view", prNumber, "--json", "title,body,comments"]),
+  );
+  const prTitle = textOr(field(prView, "title"), "");
+  const prBody = textOr(field(prView, "body"), "");
+  const linked = fetchLinkedIssue(prBody);
+  const reviewThreads = fetchUnresolvedThreadComments(prNumber);
+  const prComments = summarisePrComments(prView, prNumber, reviewThreads);
   const diff = safeSh("git diff main...HEAD") || sh("git diff main..HEAD");
 
   return {
-    prTitle: prView.title,
-    prBody: prView.body ?? "",
-    issueNumber,
-    issueTitle,
-    linkedIssue,
+    prTitle,
+    prBody,
+    ...linked,
     diff,
     prCommentsJson: JSON.stringify(prComments, null, 2),
     diffLines: parseDiffLines(diff),

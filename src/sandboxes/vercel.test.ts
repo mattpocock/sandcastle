@@ -1,5 +1,7 @@
 import { existsSync } from "node:fs";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Writable } from "node:stream";
 import {
   afterEach,
@@ -38,6 +40,8 @@ interface FakeRunCommandParams {
 }
 
 interface FakeSandbox {
+  name?: string;
+  sandboxId?: string;
   mkDir: (path: string) => Promise<void>;
   writeFiles: (files: { path: string; content: Uint8Array }[]) => Promise<void>;
   runCommand: (params: FakeRunCommandParams) => Promise<FakeResult>;
@@ -190,6 +194,50 @@ describe("vercel() setup", () => {
   });
 });
 
+describe("vercel() sandboxId", () => {
+  beforeEach(() => {
+    vi.stubEnv("VERCEL_TOKEN", undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const identifiedSandbox = (identity: {
+    name?: string;
+    sandboxId?: string;
+  }): FakeSandbox => ({
+    ...identity,
+    mkDir: async () => {},
+    writeFiles: async () => {},
+    runCommand: async () => ({
+      exitCode: 0,
+      stdout: async () => "",
+      stderr: async () => "",
+    }),
+  });
+
+  it("is the sandbox's name (SDK 2 and later)", async () => {
+    sandboxCreate.mockImplementationOnce(async () =>
+      identifiedSandbox({ name: "sbx_named" }),
+    );
+
+    const handle = await vercel().create({ env: {} });
+
+    expect(handle.sandboxId).toBe("sbx_named");
+  });
+
+  it("is the sandbox's sandboxId (SDK 1)", async () => {
+    sandboxCreate.mockImplementationOnce(async () =>
+      identifiedSandbox({ sandboxId: "sbx_v1" }),
+    );
+
+    const handle = await vercel().create({ env: {} });
+
+    expect(handle.sandboxId).toBe("sbx_v1");
+  });
+});
+
 describe("vercel() when setup fails inside create()", () => {
   beforeEach(() => {
     vi.stubEnv("VERCEL_TOKEN", undefined);
@@ -327,7 +375,7 @@ describe("vercel() auth from the environment", () => {
     vi.stubEnv("VERCEL_TOKEN", "env-token");
 
     await expect(vercel().create({ env: {} })).rejects.toThrow(
-      /VERCEL_TEAM_ID.*VERCEL_PROJECT_ID/,
+      /VERCEL_TEAM_ID.*VERCEL_PROJECT_ID/u,
     );
     expect(sandboxCreate).not.toHaveBeenCalled();
   });
@@ -424,5 +472,51 @@ describe("vercel() exec", () => {
 
     expect(result.stdout).toBe("ok\n");
     expect(sdk.writtenPaths).toHaveLength(0);
+  });
+});
+
+describe("vercel() copyIn", () => {
+  beforeEach(() => {
+    vi.stubEnv("VERCEL_TOKEN", undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("copies a directory tree into the sandbox", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "vercel-copyin-host-"));
+    await mkdir(join(hostDir, "nested"));
+    await writeFile(join(hostDir, "a.txt"), "top");
+    await writeFile(join(hostDir, "nested", "b.txt"), "deep");
+    const sandboxDir = join(
+      await mkdtemp(join(tmpdir(), "vercel-copyin-sandbox-")),
+      "dest",
+    );
+    const handle = await vercel().create({ env: {} });
+
+    await handle.copyIn(hostDir, sandboxDir);
+
+    await expect(readFile(join(sandboxDir, "a.txt"), "utf8")).resolves.toBe(
+      "top",
+    );
+    await expect(
+      readFile(join(sandboxDir, "nested", "b.txt"), "utf8"),
+    ).resolves.toBe("deep");
+  });
+
+  it("copies a single file into the sandbox", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "vercel-copyin-host-"));
+    const hostFile = join(hostDir, "one.txt");
+    await writeFile(hostFile, "single");
+    const sandboxFile = join(
+      await mkdtemp(join(tmpdir(), "vercel-copyin-sandbox-")),
+      "one.txt",
+    );
+    const handle = await vercel().create({ env: {} });
+
+    await handle.copyIn(hostFile, sandboxFile);
+
+    await expect(readFile(sandboxFile, "utf8")).resolves.toBe("single");
   });
 });

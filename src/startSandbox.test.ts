@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { exec } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
 import {
   createBindMountSandboxProvider,
@@ -24,6 +25,21 @@ import {
 
 const execAsync = promisify(exec);
 
+type CopyIn = (hostPath: string, sandboxPath: string) => Promise<void>;
+
+/**
+ * A `copyIn` that passes syncIn's repo bundle copies through to the real
+ * handle and sends every other copy to `otherwise`.
+ */
+const copyBundlesOnly =
+  (handle: { copyIn: CopyIn }, otherwise: () => Promise<void>): CopyIn =>
+  async (hostPath, sandboxPath) => {
+    if (sandboxPath.includes("repo.bundle")) {
+      return handle.copyIn(hostPath, sandboxPath);
+    }
+    return otherwise();
+  };
+
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });
   await execAsync('git config user.email "test@test.com"', { cwd: dir });
@@ -32,10 +48,10 @@ const initRepo = async (dir: string) => {
 
 const commitFile = async (
   dir: string,
-  name: string,
-  content: string,
+  file: { readonly name: string; readonly content: string },
   message: string,
 ) => {
+  const { name, content } = file;
   await writeFile(join(dir, name), content);
   await execAsync(`git add "${name}"`, { cwd: dir });
   await execAsync(`git commit -m "${message}"`, { cwd: dir });
@@ -131,7 +147,11 @@ describe("startSandbox", () => {
       const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
       tempDirs.push(hostDir);
       await initRepo(hostDir);
-      await commitFile(hostDir, "hello.txt", "hello world", "initial");
+      await commitFile(
+        hostDir,
+        { name: "hello.txt", content: "hello world" },
+        "initial",
+      );
 
       const provider = testIsolated();
       const { handle, sandbox, worktreePath } = await Effect.runPromise(
@@ -154,7 +174,11 @@ describe("startSandbox", () => {
       const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
       tempDirs.push(hostDir);
       await initRepo(hostDir);
-      await commitFile(hostDir, "hello.txt", "hello", "initial");
+      await commitFile(
+        hostDir,
+        { name: "hello.txt", content: "hello" },
+        "initial",
+      );
       await writeFile(join(hostDir, "extra.txt"), "extra content");
 
       const provider = testIsolated();
@@ -178,7 +202,11 @@ describe("startSandbox", () => {
       const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
       tempDirs.push(hostDir);
       await initRepo(hostDir);
-      await commitFile(hostDir, "hello.txt", "hello", "initial");
+      await commitFile(
+        hostDir,
+        { name: "hello.txt", content: "hello" },
+        "initial",
+      );
       await writeFile(join(hostDir, "hang.txt"), "will hang");
 
       const realProvider = testIsolated();
@@ -188,14 +216,11 @@ describe("startSandbox", () => {
           const handle = await realProvider.create(options);
           return {
             ...handle,
-            copyIn: async (hostPath: string, sandboxPath: string) => {
-              // Allow syncIn's copyIn calls (bundle files) to succeed,
-              // but hang on everything else
-              if (sandboxPath.includes("repo.bundle")) {
-                return handle.copyIn(hostPath, sandboxPath);
-              }
-              return new Promise<void>(() => {}); // never resolves
-            },
+            // Allow syncIn's copyIn calls (bundle files) to succeed,
+            // but hang on everything else
+            copyIn: copyBundlesOnly(handle, async () => {
+              await new Promise<void>(() => {}); // never resolves
+            }),
           };
         },
       });
@@ -216,9 +241,7 @@ describe("startSandbox", () => {
         );
         // Yield to allow real async operations (create, syncIn) to complete
         yield* Effect.yieldNow();
-        yield* Effect.promise(
-          async () => new Promise((r) => setTimeout(r, 2000)),
-        );
+        yield* Effect.promise(async () => sleep(2000));
         yield* Effect.yieldNow();
         // Now advance past the copyPaths timeout
         yield* TestClock.adjust(Duration.millis(COPY_PATHS_TIMEOUT_MS + 1));
@@ -240,7 +263,11 @@ describe("startSandbox", () => {
       const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
       tempDirs.push(hostDir);
       await initRepo(hostDir);
-      await commitFile(hostDir, "hello.txt", "hello", "initial");
+      await commitFile(
+        hostDir,
+        { name: "hello.txt", content: "hello" },
+        "initial",
+      );
 
       const realProvider = testIsolated();
       let closeCalls = 0;
@@ -272,7 +299,11 @@ describe("startSandbox", () => {
       const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
       tempDirs.push(hostDir);
       await initRepo(hostDir);
-      await commitFile(hostDir, "hello.txt", "hello", "initial");
+      await commitFile(
+        hostDir,
+        { name: "hello.txt", content: "hello" },
+        "initial",
+      );
       await writeFile(join(hostDir, "extra.txt"), "extra content");
 
       const realProvider = testIsolated();
@@ -283,12 +314,9 @@ describe("startSandbox", () => {
           const handle = await realProvider.create(options);
           return {
             ...handle,
-            copyIn: async (hostPath: string, sandboxPath: string) => {
-              if (sandboxPath.includes("repo.bundle")) {
-                return handle.copyIn(hostPath, sandboxPath);
-              }
+            copyIn: copyBundlesOnly(handle, async () => {
               throw new Error("copy failed");
-            },
+            }),
             close: async () => {
               closeCalls++;
               await handle.close();
@@ -315,7 +343,11 @@ describe("startSandbox", () => {
       const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
       tempDirs.push(hostDir);
       await initRepo(hostDir);
-      await commitFile(hostDir, "hello.txt", "hello", "initial");
+      await commitFile(
+        hostDir,
+        { name: "hello.txt", content: "hello" },
+        "initial",
+      );
 
       const realProvider = testIsolated();
       let closeCalls = 0;
@@ -344,7 +376,11 @@ describe("startSandbox", () => {
       const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
       tempDirs.push(hostDir);
       await initRepo(hostDir);
-      await commitFile(hostDir, "hello.txt", "hello", "initial");
+      await commitFile(
+        hostDir,
+        { name: "hello.txt", content: "hello" },
+        "initial",
+      );
 
       const provider = testIsolated();
       const started = Effect.runPromise(
@@ -370,7 +406,9 @@ describe("startSandbox", () => {
      */
     const makeSlowCreate = () => {
       let resolveCreate!: () => void;
-      const released = new Promise<void>((r) => (resolveCreate = r));
+      const released = new Promise<void>((resolve) => {
+        resolveCreate = resolve;
+      });
       let markStarted = (): void => undefined;
       const started = new Promise<void>((resolve) => {
         markStarted = () => {
@@ -415,7 +453,7 @@ describe("startSandbox", () => {
       );
       // The provider finishes creating the sandbox after we gave up on it.
       slow.resolveCreate();
-      await new Promise((r) => setTimeout(r, 10));
+      await sleep(10);
       return exit;
     };
 

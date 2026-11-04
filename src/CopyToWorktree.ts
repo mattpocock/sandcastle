@@ -1,4 +1,5 @@
-import { type ChildProcess, execFile } from "node:child_process";
+import { execFile } from "node:child_process";
+import type { ChildProcess, ExecFileException } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname, join, sep } from "node:path";
@@ -18,6 +19,85 @@ const COPY_TO_WORKTREE_TIMEOUT_MS = 60_000;
  */
 export const getCopyOnWriteFlags = (platform: string): string[] =>
   platform === "darwin" ? ["-cR"] : ["-R", "--reflink=auto"];
+
+/** Create `dir` (and its parents) for the copy of `relativePath`. */
+const createDir = (
+  dir: string,
+  relativePath: string,
+): Effect.Effect<void, CopyToWorktreeError> =>
+  Effect.tryPromise({
+    try: () => mkdir(dir, { recursive: true }),
+    catch: (e) => {
+      const message = e instanceof Error ? e.message : String(e);
+      return new CopyToWorktreeError({
+        message: `Failed to copy ${relativePath} to worktree: ${message}`,
+        path: relativePath,
+        stderr: message,
+        exitCode: null,
+      });
+    },
+  });
+
+/** Builds the error for a failed copy of `relativePath`. */
+const copyFailed = (
+  relativePath: string,
+  error: ExecFileException,
+  stderr: string,
+): CopyToWorktreeError =>
+  new CopyToWorktreeError({
+    message: `Failed to copy ${relativePath} to worktree: ${stderr || error.message}`,
+    path: relativePath,
+    stderr: stderr || error.message,
+    exitCode: typeof error.code === "number" ? error.code : null,
+  });
+
+/**
+ * Run `cp` with the copy-on-write flags, falling back to a plain `cp -R`
+ * when copy-on-write is not supported. Interrupting the effect kills the
+ * running `cp`.
+ */
+const copyPath = (copy: {
+  readonly cowFlags: string[];
+  readonly cpSrc: string;
+  readonly dest: string;
+  readonly relativePath: string;
+}): Effect.Effect<void, CopyToWorktreeError> =>
+  Effect.async<void, CopyToWorktreeError>((resume) => {
+    const { cowFlags, cpSrc, dest, relativePath } = copy;
+    // The cp currently running, killed if the copy is interrupted (e.g.
+    // by the timeout in copyToWorktree) so it can't keep writing into the
+    // worktree.
+    let child: ChildProcess;
+    // Set once the copy is interrupted. Killing the cp makes its callback
+    // fire with an error, which must not start the fallback cp: nothing
+    // would kill that one.
+    let interrupted = false;
+    child = execFile("cp", [...cowFlags, cpSrc, dest], (error) => {
+      if (interrupted) {
+        return;
+      }
+      if (!error) {
+        resume(Effect.void);
+        return;
+      }
+      // Fall back to a regular copy if copy-on-write is not supported
+      child = execFile(
+        "cp",
+        ["-R", cpSrc, dest],
+        (fallbackError, _, stderr) => {
+          resume(
+            fallbackError
+              ? Effect.fail(copyFailed(relativePath, fallbackError, stderr))
+              : Effect.void,
+          );
+        },
+      );
+    });
+    return Effect.sync(() => {
+      interrupted = true;
+      child.kill("SIGKILL");
+    });
+  });
 
 /**
  * Copy files and directories from the host repo root to the worktree root,
@@ -48,56 +128,8 @@ export const copyToWorktree = (
       // For a file, create its parent dirs so a nested path can land.
       const dirToCreate = isDirectory ? dest : dirname(dest);
       const cpSrc = isDirectory ? `${src}${sep}.` : src;
-      yield* Effect.tryPromise({
-        try: () => mkdir(dirToCreate, { recursive: true }),
-        catch: (e) => {
-          const message = e instanceof Error ? e.message : String(e);
-          return new CopyToWorktreeError({
-            message: `Failed to copy ${relativePath} to worktree: ${message}`,
-            path: relativePath,
-            stderr: message,
-            exitCode: null,
-          });
-        },
-      });
-      yield* Effect.async<void, CopyToWorktreeError>((resume) => {
-        // The cp currently running, killed if the copy is interrupted (e.g.
-        // by the timeout below) so it can't keep writing into the worktree.
-        let child: ChildProcess;
-        child = execFile("cp", [...cowFlags, cpSrc, dest], (error) => {
-          if (error) {
-            // Fall back to a regular copy if copy-on-write is not supported
-            child = execFile(
-              "cp",
-              ["-R", cpSrc, dest],
-              (fallbackError, _, stderr) => {
-                if (fallbackError) {
-                  resume(
-                    Effect.fail(
-                      new CopyToWorktreeError({
-                        message: `Failed to copy ${relativePath} to worktree: ${stderr || fallbackError.message}`,
-                        path: relativePath,
-                        stderr: stderr || fallbackError.message,
-                        exitCode:
-                          typeof fallbackError.code === "number"
-                            ? fallbackError.code
-                            : null,
-                      }),
-                    ),
-                  );
-                } else {
-                  resume(Effect.void);
-                }
-              },
-            );
-          } else {
-            resume(Effect.void);
-          }
-        });
-        return Effect.sync(() => {
-          child.kill("SIGKILL");
-        });
-      });
+      yield* createDir(dirToCreate, relativePath);
+      yield* copyPath({ cowFlags, cpSrc, dest, relativePath });
     }
   }).pipe(
     withTimeout(

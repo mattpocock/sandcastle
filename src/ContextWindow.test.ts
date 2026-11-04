@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import {
   claudeCode,
   codex,
@@ -62,8 +62,9 @@ describe("context window from real agent output", () => {
 
   it("codex: the session's last token_count gives the last request and the model limit", () => {
     const provider = codex("gpt-6-luna");
+    assert(provider.parseSessionContextWindow !== undefined);
     expect(
-      provider.parseSessionContextWindow!(fixture("codex.session.jsonl")),
+      provider.parseSessionContextWindow(fixture("codex.session.jsonl")),
     ).toStrictEqual({ tokens: 31_899, limit: 258_400 });
   });
 
@@ -110,7 +111,9 @@ describe("context window from real agent output", () => {
     );
     // result.usage is summed over the turn's calls (20491 input, 16768 cache read).
     expect(events).toStrictEqual([]);
-    expect(cursor("composer-2").parseSessionContextWindow).toBeUndefined();
+    expect(cursor("composer-2")).not.toHaveProperty(
+      "parseSessionContextWindow",
+    );
   });
 });
 

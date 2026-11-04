@@ -150,10 +150,14 @@ describe("testIsolated()", () => {
       const lines: string[] = [];
       const result = await handle.exec(
         'echo "line1"; echo "line2"; echo "line3"',
-        { onLine: (line) => lines.push(line) },
+        {
+          onLine: (line) => {
+            lines.push(line);
+          },
+        },
       );
 
-      expect(lines).toEqual(["line1", "line2", "line3"]);
+      expect(lines).toStrictEqual(["line1", "line2", "line3"]);
       expect(result.exitCode).toBe(0);
     } finally {
       await handle.close();

@@ -1,0 +1,114 @@
+# Prompts
+
+A [prompt template](./glossary.md#prompt-template) is a [prompt](./glossary.md#prompt) that Sandcastle reads from a file and fills in before the [agent](./glossary.md#agent) sees it. This one, in `.sandcastle/prompt.md`, has a [prompt argument](./glossary.md#prompt-argument), `{{ISSUE_NUMBER}}`, whose value you pass in `promptArgs`; a [built-in prompt argument](./glossary.md#built-in-prompt-argument), `{{SOURCE_BRANCH}}`, which Sandcastle fills in for you; and a [shell expression](./glossary.md#shell-expression), a `` !`command` `` that Sandcastle runs in the [sandbox](./glossary.md#sandbox) and replaces with its output:
+
+```markdown
+Work on issue #{{ISSUE_NUMBER}}. You are on {{SOURCE_BRANCH}}.
+
+!`gh issue view {{ISSUE_NUMBER}} --json body -q .body`
+```
+
+And the `run()` call that fills it in:
+
+```typescript
+import { run, claudeCode } from "@ai-hero/sandcastle";
+import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+
+await run({
+  agent: claudeCode("claude-opus-4-8"),
+  sandbox: docker(),
+  promptFile: ".sandcastle/prompt.md",
+  promptArgs: { ISSUE_NUMBER: 42 },
+});
+```
+
+Sandcastle uses a flexible prompt system. You write the prompt, and the engine executes it — no opinions about workflow, issue tracking, or context sources are imposed.
+
+## Prompt resolution
+
+You must provide exactly one of:
+
+1. `prompt: "inline string"` — pass an [inline prompt](./glossary.md#inline-prompt), a prompt written as a string in your code, directly via `RunOptions`
+2. `promptFile: "./path/to/prompt.md"` — point to a specific file via `RunOptions`
+
+`prompt` and `promptFile` are mutually exclusive — providing both is an error. If neither is provided, `run()` throws an error asking you to supply one.
+
+**Inline prompts (`prompt: "..."`) are passed to the agent literally.** No `{{KEY}}` substitution, no `` !`command` `` expansion, no built-in `{{SOURCE_BRANCH}}` / `{{TARGET_BRANCH}}` injection. If you need values interpolated into an inline prompt, build the string in JavaScript (`` `Work on ${branch}…` ``). Passing `promptArgs` alongside an inline prompt is an error — switch to `promptFile` to use substitution.
+
+The substitution and expansion features below apply **only** to prompts sourced from `promptFile`.
+
+> **Convention**: `sandcastle init` scaffolds `.sandcastle/prompt.md` and all templates explicitly reference it via `promptFile: ".sandcastle/prompt.md"`. This is a convention, not an automatic fallback — Sandcastle does not read `.sandcastle/prompt.md` unless you pass it as `promptFile`.
+
+## Dynamic context with `` !`command` ``
+
+Use `` !`command` `` expressions in your prompt to pull in dynamic context. Each expression is replaced with the command's stdout before the prompt is sent to the agent. All expressions in a prompt run **in parallel** for faster expansion.
+
+Commands run **inside the sandbox** after `sandbox.onSandboxReady` hooks complete, so they see the same repo state the agent sees (including installed dependencies).
+
+```markdown
+# Open issues
+
+!`gh issue list --state open --label Sandcastle --json number,title,body,comments,labels --limit 100`
+
+# Recent commits
+
+!`git log --oneline -10`
+```
+
+If any command exits with a non-zero code, the run fails immediately with an error.
+
+Shell expressions inside HTML comments (`<!-- … -->`) are not run; they reach the agent as written. Use a comment to keep an example or a disabled command in the prompt.
+
+## Prompt arguments with `{{KEY}}`
+
+Use `{{KEY}}` placeholders in your prompt to inject values from the `promptArgs` option. This is useful for reusing the same prompt file across multiple runs with different parameters.
+
+```typescript
+import { run } from "@ai-hero/sandcastle";
+
+await run({
+  promptFile: "./my-prompt.md",
+  promptArgs: { ISSUE_NUMBER: 42, PRIORITY: "high" },
+});
+```
+
+In the prompt file:
+
+```markdown
+Work on issue #{{ISSUE_NUMBER}} (priority: {{PRIORITY}}).
+```
+
+[Prompt argument substitution](./glossary.md#prompt-argument-substitution), the step that swaps each `{{KEY}}` for its value, runs on the [host](./glossary.md#host) before shell expression expansion, so `{{KEY}}` placeholders inside `` !`command` `` expressions are replaced first:
+
+```markdown
+!`gh issue view {{ISSUE_NUMBER}} --json body -q .body`
+```
+
+A `{{KEY}}` placeholder with no matching prompt argument is an error. Unused prompt arguments produce a warning.
+
+`` !`command` `` expansion only runs on shell blocks written in the prompt file itself. Any `` !`…` `` pattern that appears inside an argument value is treated as inert text — it won't be executed against the host shell. This makes it safe to pass user-authored content (issue titles, PR descriptions, docs excerpts) through `promptArgs`.
+
+## Built-in prompt arguments
+
+Sandcastle automatically injects two built-in prompt arguments into every prompt:
+
+| Placeholder         | Value                                                                                              |
+| ------------------- | -------------------------------------------------------------------------------------------------- |
+| `{{SOURCE_BRANCH}}` | The branch the agent works on (determined by the [branch strategy](./glossary.md#branch-strategy)) |
+| `{{TARGET_BRANCH}}` | The host's active branch at `run()` time                                                           |
+
+Use them in your prompt without passing them via `promptArgs`:
+
+```markdown
+You are working on {{SOURCE_BRANCH}}. When diffing, compare against {{TARGET_BRANCH}}.
+```
+
+Passing `SOURCE_BRANCH` or `TARGET_BRANCH` in `promptArgs` is an error — built-in prompt arguments cannot be overridden.
+
+## Related terms
+
+- [Iterations](./iterations.md): the prompt is passed at the start of each [iteration](./glossary.md#iteration), and can tell the agent to emit the [completion signal](./glossary.md#completion-signal)
+- [Structured output](./structured-output.md): the prompt must contain the output tag
+- [Hooks](./hooks.md): shell expressions run after `sandbox.onSandboxReady` hooks
+- [Branch strategies](./branch-strategies.md#source-and-target-branches): the source and [target branches](./glossary.md#target-branch)
+- [Init](./init.md): the placeholders `sandcastle init` fills in once, and the scaffolded `prompt.md`

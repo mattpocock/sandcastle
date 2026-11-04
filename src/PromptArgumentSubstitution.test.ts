@@ -2,14 +2,25 @@ import type { Layer } from "effect";
 import { Effect, Ref } from "effect";
 import { describe, expect, it } from "vitest";
 import { SilentDisplay } from "./Display.js";
-import type { DisplayEntry } from "./Display.js";
+import type { Display, DisplayEntry } from "./Display.js";
 import {
   substitutePromptArgs,
   validateNoArgsWithInlinePrompt,
   validateNoBuiltInArgOverride,
   BUILT_IN_PROMPT_ARG_KEYS,
 } from "./PromptArgumentSubstitution.js";
+import type { PromptArgs } from "./PromptArgumentSubstitution.js";
 import { PromptError } from "./errors.js";
+
+/**
+ * Prompt args holding a value the type forbids, as a JavaScript caller (or a
+ * stale config) can pass. `Reflect.set` writes it without a type assertion.
+ */
+const untypedArgs = (key: string, value: undefined | null): PromptArgs => {
+  const args: PromptArgs = {};
+  Reflect.set(args, key, value);
+  return args;
+};
 
 describe("PromptArgumentSubstitution", () => {
   const setup = () => {
@@ -27,7 +38,7 @@ describe("PromptArgumentSubstitution", () => {
   const run = (
     prompt: string,
     args: Record<string, string | number | boolean>,
-    layer: Layer.Layer<import("./Display.js").Display>,
+    layer: Layer.Layer<Display>,
   ) =>
     Effect.runPromise(
       substitutePromptArgs(prompt, args).pipe(Effect.provide(layer)),
@@ -36,7 +47,7 @@ describe("PromptArgumentSubstitution", () => {
   const runFail = async (
     prompt: string,
     args: Record<string, string | number | boolean>,
-    layer: Layer.Layer<import("./Display.js").Display>,
+    layer: Layer.Layer<Display>,
   ) =>
     Effect.runPromise(
       substitutePromptArgs(prompt, args).pipe(
@@ -95,7 +106,7 @@ describe("PromptArgumentSubstitution", () => {
     const { layer } = setup();
     const error = await runFail(
       "Hello {{TITLE}}",
-      { TITLE: undefined } as unknown as Record<string, string>,
+      untypedArgs("TITLE", undefined),
       layer,
     );
     expect(error).toBeInstanceOf(PromptError);
@@ -108,7 +119,7 @@ describe("PromptArgumentSubstitution", () => {
     const { layer } = setup();
     const error = await runFail(
       "Hello {{TITLE}}",
-      { TITLE: null } as unknown as Record<string, string>,
+      untypedArgs("TITLE", null),
       layer,
     );
     expect(error).toBeInstanceOf(PromptError);
@@ -195,7 +206,7 @@ describe("PromptArgumentSubstitution", () => {
     const error = await runFail("{{A}} and {{B}}", {}, layer);
     expect(error).toBeInstanceOf(PromptError);
     // Should mention at least one of the missing keys
-    expect(error.message).toMatch(/A|B/);
+    expect(error.message).toMatch(/A|B/u);
   });
 
   it("warns about multiple unused args", async () => {

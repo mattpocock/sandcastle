@@ -35,7 +35,8 @@ import type { ExecResult, SandboxService } from "./SandboxFactory.js";
 import type { IsolatedSandboxHandle } from "./SandboxProvider.js";
 import { buildRecoveryMessage } from "./RecoveryMessage.js";
 import type { FailedStep } from "./RecoveryMessage.js";
-import { SyncError, type SyncOutPathError } from "./errors.js";
+import { SyncError } from "./errors.js";
+import type { SyncOutPathError } from "./errors.js";
 import { hostGit } from "./hostGit.js";
 import {
   checkPatchFileSymlinks,
@@ -252,6 +253,337 @@ export const countCommitsToSync = (
     return Number.isNaN(parsed) ? 0 : parsed;
   });
 
+/** What the sandbox has that the host doesn't. */
+interface SandboxChanges {
+  /** The commit format-patch starts from. */
+  readonly base: string;
+  readonly sandboxHead: string;
+  readonly hasCommits: boolean;
+  readonly hasDiff: boolean;
+  /** `git diff HEAD` in the sandbox: the uncommitted changes. */
+  readonly diff: string;
+  readonly hasUntracked: boolean;
+  readonly untrackedFiles: string[];
+}
+
+/**
+ * The format-patch base, from a sandbox-owned ref. `git am` rewrites host
+ * SHAs, so after run 1 the host HEAD is unknown to the sandbox; the ref pins
+ * the last commit we actually shipped. Absent on run 1 — and that is the only
+ * run where host HEAD is still a valid base (sync-in just copied it in). The
+ * two conditions are coupled. See ADR 0017.
+ */
+const readSyncBase = (
+  handle: IsolatedSandboxHandle,
+  hostHead: string,
+): Effect.Effect<string, SyncError> =>
+  execSandbox(handle, `git rev-parse --verify --quiet ${SYNC_BASE_REF}`, {
+    cwd: handle.worktreePath,
+  }).pipe(
+    Effect.map((result) =>
+      result.exitCode === 0 && result.stdout.trim().length > 0
+        ? result.stdout.trim()
+        : hostHead,
+    ),
+  );
+
+/** The sandbox's untracked files; none when git fails. */
+const listUntracked = (
+  handle: IsolatedSandboxHandle,
+): Effect.Effect<string[], SyncError> =>
+  execSandbox(handle, "git ls-files --others --exclude-standard", {
+    cwd: handle.worktreePath,
+  }).pipe(
+    Effect.map((result) =>
+      result.exitCode === 0 && result.stdout.trim().length > 0
+        ? result.stdout
+            .trim()
+            .split("\n")
+            .filter((f) => f.length > 0)
+        : [],
+    ),
+  );
+
+/** Asks the sandbox what changed since the last sync. */
+const inspectSandbox = (
+  hostRepoDir: string,
+  handle: IsolatedSandboxHandle,
+): Effect.Effect<SandboxChanges, SyncError> =>
+  Effect.gen(function* () {
+    const hostHead = (yield* execHostGit(
+      ["rev-parse", "HEAD"],
+      hostRepoDir,
+    )).trim();
+    const sandboxHead = (yield* execOk(handle, "git rev-parse HEAD", {
+      cwd: handle.worktreePath,
+    })).stdout.trim();
+    const base = yield* readSyncBase(handle, hostHead);
+
+    // Check for uncommitted changes
+    const diffResult = yield* execSandbox(handle, "git diff HEAD", {
+      cwd: handle.worktreePath,
+    });
+    const untrackedFiles = yield* listUntracked(handle);
+
+    return {
+      base,
+      sandboxHead,
+      hasCommits: base !== sandboxHead,
+      hasDiff: diffResult.exitCode === 0 && diffResult.stdout.trim().length > 0,
+      diff: diffResult.stdout,
+      hasUntracked: untrackedFiles.length > 0,
+      untrackedFiles,
+    };
+  });
+
+/** One sync-out, once its patch directory exists. */
+interface SyncRun {
+  readonly hostRepoDir: string;
+  readonly handle: IsolatedSandboxHandle;
+  /** The host worktree's real path, symlinks resolved. */
+  readonly realRoot: string;
+  readonly changes: SandboxChanges;
+  /** Each untracked file's checked path segments, by index. */
+  readonly untrackedSegments: readonly string[][];
+  readonly patchDir: string;
+  readonly untrackedDir: string;
+}
+
+const diffPathOf = (run: SyncRun): string =>
+  join(run.patchDir, "changes.patch");
+
+/** Where an untracked file is staged in the patch directory. */
+const stagedUntrackedPath = (run: SyncRun, i: number): string =>
+  join(run.untrackedDir, ...(run.untrackedSegments[i] ?? []));
+
+/**
+ * Saves the sandbox's new commits as patches in the patch directory.
+ * Returns the host paths of the patches that carry a diff.
+ */
+const saveCommitPatches = (
+  run: SyncRun,
+): Effect.Effect<string[], SyncError | SyncOutPathError> =>
+  Effect.gen(function* () {
+    const { handle } = run;
+    const mkTempResult = yield* execOk(
+      handle,
+      "mktemp -d -t sandcastle-patches-XXXXXX",
+    );
+    const sandboxPatchDir = mkTempResult.stdout.trim();
+    const nonEmptyPatches: string[] = [];
+
+    try {
+      yield* execOk(
+        handle,
+        `git format-patch "${run.changes.base}..HEAD" -o "${sandboxPatchDir}"`,
+        { cwd: handle.worktreePath },
+      );
+
+      const lsResult = yield* execOk(handle, `ls -1 "${sandboxPatchDir}"`);
+      const patchNames = lsResult.stdout
+        .trim()
+        .split("\n")
+        .filter((name) => name.length > 0);
+
+      for (const patchName of patchNames) {
+        yield* checkPatchName(patchName);
+        const sandboxPatchPath = `${sandboxPatchDir}/${patchName}`;
+        const hostPatchPath = join(run.patchDir, patchName);
+        yield* Effect.tryPromise({
+          try: () => handle.copyFileOut(sandboxPatchPath, hostPatchPath),
+          catch: (e) =>
+            new SyncError({
+              message: `Failed to copy patch ${patchName}: ${e instanceof Error ? e.message : String(e)}`,
+            }),
+        });
+
+        if (!(yield* isEmptyPatch(hostPatchPath))) {
+          nonEmptyPatches.push(hostPatchPath);
+        }
+      }
+    } finally {
+      yield* execSandbox(handle, `rm -rf "${sandboxPatchDir}"`);
+    }
+    return nonEmptyPatches;
+  });
+
+/** Saves the uncommitted diff as `changes.patch`. */
+const saveDiff = (run: SyncRun): Effect.Effect<void, SyncError> =>
+  Effect.tryPromise({
+    try: () => writeFile(diffPathOf(run), run.changes.diff),
+    catch: (e) =>
+      new SyncError({
+        message: `Failed to write diff patch: ${e instanceof Error ? e.message : String(e)}`,
+      }),
+  });
+
+/** Copies each untracked file out of the sandbox into the patch directory. */
+const saveUntracked = (run: SyncRun): Effect.Effect<void, SyncError> =>
+  Effect.gen(function* () {
+    for (const [i, relPath] of run.changes.untrackedFiles.entries()) {
+      const sandboxFilePath = `${run.handle.worktreePath}/${relPath}`;
+      const hostFilePath = stagedUntrackedPath(run, i);
+      yield* Effect.tryPromise({
+        try: async () => {
+          await mkdir(dirname(hostFilePath), { recursive: true });
+          await run.handle.copyFileOut(sandboxFilePath, hostFilePath);
+        },
+        catch: (e) =>
+          new SyncError({
+            message: `Failed to save untracked file ${relPath}: ${e instanceof Error ? e.message : String(e)}`,
+          }),
+      });
+    }
+  });
+
+/** Each untracked file's host destination, symlinks resolved on the host. */
+const checkUntrackedDestinations = (
+  run: SyncRun,
+): Effect.Effect<string[], SyncOutPathError> =>
+  Effect.all(
+    run.changes.untrackedFiles.map((relPath, i) =>
+      checkStagedFile(stagedUntrackedPath(run, i), relPath).pipe(
+        Effect.andThen(() => resolveHostDestination(run.realRoot, relPath)),
+      ),
+    ),
+  );
+
+/** Copies the staged untracked files to their checked host destinations. */
+const copyUntrackedToHost = (
+  run: SyncRun,
+  destinations: readonly string[],
+): Effect.Effect<void, SyncError> =>
+  Effect.tryPromise({
+    try: async () => {
+      for (const [i, destPath] of destinations.entries()) {
+        const srcPath = stagedUntrackedPath(run, i);
+        await mkdir(dirname(destPath), { recursive: true });
+        const content = await readFile(srcPath);
+        await writeFile(destPath, content);
+      }
+    },
+    catch: (e) =>
+      new SyncError({
+        message: `Failed to copy untracked files: ${e instanceof Error ? e.message : String(e)}`,
+      }),
+  });
+
+/** Whether `effect` failed, without failing. */
+const failed = <E>(effect: Effect.Effect<unknown, E>): Effect.Effect<boolean> =>
+  Effect.either(effect).pipe(Effect.map((result) => result._tag === "Left"));
+
+/**
+ * Phase 2: applies the saved artifacts to the host, in order, stopping at
+ * the first step that fails. Returns that step.
+ */
+const applySaved = (
+  run: SyncRun,
+  nonEmptyPatches: readonly string[],
+): Effect.Effect<FailedStep | undefined, SyncOutPathError> =>
+  Effect.gen(function* () {
+    const { hostRepoDir, changes } = run;
+    // Apply committed patches
+    if (nonEmptyPatches.length > 0) {
+      // ignore abort failures
+      yield* Effect.either(execHostGit(["am", "--abort"], hostRepoDir));
+      if (
+        yield* failed(
+          execHostGit(["am", "--3way", ...nonEmptyPatches], hostRepoDir),
+        )
+      ) {
+        return "commits";
+      }
+    }
+
+    // Apply uncommitted diff
+    if (
+      changes.hasDiff &&
+      (yield* failed(execHostGit(["apply", diffPathOf(run)], hostRepoDir)))
+    ) {
+      return "diff";
+    }
+
+    // Copy untracked files. The applied patches changed the host tree, so
+    // each destination's symlinks are resolved again; a refusal fails the
+    // sync rather than being recovered from.
+    if (changes.hasUntracked) {
+      const destinations = yield* checkUntrackedDestinations(run);
+      if (yield* failed(copyUntrackedToHost(run, destinations))) {
+        return "untracked";
+      }
+    }
+    return undefined;
+  });
+
+/**
+ * Advances the sync-base ref, then cleans up the patch directory, or keeps
+ * it and prints how to recover when a step failed.
+ */
+const completeSyncOut = (
+  run: SyncRun,
+  nonEmptyPatches: readonly string[],
+  failedStep: FailedStep | undefined,
+): Effect.Effect<void, SyncError> =>
+  Effect.gen(function* () {
+    const { changes } = run;
+    // Advance the sync-base ref whenever commits were actually shipped (or
+    // there were none new to ship in this slice). Skipped only when `git am`
+    // itself failed — those commits never landed on the host, and the next
+    // run must retry from the same base. Diff/untracked failures don't undo
+    // the commits that already landed; the ref must move so we don't re-emit.
+    if (changes.hasCommits && failedStep !== "commits") {
+      yield* execOk(
+        run.handle,
+        `git update-ref ${SYNC_BASE_REF} ${changes.sandboxHead}`,
+        { cwd: run.handle.worktreePath },
+      );
+    }
+
+    // --- Cleanup or preserve ---
+    if (failedStep) {
+      const msg = buildRecoveryMessage({
+        patchDir: join(".sandcastle", "patches", basename(run.patchDir)),
+        failedStep,
+        hasCommits: nonEmptyPatches.length > 0,
+        hasDiff: changes.hasDiff,
+        hasUntracked: changes.hasUntracked,
+      });
+      yield* Console.error(`\n${msg}`);
+    } else {
+      yield* removePatchDir(run.hostRepoDir, run.patchDir);
+    }
+  });
+
+/**
+ * Phase 1: saves every artifact to the patch directory, then checks every
+ * path they would write on the host. Returns the patches that carry a diff.
+ */
+const saveAndCheck = (
+  run: SyncRun,
+): Effect.Effect<string[], SyncError | SyncOutPathError> =>
+  Effect.gen(function* () {
+    const { changes } = run;
+    const nonEmptyPatches = changes.hasCommits
+      ? yield* saveCommitPatches(run)
+      : [];
+    if (changes.hasDiff) {
+      yield* saveDiff(run);
+    }
+    if (changes.hasUntracked) {
+      yield* saveUntracked(run);
+    }
+
+    // Checked before anything is applied, and again just before writing.
+    yield* checkUntrackedDestinations(run);
+
+    // Refuse symlinks the patches would make that lead out of the worktree.
+    yield* checkPatchFileSymlinks(
+      [...nonEmptyPatches, ...(changes.hasDiff ? [diffPathOf(run)] : [])],
+      hostSymlinkAt(run.realRoot),
+    );
+    return nonEmptyPatches;
+  });
+
 /**
  * Sync changes from an isolated sandbox back to the host repo.
  *
@@ -265,65 +597,17 @@ export const syncOut = (
 ): Effect.Effect<void, SyncError | SyncOutPathError> => {
   let createdPatchDir: string | undefined;
   return Effect.gen(function* () {
-    const { worktreePath } = handle;
     const realRoot = yield* realRootOf(hostRepoDir);
-
-    const hostHead = (yield* execHostGit(
-      ["rev-parse", "HEAD"],
-      hostRepoDir,
-    )).trim();
-    const sandboxHead = (yield* execOk(handle, "git rev-parse HEAD", {
-      cwd: worktreePath,
-    })).stdout.trim();
-
-    // Resolve the format-patch base from a sandbox-owned ref. `git am` rewrites
-    // host SHAs, so after run 1 the host HEAD is unknown to the sandbox; the
-    // ref pins the last commit we actually shipped. Absent on run 1 — and that
-    // is the only run where host HEAD is still a valid base (sync-in just
-    // copied it in). The two conditions are coupled. See ADR 0017.
-    const baseRefResult = yield* execSandbox(
-      handle,
-      `git rev-parse --verify --quiet ${SYNC_BASE_REF}`,
-      { cwd: worktreePath },
-    );
-    const base =
-      baseRefResult.exitCode === 0 && baseRefResult.stdout.trim().length > 0
-        ? baseRefResult.stdout.trim()
-        : hostHead;
-
-    const hasCommits = base !== sandboxHead;
-
-    // Check for uncommitted changes
-    const diffResult = yield* execSandbox(handle, "git diff HEAD", {
-      cwd: worktreePath,
-    });
-    const hasDiff =
-      diffResult.exitCode === 0 && diffResult.stdout.trim().length > 0;
-
-    // Check for untracked files
-    const lsFilesResult = yield* execSandbox(
-      handle,
-      "git ls-files --others --exclude-standard",
-      { cwd: worktreePath },
-    );
-    const hasUntracked =
-      lsFilesResult.exitCode === 0 && lsFilesResult.stdout.trim().length > 0;
-
-    const untrackedFiles = hasUntracked
-      ? lsFilesResult.stdout
-          .trim()
-          .split("\n")
-          .filter((f) => f.length > 0)
-      : [];
+    const changes = yield* inspectSandbox(hostRepoDir, handle);
 
     // Nothing to sync
-    if (!hasCommits && !hasDiff && !hasUntracked) {
+    if (!changes.hasCommits && !changes.hasDiff && !changes.hasUntracked) {
       return;
     }
 
     // Refuse a bad untracked path before anything is written.
     const untrackedSegments = yield* Effect.all(
-      untrackedFiles.map((relPath) => checkRelativePath(relPath)),
+      changes.untrackedFiles.map((relPath) => checkRelativePath(relPath)),
     );
 
     // --- Phase 1: Save all artifacts ---
@@ -331,191 +615,20 @@ export const syncOut = (
     createdPatchDir = patchDir;
     // Created with `mkdir -p`, which follows symlinks.
     yield* resolveHostDestination(realRoot, relative(hostRepoDir, patchDir));
-    const relativePatchDir = join(".sandcastle", "patches", basename(patchDir));
-    const untrackedDir = join(patchDir, "untracked");
-
-    const nonEmptyPatches: string[] = [];
-
-    // Save committed patches
-    if (hasCommits) {
-      const mkTempResult = yield* execOk(
-        handle,
-        "mktemp -d -t sandcastle-patches-XXXXXX",
-      );
-      const sandboxPatchDir = mkTempResult.stdout.trim();
-
-      try {
-        yield* execOk(
-          handle,
-          `git format-patch "${base}..HEAD" -o "${sandboxPatchDir}"`,
-          { cwd: worktreePath },
-        );
-
-        const lsResult = yield* execOk(handle, `ls -1 "${sandboxPatchDir}"`);
-        const patchNames = lsResult.stdout
-          .trim()
-          .split("\n")
-          .filter((name) => name.length > 0);
-
-        for (const patchName of patchNames) {
-          yield* checkPatchName(patchName);
-          const sandboxPatchPath = `${sandboxPatchDir}/${patchName}`;
-          const hostPatchPath = join(patchDir, patchName);
-          yield* Effect.tryPromise({
-            try: () => handle.copyFileOut(sandboxPatchPath, hostPatchPath),
-            catch: (e) =>
-              new SyncError({
-                message: `Failed to copy patch ${patchName}: ${e instanceof Error ? e.message : String(e)}`,
-              }),
-          });
-
-          if (!(yield* isEmptyPatch(hostPatchPath))) {
-            nonEmptyPatches.push(hostPatchPath);
-          }
-        }
-      } finally {
-        yield* execSandbox(handle, `rm -rf "${sandboxPatchDir}"`);
-      }
-    }
-
-    // Save uncommitted diff
-    if (hasDiff) {
-      const diffPath = join(patchDir, "changes.patch");
-      yield* Effect.tryPromise({
-        try: () => writeFile(diffPath, diffResult.stdout),
-        catch: (e) =>
-          new SyncError({
-            message: `Failed to write diff patch: ${e instanceof Error ? e.message : String(e)}`,
-          }),
-      });
-    }
-
-    // Save untracked files
-    if (hasUntracked) {
-      for (const [i, relPath] of untrackedFiles.entries()) {
-        const sandboxFilePath = `${worktreePath}/${relPath}`;
-        const hostFilePath = join(
-          untrackedDir,
-          ...(untrackedSegments[i] ?? []),
-        );
-        yield* Effect.tryPromise({
-          try: async () => {
-            await mkdir(dirname(hostFilePath), { recursive: true });
-            await handle.copyFileOut(sandboxFilePath, hostFilePath);
-          },
-          catch: (e) =>
-            new SyncError({
-              message: `Failed to save untracked file ${relPath}: ${e instanceof Error ? e.message : String(e)}`,
-            }),
-        });
-      }
-    }
-
-    // Each untracked file's host destination, symlinks resolved on the host.
-    const checkUntrackedDestinations = () =>
-      Effect.all(
-        untrackedFiles.map((relPath, i) =>
-          checkStagedFile(
-            join(untrackedDir, ...(untrackedSegments[i] ?? [])),
-            relPath,
-          ).pipe(
-            Effect.andThen(() => resolveHostDestination(realRoot, relPath)),
-          ),
-        ),
-      );
-    // Checked before anything is applied, and again just before writing.
-    yield* checkUntrackedDestinations();
-
-    // Refuse symlinks the patches would make that lead out of the worktree.
-    yield* checkPatchFileSymlinks(
-      [
-        ...nonEmptyPatches,
-        ...(hasDiff ? [join(patchDir, "changes.patch")] : []),
-      ],
-      hostSymlinkAt(realRoot),
-    );
+    const run: SyncRun = {
+      hostRepoDir,
+      handle,
+      realRoot,
+      changes,
+      untrackedSegments,
+      patchDir,
+      untrackedDir: join(patchDir, "untracked"),
+    };
+    const nonEmptyPatches = yield* saveAndCheck(run);
 
     // --- Phase 2: Apply from saved directory ---
-    let failedStep: FailedStep | undefined;
-
-    // Apply committed patches
-    if (nonEmptyPatches.length > 0) {
-      const abortResult = yield* Effect.either(
-        execHostGit(["am", "--abort"], hostRepoDir),
-      );
-      void abortResult; // ignore abort failures
-      const applyResult = yield* Effect.either(
-        execHostGit(["am", "--3way", ...nonEmptyPatches], hostRepoDir),
-      );
-      if (applyResult._tag === "Left") {
-        failedStep = "commits";
-      }
-    }
-
-    // Apply uncommitted diff
-    if (!failedStep && hasDiff) {
-      const diffPath = join(patchDir, "changes.patch");
-      const applyResult = yield* Effect.either(
-        execHostGit(["apply", diffPath], hostRepoDir),
-      );
-      if (applyResult._tag === "Left") {
-        failedStep = "diff";
-      }
-    }
-
-    // Copy untracked files. The applied patches changed the host tree, so
-    // each destination's symlinks are resolved again; a refusal fails the
-    // sync rather than being recovered from.
-    if (!failedStep && hasUntracked) {
-      const destinations = yield* checkUntrackedDestinations();
-      const copyResult = yield* Effect.either(
-        Effect.tryPromise({
-          try: async () => {
-            for (const [i, destPath] of destinations.entries()) {
-              const srcPath = join(
-                untrackedDir,
-                ...(untrackedSegments[i] ?? []),
-              );
-              await mkdir(dirname(destPath), { recursive: true });
-              const content = await readFile(srcPath);
-              await writeFile(destPath, content);
-            }
-          },
-          catch: (e) =>
-            new SyncError({
-              message: `Failed to copy untracked files: ${e instanceof Error ? e.message : String(e)}`,
-            }),
-        }),
-      );
-      if (copyResult._tag === "Left") {
-        failedStep = "untracked";
-      }
-    }
-
-    // Advance the sync-base ref whenever commits were actually shipped (or
-    // there were none new to ship in this slice). Skipped only when `git am`
-    // itself failed — those commits never landed on the host, and the next
-    // run must retry from the same base. Diff/untracked failures don't undo
-    // the commits that already landed; the ref must move so we don't re-emit.
-    if (hasCommits && failedStep !== "commits") {
-      yield* execOk(handle, `git update-ref ${SYNC_BASE_REF} ${sandboxHead}`, {
-        cwd: worktreePath,
-      });
-    }
-
-    // --- Cleanup or preserve ---
-    if (failedStep) {
-      const msg = buildRecoveryMessage({
-        patchDir: relativePatchDir,
-        failedStep,
-        hasCommits: nonEmptyPatches.length > 0,
-        hasDiff,
-        hasUntracked,
-      });
-      yield* Console.error(`\n${msg}`);
-    } else {
-      yield* removePatchDir(hostRepoDir, patchDir);
-    }
+    const failedStep = yield* applySaved(run, nonEmptyPatches);
+    yield* completeSyncOut(run, nonEmptyPatches, failedStep);
   }).pipe(
     // A refused path leaves nothing the sandbox wrote behind on the host.
     Effect.tapError((e) =>

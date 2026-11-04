@@ -82,6 +82,9 @@ export interface BindMountSandboxHandle {
         sudo?: boolean;
         stdin?: string;
     }): Promise<ExecResult>;
+    readonly sandboxHomedir?: string;
+    readonly sandboxId?: string;
+    readonly sandboxTmpdir?: string;
     readonly worktreePath: string;
 }
 
@@ -142,7 +145,7 @@ export interface CodexOptions {
     readonly approvalsReviewer?: "user" | "auto_review";
     readonly captureSessions?: boolean;
     // (undocumented)
-    readonly effort?: "low" | "medium" | "high" | "xhigh";
+    readonly effort?: "low" | "medium" | "high" | "xhigh" | "max";
     readonly env?: Record<string, string>;
     readonly sessionStorage?: {
         readonly hostSessionsDir?: string;
@@ -293,6 +296,7 @@ export interface IsolatedSandboxHandle {
         sudo?: boolean;
         stdin?: string;
     }): Promise<ExecResult>;
+    readonly sandboxId?: string;
     readonly worktreePath: string;
 }
 
@@ -365,6 +369,20 @@ export interface NamedBranchStrategy {
     // (undocumented)
     readonly type: "branch";
 }
+
+// @public
+export interface NativeSandboxUnavailableError extends Error {
+    readonly fixCommand?: string;
+    // (undocumented)
+    readonly message: string;
+    // (undocumented)
+    readonly _tag: "NativeSandboxUnavailableError";
+}
+
+// Warning: (ae-forgotten-export) The symbol "NativeSandboxUnavailableErrorConstructor" needs to be exported by the entry point index.d.ts
+//
+// @public
+export const NativeSandboxUnavailableError: NativeSandboxUnavailableErrorConstructor;
 
 // @public
 export type NoSandboxBranchStrategy = HeadBranchStrategy | MergeToHeadBranchStrategy | NamedBranchStrategy;
@@ -541,6 +559,7 @@ export interface Sandbox {
     close(): Promise<CloseResult>;
     exec(command: string, options?: SandboxExecOptions): Promise<ExecResult>;
     run(options: SandboxRunOptions): Promise<SandboxRunResult>;
+    readonly sandboxId?: string;
     readonly worktreePath: string;
 }
 

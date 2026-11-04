@@ -9,15 +9,16 @@
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
-import {
-  createBindMountSandboxProvider,
-  type SandboxProvider,
-  type BindMountCreateOptions,
-  type BindMountSandboxHandle,
-  type ExecResult,
+import { createBindMountSandboxProvider } from "../SandboxProvider.js";
+import type {
+  SandboxProvider,
+  BindMountCreateOptions,
+  BindMountSandboxHandle,
+  ExecResult,
 } from "../SandboxProvider.js";
 import type { MountConfig } from "../MountConfig.js";
 import type { SelinuxLabel } from "../mountUtils.js";
+import type { LinuxCapability } from "../LinuxCapability.js";
 import {
   defaultImageName,
   resolveUserMounts,
@@ -26,6 +27,8 @@ import {
 } from "../mountUtils.js";
 import { BoundedTail, MAX_TAIL_CHARS } from "../boundedTail.js";
 import { registerShutdown } from "../shutdownRegistry.js";
+
+export type { LinuxCapability } from "../LinuxCapability.js";
 
 export interface PodmanOptions {
   /** Podman image name (default: derived from repo directory name). */
@@ -92,6 +95,20 @@ export interface PodmanOptions {
    * When omitted, no `--group-add` flags are added.
    */
   readonly groups?: readonly (string | number)[];
+  /**
+   * Linux capabilities to drop from the container, via `--cap-drop`.
+   *
+   * Names are written without the `CAP_` prefix, as `podman run` accepts them,
+   * and a misspelt name is a type error:
+   *
+   * - `["NET_RAW"]` → `--cap-drop NET_RAW` (no raw sockets, so no `ping`)
+   * - `["NET_RAW", "MKNOD"]` → `--cap-drop NET_RAW --cap-drop MKNOD`
+   * - `["ALL"]` → `--cap-drop ALL` (drop every capability)
+   *
+   * When omitted, no `--cap-drop` flags are added and the container keeps
+   * Podman's default capability set.
+   */
+  readonly capDrop?: readonly LinuxCapability[];
   /**
    * Host devices to expose to the container, via `--device`.
    *
@@ -192,15 +209,22 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
         `${key}=${value}`,
       ]);
       const volumeArgs = volumeMounts.flatMap((v) => ["-v", v]);
-      const usernsArgs = userns
-        ? [`--userns=keep-id:uid=${containerUid},gid=${containerGid}`]
-        : [];
+      const usernsArgs =
+        userns === false
+          ? []
+          : [`--userns=keep-id:uid=${containerUid},gid=${containerGid}`];
       const userArgs = ["--user", `${containerUid}:${containerGid}`];
-      const networks = options?.network ? [options.network].flat() : [];
+      const network = options?.network;
+      const networks =
+        network === undefined || network === "" ? [] : [network].flat();
       const networkArgs = networks.flatMap((n) => ["--network", n]);
       const groupArgs = (options?.groups ?? []).flatMap((g) => [
         "--group-add",
         String(g),
+      ]);
+      const capDropArgs = (options?.capDrop ?? []).flatMap((cap) => [
+        "--cap-drop",
+        cap,
       ]);
       const deviceArgs = (options?.devices ?? []).flatMap((d) => [
         "--device",
@@ -222,6 +246,7 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
             ...usernsArgs,
             ...networkArgs,
             ...groupArgs,
+            ...capDropArgs,
             ...deviceArgs,
             ...cpusArgs,
             "-w",
@@ -296,6 +321,7 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
 
       const handle: BindMountSandboxHandle = {
         worktreePath,
+        sandboxId: containerName,
 
         exec: async (
           command: string,
@@ -310,13 +336,13 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
           // Elevate by running as root through the engine, not a `sudo`
           // prefix: the image needs no sudo binary, and the whole command
           // (`a && b`, not just `a`) runs as root.
-          if (opts?.sudo) {
+          if (opts?.sudo === true) {
             args.push("--user", "0:0");
           }
           if (opts?.stdin !== undefined) {
             args.push("-i");
           }
-          if (opts?.cwd) {
+          if (opts?.cwd !== undefined && opts.cwd !== "") {
             args.push("-w", opts.cwd);
           }
           args.push(containerName, "sh", "-c", command);

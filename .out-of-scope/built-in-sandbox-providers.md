@@ -1,6 +1,6 @@
 # Built-in sandbox providers on request
 
-Sandcastle ships a small, chosen set of **built-in** sandbox providers: the local engines (Docker, Podman), the no-op `noSandbox`, and a few remote, isolated providers (Vercel, Daytona). The remote set can grow, a little at a time, with providers Sandcastle picks itself. It does not grow because someone requested a provider.
+Sandcastle ships a small, chosen set of **built-in** sandbox providers: the local engines (Docker, Podman), the no-op `noSandbox`, and a few remote, isolated providers (Vercel, Daytona, E2B, Modal, Fly.io Sprites). The remote set can grow, a little at a time, with providers Sandcastle picks itself. It does not grow because someone requested a provider.
 
 ## What gets a remote provider in-tree
 

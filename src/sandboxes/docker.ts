@@ -11,12 +11,13 @@ import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import { Effect } from "effect";
 import { startContainer, removeContainer } from "../DockerLifecycle.js";
-import {
-  createBindMountSandboxProvider,
-  type SandboxProvider,
-  type BindMountCreateOptions,
-  type BindMountSandboxHandle,
-  type ExecResult,
+import type { LinuxCapability } from "../DockerLifecycle.js";
+import { createBindMountSandboxProvider } from "../SandboxProvider.js";
+import type {
+  SandboxProvider,
+  BindMountCreateOptions,
+  BindMountSandboxHandle,
+  ExecResult,
 } from "../SandboxProvider.js";
 import type { MountConfig } from "../MountConfig.js";
 import type { SelinuxLabel } from "../mountUtils.js";
@@ -83,6 +84,20 @@ export interface DockerOptions {
    * When omitted, no `--group-add` flags are added.
    */
   readonly groups?: readonly (string | number)[];
+  /**
+   * Linux capabilities to drop from the container, via `--cap-drop`.
+   *
+   * Names are written without the `CAP_` prefix, as `docker run` accepts them,
+   * and a misspelt name is a type error:
+   *
+   * - `["NET_RAW"]` → `--cap-drop NET_RAW` (no raw sockets, so no `ping`)
+   * - `["NET_RAW", "MKNOD"]` → `--cap-drop NET_RAW --cap-drop MKNOD`
+   * - `["ALL"]` → `--cap-drop ALL` (drop every capability)
+   *
+   * When omitted, no `--cap-drop` flags are added and the container keeps
+   * Docker's default capability set.
+   */
+  readonly capDrop?: readonly LinuxCapability[];
   /**
    * Host devices to expose to the container, via `--device`.
    *
@@ -185,6 +200,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
             user: `${containerUid}:${containerGid}`,
             network: options?.network,
             groups: options?.groups,
+            capDrop: options?.capDrop,
             devices: options?.devices,
             cpus: options?.cpus,
             selinuxLabel,
@@ -240,6 +256,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
 
       const handle: BindMountSandboxHandle = {
         worktreePath,
+        sandboxId: containerName,
 
         exec: async (
           command: string,
@@ -254,13 +271,13 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
           // Elevate by running as root through the engine, not a `sudo`
           // prefix: the image needs no sudo binary, and the whole command
           // (`a && b`, not just `a`) runs as root.
-          if (opts?.sudo) {
+          if (opts?.sudo === true) {
             args.push("--user", "0:0");
           }
           if (opts?.stdin !== undefined) {
             args.push("-i");
           }
-          if (opts?.cwd) {
+          if (opts?.cwd !== undefined && opts.cwd !== "") {
             args.push("-w", opts.cwd);
           }
           args.push(containerName, "sh", "-c", command);
@@ -368,6 +385,8 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
     },
   });
 };
+
+export type { LinuxCapability } from "../DockerLifecycle.js";
 
 // Re-export for backwards compatibility
 export { defaultImageName } from "../mountUtils.js";

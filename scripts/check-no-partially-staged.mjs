@@ -7,12 +7,16 @@
  * parallel commits from different worktrees race on it, drop each other's
  * entries and leave stray "lint-staged automatic backup" entries behind.
  *
- * Without the stash, lint-staged can't hide unstaged hunks while prettier
+ * Without the stash, lint-staged can't hide unstaged hunks while Biome
  * runs, so it would format and re-stage them. Refusing partially staged
  * files keeps commits to exactly what was staged.
  */
 import { execFileSync } from "node:child_process";
 
+/**
+ * Lists the paths `git diff --name-only` reports for the given flags.
+ * @param {...string} args
+ */
 const names = (...args) =>
   execFileSync("git", ["diff", "--name-only", "-z", ...args], {
     encoding: "utf8",

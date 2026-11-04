@@ -10,14 +10,8 @@ import { mergeProviderEnv } from "./mergeProviderEnv.js";
 import { orchestrate } from "./Orchestrator.js";
 import type { IterationResult } from "./Orchestrator.js";
 import { agentStreamEmitterLayer } from "./AgentStreamEmitter.js";
-import {
-  substitutePromptArgs,
-  validateNoArgsWithInlinePrompt,
-  validateNoBuiltInArgOverride,
-  BUILT_IN_PROMPT_ARG_KEYS,
-} from "./PromptArgumentSubstitution.js";
 import type { PromptArgs } from "./PromptArgumentSubstitution.js";
-import { resolvePrompt } from "./PromptResolver.js";
+import { resolveSandboxPrompt } from "./resolveSandboxPrompt.js";
 import type { LoggingOption, Timeouts } from "./run.js";
 import {
   buildAgentStreamHandler,
@@ -38,6 +32,7 @@ import type { MountEntry, SandboxService } from "./SandboxFactory.js";
 import type {
   SandboxProvider,
   BindMountSandboxHandle,
+  BindMountSandboxProvider,
   IsolatedSandboxHandle,
   NoSandboxHandle,
   MergeToHeadBranchStrategy,
@@ -195,6 +190,31 @@ export interface Sandbox {
   readonly branch: string;
   /** Host path to the worktree. */
   readonly worktreePath: string;
+  /**
+   * The provider's id for this sandbox, for a supervisor outside this process
+   * (a run registry, a kill step for stuck runs) to address it with the
+   * provider's own tools:
+   *
+   * - `docker()`: the container name: `docker inspect <sandboxId>`,
+   *   `docker rm -f <sandboxId>`.
+   * - `podman()`: the container name: `podman inspect <sandboxId>`,
+   *   `podman rm -f <sandboxId>`.
+   * - `vercel()`: the Vercel sandbox's id (its `name` from `@vercel/sandbox`
+   *   2 on, its `sandboxId` in 1.x): pass it to the SDK's `Sandbox.get()`,
+   *   then call `stop()`.
+   * - `daytona()`: the Daytona sandbox id: `daytona.get(<sandboxId>)`, then
+   *   `delete()`, from `@daytona/sdk`.
+   * - `modal()`: the Modal sandbox id: `modal.sandboxes.fromId(<sandboxId>)`,
+   *   then `terminate()`, from `modal`.
+   * - `sprites()`: the Sprite's name: `client.getSprite(<sandboxId>)`, then
+   *   `delete()`, from `@fly/sprites`.
+   * - A custom provider: whatever its handle's `sandboxId` is.
+   *
+   * `undefined` for `noSandbox()` and the native `bwrap()` and `seatbelt()`
+   * sandboxes: their sandbox is a child process of this one, with nothing
+   * outside it to address.
+   */
+  readonly sandboxId?: string;
   /** Invoke an agent inside the existing sandbox. */
   run(options: SandboxRunOptions): Promise<SandboxRunResult>;
   /**
@@ -286,7 +306,7 @@ const withAgentEnv = (
   });
   const invalid = entries
     .map(([key]) => key)
-    .filter((key) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key));
+    .filter((key) => !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(key));
   if (invalid.length > 0) {
     throw new Error(
       `Invalid agent provider env key(s): ${invalid.join(", ")}. Keys must match [A-Za-z_][A-Za-z0-9_]*.`,
@@ -301,6 +321,137 @@ const withAgentEnv = (
       const printCommand = agent.buildPrintCommand(options);
       return { ...printCommand, command: exports + printCommand.command };
     },
+  };
+};
+
+/**
+ * @internal Rejects run options that can't work before any setup happens:
+ * bad timeouts, `resumeSession` with more than one iteration, `forkSession`
+ * without `resumeSession` or on an agent that can't fork, and a
+ * `resumeSession` whose file is missing on the host.
+ */
+const assertRunOptionsValid = async (
+  runOptions: SandboxRunOptions,
+  provider: AgentProvider,
+  ctx: SandboxHandleContext,
+): Promise<void> => {
+  validateTimeoutOptions(runOptions);
+
+  const isResuming =
+    runOptions.resumeSession !== undefined && runOptions.resumeSession !== "";
+
+  // Validate: resumeSession + maxIterations > 1 is not allowed.
+  if (isResuming && (runOptions.maxIterations ?? 1) > 1) {
+    throw new Error(
+      "resumeSession cannot be combined with maxIterations > 1. " +
+        "Resume applies to iteration 1 only; multi-iteration resume semantics are not supported.",
+    );
+  }
+
+  // Validate: forkSession only makes sense alongside resumeSession.
+  if (runOptions.forkSession === true && !isResuming) {
+    throw new Error(
+      "forkSession requires resumeSession. " +
+        "Use sandboxRunResult.fork(prompt) to fork the most recent captured session.",
+    );
+  }
+  if (runOptions.forkSession === true) {
+    assertForkSupported(provider);
+  }
+
+  // Validate: resumeSession file must exist on the host before launching.
+  if (isResuming) {
+    await assertResumeSessionExists({
+      provider,
+      sandboxTag: ctx.providerTag,
+      hostRepoDir: ctx.hostRepoDir,
+      resumeSession: runOptions.resumeSession,
+    });
+  }
+};
+
+/** @internal A run's logging option; defaults to a file under `.sandcastle/logs/`. */
+const resolveRunLogging = (
+  runOptions: SandboxRunOptions,
+  hostRepoDir: string,
+  branch: string,
+): LoggingOption =>
+  runOptions.logging ?? {
+    type: "file",
+    path: join(
+      hostRepoDir,
+      ".sandcastle",
+      "logs",
+      buildLogFilename(branch, undefined, runOptions.name),
+    ),
+  };
+
+/**
+ * @internal The display for a run: file logging prints the startup banner
+ * and writes to the log file; any other logging stays silent.
+ */
+const buildRunDisplayLayer = (
+  logging: LoggingOption,
+  banner: { readonly agentName: string | undefined; readonly branch: string },
+  silentDisplayLayer: Layer.Layer<Display>,
+): Layer.Layer<Display> => {
+  if (logging.type !== "file") {
+    return silentDisplayLayer;
+  }
+  printFileDisplayStartup({ logPath: logging.path, ...banner });
+  return Layer.provide(FileDisplay.layer(logging.path), NodeFileSystem.layer);
+};
+
+/**
+ * @internal Adds `.resume()` / `.fork()` to a run result, only when the
+ * agent supports session capture and the last iteration captured a session
+ * id. Both re-enter the same long-lived sandbox through `rerun`, which
+ * repeats the original run's options with the given overrides, so the
+ * container and worktree stay warm.
+ */
+const withResumeAndFork = (
+  baseResult: SandboxRunResult,
+  provider: AgentProvider,
+  rerun: (overrides: Partial<SandboxRunOptions>) => Promise<SandboxRunResult>,
+): SandboxRunResult => {
+  const lastIteration = baseResult.iterations.at(-1);
+  if (
+    !provider.sessionStorage ||
+    lastIteration?.sessionId === undefined ||
+    lastIteration.sessionId === ""
+  ) {
+    return baseResult;
+  }
+  const capturedSessionId = lastIteration.sessionId;
+  return {
+    ...baseResult,
+    resume: async (
+      nextPrompt: string,
+      resumeOptions?: ResumeSandboxRunResultOptions,
+    ): Promise<SandboxRunResult> =>
+      rerun({
+        // The follow-up prompt is inline: drop the template's arguments.
+        promptArgs: undefined,
+        ...resumeOptions,
+        prompt: nextPrompt,
+        promptFile: undefined,
+        maxIterations: 1,
+        resumeSession: capturedSessionId,
+      }),
+    fork: async (
+      nextPrompt: string,
+      forkOptions?: ResumeSandboxRunResultOptions,
+    ): Promise<SandboxRunResult> =>
+      rerun({
+        // The follow-up prompt is inline: drop the template's arguments.
+        promptArgs: undefined,
+        ...forkOptions,
+        prompt: nextPrompt,
+        promptFile: undefined,
+        maxIterations: 1,
+        resumeSession: capturedSessionId,
+        forkSession: true,
+      }),
   };
 };
 
@@ -336,6 +487,10 @@ const buildSandboxHandle = (
   const sandboxHandle: Sandbox = {
     branch,
     worktreePath,
+    sandboxId:
+      providerHandle !== undefined && "sandboxId" in providerHandle
+        ? providerHandle.sandboxId
+        : undefined,
 
     run: async (runOptions: SandboxRunOptions): Promise<SandboxRunResult> => {
       // If signal is already aborted, reject immediately without any setup
@@ -346,98 +501,34 @@ const buildSandboxHandle = (
       // agent's env is applied to its own process instead (see withAgentEnv).
       const provider = withAgentEnv(runOptions.agent, ctx.sandboxProviderEnv);
 
-      validateTimeoutOptions(runOptions);
-
-      // Validate: resumeSession + maxIterations > 1 is not allowed.
-      if (runOptions.resumeSession && maxIterations > 1) {
-        throw new Error(
-          "resumeSession cannot be combined with maxIterations > 1. " +
-            "Resume applies to iteration 1 only; multi-iteration resume semantics are not supported.",
-        );
-      }
-
-      // Validate: forkSession only makes sense alongside resumeSession.
-      if (runOptions.forkSession && !runOptions.resumeSession) {
-        throw new Error(
-          "forkSession requires resumeSession. " +
-            "Use sandboxRunResult.fork(prompt) to fork the most recent captured session.",
-        );
-      }
-      if (runOptions.forkSession === true) {
-        assertForkSupported(provider);
-      }
-
-      // Validate: resumeSession file must exist on the host before launching.
-      if (runOptions.resumeSession) {
-        await assertResumeSessionExists({
-          provider,
-          sandboxTag: ctx.providerTag,
-          hostRepoDir,
-          resumeSession: runOptions.resumeSession,
-        });
-      }
-
-      const resolved = await Effect.runPromise(
-        resolvePrompt({ prompt, promptFile }).pipe(
-          Effect.provide(NodeContext.layer),
-        ),
-      );
-      const rawPrompt = resolved.text;
-      const isInlinePrompt = resolved.source === "inline";
-
-      const userArgs = runOptions.promptArgs ?? {};
-      const currentHostBranch = await Effect.runPromise(
-        WorktreeManager.getCurrentBranch(hostRepoDir),
-      );
+      await assertRunOptionsValid(runOptions, provider, ctx);
 
       const displayRef = Ref.unsafeMake<readonly DisplayEntry[]>([]);
       const silentDisplayLayer = SilentDisplay.layer(displayRef);
 
       const resolvedPrompt = await Effect.runPromise(
-        Effect.gen(function* () {
-          if (isInlinePrompt) {
-            yield* validateNoArgsWithInlinePrompt(userArgs);
-            return rawPrompt;
-          }
-          yield* validateNoBuiltInArgOverride(userArgs);
-          const effectiveArgs = {
-            SOURCE_BRANCH: branch,
-            TARGET_BRANCH: currentHostBranch,
-            ...userArgs,
-          };
-          const builtInArgKeysSet = new Set<string>(BUILT_IN_PROMPT_ARG_KEYS);
-          return yield* substitutePromptArgs(
-            rawPrompt,
-            effectiveArgs,
-            builtInArgKeysSet,
-          );
-        }).pipe(Effect.provide(silentDisplayLayer)),
+        resolveSandboxPrompt({
+          prompt,
+          promptFile,
+          promptArgs: runOptions.promptArgs,
+          branch,
+          hostRepoDir,
+        }).pipe(
+          Effect.provide(Layer.mergeAll(NodeContext.layer, silentDisplayLayer)),
+        ),
       );
 
-      const resolvedLogging: LoggingOption = runOptions.logging ?? {
-        type: "file",
-        path: join(
-          hostRepoDir,
-          ".sandcastle",
-          "logs",
-          buildLogFilename(branch, undefined, runOptions.name),
-        ),
-      };
+      const resolvedLogging = resolveRunLogging(
+        runOptions,
+        hostRepoDir,
+        branch,
+      );
 
-      const runDisplayLayer =
-        resolvedLogging.type === "file"
-          ? (() => {
-              printFileDisplayStartup({
-                logPath: resolvedLogging.path,
-                agentName: runOptions.name,
-                branch,
-              });
-              return Layer.provide(
-                FileDisplay.layer(resolvedLogging.path),
-                NodeFileSystem.layer,
-              );
-            })()
-          : silentDisplayLayer;
+      const runDisplayLayer = buildRunDisplayLayer(
+        resolvedLogging,
+        { agentName: runOptions.name, branch },
+        silentDisplayLayer,
+      );
 
       const reuseFactoryLayer = reuseSandboxFactoryLayer(
         {
@@ -469,7 +560,7 @@ const buildSandboxHandle = (
             const orchestrateResult = yield* orchestrate({
               hostRepoDir,
               iterations: maxIterations,
-              prompt: resolvedPrompt,
+              prompt: resolvedPrompt.text,
               branch: mergeToHead ? undefined : branch,
               provider,
               completionSignal: runOptions.completionSignal,
@@ -479,7 +570,7 @@ const buildSandboxHandle = (
               resumeSession: runOptions.resumeSession,
               forkSession: runOptions.forkSession,
               signal: runOptions.signal,
-              skipPromptExpansion: isInlinePrompt,
+              skipPromptExpansion: resolvedPrompt.isInline,
               timeouts,
               keepSourceBranch: mergeToHead,
             });
@@ -505,57 +596,18 @@ const buildSandboxHandle = (
         throw error;
       }
 
-      const baseResult: SandboxRunResult = {
-        iterations: result.iterations,
-        completionSignal: result.completionSignal,
-        stdout: result.stdout,
-        commits: result.commits,
-        logFilePath:
-          resolvedLogging.type === "file" ? resolvedLogging.path : undefined,
-      };
-
-      // Expose .resume()/.fork() only when the provider supports session
-      // capture and a session id was actually captured on the last iteration.
-      // The functions re-enter the same long-lived sandbox by calling
-      // sandboxHandle.run() — container and worktree stay warm.
-      const lastIteration = result.iterations.at(-1);
-      if (provider.sessionStorage && lastIteration?.sessionId) {
-        const capturedSessionId = lastIteration.sessionId;
-        return {
-          ...baseResult,
-          resume: (
-            nextPrompt: string,
-            resumeOptions?: ResumeSandboxRunResultOptions,
-          ): Promise<SandboxRunResult> =>
-            sandboxHandle.run({
-              ...runOptions,
-              // The follow-up prompt is inline: drop the template's arguments.
-              promptArgs: undefined,
-              ...resumeOptions,
-              prompt: nextPrompt,
-              promptFile: undefined,
-              maxIterations: 1,
-              resumeSession: capturedSessionId,
-            }),
-          fork: (
-            nextPrompt: string,
-            forkOptions?: ResumeSandboxRunResultOptions,
-          ): Promise<SandboxRunResult> =>
-            sandboxHandle.run({
-              ...runOptions,
-              // The follow-up prompt is inline: drop the template's arguments.
-              promptArgs: undefined,
-              ...forkOptions,
-              prompt: nextPrompt,
-              promptFile: undefined,
-              maxIterations: 1,
-              resumeSession: capturedSessionId,
-              forkSession: true,
-            }),
-        };
-      }
-
-      return baseResult;
+      return withResumeAndFork(
+        {
+          iterations: result.iterations,
+          completionSignal: result.completionSignal,
+          stdout: result.stdout,
+          commits: result.commits,
+          logFilePath:
+            resolvedLogging.type === "file" ? resolvedLogging.path : undefined,
+        },
+        provider,
+        async (overrides) => sandboxHandle.run({ ...runOptions, ...overrides }),
+      );
     },
 
     exec: async (
@@ -605,6 +657,232 @@ export interface CreateSandboxFromWorktreeOptions {
   };
 }
 
+type ProviderHandle =
+  | BindMountSandboxHandle
+  | IsolatedSandboxHandle
+  | NoSandboxHandle;
+
+interface StartProviderSandboxOptions {
+  readonly provider: SandboxProvider;
+  readonly hostRepoDir: string;
+  readonly worktreePath: string;
+  readonly env: Record<string, string>;
+  readonly copyToWorktree: string[] | undefined;
+  /** Temp dirs behind the git mounts get pushed here, for the caller to remove. */
+  readonly mountsToClean: MountEntry[];
+}
+
+/**
+ * Starts a bind-mount provider's sandbox on `worktreePath`, after resolving
+ * the host repo's git mounts and patching them for Windows.
+ */
+const startBindMountWithGitMounts = (
+  provider: BindMountSandboxProvider,
+  {
+    hostRepoDir,
+    worktreePath,
+    env,
+    mountsToClean,
+  }: StartProviderSandboxOptions,
+) =>
+  resolveGitMounts(join(hostRepoDir, ".git")).pipe(
+    Effect.provide(NodeFileSystem.layer),
+    Effect.catchAll(() => Effect.succeed([])),
+    // Patch git mounts for Windows worktree compatibility (ADR-0006)
+    Effect.flatMap((gitMounts) =>
+      patchGitMountsForWindows(gitMounts, worktreePath, SANDBOX_REPO_DIR),
+    ),
+    Effect.tap((gitMounts) => {
+      mountsToClean.push(...gitMounts);
+    }),
+    Effect.flatMap((gitMounts) =>
+      startSandbox({
+        provider,
+        hostRepoDir,
+        env,
+        worktreeOrRepoPath: worktreePath,
+        gitMounts,
+        repoDir: SANDBOX_REPO_DIR,
+      }),
+    ),
+  );
+
+/** Starts `provider`'s sandbox on `worktreePath`, whatever its tag. */
+const startProviderSandbox = (options: StartProviderSandboxOptions) => {
+  const { provider, hostRepoDir, worktreePath, env } = options;
+  if (provider.tag === "isolated") {
+    return startSandbox({
+      provider,
+      hostRepoDir: worktreePath,
+      env,
+      copyPaths: options.copyToWorktree,
+      copySourceDir: hostRepoDir,
+    });
+  }
+  if (provider.tag === "none") {
+    return startSandbox({
+      provider,
+      hostRepoDir,
+      env,
+      worktreeOrRepoPath: worktreePath,
+    });
+  }
+  return startBindMountWithGitMounts(provider, options);
+};
+
+/**
+ * Copies `copyToWorktree` paths from the host repo into the worktree.
+ * Isolated providers skip this: startSandbox copies their paths in.
+ */
+const copyIntoWorktree = (
+  options: Pick<
+    CreateSandboxOptions,
+    "copyToWorktree" | "sandbox" | "timeouts"
+  >,
+  hostRepoDir: string,
+  worktreePath: string,
+) =>
+  options.copyToWorktree &&
+  options.copyToWorktree.length > 0 &&
+  options.sandbox.tag !== "isolated"
+    ? copyToWorktree(
+        options.copyToWorktree,
+        hostRepoDir,
+        worktreePath,
+        options.timeouts?.copyToWorktreeMs,
+      )
+    : Effect.void;
+
+/** The `buildSandboxHandle` fields that come from the provider and its handle. */
+const providerHandleFields = (
+  provider: SandboxProvider,
+  providerHandle: ProviderHandle | undefined,
+  worktreePath: string,
+) => ({
+  providerHandle,
+  // Pre-narrow the bind-mount handle for the orchestrator's session-capture
+  // path. Gating on the provider tag avoids handing a NoSandbox/Isolated
+  // handle (which lack copyFileIn/copyFileOut) to AgentSessionStorage and
+  // turning a missing-feature into a runtime SessionCaptureError.
+  bindMountHandle:
+    provider.tag === "bind-mount"
+      ? (providerHandle as BindMountSandboxHandle | undefined)
+      : undefined,
+  providerTag: provider.tag,
+  sandboxProviderEnv: provider.env,
+  // Syncs an isolated sandbox's changes back to the host worktree.
+  applyToHost:
+    provider.tag === "isolated" && providerHandle
+      ? () => syncOut(worktreePath, providerHandle as IsolatedSandboxHandle)
+      : () => Effect.void,
+});
+
+/**
+ * Starts the sandbox on `worktreePath`: the provider's, or the local sandbox
+ * layer in test mode.
+ */
+const startSandboxOnWorktree = ({
+  options,
+  hostRepoDir,
+  worktreePath,
+  mountsToClean,
+}: {
+  readonly options: Pick<
+    CreateSandboxOptions,
+    "sandbox" | "_test" | "copyToWorktree"
+  >;
+  readonly hostRepoDir: string;
+  readonly worktreePath: string;
+  readonly mountsToClean: MountEntry[];
+}) =>
+  Effect.gen(function* () {
+    if (options._test?.buildSandbox) {
+      return {
+        sandbox: options._test.buildSandbox(worktreePath),
+        sandboxRepoDir: worktreePath,
+        providerHandle: options._test.bindMountHandle,
+      };
+    }
+    const resolvedEnv = yield* resolveEnv(hostRepoDir);
+    const env = mergeProviderEnv({
+      resolvedEnv,
+      agentProviderEnv: {},
+      sandboxProviderEnv: options.sandbox.env,
+    });
+    const startResult = yield* startProviderSandbox({
+      provider: options.sandbox,
+      hostRepoDir,
+      worktreePath,
+      env,
+      copyToWorktree: options.copyToWorktree,
+      mountsToClean,
+    });
+    return {
+      providerHandle: startResult.handle,
+      sandbox: startResult.sandbox,
+      sandboxRepoDir: startResult.worktreePath,
+    };
+  });
+
+/**
+ * Runs the onSandboxReady hooks, sandbox-side and host-side in parallel,
+ * after marking the sandbox repo a git safe.directory. A no-op without hooks.
+ */
+const runOnSandboxReadyHooks = ({
+  sandbox,
+  sandboxRepoDir,
+  worktreePath,
+  hooks,
+}: {
+  readonly sandbox: SandboxService;
+  readonly sandboxRepoDir: string;
+  readonly worktreePath: string;
+  readonly hooks: SandboxHooks | undefined;
+}) => {
+  const sandboxOnReady = hooks?.sandbox?.onSandboxReady ?? [];
+  const hostOnReady = hooks?.host?.onSandboxReady ?? [];
+  if (sandboxOnReady.length === 0 && hostOnReady.length === 0) {
+    return Effect.void;
+  }
+  return Effect.gen(function* () {
+    yield* sandbox.exec(
+      `git config --global --add safe.directory "${sandboxRepoDir}"`,
+    );
+    const sandboxEffects = sandboxOnReady.map((hook) =>
+      sandbox.exec(hook.command, {
+        cwd: sandboxRepoDir,
+        sudo: hook.sudo,
+      }),
+    );
+    const allEffects = [
+      ...sandboxEffects,
+      ...(hostOnReady.length > 0
+        ? [runHostHooks(hostOnReady, worktreePath)]
+        : []),
+    ];
+    yield* Effect.all(allEffects, { concurrency: "unbounded" });
+  });
+};
+
+/** A close() that tears down the container only, once, and its mount temp dirs. */
+const closeContainerOnly = (
+  providerHandle: ProviderHandle | undefined,
+  mountsToClean: readonly MountEntry[],
+): (() => Promise<CloseResult>) => {
+  let closed = false;
+  return async () => {
+    if (closed) {
+      return { preservedWorktreePath: undefined };
+    }
+    closed = true;
+    if (providerHandle) {
+      await providerHandle.close();
+    }
+    await Effect.runPromise(removeMountTempDirs(mountsToClean));
+    return { preservedWorktreePath: undefined };
+  };
+};
+
 /**
  * @internal Creates a sandbox backed by an existing worktree.
  * Split ownership: close() tears down the container only, leaving the worktree intact.
@@ -614,148 +892,37 @@ export const createSandboxFromWorktree = async (
   options: CreateSandboxFromWorktreeOptions,
 ): Promise<Sandbox> => {
   const { branch, worktreePath, hostRepoDir } = options;
-  const isTestMode = !!options._test?.buildSandbox;
   validateTimeoutOptions(options);
 
   // 1. Copy files if requested (bind-mount only)
-  if (
-    options.copyToWorktree &&
-    options.copyToWorktree.length > 0 &&
-    options.sandbox.tag !== "isolated"
-  ) {
-    await Effect.runPromise(
-      copyToWorktree(
-        options.copyToWorktree,
-        hostRepoDir,
-        worktreePath,
-        options.timeouts?.copyToWorktreeMs,
-      ),
-    );
-  }
+  await Effect.runPromise(copyIntoWorktree(options, hostRepoDir, worktreePath));
 
   // 2. Start sandbox via provider or local sandbox layer (test mode)
-  let providerHandle:
-    | BindMountSandboxHandle
-    | IsolatedSandboxHandle
-    | NoSandboxHandle
-    | undefined;
-  let sandbox: SandboxService;
-  let sandboxRepoDir: string;
-  const isIsolated = options.sandbox.tag === "isolated";
   // Temp dirs behind the git mounts, removed once the sandbox is closed.
   const mountsToClean: MountEntry[] = [];
-
-  if (isTestMode) {
-    sandbox = options._test.buildSandbox!(worktreePath);
-    sandboxRepoDir = worktreePath;
-    providerHandle = options._test.bindMountHandle;
-  } else {
-    const resolvedEnv = await Effect.runPromise(
-      resolveEnv(hostRepoDir).pipe(Effect.provide(NodeContext.layer)),
-    );
-    const env = mergeProviderEnv({
-      resolvedEnv,
-      agentProviderEnv: {},
-      sandboxProviderEnv: options.sandbox.env,
-    });
-
-    const provider = options.sandbox;
-
-    let startEffect;
-    if (provider.tag === "isolated") {
-      startEffect = startSandbox({
-        provider,
-        hostRepoDir: worktreePath,
-        env,
-        copyPaths: options.copyToWorktree,
-        copySourceDir: hostRepoDir,
-      });
-    } else if (provider.tag === "none") {
-      startEffect = startSandbox({
-        provider,
-        hostRepoDir,
-        env,
-        worktreeOrRepoPath: worktreePath,
-      });
-    } else {
-      startEffect = resolveGitMounts(join(hostRepoDir, ".git")).pipe(
-        Effect.provide(NodeFileSystem.layer),
-        Effect.catchAll(() => Effect.succeed([])),
-        // Patch git mounts for Windows worktree compatibility (ADR-0006)
-        Effect.flatMap((gitMounts) =>
-          patchGitMountsForWindows(gitMounts, worktreePath, SANDBOX_REPO_DIR),
-        ),
-        Effect.tap((gitMounts) => {
-          mountsToClean.push(...gitMounts);
-        }),
-        Effect.flatMap((gitMounts) =>
-          startSandbox({
-            provider,
-            hostRepoDir,
-            env,
-            worktreeOrRepoPath: worktreePath,
-            gitMounts,
-            repoDir: SANDBOX_REPO_DIR,
-          }),
-        ),
-        Effect.onError(() => removeMountTempDirs(mountsToClean)),
-      );
-    }
-
-    const startResult = await Effect.runPromise(startEffect);
-
-    providerHandle = startResult.handle;
-    sandbox = startResult.sandbox;
-    sandboxRepoDir = startResult.worktreePath;
-  }
+  const { providerHandle, sandbox, sandboxRepoDir } = await Effect.runPromise(
+    startSandboxOnWorktree({
+      options,
+      hostRepoDir,
+      worktreePath,
+      mountsToClean,
+    }).pipe(
+      Effect.onError(() => removeMountTempDirs(mountsToClean)),
+      Effect.provide(NodeContext.layer),
+    ),
+  );
 
   // 3. Run onSandboxReady hooks (sandbox-side and host-side in parallel)
-  const sandboxOnReady = options.hooks?.sandbox?.onSandboxReady;
-  const hostOnReady = options.hooks?.host?.onSandboxReady;
+  await Effect.runPromise(
+    runOnSandboxReadyHooks({
+      sandbox,
+      sandboxRepoDir,
+      worktreePath,
+      hooks: options.hooks,
+    }),
+  );
 
-  if (sandboxOnReady?.length || hostOnReady?.length) {
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        yield* sandbox.exec(
-          `git config --global --add safe.directory "${sandboxRepoDir}"`,
-        );
-        const sandboxEffects = (sandboxOnReady ?? []).map((hook) =>
-          sandbox.exec(hook.command, {
-            cwd: sandboxRepoDir,
-            sudo: hook.sudo,
-          }),
-        );
-        const allEffects = [
-          ...sandboxEffects,
-          ...(hostOnReady?.length
-            ? [runHostHooks(hostOnReady, worktreePath)]
-            : []),
-        ];
-        yield* Effect.all(allEffects, {
-          concurrency: "unbounded",
-        });
-      }),
-    );
-  }
-
-  // 4. Build applyToHost callback
-  const applyToHost =
-    isIsolated && providerHandle
-      ? () => syncOut(worktreePath, providerHandle as IsolatedSandboxHandle)
-      : () => Effect.void;
-
-  // 5. Build and return sandbox handle — container-only close (worktree owns worktree)
-  let closed = false;
-
-  // Pre-narrow the bind-mount handle for the orchestrator's session-capture
-  // path. Gating on the provider tag avoids handing a NoSandbox/Isolated
-  // handle (which lack copyFileIn/copyFileOut) to AgentSessionStorage and
-  // turning a missing-feature into a runtime SessionCaptureError.
-  const bindMountHandle =
-    options.sandbox.tag === "bind-mount"
-      ? (providerHandle as BindMountSandboxHandle | undefined)
-      : undefined;
-
+  // 4. Build and return sandbox handle — container-only close (worktree owns worktree)
   return buildSandboxHandle(
     {
       branch,
@@ -763,27 +930,141 @@ export const createSandboxFromWorktree = async (
       hostRepoDir,
       sandboxRepoDir,
       sandbox,
-      providerHandle,
-      bindMountHandle,
-      providerTag: options.sandbox.tag,
-      sandboxProviderEnv: options.sandbox.env,
-      applyToHost,
+      ...providerHandleFields(options.sandbox, providerHandle, worktreePath),
       timeouts: options.timeouts,
       branchStrategy: options.branchStrategy,
     },
-    async () => {
-      if (closed) {
-        return { preservedWorktreePath: undefined };
-      }
-      closed = true;
-      if (providerHandle) {
-        await providerHandle.close();
-      }
-      await Effect.runPromise(removeMountTempDirs(mountsToClean));
-      return { preservedWorktreePath: undefined };
-    },
+    closeContainerOnly(providerHandle, mountsToClean),
   );
 };
+
+/**
+ * @internal Copies files into the new worktree, runs host `onWorktreeReady`
+ * hooks, starts the sandbox, then runs `onSandboxReady` hooks. If those
+ * hooks fail, the sandbox that just started is torn down.
+ */
+const prepareSandboxOnWorktree = (
+  options: CreateSandboxOptions,
+  target: {
+    readonly hostRepoDir: string;
+    readonly worktreePath: string;
+    readonly mountsToClean: MountEntry[];
+  },
+) =>
+  Effect.gen(function* () {
+    const { hostRepoDir, worktreePath, mountsToClean } = target;
+    // Copy files (bind-mount/no-sandbox only; isolated copies in startSandbox).
+    yield* copyIntoWorktree(options, hostRepoDir, worktreePath);
+
+    // Run host.onWorktreeReady hooks (after copy, before sandbox creation).
+    const onWorktreeReady = options.hooks?.host?.onWorktreeReady;
+    if (onWorktreeReady !== undefined && onWorktreeReady.length > 0) {
+      yield* runHostHooks(onWorktreeReady, worktreePath);
+    }
+
+    // Start the sandbox via the test layer or the shared startSandbox helper.
+    const { providerHandle, sandbox, sandboxRepoDir } =
+      yield* startSandboxOnWorktree({
+        options,
+        hostRepoDir,
+        worktreePath,
+        mountsToClean,
+      });
+
+    // Run onSandboxReady hooks (sandbox-side and host-side in parallel). If
+    // they fail, tear down the container that just started before the outer
+    // handler removes the worktree.
+    yield* runOnSandboxReadyHooks({
+      sandbox,
+      sandboxRepoDir,
+      worktreePath,
+      hooks: options.hooks,
+    }).pipe(
+      Effect.onError(() =>
+        (providerHandle
+          ? Effect.promise(() => providerHandle.close().catch(() => {}))
+          : Effect.void
+        ).pipe(Effect.andThen(removeMountTempDirs(mountsToClean))),
+      ),
+    );
+
+    return { providerHandle, sandbox, sandboxRepoDir };
+  });
+
+/**
+ * @internal Resolves the host repo, creates the worktree on `options.branch`
+ * and prepares the sandbox on it. Once the worktree exists, any later
+ * failure (e.g. a missing image surfacing when the provider creates the
+ * container) tears down the container — if it started — and removes the
+ * worktree so it is not orphaned on disk.
+ */
+const setUpWorktreeSandbox = (
+  options: CreateSandboxOptions,
+  mountsToClean: MountEntry[],
+) =>
+  Effect.gen(function* () {
+    const hostRepoDir = yield* resolveCwd(options.cwd);
+
+    yield* WorktreeManager.pruneStale(hostRepoDir).pipe(
+      Effect.catchAll(() => Effect.void),
+    );
+    const { path: worktreePath } = yield* WorktreeManager.create(hostRepoDir, {
+      branch: options.branch,
+      baseBranch: options.baseBranch,
+    });
+
+    const prepared = yield* prepareSandboxOnWorktree(options, {
+      hostRepoDir,
+      worktreePath,
+      mountsToClean,
+    }).pipe(
+      Effect.onError(() =>
+        WorktreeManager.remove(worktreePath).pipe(
+          Effect.catchAll(() => Effect.void),
+          Effect.andThen(removeMountTempDirs(mountsToClean)),
+        ),
+      ),
+    );
+
+    return { hostRepoDir, worktreePath, ...prepared };
+  });
+
+/** @internal Tells the user where a worktree left behind by a shutdown is. */
+const printWorktreePreserved = (worktreePath: string): void => {
+  console.error(`\nWorktree preserved at ${worktreePath}`);
+  console.error(`  To review: cd ${worktreePath}`);
+  console.error(`  To clean up: git worktree remove --force ${worktreePath}`);
+};
+
+/**
+ * @internal Closes a top-level `createSandbox()`: the container, the git
+ * mounts' temp dirs, then the worktree unless it has uncommitted changes.
+ */
+const closeSandboxAndWorktree = (target: {
+  readonly providerHandle: ProviderHandle | undefined;
+  readonly mountsToClean: readonly MountEntry[];
+  readonly worktreePath: string;
+}): Effect.Effect<CloseResult> =>
+  Effect.gen(function* () {
+    const { providerHandle, mountsToClean, worktreePath } = target;
+    if (providerHandle) {
+      yield* Effect.promise(() => providerHandle.close());
+    }
+    yield* removeMountTempDirs(mountsToClean);
+
+    // Preserve the worktree when it has uncommitted changes; otherwise remove it.
+    const isDirty = yield* WorktreeManager.hasUncommittedChanges(
+      worktreePath,
+    ).pipe(Effect.catchAll(() => Effect.succeed(false)));
+    if (isDirty) {
+      return { preservedWorktreePath: worktreePath };
+    }
+
+    yield* WorktreeManager.remove(worktreePath).pipe(
+      Effect.catchAll(() => Effect.void),
+    );
+    return { preservedWorktreePath: undefined };
+  });
 
 /**
  * Eagerly creates a git worktree on the provided explicit branch and starts
@@ -794,229 +1075,35 @@ export const createSandbox = async (
   options: CreateSandboxOptions,
 ): Promise<Sandbox> => {
   const { branch } = options;
-  const isTestMode = !!options._test?.buildSandbox;
-  const isIsolated = options.sandbox.tag === "isolated";
   validateTimeoutOptions(options);
   // Temp dirs behind the git mounts, removed once the sandbox is closed.
   const mountsToClean: MountEntry[] = [];
 
   // Resolve cwd, create the worktree, and set up the sandbox in a single Effect.
-  // Once the worktree exists, any later failure (e.g. a missing image surfacing
-  // when the provider creates the container) tears down the container — if it
-  // started — and removes the worktree so it is not orphaned on disk.
   const { hostRepoDir, worktreePath, providerHandle, sandbox, sandboxRepoDir } =
     await Effect.runPromise(
-      Effect.gen(function* () {
-        const hostRepoDir = yield* resolveCwd(options.cwd);
-
-        yield* WorktreeManager.pruneStale(hostRepoDir).pipe(
-          Effect.catchAll(() => Effect.void),
-        );
-        const { path: worktreePath } = yield* WorktreeManager.create(
-          hostRepoDir,
-          { branch, baseBranch: options.baseBranch },
-        );
-
-        const prepared = yield* Effect.gen(function* () {
-          // Copy files (bind-mount/no-sandbox only; isolated copies in startSandbox).
-          if (
-            options.copyToWorktree &&
-            options.copyToWorktree.length > 0 &&
-            options.sandbox.tag !== "isolated"
-          ) {
-            yield* copyToWorktree(
-              options.copyToWorktree,
-              hostRepoDir,
-              worktreePath,
-              options.timeouts?.copyToWorktreeMs,
-            );
-          }
-
-          // Run host.onWorktreeReady hooks (after copy, before sandbox creation).
-          if (options.hooks?.host?.onWorktreeReady?.length) {
-            yield* runHostHooks(
-              options.hooks.host.onWorktreeReady,
-              worktreePath,
-            );
-          }
-
-          // Start the sandbox via the test layer or the shared startSandbox helper.
-          let providerHandle:
-            | BindMountSandboxHandle
-            | IsolatedSandboxHandle
-            | NoSandboxHandle
-            | undefined;
-          let sandbox: SandboxService;
-          let sandboxRepoDir: string;
-
-          if (isTestMode) {
-            sandbox = options._test.buildSandbox!(worktreePath);
-            sandboxRepoDir = worktreePath;
-            providerHandle = options._test.bindMountHandle;
-          } else {
-            const resolvedEnv = yield* resolveEnv(hostRepoDir);
-            const env = mergeProviderEnv({
-              resolvedEnv,
-              agentProviderEnv: {},
-              sandboxProviderEnv: options.sandbox.env,
-            });
-
-            const provider = options.sandbox;
-            const startResult = yield* (() => {
-              if (provider.tag === "isolated") {
-                return startSandbox({
-                  provider,
-                  hostRepoDir: worktreePath,
-                  env,
-                  copyPaths: options.copyToWorktree,
-                  copySourceDir: hostRepoDir,
-                });
-              }
-              if (provider.tag === "none") {
-                return startSandbox({
-                  provider,
-                  hostRepoDir,
-                  env,
-                  worktreeOrRepoPath: worktreePath,
-                });
-              }
-              return resolveGitMounts(join(hostRepoDir, ".git")).pipe(
-                Effect.provide(NodeFileSystem.layer),
-                Effect.catchAll(() => Effect.succeed([])),
-                // Patch git mounts for Windows worktree compatibility (ADR-0006)
-                Effect.flatMap((gitMounts) =>
-                  patchGitMountsForWindows(
-                    gitMounts,
-                    worktreePath,
-                    SANDBOX_REPO_DIR,
-                  ),
-                ),
-                Effect.tap((gitMounts) => {
-                  mountsToClean.push(...gitMounts);
-                }),
-                Effect.flatMap((gitMounts) =>
-                  startSandbox({
-                    provider,
-                    hostRepoDir,
-                    env,
-                    worktreeOrRepoPath: worktreePath,
-                    gitMounts,
-                    repoDir: SANDBOX_REPO_DIR,
-                  }),
-                ),
-              );
-            })();
-
-            providerHandle = startResult.handle;
-            sandbox = startResult.sandbox;
-            sandboxRepoDir = startResult.worktreePath;
-          }
-
-          // Run onSandboxReady hooks (sandbox-side and host-side in parallel). If
-          // they fail, tear down the container that just started before the outer
-          // handler removes the worktree.
-          const sandboxOnReady = options.hooks?.sandbox?.onSandboxReady;
-          const hostOnReady = options.hooks?.host?.onSandboxReady;
-
-          if (sandboxOnReady?.length || hostOnReady?.length) {
-            yield* Effect.gen(function* () {
-              yield* sandbox.exec(
-                `git config --global --add safe.directory "${sandboxRepoDir}"`,
-              );
-              const sandboxEffects = (sandboxOnReady ?? []).map((hook) =>
-                sandbox.exec(hook.command, {
-                  cwd: sandboxRepoDir,
-                  sudo: hook.sudo,
-                }),
-              );
-              const allEffects = [
-                ...sandboxEffects,
-                ...(hostOnReady?.length
-                  ? [runHostHooks(hostOnReady, worktreePath)]
-                  : []),
-              ];
-              yield* Effect.all(allEffects, { concurrency: "unbounded" });
-            }).pipe(
-              Effect.onError(() =>
-                (providerHandle
-                  ? Effect.promise(() => providerHandle.close().catch(() => {}))
-                  : Effect.void
-                ).pipe(Effect.andThen(removeMountTempDirs(mountsToClean))),
-              ),
-            );
-          }
-
-          return { providerHandle, sandbox, sandboxRepoDir };
-        }).pipe(
-          Effect.onError(() =>
-            WorktreeManager.remove(worktreePath).pipe(
-              Effect.catchAll(() => Effect.void),
-              Effect.andThen(removeMountTempDirs(mountsToClean)),
-            ),
-          ),
-        );
-
-        return { hostRepoDir, worktreePath, ...prepared };
-      }).pipe(Effect.provide(NodeContext.layer)),
+      setUpWorktreeSandbox(options, mountsToClean).pipe(
+        Effect.provide(NodeContext.layer),
+      ),
     );
-
-  // Build applyToHost callback (once, reused across runs)
-  const applyToHost =
-    isIsolated && providerHandle
-      ? () => syncOut(worktreePath, providerHandle as IsolatedSandboxHandle)
-      : () => Effect.void;
-
-  let closed = false;
-
-  const forceCleanup = () => {
-    console.error(`\nWorktree preserved at ${worktreePath}`);
-    console.error(`  To review: cd ${worktreePath}`);
-    console.error(`  To clean up: git worktree remove --force ${worktreePath}`);
-  };
 
   // Route cleanup through the shared registry so concurrent sandboxes share one
   // SIGINT/SIGTERM/exit listener instead of tripping MaxListenersExceededWarning.
-  const unregisterShutdown = registerShutdown(forceCleanup);
+  const unregisterShutdown = registerShutdown(() => {
+    printWorktreePreserved(worktreePath);
+  });
 
-  // Build close function
+  let closed = false;
   const doClose = async (): Promise<CloseResult> => {
     if (closed) {
       return { preservedWorktreePath: undefined };
     }
     closed = true;
-
     return Effect.runPromise(
-      Effect.gen(function* () {
-        if (providerHandle) {
-          yield* Effect.promise(() => providerHandle.close());
-        }
-        yield* removeMountTempDirs(mountsToClean);
-
-        // Preserve the worktree when it has uncommitted changes; otherwise remove it.
-        const isDirty = yield* WorktreeManager.hasUncommittedChanges(
-          worktreePath,
-        ).pipe(Effect.catchAll(() => Effect.succeed(false)));
-        if (isDirty) {
-          return { preservedWorktreePath: worktreePath };
-        }
-
-        yield* WorktreeManager.remove(worktreePath).pipe(
-          Effect.catchAll(() => Effect.void),
-        );
-        return { preservedWorktreePath: undefined };
-      }),
+      closeSandboxAndWorktree({ providerHandle, mountsToClean, worktreePath }),
     );
   };
 
-  // Pre-narrow the bind-mount handle for the orchestrator's session-capture
-  // path. Gating on the provider tag avoids handing a NoSandbox/Isolated
-  // handle (which lack copyFileIn/copyFileOut) to AgentSessionStorage.
-  const bindMountHandle =
-    options.sandbox.tag === "bind-mount"
-      ? (providerHandle as BindMountSandboxHandle | undefined)
-      : undefined;
-
-  // Return the Sandbox handle
   return buildSandboxHandle(
     {
       branch,
@@ -1024,11 +1111,8 @@ export const createSandbox = async (
       hostRepoDir,
       sandboxRepoDir,
       sandbox,
-      providerHandle,
-      bindMountHandle,
-      providerTag: options.sandbox.tag,
-      sandboxProviderEnv: options.sandbox.env,
-      applyToHost,
+      // applyToHost is built once, reused across runs.
+      ...providerHandleFields(options.sandbox, providerHandle, worktreePath),
       timeouts: options.timeouts,
     },
     async () => {

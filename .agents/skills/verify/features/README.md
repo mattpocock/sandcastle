@@ -4,14 +4,14 @@ What a user can do with Sandcastle, how to reach it inside a world, and the end 
 
 Every entry gives the **entry point** (what the user calls) and the **proof** (what you read back afterwards: a file, a commit, a branch, an image, an exit code). Facts cite `src/` so you can recheck them when the code moves.
 
-| Surface                                                              | File                                         |
-| -------------------------------------------------------------------- | -------------------------------------------- |
-| `sandcastle init`: flags, templates, issue trackers                  | [init.md](init.md)                           |
-| `sandcastle docker\|podman build-image\|remove-image`                | [images.md](images.md)                       |
-| `run()`, `createSandbox()`, `createWorktree()`                       | [entry-points.md](entry-points.md)           |
-| Branch strategies: `head`, `merge-to-head`, `branch`                 | [branch-strategies.md](branch-strategies.md) |
-| Sandboxes: docker, podman, vercel, daytona (and why never noSandbox) | [sandboxes.md](sandboxes.md)                 |
-| Agents: claudeCode, pi, codex, cursor, opencode, copilot             | [agents.md](agents.md)                       |
+| Surface                                                                                               | File                                         |
+| ----------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| `sandcastle init`: flags, templates, issue trackers                                                   | [init.md](init.md)                           |
+| `sandcastle docker\|podman build-image\|remove-image`                                                 | [images.md](images.md)                       |
+| `run()`, `createSandbox()`, `createWorktree()`                                                        | [entry-points.md](entry-points.md)           |
+| Branch strategies: `head`, `merge-to-head`, `branch`                                                  | [branch-strategies.md](branch-strategies.md) |
+| Sandboxes: bwrap, seatbelt, docker, podman, vercel, daytona, modal, sprites (and why never noSandbox) | [sandboxes.md](sandboxes.md)                 |
+| Agents: claudeCode, pi, codex, cursor, opencode, copilot                                              | [agents.md](agents.md)                       |
 
 ## Driving the JS API in a world
 
@@ -23,7 +23,7 @@ Ask the agent for one fixed artefact (one file holding one line, one commit), so
 
 The mapping pass found these while reading code. Each is a hypothesis: a world run decides it.
 
-- `createSandbox()` and `wt.createSandbox()` pass `agentProviderEnv: {}`, so env declared on the agent factory may never reach that container (`src/createSandbox.ts:606`, `:795`).
+- `createSandbox()` and `wt.createSandbox()` pass `agentProviderEnv: {}`, so env declared on the agent factory may never reach that container (`src/createSandbox.ts:779`, `:968`).
 - `daytona()`'s `create` takes no arguments, so `.sandcastle/.env` keys may never reach a Daytona sandbox (`src/sandboxes/daytona.ts:84`).
 - `run()` removes a clean worktree after a failure or an abort, though the `signal` doc says the worktree is preserved (`src/run.ts:407`).
 - With merge-to-head, `run()`'s log filename and summary use a branch name that `WorktreeManager.create` then generates again, so the two may differ (`src/run.ts:639`, `src/SandboxFactory.ts:330`).

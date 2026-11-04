@@ -1,0 +1,27 @@
+{
+  "start": "getting-started",
+  "groups": [
+    {
+      "title": "Concepts",
+      "pages": [
+        "core-concepts",
+        "sandbox-providers",
+        "branch-strategies",
+        "agent-providers",
+        "agent-sessions"
+      ]
+    },
+    {
+      "title": "Running",
+      "pages": [
+        "prompts",
+        "iterations",
+        "structured-output",
+        "hooks",
+        "run-logs",
+        "init"
+      ]
+    },
+    { "title": "Reference", "pages": ["run", "cli", "glossary"] }
+  ]
+}
