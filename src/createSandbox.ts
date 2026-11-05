@@ -45,6 +45,7 @@ import type {
   NamedBranchStrategy,
   ExecResult,
 } from "./SandboxProvider.js";
+import { execOk } from "./sandboxSetup.js";
 import { startSandbox } from "./startSandbox.js";
 import { syncOut } from "./syncOut.js";
 import * as WorktreeManager from "./WorktreeManager.js";
@@ -431,15 +432,15 @@ const resolveRunLogging = (
 
 /**
  * @internal The display for a run: file logging prints the startup banner
- * and writes to the log file; any other logging stays silent.
+ * and writes to the log file; stdout logging renders to the terminal, as
+ * run() does.
  */
 const buildRunDisplayLayer = (
   logging: LoggingOption,
   banner: { readonly agentName: string | undefined; readonly branch: string },
-  silentDisplayLayer: Layer.Layer<Display>,
 ): Layer.Layer<Display> => {
   if (logging.type !== "file") {
-    return silentDisplayLayer;
+    return ClackDisplay.layer;
   }
   printFileDisplayStartup({ logPath: logging.path, ...banner });
   return Layer.provide(FileDisplay.layer(logging.path), NodeFileSystem.layer);
@@ -567,11 +568,10 @@ const buildSandboxHandle = (
         branch,
       );
 
-      const runDisplayLayer = buildRunDisplayLayer(
-        resolvedLogging,
-        { agentName: runOptions.name, branch },
-        silentDisplayLayer,
-      );
+      const runDisplayLayer = buildRunDisplayLayer(resolvedLogging, {
+        agentName: runOptions.name,
+        branch,
+      });
 
       const reuseFactoryLayer = reuseSandboxFactoryLayer(
         {
@@ -989,7 +989,7 @@ const runOnSandboxReadyHooks = ({
       `git config --global --add safe.directory "${sandboxRepoDir}"`,
     );
     const sandboxEffects = sandboxOnReady.map((hook) =>
-      sandbox.exec(hook.command, {
+      execOk(sandbox, hook.command, {
         cwd: sandboxRepoDir,
         sudo: hook.sudo,
       }),
@@ -1003,6 +1003,19 @@ const runOnSandboxReadyHooks = ({
     yield* Effect.all(allEffects, { concurrency: "unbounded" });
   });
 };
+
+/**
+ * Tears down a sandbox whose setup failed after it started: closes the
+ * container, ignoring close errors, and removes its mount temp dirs.
+ */
+const tearDownStartedSandbox = (
+  providerHandle: ProviderHandle | undefined,
+  mountsToClean: readonly MountEntry[],
+): Effect.Effect<void> =>
+  (providerHandle
+    ? Effect.promise(() => providerHandle.close().catch(() => {}))
+    : Effect.void
+  ).pipe(Effect.andThen(removeMountTempDirs(mountsToClean)));
 
 /** A close() that tears down the container only, once, and its mount temp dirs. */
 const closeContainerOnly = (
@@ -1052,14 +1065,19 @@ export const createSandboxFromWorktree = async (
     ),
   );
 
-  // 3. Run onSandboxReady hooks (sandbox-side and host-side in parallel)
+  // 3. Run onSandboxReady hooks (sandbox-side and host-side in parallel). If
+  // they fail, tear down the container that just started; the worktree stays.
   await Effect.runPromise(
     runOnSandboxReadyHooks({
       sandbox,
       sandboxRepoDir,
       worktreePath,
       hooks: options.hooks,
-    }),
+    }).pipe(
+      Effect.onError(() =>
+        tearDownStartedSandbox(providerHandle, mountsToClean),
+      ),
+    ),
   );
 
   // 4. Build and return sandbox handle — container-only close (worktree owns worktree)
@@ -1121,10 +1139,7 @@ const prepareSandboxOnWorktree = (
       hooks: options.hooks,
     }).pipe(
       Effect.onError(() =>
-        (providerHandle
-          ? Effect.promise(() => providerHandle.close().catch(() => {}))
-          : Effect.void
-        ).pipe(Effect.andThen(removeMountTempDirs(mountsToClean))),
+        tearDownStartedSandbox(providerHandle, mountsToClean),
       ),
     );
 

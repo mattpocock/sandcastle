@@ -17,7 +17,8 @@ import { vi } from "vitest";
  *
  * The fake records the arguments of each `<engine> run`, one per line; it
  * answers `podman machine list` (checked on macOS) with a running machine;
- * every other call succeeds silently.
+ * an `<engine> exec` whose command contains `fake-engine-sigterm` prints
+ * `partial` and is killed by SIGTERM; every other call succeeds silently.
  */
 export interface FakeEngineWorld {
   /** Host path to the repo. */
@@ -49,6 +50,7 @@ export const setUpFakeEngine = (
       "#!/bin/sh",
       `if [ "$1" = run ]; then printf '%s\\n' "$@" > '${runLog}'; fi`,
       `if [ "$1" = machine ]; then echo '[{"Running":true}]'; fi`,
+      `case "$*" in *fake-engine-sigterm*) echo partial; kill -TERM $$;; esac`,
       "exit 0",
       "",
     ].join("\n"),
