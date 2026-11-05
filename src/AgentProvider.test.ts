@@ -151,6 +151,19 @@ describe("claudeCode factory", () => {
     ]);
   });
 
+  it("parseStreamLine extracts tool_use block (Skill → skill arg)", () => {
+    const provider = claudeCode("claude-opus-4-8");
+    const line = JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [{ type: "tool_use", name: "Skill", input: { skill: "tdd" } }],
+      },
+    });
+    expect(provider.parseStreamLine(line)).toStrictEqual([
+      { type: "tool_call", name: "Skill", args: "tdd" },
+    ]);
+  });
+
   it("parseStreamLine bakes model into each provider instance independently", () => {
     const provider1 = claudeCode("model-a");
     const provider2 = claudeCode("model-b");
