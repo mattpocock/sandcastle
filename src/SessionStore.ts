@@ -361,7 +361,7 @@ export const transferCodexSession = (
  * Encode a cwd into pi's `~/.pi/agent/sessions/<encoded>/` layout. Pi strips the
  * leading separator and replaces path separators / drive colons with `-`, then
  * wraps the result in `--` markers. Mirrors `@mariozechner/pi-agent-core`'s
- * `SessionManager` directory encoding (verified against pi 0.73.1).
+ * `SessionManager` directory encoding (verified against pi 0.73.1 and 1.5.0).
  */
 export const encodePiSessionDir = (cwd: string): string => {
   const stripped = cwd.replace(/^[/\\]/u, "");
