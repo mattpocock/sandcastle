@@ -23,7 +23,11 @@ export interface RecordParts {
     | undefined;
 }
 
-const redactEvent = (event: RecordedEvent, redact: Redact): RecordedEvent =>
+/** One event with every secret masked, as the record has it. */
+export const redactEvent = (
+  event: RecordedEvent,
+  redact: Redact,
+): RecordedEvent =>
   event.type === "text"
     ? { ...event, text: redact(event.text) }
     : { ...event, args: redact(event.args) };

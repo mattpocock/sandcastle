@@ -7,6 +7,7 @@ import { agentFromDescriptor } from "./agentFromDescriptor.js";
 import type { ReplayFile } from "./fakeAgentReplay.js";
 import type { CarriedSession } from "./supervisorDetach.js";
 import { carryOn } from "./supervisorDetach.js";
+import { eventsFile } from "./supervisorProtocol.js";
 import type {
   DetachRequest,
   FinishReportDelivery,
@@ -69,11 +70,13 @@ const runSession = (options: {
     yield* Effect.promise(async () => board.started(request.id, request));
     const command = yield* commandFor(request);
     const log = createWriteStream(path.join("sessions", `${request.id}.log`));
+    const eventsLog = createWriteStream(eventsFile(request.id));
     const session = yield* startSession({
       request,
       agent: agentFromDescriptor(request.agent),
       command,
       log,
+      eventsLog,
       emit: send,
       secrets: options.secrets,
       detachId: options.detachId,
@@ -81,6 +84,12 @@ const runSession = (options: {
     running.set(request.id, { request, session });
     const outcome = yield* session.outcome;
     running.delete(request.id);
+    // Every event is on disk before the status file says the session ended.
+    yield* Effect.async((resume) => {
+      eventsLog.end(() => {
+        resume(Effect.void);
+      });
+    });
     yield* Effect.promise(async () =>
       board.finished(request.id, request, outcome),
     );

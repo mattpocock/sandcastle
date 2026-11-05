@@ -11,7 +11,7 @@ import { applyEvents, emptyStream } from "./sessionStream.js";
 import type { StreamEnd, Watched } from "./sessionOutcome.js";
 import { sessionOutcome } from "./sessionOutcome.js";
 import type { Recording } from "./supervisorRecord.js";
-import { recordSession } from "./supervisorRecord.js";
+import { liveRedactor, recordSession } from "./supervisorRecord.js";
 import type {
   Reply,
   SessionOutcome,
@@ -42,6 +42,8 @@ interface Context {
   readonly trigger: string | undefined;
   /** Every event the user sees, timestamped, for the session's record. */
   readonly events: RecordedEvent[];
+  /** Appends an event to the session's events file, redacted, for `follow()`. */
+  readonly follow: (event: RecordedEvent) => void;
 }
 
 const stopped = (
@@ -62,6 +64,7 @@ const readLine = (
   for (const event of applied.visible) {
     context.emit({ type: "event", event });
     context.events.push({ ...event, at });
+    context.follow({ ...event, at });
   }
   return applied.state;
 };
@@ -135,6 +138,8 @@ export interface StartOptions {
   /** Turns the agent's real command into the one to run (a fake agent replays instead). */
   readonly command: (realCommand: string) => string;
   readonly log: WriteStream;
+  /** The session's events file, one redacted event per line. */
+  readonly eventsLog: WriteStream;
   readonly emit: (reply: Reply) => void;
   /** The record's upload URL and webhook secret, opened. */
   readonly secrets: RecordSecrets;
@@ -171,6 +176,7 @@ export const startSession = (
     const { request, agent } = options;
     const startedMs = yield* Clock.currentTimeMillis;
     const { process, env } = yield* launch(options);
+    const redact = yield* liveRedactor(request, env);
     const context: Context = {
       request,
       agent,
@@ -179,6 +185,9 @@ export const startSession = (
       trigger:
         request.output === undefined ? undefined : `</${request.output.tag}>`,
       events: [],
+      follow: (event) => {
+        options.eventsLog.write(`${JSON.stringify(redact(event))}\n`);
+      },
     };
     const recording: Recording = {
       request,
