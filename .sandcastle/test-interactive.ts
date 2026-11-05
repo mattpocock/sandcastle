@@ -1,5 +1,4 @@
 import * as sandcastle from "@ai-hero/sandcastle";
-import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
 
 // /matt-pococks-projects/sandcastle
 const { commits, branch } = await sandcastle.interactive({

@@ -61,7 +61,10 @@ interface HostContext {
 /** A spawned `exec` process: stdout and stderr are always piped. */
 type ExecProcess = ChildProcessByStdio<Writable | null, Readable, Readable>;
 
-/** Attaches output listeners; call the result on close for the output. */
+/**
+ * Attaches output listeners to a process whose stdout and stderr emit UTF-8
+ * strings; call the result on close for the output.
+ */
 type OutputCollector = (proc: ExecProcess) => () => {
   stdout: string;
   stderr: string;
@@ -122,8 +125,8 @@ const streamLines =
       stdoutTail.push(line);
       onLine(line);
     });
-    proc.stderr.on("data", (chunk: Buffer) => {
-      stderrTail.push(chunk.toString());
+    proc.stderr.on("data", (chunk: string) => {
+      stderrTail.push(chunk);
     });
     return () => ({
       stdout: stdoutTail.toString(),
@@ -135,11 +138,11 @@ const streamLines =
 const bufferAll: OutputCollector = (proc) => {
   const stdoutChunks: string[] = [];
   const stderrChunks: string[] = [];
-  proc.stdout.on("data", (chunk: Buffer) => {
-    stdoutChunks.push(chunk.toString());
+  proc.stdout.on("data", (chunk: string) => {
+    stdoutChunks.push(chunk);
   });
-  proc.stderr.on("data", (chunk: Buffer) => {
-    stderrChunks.push(chunk.toString());
+  proc.stderr.on("data", (chunk: string) => {
+    stderrChunks.push(chunk);
   });
   return () => ({
     stdout: stdoutChunks.join(""),
@@ -155,6 +158,10 @@ const waitForExec = async (
     proc.on("error", (error: Error) => {
       reject(new Error(`exec failed: ${error.message}`));
     });
+    // Decode as UTF-8 streams, so a multi-byte character split across two
+    // chunks is joined back up instead of becoming replacement characters.
+    proc.stdout.setEncoding("utf8");
+    proc.stderr.setEncoding("utf8");
     const output = collect(proc);
     proc.on("close", (code: number | null) => {
       resolve({ ...output(), exitCode: code ?? 0 });
