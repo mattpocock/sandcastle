@@ -21,10 +21,19 @@
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 
-const branch = process.env["FACTORY_BRANCH"]!;
+/** Read an env var the daemon always sets; fail fast if it is missing. */
+const requireEnv = (name: string): string => {
+  const value = process.env[name];
+  if (value === undefined) {
+    throw new Error(`implement-task: ${name} is not set`);
+  }
+  return value;
+};
+
+const branch = requireEnv("FACTORY_BRANCH");
 const base = process.env["FACTORY_BASE"];
 const repoPath = process.env["FACTORY_REPO_PATH"];
-const taskDescription = process.env["FACTORY_TASK_DESCRIPTION"]!;
+const taskDescription = requireEnv("FACTORY_TASK_DESCRIPTION");
 const issueNumber = process.env["FACTORY_TASK_ISSUE_NUMBER"]!;
 
 await using worktree = await sandcastle.createWorktree({
@@ -51,7 +60,7 @@ const result = await sandbox.run({
   agent: sandcastle.claudeCode("claude-opus-4-8"),
   promptFile: "./.sandcastle/implement-prompt.md",
   promptArgs: {
-    ISSUE_NUMBER: String(issueNumber),
+    ISSUE_NUMBER: issueNumber,
     ISSUE_TITLE: taskDescription,
     BRANCH: branch,
   },
@@ -63,7 +72,7 @@ if (result.commits.length > 0) {
     agent: sandcastle.claudeCode("claude-opus-4-8"),
     promptFile: "./.sandcastle/review-prompt.md",
     promptArgs: {
-      ISSUE_NUMBER: String(issueNumber),
+      ISSUE_NUMBER: issueNumber,
       ISSUE_TITLE: taskDescription,
       BRANCH: branch,
     },
