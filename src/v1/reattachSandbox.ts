@@ -9,7 +9,11 @@ import type { ProviderSandbox } from "./SandboxProvider.js";
 import { providerInternals } from "./SandboxProvider.js";
 import { SandboxUnavailableError } from "./SandboxUnavailableError.js";
 import { readSupervisorStatus } from "./sandboxStatus.js";
-import { exitedLink, linkTo, supervisorDirectory } from "./supervisorHost.js";
+import {
+  exitedLink,
+  lazyLinkTo,
+  supervisorDirectory,
+} from "./supervisorHost.js";
 
 /** The provider's sandbox, its commands getting `env` under their own. */
 const withEnv = (
@@ -62,10 +66,12 @@ export async function reattachSandbox(
   if (status === undefined) {
     return undefined;
   }
+  // Linked on first use, so a handle only looked through (status(),
+  // follow()) never waits on the supervisor's client.
   const supervisor =
     status.supervisor === "exited"
       ? exitedLink(directory)
-      : await linkTo(sandbox, directory).catch(() => exitedLink(directory));
+      : lazyLinkTo(sandbox, directory);
   return sandboxHandle({
     sandbox,
     canDetach: true,
