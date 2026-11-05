@@ -6,12 +6,16 @@ import type { Sandbox } from "./Sandbox.js";
 import type { SessionProcess } from "./Session.js";
 import type { SessionRecordOptions } from "./SessionRecord.js";
 import { MIRRORED_SKILLS } from "./skills/mirroredSkills.js";
-import type { TaskLimits, TaskSkillsContext } from "./Task.js";
+import type {
+  TaskAgentOptions,
+  TaskLimits,
+  TaskSkillsContext,
+} from "./Task.js";
 import { implementPrompt } from "./taskImplementPrompt.js";
 import { startTask } from "./taskStart.js";
 
 /** What every `implement` round takes. */
-export interface ImplementCommon {
+export interface ImplementCommon extends TaskAgentOptions {
   /** The repo to clone: `owner/name` on GitHub, or any URL or path `git clone` takes. */
   readonly repo: string;
   /**
@@ -62,7 +66,7 @@ export type ImplementRound =
 /** What `implement.start` takes. */
 export type ImplementInput = ImplementCommon & ImplementWork & ImplementRound;
 
-/** The `implement` bundled task: a ticket in, a PR out, never merged. Claude Code on Opus. */
+/** The `implement` bundled task: a ticket in, a PR out, never merged. Claude Code on Opus unless you pass `agent`. */
 export interface ImplementTask {
   /** The task's name, and the name of its session in the finish report. */
   readonly name: "implement";
@@ -109,7 +113,7 @@ const start: ImplementTask["start"] = async (sandbox, input) => {
   return startTask(sandbox, {
     name: "implement",
     limits: LIMITS,
-    agent: claudeCode("opus"),
+    agent: input.agent ?? claudeCode("opus"),
     skills: SKILLS,
     prompt: implementPrompt({
       work:
@@ -127,6 +131,7 @@ const start: ImplementTask["start"] = async (sandbox, input) => {
     skillsContext: input.skillsContext,
     setup: input.setup ?? [],
     record: input.record,
+    completionTimeoutSeconds: input.completionTimeoutSeconds,
   });
 };
 

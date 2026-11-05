@@ -3,9 +3,9 @@ import type { OutputDefinition } from "./Output.js";
 import type { Sandbox } from "./Sandbox.js";
 import type { OutputType, SessionProcess } from "./Session.js";
 import { installSkills } from "./skills/installSkills.js";
-import type { Skill } from "./skills/Skill.js";
 import type { TaskLimits, TaskRun, TaskSkillsContext } from "./Task.js";
 import { latestDeadlineMs, setTaskDeadline } from "./detachDeadline.js";
+import { checkAgentOptions } from "./sessionRequest.js";
 import { prepareRepo } from "./taskBranch.js";
 import { taskPrompt } from "./taskPrompt.js";
 
@@ -39,7 +39,7 @@ const taskDeadline = (sandbox: Sandbox, name: string, limits: TaskLimits) => {
 
 const install = async (
   sandbox: Sandbox,
-  skills: readonly Skill[],
+  skills: TaskRun<undefined>["skills"],
   context: TaskSkillsContext,
 ): Promise<void> => {
   if (skills.length === 0) {
@@ -102,6 +102,7 @@ export const startTask = async <O extends OutputDefinition | undefined>(
   run: TaskRun<O>,
 ): Promise<SessionProcess<OutputType<O>>> => {
   checkTracker(run.name, run.skillsContext);
+  checkAgentOptions(run);
   const deadline = taskDeadline(sandbox, run.name, run.limits);
   const directory = await prepareRepo(sandbox, run);
   const body = await taskBody(run.prompt, directory);
@@ -122,5 +123,8 @@ export const startTask = async <O extends OutputDefinition | undefined>(
       ? {}
       : { env: { GH_TOKEN: run.githubToken } }),
     ...(run.record === undefined ? {} : { record: run.record }),
+    ...(run.completionTimeoutSeconds === undefined
+      ? {}
+      : { completionTimeoutSeconds: run.completionTimeoutSeconds }),
   });
 };

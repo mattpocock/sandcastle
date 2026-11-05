@@ -4,13 +4,17 @@ import type { OutputMap } from "./FinishReport.js";
 import type { Sandbox } from "./Sandbox.js";
 import type { OutputType, SessionProcess } from "./Session.js";
 import type { SessionRecordOptions } from "./SessionRecord.js";
-import type { TaskLimits, TaskSkillsContext } from "./Task.js";
+import type {
+  TaskAgentOptions,
+  TaskLimits,
+  TaskSkillsContext,
+} from "./Task.js";
 import { startTask } from "./taskStart.js";
 
 /** What `general.start` takes. */
 export interface GeneralInput<
   O extends OutputDefinition | undefined = undefined,
-> {
+> extends TaskAgentOptions {
   /** The question or job, in your words. */
   readonly prompt: string;
   /**
@@ -38,7 +42,7 @@ export type GeneralOutputs<O extends OutputDefinition> = Readonly<
   Record<"general", O>
 >;
 
-/** The `general` bundled task: any prompt, answered by Claude Code on Sonnet. */
+/** The `general` bundled task: any prompt, answered by Claude Code on Sonnet unless you pass `agent`. */
 export interface GeneralTask {
   /** The task's name, and the name of its session in the finish report. */
   readonly name: "general";
@@ -85,7 +89,7 @@ export const general: GeneralTask = {
     startTask(sandbox, {
       name: "general",
       limits: LIMITS,
-      agent: claudeCode("sonnet"),
+      agent: input.agent ?? claudeCode("sonnet"),
       skills: [],
       prompt: input.prompt,
       output: input.output,
@@ -95,5 +99,6 @@ export const general: GeneralTask = {
       skillsContext: input.skillsContext,
       setup: input.setup ?? [],
       record: input.record,
+      completionTimeoutSeconds: input.completionTimeoutSeconds,
     }),
 };

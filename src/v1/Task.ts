@@ -29,6 +29,31 @@ export interface TaskSkillsContext {
   readonly tracker: Tracker;
 }
 
+/**
+ * The agent options every bundled task's `start` takes, beside its own input.
+ */
+export interface TaskAgentOptions {
+  /**
+   * The agent and model the task's session runs, from a built-in agent
+   * factory (`claudeCode()`, `codex()`, `cursor()`, `opencode()`,
+   * `copilot()`, `pi()`), or `fakeAgent()` from `/v1/testing` in tests.
+   * Default: Claude Code on the task's own model (Sonnet for `general` and
+   * `review`, Opus for `implement`). Give the agent env of its own, such as
+   * its token, through the factory: `claudeCode("opus", { env })`. The task's
+   * skills are installed where Claude Code reads them, and its prompt is the
+   * same whichever agent runs it. `start` rejects an agent not made by a
+   * built-in factory before it clones anything.
+   */
+  readonly agent?: AgentProvider;
+  /**
+   * Once the task's output closing tag has appeared, how long the agent may
+   * stay silent before its process is stopped and the session counts as
+   * done. Default 60, the session's own default. `start` rejects a value
+   * that isn't a positive number before it clones anything.
+   */
+  readonly completionTimeoutSeconds?: number;
+}
+
 /** What a task hands the bundled task contract (`startTask`) to start it. Internal. */
 export interface TaskRun<O extends OutputDefinition | undefined> {
   /** The task's name, and its session's. */
@@ -51,4 +76,5 @@ export interface TaskRun<O extends OutputDefinition | undefined> {
   readonly skillsContext: TaskSkillsContext;
   readonly setup: readonly string[];
   readonly record: SessionRecordOptions | undefined;
+  readonly completionTimeoutSeconds: number | undefined;
 }

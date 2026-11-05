@@ -46,7 +46,7 @@ export interface ExecResult<Code extends number = number> {
 export const general: GeneralTask;
 
 // @public
-export interface GeneralInput<O extends OutputDefinition | undefined = undefined> {
+export interface GeneralInput<O extends OutputDefinition | undefined = undefined> extends TaskAgentOptions {
     readonly githubToken?: string;
     readonly output?: O;
     readonly prompt: string;
@@ -74,7 +74,7 @@ export interface GeneralTask {
 export const implement: ImplementTask;
 
 // @public
-export interface ImplementCommon {
+export interface ImplementCommon extends TaskAgentOptions {
     readonly githubToken: string;
     readonly record?: SessionRecordOptions;
     readonly repo: string;
@@ -182,7 +182,7 @@ export interface RecordRedaction {
 export const review: ReviewTask;
 
 // @public
-export interface ReviewInput {
+export interface ReviewInput extends TaskAgentOptions {
     readonly githubToken: string;
     readonly pr: number;
     readonly record?: SessionRecordOptions;
@@ -335,6 +335,12 @@ export interface SessionUsage {
     readonly inputTokens: number;
     // (undocumented)
     readonly outputTokens: number;
+}
+
+// @public
+export interface TaskAgentOptions {
+    readonly agent?: AgentProvider;
+    readonly completionTimeoutSeconds?: number;
 }
 
 // @public

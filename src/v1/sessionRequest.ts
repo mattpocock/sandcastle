@@ -78,6 +78,21 @@ const checkEnv = (env: Readonly<Record<string, string>>): void => {
   }
 };
 
+/**
+ * Checks a session's agent and completion timeout on their own, so a caller
+ * that does work before spawning the session (a bundled task) fails first.
+ */
+export const checkAgentOptions = (
+  options: Pick<SessionOptions, "agent" | "completionTimeoutSeconds">,
+): void => {
+  agentDescriptor(options.agent);
+  positiveMs(
+    "completionTimeoutSeconds",
+    options.completionTimeoutSeconds,
+    DEFAULT_COMPLETION_TIMEOUT_SECONDS,
+  );
+};
+
 /** The supervisor's request for a session; throws on options that can't run. */
 export const sessionRequest = (
   options: SessionOptions,
