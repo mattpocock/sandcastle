@@ -8,7 +8,7 @@ Read `GLOSSARY.md` and any relevant ADRs under `docs/adr/` before resolving anyt
 
 <pr-view>
 
-!`gh pr view {{PR_NUMBER}}`
+!`gh pr view {{PR_NUMBER}} --json number,title,body,state,baseRefName,headRefName,url`
 
 </pr-view>
 
