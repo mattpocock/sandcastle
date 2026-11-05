@@ -1,5 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, assert, beforeEach, describe, expect, it } from "vitest";
@@ -81,7 +87,8 @@ describe("run({ resumeSession }) checks the session before starting", () => {
   };
 
   beforeEach(() => {
-    repo = mkdtempSync(path.join(tmpdir(), "e2e-resume-"));
+    // The real path: Sandcastle resolves the repo dir (macOS tmpdir is a symlink).
+    repo = realpathSync(mkdtempSync(path.join(tmpdir(), "e2e-resume-")));
     store = mkdtempSync(path.join(tmpdir(), "e2e-resume-store-"));
     const git = (...args: string[]): void => {
       execFileSync("git", args, { cwd: repo, stdio: "ignore" });
@@ -267,7 +274,7 @@ describe("RunResult.fork()", () => {
   let store = "";
 
   beforeEach(() => {
-    repo = mkdtempSync(path.join(tmpdir(), "e2e-fork-"));
+    repo = realpathSync(mkdtempSync(path.join(tmpdir(), "e2e-fork-")));
     store = mkdtempSync(path.join(tmpdir(), "e2e-fork-store-"));
     const git = (...args: string[]): void => {
       execFileSync("git", args, { cwd: repo, stdio: "ignore" });
