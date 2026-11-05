@@ -431,15 +431,15 @@ const resolveRunLogging = (
 
 /**
  * @internal The display for a run: file logging prints the startup banner
- * and writes to the log file; any other logging stays silent.
+ * and writes to the log file; stdout logging renders to the terminal, as
+ * run() does.
  */
 const buildRunDisplayLayer = (
   logging: LoggingOption,
   banner: { readonly agentName: string | undefined; readonly branch: string },
-  silentDisplayLayer: Layer.Layer<Display>,
 ): Layer.Layer<Display> => {
   if (logging.type !== "file") {
-    return silentDisplayLayer;
+    return ClackDisplay.layer;
   }
   printFileDisplayStartup({ logPath: logging.path, ...banner });
   return Layer.provide(FileDisplay.layer(logging.path), NodeFileSystem.layer);
@@ -567,11 +567,10 @@ const buildSandboxHandle = (
         branch,
       );
 
-      const runDisplayLayer = buildRunDisplayLayer(
-        resolvedLogging,
-        { agentName: runOptions.name, branch },
-        silentDisplayLayer,
-      );
+      const runDisplayLayer = buildRunDisplayLayer(resolvedLogging, {
+        agentName: runOptions.name,
+        branch,
+      });
 
       const reuseFactoryLayer = reuseSandboxFactoryLayer(
         {
