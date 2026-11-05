@@ -206,6 +206,15 @@ const killOnAbort = (
   );
 };
 
+/** Where the sandbox's sessions run; the supervisor's key comes from its link. */
+interface SessionContext {
+  readonly workingDirectory: string;
+  readonly record: Omit<
+    Parameters<typeof sessionRequest>[1]["record"],
+    "publicKey"
+  >;
+}
+
 /** A session's name is taken from the moment its spawn is accepted ("starting") until the supervisor's answer for it is over, or its spawn fails. */
 type Running = Map<string, Live | "starting">;
 
@@ -216,21 +225,23 @@ const free = (running: Running, name: string, slot: Live | "starting") => {
 };
 
 /** `spawnSession()` for one sandbox. */
-const spawner = (
-  shared: Shared,
-  running: Running,
-  context: Omit<Parameters<typeof sessionRequest>[1], "name">,
-) => {
+const spawner = (shared: Shared, running: Running, context: SessionContext) => {
   let count = 0;
   return async (options: SessionOptions): Promise<SessionProcess> => {
     count += 1;
     const name = options.name ?? `session-${count}`;
+    // Before the name is checked and taken, so no await comes between them.
+    const publicKey = await shared.link.publicKey();
     if (running.has(name)) {
       throw new TypeError(
         `session: a session named "${name}" is already running`,
       );
     }
-    const request = sessionRequest(options, { ...context, name });
+    const request = sessionRequest(options, {
+      ...context,
+      name,
+      record: { ...context.record, publicKey },
+    });
     if (options.abortSignal?.aborted === true) {
       throw abortedBeforeStart(name);
     }
@@ -262,10 +273,7 @@ const spawner = (
 };
 
 /** `session()` and `spawnSession()` for one sandbox. */
-export const sessionHost = (
-  link: SupervisorLink,
-  context: Omit<Parameters<typeof sessionRequest>[1], "name">,
-) => {
+export const sessionHost = (link: SupervisorLink, context: SessionContext) => {
   const running: Running = new Map();
   const shared: Shared = { link, letGo: new AbortController() };
   const spawnSession = spawner(shared, running, context);

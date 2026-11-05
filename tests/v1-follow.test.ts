@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -190,6 +190,40 @@ describe.skipIf(process.platform === "win32")("follow() (v1)", () => {
       true,
     );
   }, 30_000);
+
+  it("a fresh reattach reads status() and follows without waiting on the supervisor: on a loaded sandbox its client can take tens of seconds to answer", async () => {
+    const sandbox = await createSandbox({ provider });
+    await sandbox.spawnSession({
+      name: "implement",
+      agent: working,
+      prompt: "Go.",
+    });
+    await sandbox.detach();
+    const supervisor = supervisorDir(provider, sandbox.sandboxId);
+    const bundle = path.join(supervisor, "supervisor.mjs");
+    const real = await readFile(bundle, "utf8");
+    // The running supervisor has its code loaded already; a client started
+    // from now on never answers, like one starved of CPU by the agent's work.
+    await writeFile(bundle, "setTimeout(() => undefined, 20_000);\n");
+    try {
+      const watcher = await reattach({
+        provider: fakeSandbox({ rootDir }),
+        sandboxId: sandbox.sandboxId,
+      });
+      const status = await watcher.status();
+      expect(status.running.map((work) => work.name)).toStrictEqual([
+        "implement",
+      ]);
+      const seen = await readAllThen(
+        watcher.follow({ session: "implement" }),
+        EXPECTED.length,
+        async () => endAgents(watcher, supervisor),
+      );
+      expect(seen.map((event) => withoutTime(event))).toStrictEqual(EXPECTED);
+    } finally {
+      await writeFile(bundle, real);
+    }
+  }, 15_000);
 
   it("follows from a fresh reattach, live and after the supervisor has exited, and picks up where an earlier follow stopped", async () => {
     const hook = await listening();

@@ -176,7 +176,6 @@ const sessionsOn = (
     record: {
       sandboxId: sandbox.sandboxId,
       killTime: sandbox.killTime,
-      publicKey: supervisor.publicKey,
     },
   });
 

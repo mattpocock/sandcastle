@@ -138,6 +138,7 @@ const handOver = async (
 const detachRequest = (
   context: DetachContext,
   options: DetachOptions,
+  publicKey: string,
 ): { readonly request: DetachRequest; readonly deadline: DetachDeadline } => {
   const { sandbox } = context;
   const deadline = detachDeadline({
@@ -159,10 +160,7 @@ const detachRequest = (
       : {
           finishReport: {
             url: finishReport.url,
-            sealedSecret: sealSecret(
-              context.link.publicKey,
-              finishReport.secret,
-            ),
+            sealedSecret: sealSecret(publicKey, finishReport.secret),
           },
         }),
   };
@@ -174,10 +172,13 @@ export const detachFrom =
   (context: DetachContext) =>
   async (options: DetachOptions = {}): Promise<DetachReceipt> => {
     checkOptions(options);
+    // First, so nothing can start between checkReady() and the hand-over.
+    const publicKey =
+      options.finishReport === undefined ? "" : await context.link.publicKey();
     options.abortSignal?.throwIfAborted();
     checkReady(context);
     const { sandboxId } = context.sandbox;
-    const { request, deadline } = detachRequest(context, options);
+    const { request, deadline } = detachRequest(context, options, publicKey);
     const { detachId } = request;
     const carried = await handOver(context, request, options.abortSignal);
     context.letGo(

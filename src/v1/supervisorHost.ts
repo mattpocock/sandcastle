@@ -30,7 +30,7 @@ export interface SupervisorLink {
   /** Stops every session and the supervisor. Never rejects. */
   readonly shutdown: () => Promise<void>;
   /** The supervisor's public key, from its hello: finish-report secrets are sealed to it. */
-  readonly publicKey: string;
+  readonly publicKey: () => Promise<string>;
   /** Its directory in the sandbox, where it keeps its status, reports and log. */
   readonly directory: string;
 }
@@ -106,7 +106,7 @@ export const linkTo = async (
   }
   return {
     call,
-    publicKey,
+    publicKey: async () => publicKey,
     directory,
     shutdown: async () =>
       Effect.runPromise(
@@ -124,10 +124,43 @@ export const exitedLink = (directory: string): SupervisorLink => ({
       "the session supervisor has exited: its detached work has been reported",
     );
   },
-  publicKey: "",
+  publicKey: async () => "",
   directory,
   shutdown: async () => undefined,
 });
+
+/**
+ * A link to the supervisor running in `directory` that says hello only when
+ * something first needs the supervisor: a session, a detach, a close.
+ * `status()` and `follow()` read its files and never do, which matters on a
+ * busy sandbox, where starting the supervisor's client can take tens of
+ * seconds. A supervisor that doesn't answer then is taken as exited.
+ */
+export const lazyLinkTo = (
+  sandbox: ProviderSandbox,
+  directory: string,
+): SupervisorLink => {
+  let linked: Promise<SupervisorLink> | undefined;
+  const link = async (): Promise<SupervisorLink> => {
+    linked ??= linkTo(sandbox, directory).catch(() => exitedLink(directory));
+    return linked;
+  };
+  return {
+    call: async (request, onReply, abortSignal) => {
+      const { call } = await link();
+      return call(request, onReply, abortSignal);
+    },
+    publicKey: async () => {
+      const { publicKey } = await link();
+      return publicKey();
+    },
+    directory,
+    shutdown: async () => {
+      const { shutdown } = await link();
+      return shutdown();
+    },
+  };
+};
 
 /** Copies the supervisor into the sandbox, starts it and waits until it answers. */
 export const startSupervisor = async (
