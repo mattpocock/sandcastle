@@ -1,6 +1,7 @@
 import { posix } from "node:path";
 import { shellEscape } from "../AgentProvider.js";
 import type { Sandbox } from "./Sandbox.js";
+import { resolveInSandbox } from "./sandboxPath.js";
 
 // Cloning a bundled task's repo. The GitHub token reaches the clone command's
 // env only; git reads it through a credential helper that names `$GH_TOKEN`,
@@ -21,14 +22,17 @@ const cloneDirectory = (url: string): string => {
   return name === "" || name === "." || name === ".." ? "repo" : name;
 };
 
-/** Clones `repo` into the working directory; resolves with the clone's directory. */
+/** Clones `repo` into the working directory; resolves with the clone's absolute directory. */
 export const cloneRepo = async (
   sandbox: Sandbox,
   repo: string,
   githubToken: string | undefined,
 ): Promise<string> => {
   const url = cloneUrl(repo);
-  const directory = cloneDirectory(url);
+  const directory = resolveInSandbox(
+    sandbox.workingDirectory,
+    cloneDirectory(url),
+  );
   const helper = shellEscape(CREDENTIAL_HELPER);
   const credentials =
     githubToken === undefined

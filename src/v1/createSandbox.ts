@@ -109,5 +109,6 @@ export async function createSandbox(
     canDetach: provider.canDetach,
     supervisor,
     timeLimitMinutes: options.timeLimitMinutes ?? DEFAULT_TIME_LIMIT_MINUTES,
+    env: { ...options.env },
   });
 }

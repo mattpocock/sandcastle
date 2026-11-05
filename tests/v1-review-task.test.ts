@@ -237,6 +237,13 @@ describe.skipIf(process.platform === "win32")("the review task (v1)", () => {
       expect.stringMatching(/^git fetch /u),
     ]);
     expect(calls.map((call) => call.command).join("\n")).not.toContain(TOKEN);
+    const placed = calls.filter((call) => call.workingDirectory !== undefined);
+    expect(placed.length).toBeGreaterThanOrEqual(4);
+    for (const call of placed) {
+      expect(call.workingDirectory).toBe(
+        path.join(sandbox.workingDirectory, "widgets"),
+      );
+    }
     await expect(claude.read("gh-calls.txt")).resolves.toBe(
       `pr view 7 --json baseRefName,headRefName,closingIssuesReferences token=${TOKEN}\n`,
     );

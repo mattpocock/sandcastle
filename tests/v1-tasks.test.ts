@@ -217,6 +217,34 @@ describe.skipIf(process.platform === "win32")("bundled tasks (v1)", () => {
     ).resolves.not.toContain(TOKEN);
   });
 
+  it("runs every command in the clone by its absolute path: the git config and setup", async () => {
+    const claude = await stubClaude(path.join(rootDir, "agent"), [
+      init("s-absolute"),
+      result("ok"),
+    ]);
+    const sandbox = await createSandbox({ provider, env: claude.env });
+    const calls: ExecOptions[] = [];
+
+    await finished(spied(sandbox, calls), {
+      prompt: "Say ok.",
+      repo: origin,
+      githubToken: TOKEN,
+      skillsContext: GITHUB,
+      setup: ["true"],
+    });
+
+    const clone = path.join(sandbox.workingDirectory, "widgets");
+    const placed = calls.filter((call) => call.workingDirectory !== undefined);
+    expect(placed.map((call) => call.command)).toStrictEqual([
+      expect.stringMatching(/^git config credential\.helper /u),
+      "true",
+    ]);
+    expect(placed.map((call) => call.workingDirectory)).toStrictEqual([
+      clone,
+      clone,
+    ]);
+  });
+
   it("asks for the output tag, gives the tracker instructions and says no human is watching", async () => {
     const claude = await stubClaude(path.join(rootDir, "agent"), [
       init("s-prompt"),

@@ -9,6 +9,7 @@ import type {
   SandboxProvider,
 } from "@ai-hero/sandcastle/v1";
 import { localProviderSandbox } from "./helpers/localProviderSandbox.js";
+import { providerContract } from "./helpers/providerContract.js";
 import {
   CreateSandboxError,
   createSandbox,
@@ -117,6 +118,59 @@ describe.skipIf(process.platform === "win32")("createSandbox (v1)", () => {
     expect(sandbox.canDetach).toBe(false);
   });
 
+  describe("through a provider that resolves no relative path itself", () => {
+    // Like a remote shell whose own cwd isn't the sandbox's working
+    // directory: a relative path it's handed lands somewhere else. The
+    // contract still holds because Sandcastle resolves paths before the
+    // provider sees them.
+    providerContract(async (env) => {
+      const provider = createSandboxProvider({
+        name: "literal",
+        create: async (created) => {
+          const sandbox = await recordingSandbox({
+            creates: [],
+            execs: [],
+            closes: 0,
+          });
+          const elsewhere = path.join(sandbox.workingDirectory, "elsewhere");
+          const local = localProviderSandbox(elsewhere);
+          locals.push(local);
+          const literal = (file: string) => path.resolve(elsewhere, file);
+          return {
+            ...sandbox,
+            exec: async (options) =>
+              local.exec({
+                ...options,
+                env: { ...created.env, ...options.env },
+                workingDirectory: literal(
+                  options.workingDirectory ?? sandbox.workingDirectory,
+                ),
+              }),
+            readTextFile: async ({ path: file }) =>
+              local.readTextFile({ path: literal(file) }),
+            writeTextFile: async ({ path: file, content }) =>
+              local.writeTextFile({ path: literal(file), content }),
+          };
+        },
+      });
+      return createSandbox({ provider, env });
+    });
+  });
+
+  it("hands the provider absolute paths, resolved against its working directory", async () => {
+    const { provider, recorded } = recordingProvider();
+    const sandbox = await createSandbox({ provider });
+    await sandbox.exec("mkdir -p sub");
+
+    await sandbox.exec({ command: "true", workingDirectory: "sub/../sub" });
+    await sandbox.exec({ command: "true", workingDirectory: "/tmp" });
+
+    expect(recorded.execs.at(-2)?.workingDirectory).toBe(
+      path.join(sandbox.workingDirectory, "sub"),
+    );
+    expect(recorded.execs.at(-1)?.workingDirectory).toBe("/tmp");
+  });
+
   it("passes exec options through to the provider", async () => {
     const { provider, recorded } = recordingProvider();
     const sandbox = await createSandbox({ provider });
@@ -131,7 +185,7 @@ describe.skipIf(process.platform === "win32")("createSandbox (v1)", () => {
 
     expect(recorded.execs.at(-1)).toMatchObject({
       command: "true",
-      workingDirectory: "sub",
+      workingDirectory: path.join(sandbox.workingDirectory, "sub"),
       env: { ONLY: "this" },
       sudo: true,
     });

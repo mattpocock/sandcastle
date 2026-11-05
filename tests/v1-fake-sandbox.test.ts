@@ -6,6 +6,7 @@ import type { DetachableSandbox } from "@ai-hero/sandcastle/v1";
 import { createSandbox, ExecFailedError } from "@ai-hero/sandcastle/v1";
 import type { FakeSandboxProvider } from "@ai-hero/sandcastle/v1/testing";
 import { fakeSandbox } from "@ai-hero/sandcastle/v1/testing";
+import { providerContract } from "./helpers/providerContract.js";
 
 // createSandbox() on the testing fake: real directories, real `sh` processes.
 // The fake needs `sh` and POSIX process groups, so these tests skip on
@@ -64,6 +65,8 @@ describe.skipIf(process.platform === "win32")("fakeSandbox()", () => {
     await provider.closeAll();
     await rm(rootDir, { recursive: true, force: true });
   });
+
+  providerContract(async (env) => createSandbox({ provider, env }));
 
   it("resolves a detachable handle backed by a directory under rootDir", async () => {
     const sandbox = await createSandbox({ provider });

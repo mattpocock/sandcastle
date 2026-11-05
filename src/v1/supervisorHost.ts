@@ -5,6 +5,7 @@ import { shellEscape } from "../AgentProvider.js";
 import { supervisorBundle } from "./supervisorBundle.js";
 import type { Reply, Request } from "./supervisorProtocol.js";
 import { ReplyJson } from "./supervisorProtocol.js";
+import { outputTail } from "./execFailure.js";
 import type { DetachCapability, ProviderSandbox } from "./SandboxProvider.js";
 
 type SpawnDetached = (
@@ -72,7 +73,7 @@ const callOn =
     });
     if (result.exitCode !== 0) {
       throw new Error(
-        `the session supervisor didn't answer (exit ${result.exitCode}): ${result.stderr.trim()}`,
+        `the session supervisor didn't answer (exit ${result.exitCode}): ${outputTail(result.stderr)}`,
       );
     }
   };

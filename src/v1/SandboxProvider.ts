@@ -8,6 +8,8 @@
  * and the time limit.
  */
 
+import { resolveInSandbox } from "./sandboxPath.js";
+
 /** What `createSandbox` passes to a provider's `create`. */
 export interface ProviderCreateOptions {
   /** Exactly the env the caller passed to `createSandbox`. Every command in the sandbox gets it. Nothing else. */
@@ -26,7 +28,11 @@ export interface ProviderCreateOptions {
 export interface ProviderExecOptions {
   /** The shell command. */
   readonly command: string;
-  /** Directory to run in. Relative paths resolve against the sandbox's `workingDirectory`. */
+  /**
+   * Directory to run in. Always absolute: Sandcastle resolves a caller's
+   * relative path against the sandbox's `workingDirectory` before the
+   * provider sees it. Absent means the sandbox's `workingDirectory`.
+   */
   readonly workingDirectory?: string;
   /** Extra env for this command only, on top of the sandbox's env. */
   readonly env?: Readonly<Record<string, string>>;
@@ -65,11 +71,11 @@ export interface ProviderSandbox<Native = unknown> {
   readonly native: Native;
   /** Run a command and wait for it. Resolves with any exit code. */
   readonly exec: (options: ProviderExecOptions) => Promise<ProviderExecResult>;
-  /** Read a text file, or `null` if it doesn't exist. Relative paths resolve against `workingDirectory`. */
+  /** Read a text file, or `null` if it doesn't exist. Sandcastle hands it an absolute path, resolved against `workingDirectory`. */
   readonly readTextFile: (options: {
     readonly path: string;
   }) => Promise<string | null>;
-  /** Write a text file, creating parent directories. Relative paths resolve against `workingDirectory`. */
+  /** Write a text file, creating parent directories. Sandcastle hands it an absolute path, resolved against `workingDirectory`. */
   readonly writeTextFile: (options: {
     readonly path: string;
     readonly content: string;
@@ -80,7 +86,7 @@ export interface ProviderSandbox<Native = unknown> {
 
 /** What a provider adds to make its sandboxes detachable: work that outlives the host's hold on them. */
 export interface DetachCapability<Native = unknown> {
-  /** Start a command that keeps running after the host lets go of the sandbox; resolve once it has started. */
+  /** Start a command that keeps running after the host lets go of the sandbox; resolve once it has started. Its `workingDirectory`, when given, is absolute, as for `exec`. */
   readonly spawnDetached: (
     sandbox: ProviderSandbox<Native>,
     options: {
@@ -144,6 +150,48 @@ interface ProviderInternals {
 
 const internals = new WeakMap<object, ProviderInternals>();
 
+/** A working directory resolved against the sandbox's, when there is one. */
+const resolvedDirectory = (
+  sandbox: ProviderSandbox,
+  workingDirectory: string | undefined,
+): { readonly workingDirectory?: string } =>
+  workingDirectory === undefined
+    ? {}
+    : {
+        workingDirectory: resolveInSandbox(
+          sandbox.workingDirectory,
+          workingDirectory,
+        ),
+      };
+
+/**
+ * The provider's sandbox, handed only absolute paths: a relative one is
+ * resolved against its working directory here, once for every provider, so
+ * none can resolve it against a shell's own cwd instead.
+ */
+const withAbsolutePaths = <Native>(
+  sandbox: ProviderSandbox<Native>,
+): ProviderSandbox<Native> => {
+  const absolute = (path: string) =>
+    resolveInSandbox(sandbox.workingDirectory, path);
+  return {
+    sandboxId: sandbox.sandboxId,
+    workingDirectory: sandbox.workingDirectory,
+    killTime: sandbox.killTime,
+    native: sandbox.native,
+    exec: async (options) =>
+      sandbox.exec({
+        ...options,
+        ...resolvedDirectory(sandbox, options.workingDirectory),
+      }),
+    readTextFile: async ({ path }) =>
+      sandbox.readTextFile({ path: absolute(path) }),
+    writeTextFile: async ({ path, content }) =>
+      sandbox.writeTextFile({ path: absolute(path), content }),
+    close: async () => sandbox.close(),
+  };
+};
+
 /** Build a sandbox provider from your own backend. Supplying `detach` makes it detachable. */
 export function createSandboxProvider<Native>(
   config: SandboxProviderConfig<Native> & {
@@ -160,14 +208,16 @@ export function createSandboxProvider<Native>(
     name: config.name,
     canDetach: config.detach !== undefined,
   };
+  // Each sandbox handed out, keyed to the provider's own one behind it.
   const made = new WeakMap<ProviderSandbox, ProviderSandbox<Native>>();
+  const handOut = (own: ProviderSandbox<Native>): ProviderSandbox => {
+    const sandbox = withAbsolutePaths(own);
+    made.set(sandbox, own);
+    return sandbox;
+  };
   const { detach } = config;
   internals.set(provider, {
-    create: async (options) => {
-      const sandbox = await config.create(options);
-      made.set(sandbox, sandbox);
-      return sandbox;
-    },
+    create: async (options) => handOut(await config.create(options)),
     // Native is erased past this point, so a sandbox is looked up again to
     // hand the capability the one its own provider made.
     spawnDetached:
@@ -178,17 +228,17 @@ export function createSandboxProvider<Native>(
             if (own === undefined) {
               throw new TypeError(`${config.name}: not one of its sandboxes`);
             }
-            await detach.spawnDetached(own, options);
+            await detach.spawnDetached(own, {
+              ...options,
+              ...resolvedDirectory(own, options.workingDirectory),
+            });
           },
     get:
       detach === undefined
         ? undefined
         : async (sandboxId) => {
             const found = await detach.get(sandboxId);
-            if (found !== undefined) {
-              made.set(found, found);
-            }
-            return found;
+            return found === undefined ? undefined : handOut(found);
           },
   });
   return provider;
