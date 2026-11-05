@@ -870,7 +870,7 @@ const parsePiStreamLine = (line: string): ParsedStreamEvent[] => {
     // The first line of pi's --mode json stdout stream is a `session` header
     // carrying the UUID; subsequent stream entries (model_change,
     // thinking_level_change, message, ...) do not. Verified against
-    // @mariozechner/pi-coding-agent 0.73.1.
+    // @mariozechner/pi-coding-agent 0.73.1 and @earendil-works/pi-coding-agent 1.5.0.
     if (obj.type === "session" && typeof obj.id === "string") {
       return [{ type: "session_id", sessionId: obj.id }];
     }
@@ -1108,7 +1108,7 @@ const parseCodexStreamLine = (line: string): ParsedStreamEvent[] => {
 
 /** Options for the codex agent provider. */
 export interface CodexOptions {
-  readonly effort?: "low" | "medium" | "high" | "xhigh";
+  readonly effort?: "low" | "medium" | "high" | "xhigh" | "max";
   /** Environment variables injected by this agent provider. */
   readonly env?: Record<string, string>;
   /** When false, session capture is disabled. Default: true. */
@@ -1729,7 +1729,7 @@ const buildClaudePrintCommand = (
   // resumed one. See ADR 0018.
   const forkFlag = resumeSession && forkSession ? " --fork-session" : "";
   return {
-    command: `claude --print --verbose${permissionFlag} --output-format stream-json --model ${shellEscape(model)}${effortFlag}${resumeFlag}${forkFlag} -p -`,
+    command: `claude --print --verbose${permissionFlag} --output-format stream-json --model ${shellEscape(model)}${effortFlag}${resumeFlag}${forkFlag}`,
     stdin: prompt,
   };
 };
