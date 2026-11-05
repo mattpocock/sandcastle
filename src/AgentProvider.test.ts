@@ -93,7 +93,8 @@ describe("claudeCode factory", () => {
   it("buildPrintCommand delivers prompt via stdin, not argv", () => {
     const provider = claudeCode("claude-opus-4-8");
     const { command, stdin } = provider.buildPrintCommand(opts("do something"));
-    expect(command).toContain("-p -");
+    expect(command).not.toMatch(/ -p\b/u);
+    expect(command).not.toMatch(/ -$/u);
     expect(command).not.toContain("'do something'");
     expect(stdin).toBe("do something");
   });
@@ -878,7 +879,7 @@ describe("codex factory", () => {
   });
 
   it("supports all codex effort levels", () => {
-    for (const effort of ["low", "medium", "high", "xhigh"] as const) {
+    for (const effort of ["low", "medium", "high", "xhigh", "max"] as const) {
       const provider = codex("gpt-5.4-mini", { effort });
       expect(provider.buildPrintCommand(opts("test")).command).toContain(
         `model_reasoning_effort="${effort}"`,
