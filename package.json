@@ -125,7 +125,8 @@
     "zod": "^4.4.3"
   },
   "dependencies": {
-    "@clack/prompts": "^1.1.0"
+    "@clack/prompts": "^1.1.0",
+    "@standard-schema/spec": "^1.1.0"
   },
   "peerDependencies": {
     "@daytona/sdk": ">=0.164.0 <1.0.0",
