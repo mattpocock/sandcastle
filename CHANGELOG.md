@@ -1,5 +1,27 @@
 # @ai-hero/sandcastle
 
+## 0.14.1
+
+### Patch Changes
+
+- 7430f27: `sandcastle docker build-image` and `sandcastle podman build-image` now say when the project has no Dockerfile (or Containerfile), or when the `--dockerfile`/`--containerfile` path does not exist, instead of reporting a Docker failure with "Is Docker running?". Native sandboxes don't need an image.
+- 7fdca8c: Fix `claudeCode()` prompts that start with a slash command (`/code-review`, a user-invoked skill) never expanding. The print command ended in `-p -`, and Claude Code passed that `-` to the model as the first token of the prompt, so the slash command was no longer at the start. The prompt is still delivered on stdin; only the trailing `-p -` is dropped (`--print` is already passed). Thanks @andrewkcorcoran!
+- 662d681: Add `"max"` to the `codex()` provider's `effort` option. It maps to `model_reasoning_effort="max"`. Thanks @joe-alphafox!
+- 20e5579: The `.env.example` that `sandcastle init` writes for the GitHub Issues tracker now names the extra token permissions an agent needs to push branches and open pull requests (Contents and Pull requests, both read and write). It also scaffolds `GH_HOST` (and a commented `GH_ENTERPRISE_TOKEN`) for GitHub Enterprise Server. Thanks to Adam Rackis and @Rakurai for the reports.
+- 5cd8fd3: Fix the `parallel-planner` and `parallel-planner-with-review` templates stranding finished branches. The merge phase only took branches whose implementer made commits in the current cycle, so a branch advanced in an earlier cycle but never merged dropped out for good: its implementer found the work already done, made no new commits, and the merger never saw it. The merge phase now asks git which branches are ahead of the current branch (`git rev-list --count HEAD..<branch>`). Thanks @a9a4k!
+- 8c2c568: `sandcastle init` now installs the maintained `@earendil-works/pi-coding-agent` package for the Pi agent (in the scaffolded Dockerfile and the host install hint) instead of the deprecated `@mariozechner/pi-coding-agent`. Thanks @babyspectrum!
+- da13b29: `noSandbox()` keeps multi-byte UTF-8 characters whole when a command's stdout or stderr splits one across two chunks. Before, each chunk was decoded on its own, so CJK text or emoji could come back as replacement characters (`�`). Thanks @KennyMcSimpson!
+- 06d0fc7: `pi()`: `IterationResult.usage` is now filled from pi's stream, with the token counts of the iteration's last model call, as for the other agents. Thanks @Vistyy for the report.
+- 475fc5b: Resolve the repo's real path when a run starts, so Claude Code session capture and resume work when the repo is reached through a symlink (macOS's `/tmp` → `/private/tmp`, for instance). Thanks @bfs2021.
+- eb8c793: `createSandbox()` and `worktree.createSandbox()` now reject when a sandbox `onSandboxReady` hook exits non-zero, naming the command, its exit code and its stderr, and close the sandbox that just started. Before, a failed setup command (say, `npm ci`) was ignored and the sandbox came back as if setup had worked. Thanks @enwaiax!
+- b6e5a31: `sandbox.run({ logging: { type: "stdout" } })` on a `createSandbox()` sandbox now shows the agent's text, tool calls and run status in the terminal, as `run()` does. Before, it printed nothing unless `verbose` was on. Thanks @zero-two-rafaeltab!
+- 676c8c5: Report signal-terminated commands as failures in the Docker and Podman sandbox providers, so interrupted agents are no longer mistaken for successful runs. A command killed by a signal now returns `exitCode: 1` instead of `0`. Thanks @cookerpapa!
+- 2a00a32: `claudeCode()`: `Skill` tool calls now show in the run log and as `toolCall` events, with the skill's name as the argument. Thanks @marcoscale98 for the report.
+- ed8e716: Declare `@standard-schema/spec` as a dependency. The public types (`Output.object`'s `schema`) import `StandardSchemaV1` from it, so without it installed TypeScript could not resolve those types. Thanks @Vistyy for the report.
+- 7a8cf5c: Structured output now works when an agent splits its tagged reply across several assistant messages. Claude Code can continue a long reply in a new message and then repeat only the last message as its final result, so `run()` saw the closing tag without the opening one and threw "Structured output tag <result> not found". `run()` now reads the whole streamed reply in order, and `stdout` holds it once, without the repeated last message. This also applies when a hanging agent is completed by the completion timeout. Thanks @cookerpapa!
+- 72b2011: `vercel()`: a streamed `exec` now delivers a last output line that has no trailing newline to `onLine` (`printf 'a\nb'` gives `["a", "b"]`, not `["a"]`).
+- e61d4fb: Fix `sandcastle init` never creating the `Sandcastle` GitHub label on Windows. The `gh label create` command ended in a Unix-only `2>/dev/null`, which `cmd.exe` rejects, and the failure was silently ignored. The redirect was redundant, since the command already runs with `stdio: "ignore"`, so it is removed. Thanks @AntonioGassner!
+
 ## 0.14.0
 
 ### Minor Changes
