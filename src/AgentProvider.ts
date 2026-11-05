@@ -102,6 +102,7 @@ const TOOL_ARG_FIELDS: Record<string, string> = {
   WebSearch: "query",
   WebFetch: "url",
   Agent: "description",
+  Skill: "skill",
 };
 
 /** `value.message` when `value` is an object whose `message` is a string. */
