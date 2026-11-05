@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
@@ -92,7 +93,8 @@ describe("claudeCode factory", () => {
   it("buildPrintCommand delivers prompt via stdin, not argv", () => {
     const provider = claudeCode("claude-opus-4-8");
     const { command, stdin } = provider.buildPrintCommand(opts("do something"));
-    expect(command).toContain("-p -");
+    expect(command).not.toMatch(/ -p\b/u);
+    expect(command).not.toMatch(/ -$/u);
     expect(command).not.toContain("'do something'");
     expect(stdin).toBe("do something");
   });
@@ -378,6 +380,50 @@ describe("claudeCode factory", () => {
 // ---------------------------------------------------------------------------
 
 describe("pi factory", () => {
+  it("parseStreamLine emits each assistant message_end's usage, so the last call wins", () => {
+    // Real pi 0.73.1 stdout from the 2026-10-31 verify run.
+    const fixture = readFileSync(
+      join(
+        import.meta.dirname,
+        "__fixtures__",
+        "context-window",
+        "pi.stream.jsonl",
+      ),
+      "utf8",
+    );
+    const provider = pi("anthropic/claude-haiku-5-5");
+    const usages = fixture
+      .split("\n")
+      .flatMap((line) => provider.parseStreamLine(line))
+      .filter((e) => e.type === "usage")
+      .map((e) => e.usage);
+    expect(usages).toStrictEqual([
+      {
+        inputTokens: 4,
+        cacheCreationInputTokens: 2190,
+        cacheReadInputTokens: 0,
+        outputTokens: 277,
+      },
+      {
+        inputTokens: 2,
+        cacheCreationInputTokens: 17_694,
+        cacheReadInputTokens: 2190,
+        outputTokens: 0,
+      },
+    ]);
+  });
+
+  it("parseStreamLine emits no usage for a message_end with malformed usage", () => {
+    const provider = pi("anthropic/claude-haiku-5-5");
+    const line = JSON.stringify({
+      type: "message_end",
+      message: { role: "assistant", content: [], usage: { input: "lots" } },
+    });
+    expect(
+      provider.parseStreamLine(line).filter((e) => e.type === "usage"),
+    ).toStrictEqual([]);
+  });
+
   it("returns a provider with name 'pi'", () => {
     const provider = pi("claude-sonnet-4-6");
     expect(provider.name).toBe("pi");
@@ -833,7 +879,7 @@ describe("codex factory", () => {
   });
 
   it("supports all codex effort levels", () => {
-    for (const effort of ["low", "medium", "high", "xhigh"] as const) {
+    for (const effort of ["low", "medium", "high", "xhigh", "max"] as const) {
       const provider = codex("gpt-5.4-mini", { effort });
       expect(provider.buildPrintCommand(opts("test")).command).toContain(
         `model_reasoning_effort="${effort}"`,
