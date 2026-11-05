@@ -10,7 +10,6 @@ import {
   verifyFinishReport,
 } from "@ai-hero/sandcastle/v1";
 import { daytona } from "@ai-hero/sandcastle/v1/sandboxes/daytona";
-import type { DaytonaConfig } from "@daytona/sdk";
 import { z } from "zod";
 import { fakeAgent } from "@ai-hero/sandcastle/v1/testing";
 import {
@@ -21,6 +20,7 @@ import {
 } from "./helpers/fakeDaytona.js";
 import type { FinishReportReceiver } from "./helpers/finishReportReceiver.js";
 import { finishReportReceiver } from "./helpers/finishReportReceiver.js";
+import { providerContract } from "./helpers/providerContract.js";
 
 // daytona() through its subpath, with `@daytona/sdk` module-mocked by a fake
 // whose sandboxes are host directories running real `sh` processes, so
@@ -35,7 +35,7 @@ vi.mock(import("@daytona/sdk"), async (importOriginal) => {
   // a real key), with the calls daytona() makes swapped for the fake's. The
   // config daytona() passed is recorded instead.
   class Daytona extends actual.Daytona {
-    constructor(config?: DaytonaConfig) {
+    constructor(config?: ConstructorParameters<typeof actual.Daytona>[0]) {
       super({ apiKey: "unused", apiUrl: "http://127.0.0.1:9", target: "x" });
       Object.assign(this, fakeDaytonaClient(config));
     }
@@ -74,6 +74,8 @@ describe.skipIf(process.platform === "win32")("daytona() (v1)", () => {
     await Promise.all(receivers.map(async (made) => made.close()));
     receivers = [];
   });
+
+  providerContract(async (env) => createSandbox({ provider: daytona(), env }));
 
   it("passes `create` through to Daytona's create, with auto-stop and auto-pause off and a TTL of the time limit", async () => {
     const provider = daytona({

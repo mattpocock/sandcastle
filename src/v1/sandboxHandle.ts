@@ -1,5 +1,5 @@
 import { detachFrom, trackDeadline } from "./detachHost.js";
-import { ExecFailedError } from "./ExecFailedError.js";
+import { execFailed } from "./execFailure.js";
 import type { SandboxDetachedError } from "./SandboxDetachedError.js";
 import type {
   DetachOptions,
@@ -19,8 +19,12 @@ import { sessionHost } from "./sessionHost.js";
 import { supervisorFiles } from "./supervisorFiles.js";
 import type { SupervisorLink } from "./supervisorHost.js";
 
+/** The env every command in the sandbox gets, for masking in error messages. */
+type SandboxEnv = Readonly<Record<string, string>>;
+
 const exec = async (
   sandbox: ProviderSandbox,
+  env: SandboxEnv,
   input: string | ExecOptions,
 ): Promise<ExecResult> => {
   const options: ExecOptions =
@@ -28,12 +32,12 @@ const exec = async (
   const { allowFailure = false, ...providerOptions } = options;
   const result = await sandbox.exec(providerOptions);
   if (result.exitCode !== 0 && !allowFailure) {
-    throw new ExecFailedError({
-      message: `Command exited with code ${result.exitCode}: ${options.command}`,
+    throw execFailed({
       command: options.command,
       exitCode: result.exitCode,
       stdout: result.stdout,
       stderr: result.stderr,
+      env: { ...env, ...options.env },
     });
   }
   return result;
@@ -42,7 +46,11 @@ const exec = async (
 /** Runs one awaited call on the handle, or rejects once it has detached. */
 type Guard = <R>(call: () => Promise<R>) => Promise<R>;
 
-const execOn = (sandbox: ProviderSandbox, guard: Guard): Sandbox["exec"] => {
+const execOn = (
+  sandbox: ProviderSandbox,
+  env: SandboxEnv,
+  guard: Guard,
+): Sandbox["exec"] => {
   function run(
     input: string | (ExecOptions & { readonly allowFailure?: false }),
   ): Promise<ExecResult<0>>;
@@ -50,7 +58,7 @@ const execOn = (sandbox: ProviderSandbox, guard: Guard): Sandbox["exec"] => {
     options: ExecOptions & { readonly allowFailure: true },
   ): Promise<ExecResult>;
   function run(input: string | ExecOptions): Promise<ExecResult> {
-    return guard(async () => exec(sandbox, input));
+    return guard(async () => exec(sandbox, env, input));
   }
   return run;
 };
@@ -116,6 +124,8 @@ export interface HandleParts<Native> {
   readonly canDetach: boolean;
   readonly supervisor: SupervisorLink;
   readonly timeLimitMinutes: number;
+  /** The env the handle's commands run with, masked in their error messages. */
+  readonly env: SandboxEnv;
 }
 
 /** Adds `detach()` to a handle whose provider can detach. */
@@ -126,7 +136,7 @@ const withDetach = <Native>(
     calls,
     sessions,
   }: {
-    readonly parts: Omit<HandleParts<Native>, "canDetach">;
+    readonly parts: Omit<HandleParts<Native>, "canDetach" | "env">;
     readonly calls: ReturnType<typeof callGuard>;
     readonly sessions: Sessions;
   },
@@ -176,6 +186,7 @@ export const sandboxHandle = <Native>({
   canDetach,
   supervisor,
   timeLimitMinutes,
+  env,
 }: HandleParts<Native>): Sandbox<Native> => {
   const calls = callGuard();
   let closing: Promise<void> | undefined;
@@ -195,7 +206,7 @@ export const sandboxHandle = <Native>({
     killTime: sandbox.killTime,
     native: sandbox.native,
     canDetach,
-    exec: execOn(sandbox, guard),
+    exec: execOn(sandbox, env, guard),
     readTextFile: async (options) =>
       guard(async () => sandbox.readTextFile({ path: options.path })),
     writeTextFile: async (options) =>

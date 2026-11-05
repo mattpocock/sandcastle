@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type {
+  ExecOptions,
   FinishReport,
   OutputMap,
   Sandbox,
@@ -19,7 +20,7 @@ import type {
 import { implement } from "@ai-hero/sandcastle/v1/tasks";
 import type { FinishReportReceiver } from "./helpers/finishReportReceiver.js";
 import { finishReportReceiver } from "./helpers/finishReportReceiver.js";
-import { bareRepo, stubClaude } from "./helpers/taskWorld.js";
+import { bareRepo, spied, stubClaude } from "./helpers/taskWorld.js";
 
 // The bundled `implement` task through `/v1/tasks`, on the fake sandbox with a
 // local bare repo standing in for GitHub and a stub `claude` on the sandbox's
@@ -231,6 +232,40 @@ describe.skipIf(process.platform === "win32")("the implement task (v1)", () => {
 
     expect(prompt.startsWith("/implement 42")).toBe(true);
     expect(prompt).not.toContain('skill "implement"');
+  });
+
+  it("runs the git config, the branch checkout and setup in the clone by its absolute path", async () => {
+    const claude = await stubClaude(path.join(rootDir, "agent"), [
+      init("s-absolute"),
+      result(reported("sandcastle/implement-42")),
+    ]);
+    await using sandbox = await createSandbox({
+      provider,
+      env: claude.env,
+      timeLimitMinutes: implement.limits.timeLimitMinutes,
+    });
+    const calls: ExecOptions[] = [];
+
+    const spawned = await implement.start(spied(sandbox, calls), {
+      repo: origin,
+      ticket: "42",
+      githubToken: TOKEN,
+      skillsContext: GITHUB,
+      setup: ["true"],
+    });
+    await spawned.wait();
+
+    const placed = calls.filter((call) => call.workingDirectory !== undefined);
+    expect(placed.map((call) => call.command)).toStrictEqual([
+      expect.stringMatching(/^git config credential\.helper /u),
+      expect.stringMatching(/^git switch /u),
+      "true",
+    ]);
+    for (const call of placed) {
+      expect(call.workingDirectory).toBe(
+        path.join(sandbox.workingDirectory, "widgets"),
+      );
+    }
   });
 
   it("rejects a branch the remote doesn't have", async () => {

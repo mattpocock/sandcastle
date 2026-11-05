@@ -75,5 +75,6 @@ export async function reattachSandbox(
       0,
       (sandbox.killTime.getTime() - DateTime.unsafeNow().epochMillis) / 60_000,
     ),
+    env: { ...options.env },
   });
 }
