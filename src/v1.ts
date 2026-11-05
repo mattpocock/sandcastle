@@ -20,6 +20,7 @@ export type {
   ExecOptions,
   ExecResult,
   FinishReportDelivery,
+  FollowOptions,
   ReattachSandboxOptions,
   RunningWork,
   Sandbox,

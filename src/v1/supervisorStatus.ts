@@ -12,6 +12,7 @@ import { STATUS_FILE } from "./supervisorStatusSchema.js";
 type Detached = NonNullable<SupervisorStatus["detached"]>;
 
 const workOf = (request: SessionRequest) => ({
+  id: request.id,
   name: request.name,
   agent: request.agent.id,
 });

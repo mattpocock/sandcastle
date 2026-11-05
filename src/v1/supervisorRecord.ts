@@ -4,7 +4,7 @@ import type { DeliveryMethod } from "./httpDelivery.js";
 import { deliver } from "./httpDelivery.js";
 import { redactor } from "./redaction.js";
 import type { RecordedEvent, SessionRecordPointer } from "./SessionRecord.js";
-import { buildSessionRecord } from "./sessionRecordBuild.js";
+import { buildSessionRecord, redactEvent } from "./sessionRecordBuild.js";
 import type { RecordRequest, RecordSecrets } from "./sessionRecordSchema.js";
 import { SessionRecordSchema } from "./sessionRecordSchema.js";
 import { claudeSessionText } from "./sessionUsage.js";
@@ -71,6 +71,27 @@ const envValues = (
   Effect.all(names.map((name) => envValue(name, sessionEnv))).pipe(
     Effect.map((entries) => Object.fromEntries(entries)),
   );
+
+/**
+ * Masks an event as the session's record would: with its record's redaction,
+ * or not at all when it asked for no record. For the events file, which
+ * `follow()` reads while the session runs.
+ */
+export const liveRedactor = (
+  request: SessionRequest,
+  sessionEnv: Readonly<Record<string, string>>,
+): Effect.Effect<(event: RecordedEvent) => RecordedEvent> => {
+  const { record } = request;
+  if (record === undefined) {
+    return Effect.succeed((event) => event);
+  }
+  return envValues(record.redact.envVars, sessionEnv).pipe(
+    Effect.map((env) => {
+      const redact = redactor(record.redact, env);
+      return (event: RecordedEvent) => redactEvent(event, redact);
+    }),
+  );
+};
 
 /** The agent's transcript, when it keeps one the supervisor can read. */
 const nativeOf = (

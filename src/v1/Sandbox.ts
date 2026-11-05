@@ -1,6 +1,6 @@
 import type { OutputDefinition } from "./Output.js";
 import type { FinishReport, FinishReportDestination } from "./FinishReport.js";
-import type { SessionRecordPointer } from "./SessionRecord.js";
+import type { RecordedEvent, SessionRecordPointer } from "./SessionRecord.js";
 import type { SandboxProvider } from "./SandboxProvider.js";
 import type {
   OutputType,
@@ -235,6 +235,14 @@ export interface SandboxStatus {
   readonly logs: readonly string[];
 }
 
+/** Options for `follow()`. */
+export interface FollowOptions {
+  /** The session's name (the latest by that name). Default the only session the sandbox has run. */
+  readonly session?: string;
+  /** Skip this many events: how many an earlier follow yielded, to pick up where it stopped. Default 0. */
+  readonly from?: number;
+}
+
 /** A sandbox from a provider that can detach. */
 export interface DetachableSandbox<Native = unknown> extends Sandbox<Native> {
   /** Always `true`. */
@@ -258,6 +266,15 @@ export interface DetachableSandbox<Native = unknown> extends Sandbox<Native> {
    * exited. Rejects with `SandboxUnavailableError` once the sandbox has ended.
    */
   readonly status: (options?: StatusOptions) => Promise<SandboxStatus>;
+  /**
+   * A session's events (what its `events` show, timestamped, redacted as its
+   * record would be), polled from the supervisor's files: works held, after
+   * a detach, and reattached, with or without a live supervisor. Yields what
+   * has happened so far, then each event as it comes, and ends with the
+   * session. Rejects with `SandboxUnavailableError` once the sandbox has
+   * ended. Break out of the loop to stop following.
+   */
+  readonly follow: (options?: FollowOptions) => AsyncIterable<RecordedEvent>;
 }
 
 /** Options for `reattachSandbox`. */
