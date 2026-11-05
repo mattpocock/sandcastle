@@ -64,7 +64,7 @@ const AGENTS = [
     name: "pi",
     factory: "pi",
     model: "claude-sonnet-4-6",
-    installs: "@mariozechner/pi-coding-agent",
+    installs: "@earendil-works/pi-coding-agent",
   },
   {
     name: "codex",
