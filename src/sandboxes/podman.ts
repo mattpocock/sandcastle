@@ -383,7 +383,7 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
                 resolve({
                   stdout: stdoutTail.toString(),
                   stderr: stderrTail.toString(),
-                  exitCode: code ?? 0,
+                  exitCode: code ?? 1,
                 });
               });
             } else {
@@ -399,7 +399,7 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
                 resolve({
                   stdout: stdoutChunks.join(""),
                   stderr: stderrChunks.join(""),
-                  exitCode: code ?? 0,
+                  exitCode: code ?? 1,
                 });
               });
             }
@@ -435,7 +435,7 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
             });
 
             proc.on("close", (code: number | null) => {
-              resolve({ exitCode: code ?? 0 });
+              resolve({ exitCode: code ?? 1 });
             });
           }),
         copyFileIn: async (

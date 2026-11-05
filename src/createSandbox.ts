@@ -45,6 +45,7 @@ import type {
   NamedBranchStrategy,
   ExecResult,
 } from "./SandboxProvider.js";
+import { execOk } from "./sandboxSetup.js";
 import { startSandbox } from "./startSandbox.js";
 import { syncOut } from "./syncOut.js";
 import * as WorktreeManager from "./WorktreeManager.js";
@@ -988,7 +989,7 @@ const runOnSandboxReadyHooks = ({
       `git config --global --add safe.directory "${sandboxRepoDir}"`,
     );
     const sandboxEffects = sandboxOnReady.map((hook) =>
-      sandbox.exec(hook.command, {
+      execOk(sandbox, hook.command, {
         cwd: sandboxRepoDir,
         sudo: hook.sudo,
       }),
@@ -1002,6 +1003,19 @@ const runOnSandboxReadyHooks = ({
     yield* Effect.all(allEffects, { concurrency: "unbounded" });
   });
 };
+
+/**
+ * Tears down a sandbox whose setup failed after it started: closes the
+ * container, ignoring close errors, and removes its mount temp dirs.
+ */
+const tearDownStartedSandbox = (
+  providerHandle: ProviderHandle | undefined,
+  mountsToClean: readonly MountEntry[],
+): Effect.Effect<void> =>
+  (providerHandle
+    ? Effect.promise(() => providerHandle.close().catch(() => {}))
+    : Effect.void
+  ).pipe(Effect.andThen(removeMountTempDirs(mountsToClean)));
 
 /** A close() that tears down the container only, once, and its mount temp dirs. */
 const closeContainerOnly = (
@@ -1051,14 +1065,19 @@ export const createSandboxFromWorktree = async (
     ),
   );
 
-  // 3. Run onSandboxReady hooks (sandbox-side and host-side in parallel)
+  // 3. Run onSandboxReady hooks (sandbox-side and host-side in parallel). If
+  // they fail, tear down the container that just started; the worktree stays.
   await Effect.runPromise(
     runOnSandboxReadyHooks({
       sandbox,
       sandboxRepoDir,
       worktreePath,
       hooks: options.hooks,
-    }),
+    }).pipe(
+      Effect.onError(() =>
+        tearDownStartedSandbox(providerHandle, mountsToClean),
+      ),
+    ),
   );
 
   // 4. Build and return sandbox handle — container-only close (worktree owns worktree)
@@ -1120,10 +1139,7 @@ const prepareSandboxOnWorktree = (
       hooks: options.hooks,
     }).pipe(
       Effect.onError(() =>
-        (providerHandle
-          ? Effect.promise(() => providerHandle.close().catch(() => {}))
-          : Effect.void
-        ).pipe(Effect.andThen(removeMountTempDirs(mountsToClean))),
+        tearDownStartedSandbox(providerHandle, mountsToClean),
       ),
     );
 

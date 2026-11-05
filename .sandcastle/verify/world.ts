@@ -135,7 +135,7 @@ export const engineUp = (engine: Engine): boolean =>
 
 /** `engine:name` for every container named sandcastle-*. */
 export const listContainers = (): string[] =>
-  ENGINES.filter(engineUp).flatMap((engine) =>
+  ENGINES.filter((engine) => engineUp(engine)).flatMap((engine) =>
     sh(engine, [
       "ps",
       "-a",
@@ -151,7 +151,7 @@ export const listContainers = (): string[] =>
 
 /** `engine:repo:tag@id` for every image. */
 export const listImages = (): string[] =>
-  ENGINES.filter(engineUp).flatMap((engine) =>
+  ENGINES.filter((engine) => engineUp(engine)).flatMap((engine) =>
     sh(engine, ["images", "--format", "{{.Repository}}:{{.Tag}}@{{.ID}}"])
       .stdout.split("\n")
       .filter(Boolean)
@@ -317,7 +317,7 @@ export const saveWorld = (world: World): void => {
 
 /** The world `runId`, which this checkout must have created. */
 export const loadWorld = (runId: string | undefined): World => {
-  if (!runId || !/^\d{8}-\d{6}-[0-9a-f]{4}$/u.test(runId)) {
+  if (runId === undefined || !/^\d{8}-\d{6}-[0-9a-f]{4}$/u.test(runId)) {
     throw new Error(
       `a run id is required (the one \`npm run verify:world\` printed), got ${JSON.stringify(runId ?? "")}`,
     );
@@ -371,6 +371,9 @@ export const liveWorlds = (): World[] =>
 
 // --- Running inside a world ------------------------------------------------------
 
+/** `p` under the user's real home, not the world's. */
+const inRealHome = (p: string): string => join(REAL_HOME, p);
+
 /**
  * The environment of every process run in a world: this shell's own (keys
  * included, as a user's would be), HOME and TMPDIR moved into the world so
@@ -379,7 +382,6 @@ export const liveWorlds = (): World[] =>
  * stays reachable.
  */
 const worldEnv = (world: World): NodeJS.ProcessEnv => {
-  const real = (p: string) => join(REAL_HOME, p);
   const tmp = worldTmp(world);
   return {
     ...process.env,
@@ -387,10 +389,10 @@ const worldEnv = (world: World): NodeJS.ProcessEnv => {
     TMPDIR: tmp,
     TMP: tmp,
     TEMP: tmp,
-    DOCKER_CONFIG: process.env.DOCKER_CONFIG ?? real(".docker"),
-    XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME ?? real(".config"),
-    XDG_DATA_HOME: process.env.XDG_DATA_HOME ?? real(".local/share"),
-    npm_config_cache: process.env.npm_config_cache ?? real(".npm"),
+    DOCKER_CONFIG: process.env.DOCKER_CONFIG ?? inRealHome(".docker"),
+    XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME ?? inRealHome(".config"),
+    XDG_DATA_HOME: process.env.XDG_DATA_HOME ?? inRealHome(".local/share"),
+    npm_config_cache: process.env.npm_config_cache ?? inRealHome(".npm"),
     SANDCASTLE_VERIFY_RUN: world.runId,
     SANDCASTLE_VERIFY_CANARY_TOKEN: world.canary,
   };
@@ -519,7 +521,7 @@ const containerObserver = (
   hostSecrets: ReadonlyMap<string, string>,
   seen: Set<string>,
 ): (() => void) => {
-  const engines = ENGINES.filter(engineUp);
+  const engines = ENGINES.filter((engine) => engineUp(engine));
   return () => {
     for (const engine of engines) {
       const names = sh(engine, [
