@@ -20,10 +20,14 @@ import { vercel } from "./vercel.js";
 //
 // Other commands run in a real local `sh` with no stdin, as `runCommand`
 // gives none: the command reads EOF. Streamed output is written to the given
-// streams, which are not ended (as observed with SDK 3.9.1). `writeFiles`
+// streams, which are not ended (as observed with SDK 3.9.1) unless
+// `sdk.endStreams` is set. `writeFiles`
 // writes the file where a command can read it.
 const fs = vi.hoisted(() => ({ dirs: new Set<string>() }));
-const sdk = vi.hoisted(() => ({ writtenPaths: [] as string[] }));
+const sdk = vi.hoisted(() => ({
+  writtenPaths: [] as string[],
+  endStreams: false,
+}));
 
 interface FakeResult {
   exitCode: number | null;
@@ -87,13 +91,22 @@ const sandboxCreate = vi.hoisted(() =>
         });
         const write = async (stream: Writable | undefined, text: string) =>
           new Promise<void>((resolve) => {
-            if (stream === undefined || text === "") {
+            if (stream === undefined) {
               resolve();
               return;
             }
-            stream.write(text, () => {
-              resolve();
-            });
+            if (text !== "") {
+              stream.write(text);
+            }
+            if (sdk.endStreams) {
+              stream.end(() => {
+                resolve();
+              });
+            } else {
+              stream.write("", () => {
+                resolve();
+              });
+            }
           });
         await write(params.stdout, r.stdout);
         await write(params.stderr, r.stderr);
@@ -411,6 +424,7 @@ describe("vercel() exec", () => {
 
   beforeEach(() => {
     sdk.writtenPaths.length = 0;
+    sdk.endStreams = false;
     vi.stubEnv("VERCEL_TOKEN", undefined);
   });
 
@@ -440,6 +454,37 @@ describe("vercel() exec", () => {
 
     expect(result.exitCode).toBe(0);
     expect(lines).toStrictEqual(prompt.split("\n"));
+  });
+
+  it("streams a last line that has no trailing newline", async () => {
+    const handle = await vercel().create({ env: {} });
+    const lines: string[] = [];
+
+    const result = await handle.exec(String.raw`printf 'a\nb'`, {
+      cwd,
+      onLine: (line) => {
+        lines.push(line);
+      },
+    });
+
+    expect(lines).toStrictEqual(["a", "b"]);
+    expect(result.stdout).toBe("a\nb");
+  });
+
+  it("streams a last line once when the SDK does end the stream", async () => {
+    sdk.endStreams = true;
+    const handle = await vercel().create({ env: {} });
+    const lines: string[] = [];
+
+    const result = await handle.exec(String.raw`printf 'a\nb'`, {
+      cwd,
+      onLine: (line) => {
+        lines.push(line);
+      },
+    });
+
+    expect(lines).toStrictEqual(["a", "b"]);
+    expect(result.stdout).toBe("a\nb");
   });
 
   it("delivers stdin to every command of a compound command", async () => {
