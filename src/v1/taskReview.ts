@@ -3,7 +3,11 @@ import type { Sandbox } from "./Sandbox.js";
 import type { SessionProcess } from "./Session.js";
 import type { SessionRecordOptions } from "./SessionRecord.js";
 import { codeReview } from "./skills/codeReview.js";
-import type { TaskLimits, TaskSkillsContext } from "./Task.js";
+import type {
+  TaskAgentOptions,
+  TaskLimits,
+  TaskSkillsContext,
+} from "./Task.js";
 import { checkOutPullRequest } from "./taskPullRequest.js";
 import type { ReviewOutputs, ReviewResult } from "./taskReviewResult.js";
 import { REVIEW_RESULT } from "./taskReviewResult.js";
@@ -11,7 +15,7 @@ import { reviewPrompt } from "./taskReviewPrompt.js";
 import { startTask } from "./taskStart.js";
 
 /** What `review.start` takes. */
-export interface ReviewInput {
+export interface ReviewInput extends TaskAgentOptions {
   /** The pull request's repo: `owner/name` on GitHub, or a URL `git clone` takes. */
   readonly repo: string;
   /** The pull request's number. */
@@ -40,8 +44,8 @@ export interface ReviewTask {
   readonly outputs: () => ReviewOutputs;
   /**
    * Clones `repo`, checks out the pull request's branch, installs the
-   * `code-review` skill, runs `setup`, then spawns the `review` session on
-   * Sonnet and resolves once it runs. The prompt gives the pull request's
+   * `code-review` skill, runs `setup`, then spawns the `review` session
+   * (Claude Code on Sonnet unless you pass `agent`) and resolves once it runs. The prompt gives the pull request's
    * base as the fixed point and the tickets it closes as the spec (or says
    * there is none). The session posts one pull request comment and never
    * approves or merges. Rejects when the sandbox's kill time leaves less
@@ -64,7 +68,7 @@ export const review: ReviewTask = {
     startTask(sandbox, {
       name: "review",
       limits: LIMITS,
-      agent: claudeCode("sonnet"),
+      agent: input.agent ?? claudeCode("sonnet"),
       skills: [codeReview],
       prompt: async (clone) =>
         reviewPrompt(
@@ -82,5 +86,6 @@ export const review: ReviewTask = {
       skillsContext: input.skillsContext,
       setup: input.setup ?? [],
       record: input.record,
+      completionTimeoutSeconds: input.completionTimeoutSeconds,
     }),
 };
