@@ -150,7 +150,7 @@ export interface CodexOptions {
     readonly approvalsReviewer?: "user" | "auto_review";
     readonly captureSessions?: boolean;
     // (undocumented)
-    readonly effort?: "low" | "medium" | "high" | "xhigh";
+    readonly effort?: "low" | "medium" | "high" | "xhigh" | "max";
     readonly env?: Record<string, string>;
     readonly sessionStorage?: {
         readonly hostSessionsDir?: string;
