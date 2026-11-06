@@ -440,12 +440,14 @@ export const createWorktree = async (
 
   const { hostRepoDir, worktreeInfo } = await Effect.gen(function* () {
     const repoDir = yield* resolveCwd(options.cwd);
-    yield* WorktreeManager.pruneStale(repoDir).pipe(
+    const worktreeMs = options.timeouts?.worktreeMs;
+    yield* WorktreeManager.pruneStale(repoDir, worktreeMs).pipe(
       Effect.catchAll(() => Effect.void),
     );
     const info = yield* WorktreeManager.create(repoDir, {
       branch,
       baseBranch,
+      timeoutMs: worktreeMs,
     });
     if (options.copyToWorktree && options.copyToWorktree.length > 0) {
       yield* copyToWorktree(

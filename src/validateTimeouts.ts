@@ -9,6 +9,7 @@ export interface TimeoutOptions {
 }
 
 const TIMEOUTS_KEYS = [
+  "worktreeMs",
   "copyToWorktreeMs",
   "gitSetupMs",
   "commitCollectionMs",

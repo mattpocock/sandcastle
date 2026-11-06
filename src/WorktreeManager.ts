@@ -178,18 +178,33 @@ const listWorktrees = (
     }),
   );
 
-/** The error for a worktree `operation` on `repoDir` that hit WORKTREE_TIMEOUT_MS. */
+/** The error for a worktree `operation` on `repoDir` that hit `timeoutMs`. */
 const worktreeTimeout = (
   repoDir: string,
   operation: "create" | "prune",
   noun: string,
+  timeoutMs: number,
 ): WorktreeTimeoutError =>
   new WorktreeTimeoutError({
-    message: `Worktree ${noun} timed out after ${WORKTREE_TIMEOUT_MS}ms`,
-    timeoutMs: WORKTREE_TIMEOUT_MS,
+    message: `Worktree ${noun} timed out after ${timeoutMs}ms`,
+    timeoutMs,
     path: repoDir,
     operation,
   });
+
+/**
+ * Bound a worktree `operation` on `repoDir` by `timeoutMs` (default
+ * WORKTREE_TIMEOUT_MS), failing with a WorktreeTimeoutError naming it.
+ */
+const withWorktreeTimeout = (
+  repoDir: string,
+  operation: "create" | "prune",
+  noun: string,
+  timeoutMs: number = WORKTREE_TIMEOUT_MS,
+) =>
+  withTimeout(timeoutMs, () =>
+    worktreeTimeout(repoDir, operation, noun, timeoutMs),
+  );
 
 /** HEAD's commit sha in `worktreePath`, or "" when it can't be read. */
 const headSha = (worktreePath: string): Effect.Effect<string> =>
@@ -416,6 +431,9 @@ const addTempBranchWorktree = (
  * - Dirty (uncommitted changes) → reuses with a console warning, no refresh.
  *
  * Collisions with the main working tree or external worktrees always throw.
+ *
+ * `timeoutMs` (default 30_000) bounds the whole creation, including the
+ * checkout, which can be slow for a large working tree on slow storage.
  */
 export const create = (
   repoDir: string,
@@ -424,6 +442,7 @@ export const create = (
     baseBranch?: string;
     name?: string;
     tempBranch?: string;
+    timeoutMs?: number;
   },
 ): Effect.Effect<
   WorktreeInfo,
@@ -454,11 +473,7 @@ export const create = (
     }
     yield* addTempBranchWorktree(repoDir, worktreePath, branch);
     return { path: worktreePath, branch };
-  }).pipe(
-    withTimeout(WORKTREE_TIMEOUT_MS, () =>
-      worktreeTimeout(repoDir, "create", "creation"),
-    ),
-  );
+  }).pipe(withWorktreeTimeout(repoDir, "create", "creation", opts?.timeoutMs));
 
 /**
  * Returns true if the worktree at `worktreePath` has any uncommitted changes:
@@ -583,10 +598,11 @@ const removeDir = (
 
 /**
  * Prunes stale git worktree metadata and removes orphaned directories under
- * `.sandcastle/worktrees/`.
+ * `.sandcastle/worktrees/`, within `timeoutMs` (default 30_000).
  */
 export const pruneStale = (
   repoDir: string,
+  timeoutMs?: number,
 ): Effect.Effect<
   void,
   WorktreeError | WorktreeTimeoutError,
@@ -626,8 +642,4 @@ export const pruneStale = (
         yield* removeDir(fs, entryPath);
       }
     }
-  }).pipe(
-    withTimeout(WORKTREE_TIMEOUT_MS, () =>
-      worktreeTimeout(repoDir, "prune", "prune"),
-    ),
-  );
+  }).pipe(withWorktreeTimeout(repoDir, "prune", "prune", timeoutMs));
