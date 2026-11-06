@@ -439,9 +439,11 @@ const dockerEngineUnreachableError = (stderr: string) =>
 /**
  * Docker CLI messages that mean the engine itself could not be reached:
  * the daemon socket on Linux and macOS, the Docker Desktop named pipe on
- * Windows.
+ * Windows. Current CLIs (29.x) say "failed to connect to the docker API";
+ * older ones say one of the other two.
  */
 const ENGINE_UNREACHABLE_PATTERNS = [
+  /failed to connect to the docker API/i,
   /Cannot connect to the Docker daemon/i,
   /error during connect/i,
 ];

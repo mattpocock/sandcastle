@@ -81,6 +81,20 @@ describe("docker() image check", () => {
     await expect(result).rejects.not.toThrow("not found locally");
   });
 
+  it("says the Docker engine is not reachable when a current CLI can't connect to the docker API", async () => {
+    // Docker CLI 29.9.2 on Windows, with no engine listening on the pipe.
+    const stderr =
+      "failed to connect to the docker API at npipe:////./pipe/no_such_docker_engine; " +
+      "check if the path is correct and if the daemon is running: " +
+      "open //./pipe/no_such_docker_engine: The system cannot find the file specified.";
+    inspectFailsWith(`${stderr}\n`);
+
+    const result = createSandbox();
+    await expect(result).rejects.toThrow("Docker engine is not reachable");
+    await expect(result).rejects.toThrow(stderr);
+    await expect(result).rejects.not.toThrow("not found locally");
+  });
+
   it("surfaces docker's stderr for any other failure", async () => {
     const stderr =
       "permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock: " +
