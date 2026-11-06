@@ -469,7 +469,7 @@ export interface RunResult {
   readonly branch: string;
   /** Path to the log file, if logging was drained to a file. */
   readonly logFilePath?: string;
-  /** Host path to the preserved worktree, set when the run succeeded but the worktree had uncommitted changes. */
+  /** Host path to the preserved worktree, set when the run succeeded but the worktree had uncommitted changes or could not be removed. */
   readonly preservedWorktreePath?: string;
   /** Continue the last captured agent session for exactly one iteration.
    *  Present only when the provider supports resume (`sessionStorage` populated).
