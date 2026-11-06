@@ -25,6 +25,8 @@ export interface FakeEngineWorld {
   readonly repo: string;
   /** The arguments of the last `<engine> run`, starting with `run`. */
   readonly runArgs: () => string[];
+  /** Every engine invocation, with arguments joined by spaces. */
+  readonly calls: () => string[];
   /** Restores PATH and removes the repo and the fake. */
   readonly cleanup: () => void;
 }
@@ -32,6 +34,7 @@ export interface FakeEngineWorld {
 export const setUpFakeEngine = (
   engine: "docker" | "podman",
   repoPrefix: string,
+  options?: { readonly runFailure?: string },
 ): FakeEngineWorld => {
   const repo = realpathSync(mkdtempSync(path.join(tmpdir(), repoPrefix)));
   const git = (...args: string[]): void => {
@@ -44,11 +47,19 @@ export const setUpFakeEngine = (
 
   const binDir = mkdtempSync(path.join(tmpdir(), `e2e-fake-${engine}-`));
   const runLog = path.join(binDir, "run-args");
+  const callsLog = path.join(binDir, "calls");
+  const runFailure = options?.runFailure;
   writeFileSync(
     path.join(binDir, engine),
     [
       "#!/bin/sh",
+      `printf '%s\\n' "$*" >> '${callsLog}'`,
       `if [ "$1" = run ]; then printf '%s\\n' "$@" > '${runLog}'; fi`,
+      ...(runFailure === undefined
+        ? []
+        : [
+            `if [ "$1" = run ]; then printf '%s\\n' '${runFailure}' >&2; exit 1; fi`,
+          ]),
       `if [ "$1" = machine ]; then echo '[{"Running":true}]'; fi`,
       `case "$*" in *fake-engine-sigterm*) echo partial; kill -TERM $$;; esac`,
       "exit 0",
@@ -61,6 +72,7 @@ export const setUpFakeEngine = (
   return {
     repo,
     runArgs: () => readFileSync(runLog, "utf8").trimEnd().split("\n"),
+    calls: () => readFileSync(callsLog, "utf8").trimEnd().split("\n"),
     cleanup: () => {
       vi.unstubAllEnvs();
       rmSync(repo, { recursive: true, force: true });

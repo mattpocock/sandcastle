@@ -77,6 +77,8 @@ export interface StartContainerOptions {
   readonly user?: string;
   /** Docker network(s) to attach the container to. Passed as `--network` flags. */
   readonly network?: string | readonly string[];
+  /** Loopback-only port specifications passed as `--publish` flags. */
+  readonly publishedPorts?: readonly string[];
   /** Supplementary groups to add the container user to. Passed as `--group-add` flags. */
   readonly groups?: readonly (string | number)[];
   /** Linux capabilities to drop from the container. Passed as `--cap-drop` flags. */
@@ -141,6 +143,10 @@ export const startContainer = (
     const networks =
       network === undefined || network === "" ? [] : [network].flat();
     const networkFlags = networks.flatMap((n) => ["--network", n]);
+    const publishFlags = (options?.publishedPorts ?? []).flatMap((port) => [
+      "--publish",
+      port,
+    ]);
     const groupAddFlags = (options?.groups ?? []).flatMap((g) => [
       "--group-add",
       String(g),
@@ -166,6 +172,7 @@ export const startContainer = (
       ...workdirFlags,
       ...userFlags,
       ...networkFlags,
+      ...publishFlags,
       ...groupAddFlags,
       ...capDropFlags,
       ...deviceFlags,

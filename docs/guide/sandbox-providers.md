@@ -107,6 +107,23 @@ Or, more bluntly, allow user namespaces for every program: `sudo sysctl -w kerne
 
 **Agents' own sandboxes.** The native sandbox is the containment layer, and Sandcastle already runs agents with their permission checks skipped, so turn off the agent's own sandboxing. An agent can't apply its own Seatbelt sandbox inside `seatbelt()`, because macOS refuses to nest them. Inside `bwrap()`, whether an agent's own Bubblewrap sandbox can start depends on your kernel.
 
+## Docker loopback ports
+
+`docker()` can publish explicitly selected container ports for development servers. Every binding uses host loopback (`127.0.0.1`); there is no option that publishes on all host interfaces.
+
+```typescript
+import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+
+const sandbox = docker({
+  ports: [
+    { containerPort: 3000, hostPort: 3000 }, // fixed host port
+    { containerPort: 8080 }, // Docker allocates an available host port
+  ],
+});
+```
+
+Omit `ports`, or pass an empty array, to publish nothing. Fixed host ports must be unique within one provider configuration, and Docker also rejects a fixed port already used by another process or container. For an automatically allocated port, use the handle's `sandboxId` with `docker port <sandboxId> 8080/tcp` to discover the selected host port.
+
 ## E2B: `e2b()`
 
 `e2b()` runs the agent in an [E2B](https://e2b.dev) sandbox, a Firecracker microVM. Install the SDK (`npm install e2b`; it needs Node 22.19 or later) and set `E2B_API_KEY` in your shell, or pass the `apiKey` option. Don't put the key in `.sandcastle/.env`: the keys declared there are forwarded into the sandbox.
