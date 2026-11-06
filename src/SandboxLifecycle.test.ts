@@ -573,7 +573,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
   it("succeeds with merge commit when host branch has diverged (non-conflicting)", async () => {
     const { hostDir, worktreeDir, sandbox } = await setupWorktree();
 
-    await Effect.runPromise(
+    const lifecycleResult = await Effect.runPromise(
       withSandboxLifecycle(
         {
           hostRepoDir: hostDir,
@@ -604,6 +604,14 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       ).pipe(Effect.provide(testDisplayLayer)),
     );
 
+    // Only the agent's worktree commit should be reported, not host commits or the merge commit
+    expect(lifecycleResult.commits).toHaveLength(1);
+    const { stdout: commitMsg } = await execAsync(
+      `git log -1 --pretty=%B ${lifecycleResult.commits[0]!.sha}`,
+      { cwd: hostDir },
+    );
+    expect(commitMsg.trim()).toBe("worktree change");
+
     // Both files should exist on main after the merge
     const worktreeFile = await readFile(
       join(hostDir, "worktree-file.txt"),
@@ -618,6 +626,63 @@ describe("withSandboxLifecycle (worktree mode)", () => {
       cwd: hostDir,
     });
     expect(stdout.trim()).toBe("");
+  });
+
+  it("RunResult.commits includes only agent commits when host branch gains commits during the run (#1362)", async () => {
+    const { hostDir, worktreeDir, sandbox } = await setupWorktree();
+
+    const lifecycleResult = await Effect.runPromise(
+      withSandboxLifecycle(
+        {
+          hostRepoDir: hostDir,
+          sandboxRepoDir: worktreeDir,
+        },
+        sandbox,
+        (ctx) =>
+          Effect.gen(function* () {
+            yield* ctx.sandbox.exec('git config user.email "test@test.com"', {
+              cwd: ctx.sandboxRepoDir,
+            });
+            yield* ctx.sandbox.exec('git config user.name "Test"', {
+              cwd: ctx.sandboxRepoDir,
+            });
+
+            // Agent makes 2 commits in the sandbox
+            yield* ctx.sandbox.exec(
+              String.raw`sh -c "echo agent-1 > agent-1.txt && git add agent-1.txt && git commit -m \"agent commit 1\""`,
+              { cwd: ctx.sandboxRepoDir },
+            );
+            yield* ctx.sandbox.exec(
+              String.raw`sh -c "echo agent-2 > agent-2.txt && git add agent-2.txt && git commit -m \"agent commit 2\""`,
+              { cwd: ctx.sandboxRepoDir },
+            );
+
+            // Meanwhile, host branch moves forward with multiple commits
+            yield* Effect.promise(async () => {
+              await execAsync(
+                String.raw`sh -c "echo host-1 > host-1.txt && git add host-1.txt && git commit -m \"host commit 1\""`,
+                { cwd: hostDir },
+              );
+              await execAsync(
+                String.raw`sh -c "echo host-2 > host-2.txt && git add host-2.txt && git commit -m \"host commit 2\""`,
+                { cwd: hostDir },
+              );
+            });
+          }),
+      ).pipe(Effect.provide(testDisplayLayer)),
+    );
+
+    // Only agent commits should be returned in commits, excluding host commits and the merge commit
+    expect(lifecycleResult.commits).toHaveLength(2);
+    const messages = await Promise.all(
+      lifecycleResult.commits.map(async (c) => {
+        const { stdout } = await execAsync(`git log -1 --pretty=%B ${c.sha}`, {
+          cwd: hostDir,
+        });
+        return stdout.trim();
+      }),
+    );
+    expect(messages).toEqual(["agent commit 1", "agent commit 2"]);
   });
 
   it("cherry-pick works when sandboxRepoDir differs from host worktree path", async () => {
