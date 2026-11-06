@@ -1037,6 +1037,41 @@ const closeContainerOnly = (
 };
 
 /**
+ * Starts the sandbox on an existing worktree (provider or local sandbox layer
+ * in test mode), then runs the onSandboxReady hooks, sandbox-side and
+ * host-side in parallel. If the start fails, removes the mount temp dirs; if
+ * the hooks fail, tears down the container that just started. The worktree
+ * stays either way.
+ */
+const startSandboxWithReadyHooks = (
+  options: CreateSandboxFromWorktreeOptions,
+  mountsToClean: MountEntry[],
+) =>
+  Effect.gen(function* () {
+    const { hostRepoDir, worktreePath } = options;
+    const started = yield* startSandboxOnWorktree({
+      options,
+      hostRepoDir,
+      worktreePath,
+      mountsToClean,
+    }).pipe(
+      Effect.onError(() => removeMountTempDirs(mountsToClean)),
+      Effect.provide(NodeContext.layer),
+    );
+    yield* runOnSandboxReadyHooks({
+      sandbox: started.sandbox,
+      sandboxRepoDir: started.sandboxRepoDir,
+      worktreePath,
+      hooks: options.hooks,
+    }).pipe(
+      Effect.onError(() =>
+        tearDownStartedSandbox(started.providerHandle, mountsToClean),
+      ),
+    );
+    return started;
+  });
+
+/**
  * @internal Creates a sandbox backed by an existing worktree.
  * Split ownership: close() tears down the container only, leaving the worktree intact.
  * Used by Worktree.createSandbox().
@@ -1050,37 +1085,14 @@ export const createSandboxFromWorktree = async (
   // 1. Copy files if requested (bind-mount only)
   await Effect.runPromise(copyIntoWorktree(options, hostRepoDir, worktreePath));
 
-  // 2. Start sandbox via provider or local sandbox layer (test mode)
+  // 2. Start the sandbox and run its onSandboxReady hooks.
   // Temp dirs behind the git mounts, removed once the sandbox is closed.
   const mountsToClean: MountEntry[] = [];
   const { providerHandle, sandbox, sandboxRepoDir } = await Effect.runPromise(
-    startSandboxOnWorktree({
-      options,
-      hostRepoDir,
-      worktreePath,
-      mountsToClean,
-    }).pipe(
-      Effect.onError(() => removeMountTempDirs(mountsToClean)),
-      Effect.provide(NodeContext.layer),
-    ),
+    startSandboxWithReadyHooks(options, mountsToClean),
   );
 
-  // 3. Run onSandboxReady hooks (sandbox-side and host-side in parallel). If
-  // they fail, tear down the container that just started; the worktree stays.
-  await Effect.runPromise(
-    runOnSandboxReadyHooks({
-      sandbox,
-      sandboxRepoDir,
-      worktreePath,
-      hooks: options.hooks,
-    }).pipe(
-      Effect.onError(() =>
-        tearDownStartedSandbox(providerHandle, mountsToClean),
-      ),
-    ),
-  );
-
-  // 4. Build and return sandbox handle — container-only close (worktree owns worktree)
+  // 3. Build and return sandbox handle — container-only close (worktree owns worktree)
   return buildSandboxHandle(
     {
       branch,
