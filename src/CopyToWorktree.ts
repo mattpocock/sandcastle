@@ -62,7 +62,7 @@ const copyPath = (copy: {
   readonly dest: string;
   readonly relativePath: string;
 }): Effect.Effect<void, CopyToWorktreeError> =>
-  Effect.async<void, CopyToWorktreeError>((resume) => {
+  Effect.async((resume) => {
     const { cowFlags, cpSrc, dest, relativePath } = copy;
     // The cp currently running, killed if the copy is interrupted (e.g.
     // by the timeout in copyToWorktree) so it can't keep writing into the
