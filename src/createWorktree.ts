@@ -13,7 +13,11 @@ import {
   resolveGitMounts,
   SANDBOX_REPO_DIR,
 } from "./SandboxFactory.js";
-import type { MountEntry, SandboxService } from "./SandboxFactory.js";
+import type {
+  MountEntry,
+  SandboxInfo,
+  SandboxService,
+} from "./SandboxFactory.js";
 import { patchGitMountsForWindows, removeMountTempDirs } from "./mountUtils.js";
 import { withSandboxLifecycle, runHostHooks } from "./SandboxLifecycle.js";
 import type { SandboxHooks } from "./SandboxLifecycle.js";
@@ -41,7 +45,11 @@ import type { IterationResult } from "./Orchestrator.js";
 import { agentStreamEmitterLayer } from "./AgentStreamEmitter.js";
 import { resolveEnv } from "./EnvResolver.js";
 import { mergeProviderEnv } from "./mergeProviderEnv.js";
-import { startSandbox } from "./startSandbox.js";
+import {
+  startBindMountSandbox,
+  startIsolatedSandbox,
+  startSandbox,
+} from "./startSandbox.js";
 import { syncOut } from "./syncOut.js";
 import * as WorktreeManager from "./WorktreeManager.js";
 import { copyToWorktree } from "./CopyToWorktree.js";
@@ -277,8 +285,10 @@ const resolveWorktreeGitMounts = (hostRepoDir: string, worktreePath: string) =>
 
 /**
  * @internal Starts the sandbox for `worktree.run()`. Returns its handle, the
- * repo dir inside it, and the git mounts (bind-mount only) whose temp dirs
- * must be removed once the sandbox closes.
+ * repo dir inside it, the git mounts (bind-mount only) whose temp dirs must be
+ * removed once the sandbox closes, and how the run reaches the host: an
+ * isolated sandbox syncs its commits back to the host worktree, a bind-mount
+ * one hands its handle to session capture.
  */
 const startWorktreeRunSandbox = (
   sandboxProvider: SandboxProvider,
@@ -293,14 +303,17 @@ const startWorktreeRunSandbox = (
     const { hostRepoDir, worktreePath, env } = target;
     const noMounts: MountEntry[] = [];
     if (sandboxProvider.tag === "isolated") {
-      const startResult = yield* startSandbox({
+      const startResult = yield* startIsolatedSandbox({
         provider: sandboxProvider,
         hostRepoDir: worktreePath,
         env,
         copyPaths: target.copyPaths,
         copySourceDir: hostRepoDir,
       });
-      return { ...toStarted(startResult), gitMounts: noMounts };
+      const hostLink: HostLink = {
+        applyToHost: () => syncOut(worktreePath, startResult.handle),
+      };
+      return { ...toStarted(startResult), gitMounts: noMounts, hostLink };
     }
     if (sandboxProvider.tag === "none") {
       const startResult = yield* startSandbox({
@@ -309,13 +322,14 @@ const startWorktreeRunSandbox = (
         env,
         worktreeOrRepoPath: worktreePath,
       });
-      return { ...toStarted(startResult), gitMounts: noMounts };
+      const hostLink: HostLink = {};
+      return { ...toStarted(startResult), gitMounts: noMounts, hostLink };
     }
     const gitMounts = yield* resolveWorktreeGitMounts(
       hostRepoDir,
       worktreePath,
     );
-    const startResult = yield* startSandbox({
+    const startResult = yield* startBindMountSandbox({
       provider: sandboxProvider,
       hostRepoDir,
       env,
@@ -323,8 +337,19 @@ const startWorktreeRunSandbox = (
       gitMounts,
       repoDir: SANDBOX_REPO_DIR,
     });
-    return { ...toStarted(startResult), gitMounts };
+    const hostLink: HostLink = { bindMountHandle: startResult.handle };
+    return { ...toStarted(startResult), gitMounts, hostLink };
   });
+
+/**
+ * @internal How a started sandbox reaches the host worktree: `applyToHost`
+ * for an isolated sandbox, `bindMountHandle` (for session capture) for a
+ * bind-mount one, neither for no sandbox.
+ */
+type HostLink = Pick<SandboxInfo, "applyToHost" | "bindMountHandle">;
+
+/** @internal `applyToHost` for a sandbox that shares the host worktree. */
+const skipHostSync = () => Effect.void;
 
 /** @internal A started sandbox's handle and the repo dir inside it. */
 const toStarted = (startResult: {
@@ -343,33 +368,24 @@ const toStarted = (startResult: {
 
 /**
  * @internal A SandboxFactory layer that reuses a sandbox `worktree.run()`
- * already started. An isolated sandbox syncs its commits back to the host
- * worktree.
+ * already started, reaching the host through its `hostLink`.
  */
 const reuseStartedSandboxLayer = (
-  sandboxProvider: SandboxProvider,
   handle: BindMountSandboxHandle | IsolatedSandboxHandle | NoSandboxHandle,
+  hostLink: HostLink,
   paths: {
     readonly hostWorktreePath: string;
     readonly sandboxRepoPath: string;
   },
-) => {
-  const applyToHost =
-    sandboxProvider.tag === "isolated"
-      ? () => syncOut(paths.hostWorktreePath, handle as IsolatedSandboxHandle)
-      : () => Effect.void;
-  // Pre-narrow the bind-mount handle for the orchestrator's session-capture
-  // path. Gated on the provider tag so we never hand a NoSandbox/Isolated
-  // handle (which lack copyFileIn/copyFileOut) to AgentSessionStorage.
-  const bindMountHandle =
-    sandboxProvider.tag === "bind-mount"
-      ? (handle as BindMountSandboxHandle)
-      : undefined;
-  return reuseSandboxFactoryLayer(
-    { ...paths, applyToHost, bindMountHandle },
+) =>
+  reuseSandboxFactoryLayer(
+    {
+      ...paths,
+      applyToHost: hostLink.applyToHost ?? skipHostSync,
+      bindMountHandle: hostLink.bindMountHandle,
+    },
     makeSandboxFromHandle(handle),
   );
-};
 
 /**
  * @internal A `worktree.run()`'s logging (default: a file under
@@ -557,6 +573,8 @@ export const createWorktree = async (
         | BindMountSandboxHandle
         | IsolatedSandboxHandle
         | NoSandboxHandle;
+      // Only an isolated sandbox syncs its commits back to the host worktree.
+      let applyToHost: NonNullable<SandboxInfo["applyToHost"]> = skipHostSync;
 
       if (resolvedSandbox.tag === "none") {
         handle = yield* Effect.promise(async () =>
@@ -567,7 +585,7 @@ export const createWorktree = async (
         );
       } else if (resolvedSandbox.tag === "isolated") {
         const startResult = yield* d.taskLog("Starting sandbox", () =>
-          startSandbox({
+          startIsolatedSandbox({
             provider: resolvedSandbox,
             hostRepoDir: worktreeInfo.path,
             env: effectiveEnv,
@@ -575,7 +593,8 @@ export const createWorktree = async (
             copySourceDir: hostRepoDir,
           }),
         );
-        handle = startResult.handle;
+        ({ handle } = startResult);
+        applyToHost = () => syncOut(worktreeInfo.path, startResult.handle);
       } else {
         const gitMounts = yield* resolveWorktreeGitMounts(
           hostRepoDir,
@@ -592,7 +611,7 @@ export const createWorktree = async (
             repoDir: SANDBOX_REPO_DIR,
           }),
         );
-        handle = startResult.handle;
+        ({ handle } = startResult);
       }
 
       // Run lifecycle — worktree owns worktree, so no worktree cleanup here
@@ -606,11 +625,6 @@ export const createWorktree = async (
         const interactiveExecFn = handle.interactiveExec.bind(handle);
         const sandbox = makeSandboxFromHandle(handle);
         const { worktreePath } = handle;
-
-        const applyToHost =
-          resolvedSandbox.tag === "isolated"
-            ? () => syncOut(worktreeInfo.path, handle as IsolatedSandboxHandle)
-            : () => Effect.void;
 
         const lifecycleEffect = withSandboxLifecycle(
           {
@@ -679,9 +693,9 @@ export const createWorktree = async (
       }).pipe(
         // Always close sandbox handle
         Effect.ensuring(
-          Effect.promise(async () => handle.close().catch(() => {})).pipe(
-            Effect.andThen(removeMountTempDirs(mountsToClean)),
-          ),
+          Effect.promise(async () =>
+            handle.close().catch(() => undefined),
+          ).pipe(Effect.andThen(removeMountTempDirs(mountsToClean))),
         ),
       );
     });
@@ -780,6 +794,7 @@ export const createWorktree = async (
         handle,
         sandboxRepoDir,
         gitMounts: mountsToClean,
+        hostLink,
       } = yield* startWorktreeRunSandbox(sandboxProvider, {
         hostRepoDir,
         worktreePath: worktreeInfo.path,
@@ -796,7 +811,7 @@ export const createWorktree = async (
 
       // 6. Build a SandboxFactory that reuses the started sandbox
       const runLayer = Layer.mergeAll(
-        reuseStartedSandboxLayer(sandboxProvider, handle, {
+        reuseStartedSandboxLayer(handle, hostLink, {
           hostWorktreePath: worktreeInfo.path,
           sandboxRepoPath: sandboxRepoDir,
         }),
@@ -847,9 +862,9 @@ export const createWorktree = async (
         Effect.provide(runLayer),
         // Always close sandbox handle
         Effect.ensuring(
-          Effect.promise(async () => handle.close().catch(() => {})).pipe(
-            Effect.andThen(removeMountTempDirs(mountsToClean)),
-          ),
+          Effect.promise(async () =>
+            handle.close().catch(() => undefined),
+          ).pipe(Effect.andThen(removeMountTempDirs(mountsToClean))),
         ),
       );
 
