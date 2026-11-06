@@ -18,9 +18,9 @@ export interface RunWithExtractionOptions<T>
   readonly maxRetries?: number;
 }
 
-export async function runWithExtraction<T>(
+export const runWithExtraction = async <T>(
   options: RunWithExtractionOptions<T>,
-): Promise<RunResult & { output: T }> {
+): Promise<RunResult & { output: T }> => {
   const {
     output,
     extractionPrompt,
@@ -52,4 +52,4 @@ export async function runWithExtraction<T>(
   });
 
   return { ...produce, output: extraction.output };
-}
+};
