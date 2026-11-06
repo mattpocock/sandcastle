@@ -6,6 +6,7 @@
  *   await run({ agent: claudeCode("claude-opus-4-8"), sandbox: docker() });
  */
 
+import { runPromise } from "../runPromise.js";
 import { execFile, execFileSync, spawn } from "node:child_process";
 import type { StdioOptions } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -188,7 +189,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
       await checkImageUid(imageName, containerUid);
 
       // Start container
-      await Effect.runPromise(
+      await runPromise(
         startContainer(
           containerName,
           imageName,
@@ -411,7 +412,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
 
         close: async (): Promise<void> => {
           unregisterShutdown();
-          await Effect.runPromise(removeContainer(containerName));
+          await runPromise(removeContainer(containerName));
         },
       };
 
