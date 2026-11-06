@@ -311,7 +311,7 @@ const readWorktreeGitdir = (
     if (content === null) {
       return undefined;
     }
-    return /^gitdir:\s*(.+)$/u.exec(content)?.[1];
+    return /^gitdir:\s*(?<gitdir>.+)$/u.exec(content)?.groups?.gitdir;
   });
 
 /**
