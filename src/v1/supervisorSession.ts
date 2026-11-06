@@ -1,29 +1,35 @@
-import type { WriteStream } from "node:fs";
 import { Clock, DateTime, Duration, Effect, Option, Queue } from "effect";
 import type { AgentProvider } from "../AgentProvider.js";
-import { shellEscape } from "../AgentProvider.js";
-import type { AgentProcess } from "./agentProcess.js";
-import { startAgentProcess } from "./agentProcess.js";
+import type { AgentItem, AgentProcess } from "./agentProcess.js";
 import type { RecordedEvent } from "./SessionRecord.js";
-import type { RecordSecrets } from "./sessionRecordSchema.js";
 import type { StreamState } from "./sessionStream.js";
 import { applyEvents, emptyStream } from "./sessionStream.js";
 import type { StreamEnd, Watched } from "./sessionOutcome.js";
 import { sessionOutcome } from "./sessionOutcome.js";
 import type { Recording } from "./supervisorRecord.js";
 import { liveRedactor, recordSession } from "./supervisorRecord.js";
+import type { InputState } from "./supervisorInput.js";
+import {
+  closeInput,
+  inputState,
+  inputTo,
+  observeInput,
+  unread,
+} from "./supervisorInput.js";
+import type { LaunchOptions } from "./supervisorLaunch.js";
+import { launchAgent } from "./supervisorLaunch.js";
 import type {
+  InputRequest,
   Reply,
   SessionOutcome,
   SessionRequest,
 } from "./supervisorProtocol.js";
 
-export type { RecordSecrets } from "./sessionRecordSchema.js";
-
 // One agent session inside the sandbox: start the agent, read its stream,
 // and end it on exit, on kill, on the idle timeout, or, once the output's
 // closing tag has appeared, when it goes quiet for the completion timeout
 // (ADR 0019 and 0021: a process that printed its result and hangs succeeds).
+// An agent that takes input keeps its stdin open for messages (ADR 0032).
 
 /** A session the supervisor is running. */
 export interface RunningSession {
@@ -31,6 +37,8 @@ export interface RunningSession {
   readonly kill: (reason: "aborted" | "time-limit") => Effect.Effect<void>;
   /** Resolves once the session has ended. */
   readonly outcome: Effect.Effect<SessionOutcome>;
+  /** Hands the agent a message; the reply says whether it went. */
+  readonly input: (request: InputRequest) => Effect.Effect<Reply>;
 }
 
 interface Context {
@@ -44,6 +52,8 @@ interface Context {
   readonly events: RecordedEvent[];
   /** Appends an event to the session's events file, redacted, for `follow()`. */
   readonly follow: (event: RecordedEvent) => void;
+  /** The messages written to the agent and read by it. */
+  readonly input: InputState;
 }
 
 const stopped = (
@@ -59,6 +69,7 @@ const readLine = (
   stream: StreamState,
   line: string,
 ): StreamState => {
+  observeInput(context.input, context.process, line);
   const applied = applyEvents(stream, context.agent.parseStreamLine(line));
   const at = DateTime.formatIso(DateTime.unsafeNow());
   for (const event of applied.visible) {
@@ -69,6 +80,16 @@ const readLine = (
   return applied.state;
 };
 
+/** How the stream ends on the agent's exit, or on a kill. */
+const endedBy = (
+  context: Context,
+  watched: Omit<Watched, "end">,
+  item: Extract<AgentItem, { _tag: "exit" | "kill" }>,
+): Effect.Effect<Watched> =>
+  item._tag === "kill"
+    ? stopped(context, watched, { reason: item.reason })
+    : Effect.succeed({ ...watched, end: { reason: "exit", ...item } });
+
 /** Reads the agent's stream until it ends, one way or another. */
 const watch = (context: Context): Effect.Effect<Watched> =>
   Effect.gen(function* () {
@@ -76,9 +97,12 @@ const watch = (context: Context): Effect.Effect<Watched> =>
     let started = false;
     let triggered = false;
     while (true) {
-      const waitMs = triggered
-        ? context.request.completionTimeoutMs
-        : context.request.idleTimeoutMs;
+      // A message the agent hasn't read yet holds the completion timeout off:
+      // it may well start more work.
+      const waitMs =
+        triggered && unread(context.input) <= 0
+          ? context.request.completionTimeoutMs
+          : context.request.idleTimeoutMs;
       const next = yield* Queue.take(context.process.items).pipe(
         Effect.timeoutOption(Duration.millis(waitMs)),
       );
@@ -87,15 +111,11 @@ const watch = (context: Context): Effect.Effect<Watched> =>
         return yield* stopped(context, { stream, started }, { reason });
       }
       const item = next.value;
-      if (item._tag === "kill") {
-        return yield* stopped(
-          context,
-          { stream, started },
-          { reason: item.reason },
-        );
+      if (item._tag === "input") {
+        continue;
       }
-      if (item._tag === "exit") {
-        return { stream, started, end: { reason: "exit", ...item } };
+      if (item._tag !== "line") {
+        return yield* endedBy(context, { stream, started }, item);
       }
       if (!started) {
         started = true;
@@ -107,65 +127,39 @@ const watch = (context: Context): Effect.Effect<Watched> =>
     }
   });
 
-const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/u;
-
-/** `export K='v'; …` for the agent's and the session's env, then the command. */
-const withEnv = (
-  env: Readonly<Record<string, string>>,
-  command: string,
-): string =>
-  Object.entries(env)
-    .filter(([key]) => ENV_KEY.test(key))
-    .map(([key, value]) => `export ${key}=${shellEscape(value)}; `)
-    .join("") + command;
-
-const agentEnv = (options: Readonly<Record<string, unknown>>) => {
-  const { env } = options;
-  if (typeof env !== "object" || env === null) {
-    return {};
-  }
-  return Object.fromEntries(
-    Object.entries(env).filter(
-      (entry): entry is [string, string] => typeof entry[1] === "string",
-    ),
-  );
-};
-
 /** What starting a session needs. */
-export interface StartOptions {
-  readonly request: SessionRequest;
-  readonly agent: AgentProvider;
-  /** Turns the agent's real command into the one to run (a fake agent replays instead). */
-  readonly command: (realCommand: string) => string;
-  readonly log: WriteStream;
+export interface StartOptions extends LaunchOptions {
   /** The session's events file, one redacted event per line. */
-  readonly eventsLog: WriteStream;
+  readonly eventsLog: LaunchOptions["log"];
   readonly emit: (reply: Reply) => void;
   /** The record's upload URL and webhook secret, opened. */
-  readonly secrets: RecordSecrets;
+  readonly secrets: Recording["secrets"];
   /** The detach the session is carried on under, if any. */
   readonly detachId: () => string | undefined;
 }
 
-/** Starts the agent's process with the session's env; returns it and that env. */
-const launch = (options: StartOptions) =>
+/** What reading a just-started agent's stream needs. */
+const sessionContext = (
+  options: StartOptions,
+  process: AgentProcess,
+  env: Readonly<Record<string, string>>,
+): Effect.Effect<Context> =>
   Effect.gen(function* () {
-    const { request, agent } = options;
-    const print = agent.buildPrintCommand({
-      prompt: request.prompt,
-      dangerouslySkipPermissions: true,
-      ...(request.resumeSessionId === undefined
-        ? {}
-        : { resumeSession: request.resumeSessionId }),
-    });
-    const env = { ...agentEnv(request.agent.options), ...request.env };
-    const process = yield* startAgentProcess({
-      command: withEnv(env, options.command(print.command)),
-      workingDirectory: request.workingDirectory,
-      stdin: print.stdin,
-      log: options.log,
-    });
-    return { process, env };
+    const { request } = options;
+    const redact = yield* liveRedactor(request, env);
+    return {
+      request,
+      agent: options.agent,
+      process,
+      emit: options.emit,
+      trigger:
+        request.output === undefined ? undefined : `</${request.output.tag}>`,
+      events: [],
+      follow: (event) => {
+        options.eventsLog.write(`${JSON.stringify(redact(event))}\n`);
+      },
+      input: yield* inputState(request.agent.id),
+    };
   });
 
 /** Starts the session's agent; `outcome` resolves once it has ended. */
@@ -175,20 +169,9 @@ export const startSession = (
   Effect.gen(function* () {
     const { request, agent } = options;
     const startedMs = yield* Clock.currentTimeMillis;
-    const { process, env } = yield* launch(options);
-    const redact = yield* liveRedactor(request, env);
-    const context: Context = {
-      request,
-      agent,
-      process,
-      emit: options.emit,
-      trigger:
-        request.output === undefined ? undefined : `</${request.output.tag}>`,
-      events: [],
-      follow: (event) => {
-        options.eventsLog.write(`${JSON.stringify(redact(event))}\n`);
-      },
-    };
+    const { process, env } = yield* launchAgent(options);
+    const context = yield* sessionContext(options, process, env);
+    const { input } = context;
     const recording: Recording = {
       request,
       secrets: options.secrets,
@@ -200,6 +183,9 @@ export const startSession = (
       emit: options.emit,
     };
     const outcome = yield* watch(context).pipe(
+      Effect.tap(() => {
+        closeInput(input);
+      }),
       Effect.flatMap((watched) =>
         sessionOutcome({ request, agent, tail: process.tail }, watched),
       ),
@@ -212,5 +198,14 @@ export const startSession = (
           Effect.asVoid,
         ),
       outcome,
+      input: inputTo({
+        state: input,
+        process,
+        request,
+        record: (event) => {
+          context.events.push(event);
+          context.follow(event);
+        },
+      }),
     };
   });

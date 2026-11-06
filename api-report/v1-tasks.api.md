@@ -11,6 +11,7 @@ export type AgentName = "claude-code" | "codex" | "cursor" | "opencode" | "copil
 
 // @public
 export interface AgentProvider {
+    readonly acceptsInput: boolean;
     readonly model: string;
     readonly name: AgentName;
 }
@@ -170,6 +171,12 @@ export type RecordedEvent = {
     readonly name: string;
     readonly args: string;
     readonly at: string;
+} | {
+    readonly type: "input";
+    readonly text: string;
+    readonly from?: string;
+    readonly interrupt: boolean;
+    readonly at: string;
 };
 
 // @public
@@ -267,6 +274,9 @@ export interface SessionProcess<O = unknown> {
     readonly events: AsyncIterable<AgentStreamEvent>;
     readonly kill: () => Promise<void>;
     readonly name: string;
+    // Warning: (ae-forgotten-export) The symbol "SessionSendOptions" needs to be exported by the entry point tasks.d.ts
+    // Warning: (ae-forgotten-export) The symbol "SendReceipt" needs to be exported by the entry point tasks.d.ts
+    readonly send: (options: SessionSendOptions) => Promise<SendReceipt>;
     readonly wait: () => Promise<SessionResult<O>>;
 }
 

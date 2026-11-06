@@ -16,6 +16,7 @@ import type { RecordedEvent } from "./SessionRecord.js";
 import { readSupervisorStatus } from "./sandboxStatus.js";
 import type { SupervisorStatus } from "./supervisorStatusSchema.js";
 import { eventsFile } from "./supervisorStatusSchema.js";
+import { RecordedEvent as RecordedEventSchema } from "./sessionRecordSchema.js";
 
 // The host's side of `follow()`: polls a session's events file through the
 // provider's file reads, from where the last read stopped, until the status
@@ -24,21 +25,7 @@ import { eventsFile } from "./supervisorStatusSchema.js";
 /** How long to wait between reads while the session runs. */
 const POLL_MS = 500;
 
-const EventJson = Schema.parseJson(
-  Schema.Union(
-    Schema.Struct({
-      type: Schema.Literal("text"),
-      text: Schema.String,
-      at: Schema.String,
-    }),
-    Schema.Struct({
-      type: Schema.Literal("toolCall"),
-      name: Schema.String,
-      args: Schema.String,
-      at: Schema.String,
-    }),
-  ),
-);
+const EventJson = Schema.parseJson(RecordedEventSchema);
 
 const decodeEvent = Schema.decodeUnknownEither(EventJson);
 

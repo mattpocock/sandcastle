@@ -249,7 +249,11 @@ describe.skipIf(process.platform === "win32")(
       "$name: rejects a custom agent or a non-positive completionTimeoutSeconds before cloning",
       async (task) => {
         const { sandbox } = await world(task.timeLimitMinutes, []);
-        const custom: AgentProvider = { name: "claude-code", model: "mine" };
+        const custom: AgentProvider = {
+          name: "claude-code",
+          model: "mine",
+          acceptsInput: true,
+        };
 
         await expect(
           task.start(sandbox, origin, { agent: custom }),

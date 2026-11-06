@@ -6,6 +6,7 @@ import type {
   OpenCodeOptions,
   PiOptions,
 } from "../AgentProvider.js";
+import { acceptsInput } from "./agentInput.js";
 import type { AgentDescriptor } from "./supervisorProtocol.js";
 
 // Agents run inside the sandbox, under the session supervisor, so a session
@@ -29,6 +30,11 @@ export interface AgentProvider {
   readonly name: AgentName;
   /** The model it runs. */
   readonly model: string;
+  /**
+   * Whether its sessions take messages while they run, through `send()`.
+   * Only `claudeCode()` (and a fake agent in its format) does.
+   */
+  readonly acceptsInput: boolean;
 }
 
 // v1's own agent options: 0.x's minus `captureSessions` and `sessionStorage`,
@@ -112,6 +118,7 @@ export const registerAgent = (descriptor: AgentDescriptor): AgentProvider => {
   const agent: AgentProvider = {
     name: descriptor.id,
     model: descriptor.model,
+    acceptsInput: acceptsInput(descriptor.id),
   };
   descriptors.set(agent, descriptor);
   return agent;

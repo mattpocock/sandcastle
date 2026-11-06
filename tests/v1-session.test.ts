@@ -470,7 +470,7 @@ describe.skipIf(process.platform === "win32")("sessions (v1)", () => {
 
     await expect(
       sandbox.session({
-        agent: { name: "claude-code", model: "custom" },
+        agent: { name: "claude-code", model: "custom", acceptsInput: true },
         prompt: "Hello",
       }),
     ).rejects.toThrow(/built-in agent factory/u);

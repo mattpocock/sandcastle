@@ -11,12 +11,15 @@ import { eventsFile } from "./supervisorProtocol.js";
 import type {
   DetachRequest,
   FinishReportDelivery,
+  InputRequest,
   Reply,
   SessionOutcome,
   SessionRequest,
 } from "./supervisorProtocol.js";
-import type { RecordSecrets } from "./supervisorSession.js";
+import type { StartOptions } from "./supervisorSession.js";
 import { startSession } from "./supervisorSession.js";
+
+type RecordSecrets = StartOptions["secrets"];
 
 // The sessions the supervisor is running, by request id.
 
@@ -106,6 +109,38 @@ const runSession = (options: {
   );
 };
 
+/** The running session a message is for, or why there's none to hand it to. */
+const inputTarget = (
+  running: readonly CarriedSession[],
+  request: InputRequest,
+): CarriedSession | Reply => {
+  const names = running.map((carried) => carried.request.name);
+  const known = names.length === 0 ? "none" : names.join(", ");
+  const matching = running.filter(
+    ({ request: session }) =>
+      (request.id === undefined || session.id === request.id) &&
+      (request.name === undefined || session.name === request.name),
+  );
+  const named = request.id !== undefined || request.name !== undefined;
+  if (matching.length > 1 && !named) {
+    return {
+      type: "refused",
+      reason: "ambiguous-session",
+      message: `Name the session to send to: several are running (${known}).`,
+    };
+  }
+  // A name is unique among running sessions, so this is the one asked for.
+  return (
+    matching.at(-1) ?? {
+      type: "refused",
+      reason: "no-such-session",
+      message: named
+        ? `No session${request.name === undefined ? "" : ` named "${request.name}"`} is running to send to (running: ${known}).`
+        : "No session is running to send to.",
+    }
+  );
+};
+
 /** The sessions the supervisor is running. */
 export class SessionRegistry {
   private readonly running = new Map<string, CarriedSession>();
@@ -148,6 +183,15 @@ export class SessionRegistry {
       detachId: () => this.detachId,
     }).pipe(Effect.ensuring(Effect.sync(done)));
     Effect.runFork(program);
+  }
+
+  /** Hands a running session's agent a message; resolves with the reply to send back. */
+  async input(request: InputRequest): Promise<Reply> {
+    const target = inputTarget([...this.running.values()], request);
+    if (!("session" in target)) {
+      return target;
+    }
+    return Effect.runPromise(target.session.input(request));
   }
 
   /** Stops a session and waits for it to end. Unknown ids are fine. */

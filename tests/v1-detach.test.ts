@@ -147,7 +147,8 @@ describe.skipIf(process.platform === "win32")(
         path: "bin/claude",
         content: [
           "#!/bin/sh",
-          "cat > /dev/null",
+          // The prompt: the first stream-json message on stdin.
+          "IFS= read -r _prompt",
           `printf '%s\\n' '${init("s-detached")}'`,
           'while [ ! -f "$HOME/answer" ]; do sleep 0.05; done',
           `printf '%s\\n' '${result(`<answer>${answer}</answer>`)}'`,
@@ -552,7 +553,8 @@ describe.skipIf(process.platform === "win32")(
         path: "bin/claude",
         content: [
           "#!/bin/sh",
-          "cat > /dev/null",
+          // The prompt: the first stream-json message on stdin.
+          "IFS= read -r _prompt",
           `echo '${init("s-env")}'`,
           'while [ ! -f "$HOME/go" ]; do sleep 0.05; done',
           'env > "$HOME/session-env.txt"',
