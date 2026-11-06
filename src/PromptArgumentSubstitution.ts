@@ -171,6 +171,10 @@ const warnUnusedArgs = (
     }
   });
 
+/** Single-quotes a value for safe use as a single argument in a POSIX shell expression. */
+const shellQuote = (value: string | number | boolean): string =>
+  `'${String(value).replaceAll("'", String.raw`'\''`)}'`;
+
 export const substitutePromptArgs = (
   prompt: string,
   args: PromptArgs,
@@ -198,10 +202,24 @@ export const substitutePromptArgs = (
     yield* checkReferencedArgs(referencedKeys, sanitizedArgs);
     yield* warnUnusedArgs(sanitizedArgs, referencedKeys, silentKeys);
 
+    const shellBlockRanges = [
+      ...markedPrompt.matchAll(
+        new RegExp(`!${SHELL_BLOCK_MARKER}\`([^\`]+)\``, "gu"),
+      ),
+    ].map((m) => [m.index, m.index + m[0].length] as const);
+
     // Replace all placeholders with their values
+    // Values that fall inside a shell expression block are shell-quoted.
     // Every key was checked above to have a non-null value.
-    return markedPrompt.replaceAll(PLACEHOLDER_PATTERN, (_match, key: string) =>
-      String(sanitizedArgs[key]),
+    return markedPrompt.replaceAll(
+      PLACEHOLDER_PATTERN,
+      (_match, key: string, offset: number) => {
+        const raw = String(sanitizedArgs[key]);
+        const inShellBlock = shellBlockRanges.some(
+          ([start, end]) => offset >= start && offset < end,
+        );
+        return inShellBlock ? shellQuote(raw) : raw;
+      },
     );
   });
 };

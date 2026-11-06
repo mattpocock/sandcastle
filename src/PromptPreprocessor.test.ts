@@ -174,6 +174,22 @@ describe("PromptPreprocessor", () => {
     expect(result).toBe("Greeting: hello world");
   });
 
+  it("delivers arguments with spaces and quotes as exactly one argument inside shell blocks", async () => {
+    const { sandboxDir, sandbox, displayLayer } = await setup();
+    const rawTemplate = "Output:\n!`printf '[%s]\\n' {{ARG}}`";
+    const substituted = await Effect.runPromise(
+      substitutePromptArgs(rawTemplate, {
+        ARG: "value with spaces and 'quotes'",
+      }).pipe(Effect.provide(displayLayer)),
+    );
+    const result = await Effect.runPromise(
+      preprocessPrompt(substituted, sandbox, sandboxDir).pipe(
+        Effect.provide(displayLayer),
+      ),
+    );
+    expect(result).toBe("Output:\n[value with spaces and 'quotes']");
+  });
+
   it("does not execute shell blocks that arrive via prompt argument substitution", async () => {
     const { sandboxDir, sandbox, displayLayer } = await setup();
     const rawTemplate = "Title: {{TITLE}}";
