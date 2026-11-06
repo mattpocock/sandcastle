@@ -462,7 +462,10 @@ export const WorktreeDockerSandboxFactory = {
               : Effect.void,
           ),
           Effect.andThen(
-            resolveGitMounts(join(hostRepoDir, ".git")).pipe(
+            // From the worktree mounted into the sandbox, not hostRepoDir: a
+            // host repo that is itself a linked worktree has a `.git` pointer
+            // file whose identity mount the Windows patch cannot remap (#996).
+            resolveGitMounts(join(worktreePath, ".git")).pipe(
               Effect.provideService(FileSystem.FileSystem, fileSystem),
               Effect.mapError(
                 (e) =>

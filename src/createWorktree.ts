@@ -267,9 +267,15 @@ const resolveWorktreeEnv = (
     })),
   );
 
-/** @internal The host repo's git mounts, patched for a Windows worktree (ADR-0006). */
-const resolveWorktreeGitMounts = (hostRepoDir: string, worktreePath: string) =>
-  resolveGitMounts(join(hostRepoDir, ".git")).pipe(
+/**
+ * @internal The git mounts of the worktree mounted into the sandbox, patched
+ * for Windows (ADR-0006). Resolved from the worktree, not the host repo: when
+ * the host repo is itself a linked worktree, its `.git` is a pointer file whose
+ * identity mount the Windows patch cannot remap (#996). Both resolve to the
+ * same parent `.git` directory.
+ */
+const resolveWorktreeGitMounts = (worktreePath: string) =>
+  resolveGitMounts(join(worktreePath, ".git")).pipe(
     Effect.flatMap((rawGitMounts) =>
       patchGitMountsForWindows(rawGitMounts, worktreePath, SANDBOX_REPO_DIR),
     ),
@@ -311,10 +317,7 @@ const startWorktreeRunSandbox = (
       });
       return { ...toStarted(startResult), gitMounts: noMounts };
     }
-    const gitMounts = yield* resolveWorktreeGitMounts(
-      hostRepoDir,
-      worktreePath,
-    );
+    const gitMounts = yield* resolveWorktreeGitMounts(worktreePath);
     const startResult = yield* startSandbox({
       provider: sandboxProvider,
       hostRepoDir,
@@ -577,10 +580,7 @@ export const createWorktree = async (
         );
         handle = startResult.handle;
       } else {
-        const gitMounts = yield* resolveWorktreeGitMounts(
-          hostRepoDir,
-          worktreeInfo.path,
-        );
+        const gitMounts = yield* resolveWorktreeGitMounts(worktreeInfo.path);
         mountsToClean.push(...gitMounts);
         const startResult = yield* d.taskLog("Starting sandbox", () =>
           startSandbox({

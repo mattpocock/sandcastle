@@ -813,7 +813,9 @@ interface StartProviderSandboxOptions {
 
 /**
  * Starts a bind-mount provider's sandbox on `worktreePath`, after resolving
- * the host repo's git mounts and patching them for Windows.
+ * that worktree's git mounts and patching them for Windows. Resolved from the
+ * worktree, not `hostRepoDir`, so a host repo that is itself a linked worktree
+ * leaves no unpatchable `.git` pointer-file mount behind (#996).
  */
 const startBindMountWithGitMounts = (
   provider: BindMountSandboxProvider,
@@ -824,7 +826,7 @@ const startBindMountWithGitMounts = (
     mountsToClean,
   }: StartProviderSandboxOptions,
 ) =>
-  resolveGitMounts(join(hostRepoDir, ".git")).pipe(
+  resolveGitMounts(join(worktreePath, ".git")).pipe(
     Effect.provide(NodeFileSystem.layer),
     Effect.catchAll(() => Effect.succeed([])),
     // Patch git mounts for Windows worktree compatibility (ADR-0006)
