@@ -56,7 +56,7 @@
   },
   "scripts": {
     "build": "tsup",
-    "postbuild": "rm -rf dist/templates && cp -r src/templates dist/templates && node scripts/check-public-types-effect-free.mjs",
+    "postbuild": "node scripts/copy-templates.mjs && node scripts/check-public-types-effect-free.mjs",
     "pretest": "tsx scripts/ensure-build.ts",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -79,6 +79,7 @@
     "verify:world": "npm run build >/dev/null && tsx .sandcastle/verify/verify.ts world",
     "coverage:gate": "tsx scripts/coverage-gate.ts",
     "coverage:floor": "tsx scripts/coverage-floor.ts",
+    "preapi:report": "tsx scripts/ensure-build.ts",
     "api:report": "tsx scripts/api-report.ts"
   },
   "keywords": [
@@ -124,7 +125,8 @@
     "zod": "^4.4.3"
   },
   "dependencies": {
-    "@clack/prompts": "^1.1.0"
+    "@clack/prompts": "^1.1.0",
+    "@standard-schema/spec": "^1.1.0"
   },
   "peerDependencies": {
     "@daytona/sdk": ">=0.164.0 <1.0.0",
