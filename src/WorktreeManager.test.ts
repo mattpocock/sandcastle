@@ -237,17 +237,75 @@ describe("WorktreeManager.create", () => {
     await execAsync("git checkout main", { cwd: repoDir });
 
     const first = await run(create(repoDir, { branch: "my-branch" }));
-    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const second = await run(create(repoDir, { branch: "my-branch" }));
 
     expect(second.path).toBe(first.path);
     expect(second.branch).toBe("my-branch");
-    // No origin to refresh from: the reuse says so and carries on.
-    expect(log).toHaveBeenCalledWith(
+    // No origin to refresh from: the reuse warns, with git's reason, and
+    // carries on.
+    expect(warn).toHaveBeenCalledWith(
       expect.stringMatching(
-        /^Could not fetch from origin \(reusing worktree at .* as-is, branch 'my-branch'\)$/u,
+        /^Could not fetch from origin \(reusing worktree at .* as-is, branch 'my-branch'\): fatal: 'origin' does not appear to be a git repository[\s\S]*may be behind origin\/my-branch/u,
       ),
     );
+
+    await run(remove(first.path));
+  });
+
+  it("logs git's reason, without a warning, when the reused branch is not on origin yet", async () => {
+    const { repoDir } = await setupRepoWithOrigin();
+    await execAsync("git checkout -b my-branch", { cwd: repoDir });
+    await commitFile(repoDir, { name: "x.txt", content: "x" }, "branch commit");
+    await execAsync("git checkout main", { cwd: repoDir });
+
+    const first = await run(create(repoDir, { branch: "my-branch" }));
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const second = await run(create(repoDir, { branch: "my-branch" }));
+
+    expect(second.path).toBe(first.path);
+    expect(log).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^Could not fetch from origin \(reusing worktree at .* as-is, branch 'my-branch'\): fatal: couldn't find remote ref my-branch$/u,
+      ),
+    );
+    expect(warn).not.toHaveBeenCalled();
+
+    await run(remove(first.path));
+  });
+
+  it("warns of a possibly stale base, with git's reason, when origin is unreachable on reuse", async () => {
+    const { repoDir } = await setupRepoWithOrigin();
+    await execAsync("git checkout -b my-branch", { cwd: repoDir });
+    await commitFile(repoDir, { name: "x.txt", content: "x" }, "branch commit");
+    await execAsync("git push -u origin my-branch", { cwd: repoDir });
+    await execAsync("git checkout main", { cwd: repoDir });
+
+    const first = await run(create(repoDir, { branch: "my-branch" }));
+    const { stdout: initialSha } = await execAsync("git rev-parse HEAD", {
+      cwd: first.path,
+    });
+
+    // origin now points somewhere that does not exist: the fetch fails.
+    const missing = join(tmpdir(), `wt-missing-${Date.now()}`);
+    await execAsync(`git remote set-url origin "${missing}"`, {
+      cwd: repoDir,
+    });
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const second = await run(create(repoDir, { branch: "my-branch" }));
+
+    expect(second.path).toBe(first.path);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^Could not fetch from origin \(reusing worktree at .* as-is, branch 'my-branch'\): fatal: [\s\S]+The worktree may be behind origin\/my-branch, so this run may build on a stale base\.$/u,
+      ),
+    );
+    const { stdout: afterSha } = await execAsync("git rev-parse HEAD", {
+      cwd: second.path,
+    });
+    expect(afterSha.trim()).toBe(initialSha.trim());
 
     await run(remove(first.path));
   });
@@ -474,11 +532,11 @@ describe("WorktreeManager.create", () => {
       "remote-only commit",
     );
 
-    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const second = await run(create(repoDir, { branch: "my-branch" }));
-    expect(log).toHaveBeenCalledWith(
+    expect(warn).toHaveBeenCalledWith(
       expect.stringMatching(
-        /^Branch 'my-branch' has diverged from origin \(reusing worktree at .* as-is\)$/u,
+        /^Branch 'my-branch' has diverged from origin \(reusing worktree at .* as-is, without origin\/my-branch's new commits\): fatal: Not possible to fast-forward, aborting\.$/u,
       ),
     );
 
