@@ -17,6 +17,7 @@ import type { IterationResult } from "./Orchestrator.js";
 import { agentStreamEmitterLayer } from "./AgentStreamEmitter.js";
 import type { PromptArgs } from "./PromptArgumentSubstitution.js";
 import { resolveSandboxPrompt } from "./resolveSandboxPrompt.js";
+import type { ResolvedSandboxPrompt } from "./resolveSandboxPrompt.js";
 import { preprocessPrompt } from "./PromptPreprocessor.js";
 import type { LoggingOption, Timeouts } from "./run.js";
 import {
@@ -499,6 +500,163 @@ const withResumeAndFork = (
   };
 };
 
+/** @internal Resolves a run's prompt, with prompt-file reads kept off the terminal. */
+const resolveRunPrompt = (
+  ctx: SandboxHandleContext,
+  runOptions: SandboxRunOptions,
+): Promise<ResolvedSandboxPrompt> => {
+  const displayRef = Ref.unsafeMake<readonly DisplayEntry[]>([]);
+  const silentDisplayLayer = SilentDisplay.layer(displayRef);
+  return Effect.runPromise(
+    resolveSandboxPrompt({
+      prompt: runOptions.prompt,
+      promptFile: runOptions.promptFile,
+      promptArgs: runOptions.promptArgs,
+      branch: ctx.branch,
+      hostRepoDir: ctx.hostRepoDir,
+    }).pipe(
+      Effect.provide(Layer.mergeAll(NodeContext.layer, silentDisplayLayer)),
+    ),
+  );
+};
+
+/**
+ * @internal The layers a run needs: its display, a SandboxFactory that reuses
+ * this handle's sandbox, and the agent stream emitter.
+ */
+const buildRunLayer = (
+  ctx: SandboxHandleContext,
+  runOptions: SandboxRunOptions,
+  resolvedLogging: LoggingOption,
+) => {
+  const runDisplayLayer = buildRunDisplayLayer(resolvedLogging, {
+    agentName: runOptions.name,
+    branch: ctx.branch,
+  });
+
+  const reuseFactoryLayer = reuseSandboxFactoryLayer(
+    {
+      hostWorktreePath: ctx.worktreePath,
+      sandboxRepoPath: ctx.sandboxRepoDir,
+      applyToHost: ctx.applyToHost,
+      bindMountHandle: ctx.bindMountHandle,
+    },
+    ctx.sandbox,
+  );
+
+  const streamEmitterLayer = agentStreamEmitterLayer(
+    buildAgentStreamHandler(resolvedLogging),
+  );
+
+  return Layer.mergeAll(reuseFactoryLayer, runDisplayLayer, streamEmitterLayer);
+};
+
+/**
+ * @internal Orchestrates a run on this handle's sandbox and reports it: the
+ * intro, the completion status and the context-window lines.
+ */
+const orchestrateOnSandbox = (
+  ctx: SandboxHandleContext,
+  runOptions: SandboxRunOptions,
+  {
+    provider,
+    resolvedPrompt,
+  }: {
+    readonly provider: AgentProvider;
+    readonly resolvedPrompt: ResolvedSandboxPrompt;
+  },
+) =>
+  Effect.gen(function* () {
+    // In merge-to-head mode the lifecycle gets `branch: undefined` and keeps
+    // the worktree's source branch alive (see buildSandboxHandle).
+    const mergeToHead = ctx.branchStrategy?.type === "merge-to-head";
+    const display = yield* Display;
+    yield* display.intro(runOptions.name ?? "sandcastle");
+
+    const orchestrateResult = yield* orchestrate({
+      hostRepoDir: ctx.hostRepoDir,
+      iterations: runOptions.maxIterations ?? 1,
+      prompt: resolvedPrompt.text,
+      branch: mergeToHead ? undefined : ctx.branch,
+      provider,
+      completionSignal: runOptions.completionSignal,
+      idleTimeoutSeconds: runOptions.idleTimeoutSeconds,
+      completionTimeoutSeconds: runOptions.completionTimeoutSeconds,
+      name: runOptions.name,
+      resumeSession: runOptions.resumeSession,
+      forkSession: runOptions.forkSession,
+      signal: runOptions.signal,
+      skipPromptExpansion: resolvedPrompt.isInline,
+      timeouts: ctx.timeouts,
+      keepSourceBranch: mergeToHead,
+    });
+
+    const completion = buildCompletionMessage(
+      orchestrateResult.completionSignal,
+      orchestrateResult.iterations.length,
+    );
+    yield* display.status(completion.message, completion.severity);
+
+    for (const line of buildContextWindowLines(orchestrateResult.iterations)) {
+      yield* display.text(line);
+    }
+
+    return orchestrateResult;
+  });
+
+/**
+ * @internal A Sandbox handle's run(). `rerun` re-enters the same handle, for
+ * the result's `.resume()` / `.fork()`.
+ */
+const runOnSandbox = async (
+  ctx: SandboxHandleContext,
+  runOptions: SandboxRunOptions,
+  rerun: (options: SandboxRunOptions) => Promise<SandboxRunResult>,
+): Promise<SandboxRunResult> => {
+  // If signal is already aborted, reject immediately without any setup
+  runOptions.signal?.throwIfAborted();
+
+  // The container was started before this agent was chosen, so the
+  // agent's env is applied to its own process instead (see withAgentEnv).
+  const provider = withAgentEnv(runOptions.agent, ctx.sandboxProviderEnv);
+
+  await assertRunOptionsValid(runOptions, provider, ctx);
+
+  const resolvedPrompt = await resolveRunPrompt(ctx, runOptions);
+  const resolvedLogging = resolveRunLogging(
+    runOptions,
+    ctx.hostRepoDir,
+    ctx.branch,
+  );
+  const runLayer = buildRunLayer(ctx, runOptions, resolvedLogging);
+
+  let result;
+  try {
+    result = await Effect.runPromise(
+      orchestrateOnSandbox(ctx, runOptions, { provider, resolvedPrompt }).pipe(
+        Effect.provide(runLayer),
+      ),
+    );
+  } catch (error: unknown) {
+    // If the signal was aborted, surface its reason verbatim
+    runOptions.signal?.throwIfAborted();
+    throw error;
+  }
+
+  return withResumeAndFork(
+    {
+      iterations: result.iterations,
+      completionSignal: result.completionSignal,
+      stdout: result.stdout,
+      commits: result.commits,
+      logFilePath:
+        resolvedLogging.type === "file" ? resolvedLogging.path : undefined,
+    },
+    provider,
+    async (overrides) => rerun({ ...runOptions, ...overrides }),
+  );
+};
+
 /**
  * @internal Builds a Sandbox handle with run() and interactive() methods.
  * The close callback controls teardown behavior — top-level createSandbox()
@@ -516,7 +674,6 @@ const buildSandboxHandle = (
     sandboxRepoDir,
     sandbox,
     providerHandle,
-    bindMountHandle,
     applyToHost,
     timeouts,
     branchStrategy,
@@ -536,122 +693,10 @@ const buildSandboxHandle = (
         ? providerHandle.sandboxId
         : undefined,
 
-    run: async (runOptions: SandboxRunOptions): Promise<SandboxRunResult> => {
-      // If signal is already aborted, reject immediately without any setup
-      runOptions.signal?.throwIfAborted();
-
-      const { prompt, promptFile, maxIterations = 1 } = runOptions;
-      // The container was started before this agent was chosen, so the
-      // agent's env is applied to its own process instead (see withAgentEnv).
-      const provider = withAgentEnv(runOptions.agent, ctx.sandboxProviderEnv);
-
-      await assertRunOptionsValid(runOptions, provider, ctx);
-
-      const displayRef = Ref.unsafeMake<readonly DisplayEntry[]>([]);
-      const silentDisplayLayer = SilentDisplay.layer(displayRef);
-
-      const resolvedPrompt = await Effect.runPromise(
-        resolveSandboxPrompt({
-          prompt,
-          promptFile,
-          promptArgs: runOptions.promptArgs,
-          branch,
-          hostRepoDir,
-        }).pipe(
-          Effect.provide(Layer.mergeAll(NodeContext.layer, silentDisplayLayer)),
-        ),
-      );
-
-      const resolvedLogging = resolveRunLogging(
-        runOptions,
-        hostRepoDir,
-        branch,
-      );
-
-      const runDisplayLayer = buildRunDisplayLayer(resolvedLogging, {
-        agentName: runOptions.name,
-        branch,
-      });
-
-      const reuseFactoryLayer = reuseSandboxFactoryLayer(
-        {
-          hostWorktreePath: worktreePath,
-          sandboxRepoPath: sandboxRepoDir,
-          applyToHost,
-          bindMountHandle,
-        },
-        sandbox,
-      );
-
-      const streamEmitterLayer = agentStreamEmitterLayer(
-        buildAgentStreamHandler(resolvedLogging),
-      );
-
-      const runLayer = Layer.mergeAll(
-        reuseFactoryLayer,
-        runDisplayLayer,
-        streamEmitterLayer,
-      );
-
-      let result;
-      try {
-        result = await Effect.runPromise(
-          Effect.gen(function* () {
-            const display = yield* Display;
-            yield* display.intro(runOptions.name ?? "sandcastle");
-
-            const orchestrateResult = yield* orchestrate({
-              hostRepoDir,
-              iterations: maxIterations,
-              prompt: resolvedPrompt.text,
-              branch: mergeToHead ? undefined : branch,
-              provider,
-              completionSignal: runOptions.completionSignal,
-              idleTimeoutSeconds: runOptions.idleTimeoutSeconds,
-              completionTimeoutSeconds: runOptions.completionTimeoutSeconds,
-              name: runOptions.name,
-              resumeSession: runOptions.resumeSession,
-              forkSession: runOptions.forkSession,
-              signal: runOptions.signal,
-              skipPromptExpansion: resolvedPrompt.isInline,
-              timeouts,
-              keepSourceBranch: mergeToHead,
-            });
-
-            const completion = buildCompletionMessage(
-              orchestrateResult.completionSignal,
-              orchestrateResult.iterations.length,
-            );
-            yield* display.status(completion.message, completion.severity);
-
-            for (const line of buildContextWindowLines(
-              orchestrateResult.iterations,
-            )) {
-              yield* display.text(line);
-            }
-
-            return orchestrateResult;
-          }).pipe(Effect.provide(runLayer)),
-        );
-      } catch (error: unknown) {
-        // If the signal was aborted, surface its reason verbatim
-        runOptions.signal?.throwIfAborted();
-        throw error;
-      }
-
-      return withResumeAndFork(
-        {
-          iterations: result.iterations,
-          completionSignal: result.completionSignal,
-          stdout: result.stdout,
-          commits: result.commits,
-          logFilePath:
-            resolvedLogging.type === "file" ? resolvedLogging.path : undefined,
-        },
-        provider,
-        async (overrides) => sandboxHandle.run({ ...runOptions, ...overrides }),
-      );
-    },
+    run: async (runOptions: SandboxRunOptions): Promise<SandboxRunResult> =>
+      runOnSandbox(ctx, runOptions, async (options) =>
+        sandboxHandle.run(options),
+      ),
 
     interactive: async (
       interactiveOptions: SandboxInteractiveOptions,
