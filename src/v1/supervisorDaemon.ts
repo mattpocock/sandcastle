@@ -46,6 +46,15 @@ const answer = async (socket: Socket, done: Promise<void>): Promise<void> => {
   socket.end();
 };
 
+/** Sends the one reply `reply` resolves with, and ends the connection. */
+const replyOnce = async (
+  socket: Socket,
+  reply: Promise<Reply>,
+): Promise<void> => {
+  sender(socket)(await reply);
+  socket.end();
+};
+
 interface Context {
   readonly registry: SessionRegistry;
   readonly server: Server;
@@ -138,6 +147,10 @@ const handle = (request: Request, socket: Socket, context: Context): void => {
     }
     case "kill": {
       void answer(socket, context.registry.kill(request.id));
+      return;
+    }
+    case "input": {
+      void replyOnce(socket, context.registry.input(request));
       return;
     }
     case "shutdown": {

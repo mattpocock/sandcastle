@@ -35,7 +35,9 @@ The secret must not sit in a request file, even briefly: sessions run as the sam
 
 ## Trust model (2026-11-04): open, to decide before 1.0.0
 
-The control socket is unauthenticated. Any process running as the sandbox user, the agent included, can connect to it and send any request the host can: `session`, `kill`, `shutdown`, `detach`. So an agent can stop its own or a sibling session, shut the supervisor down, or detach the sandbox with a destination and secret of its own choosing. It can't read a finish-report secret the host sealed (only the supervisor's memory opens one), but it can make the run end early or report somewhere else. Request files and the supervisor's directory are as open to it.
+The control socket is unauthenticated. Any process running as the sandbox user, the agent included, can connect to it and send any request the host can: `session`, `kill`, `shutdown`, `detach`, and now `input`. So an agent can stop its own or a sibling session, shut the supervisor down, or detach the sandbox with a destination and secret of its own choosing. It can't read a finish-report secret the host sealed (only the supervisor's memory opens one), but it can make the run end early or report somewhere else. Request files and the supervisor's directory are as open to it.
+
+Since [ADR 0032](0032-v1-sessions-take-input-mid-run.md) (2026-11-06) the socket also takes `input` requests, so the same process can hand its own or a sibling session a message, interrupting its turn if it likes. Under the status quo below that is harmless (an agent that can already steer the work in its sandbox gains nothing new), but it widens what an untrusted process in the sandbox could do, and it is one more request a token or socket permissions would have to cover.
 
 This is left open for the maintainer to decide before 1.0.0. The options:
 

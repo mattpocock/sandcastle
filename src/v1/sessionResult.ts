@@ -114,3 +114,13 @@ export const sessionResult = async (
       : { contextWindow: outcome.contextWindow }),
   };
 };
+
+/** A session whose abort signal fired before it was spawned. */
+export const abortedBeforeStart = (name: string): SessionFailedError =>
+  new SessionFailedError({
+    message: `Session "${name}" was aborted before it started`,
+    sessionName: name,
+    exitReason: "aborted",
+    started: false,
+    outputTail: "",
+  });

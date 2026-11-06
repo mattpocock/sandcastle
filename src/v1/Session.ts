@@ -134,4 +134,59 @@ export interface SessionProcess<O = unknown> {
   readonly wait: () => Promise<SessionResult<O>>;
   /** Stops the agent. `wait()` then rejects with `SessionFailedError` (`aborted`). Safe to call twice. */
   readonly kill: () => Promise<void>;
+  /**
+   * Hand the running agent a message, like `send()` on the sandbox, for this
+   * session. Rejects with `SessionInputError` when it can't take one.
+   */
+  readonly send: (options: SessionSendOptions) => Promise<SendReceipt>;
+}
+
+/** Options for `SessionProcess.send()`. */
+export interface SessionSendOptions {
+  /** The message. The agent reads it as a user message. */
+  readonly text: string;
+  /**
+   * Stop the agent's current turn first, so the message starts the next one
+   * instead of waiting for a tool to finish. Default `false`.
+   */
+  readonly interrupt?: boolean;
+  /**
+   * Who is sending it, e.g. `"Ada"` or `"monitor"`. The agent reads the
+   * message as `[from <from>] <text>`, so it can weigh who said it, and the
+   * session's record keeps it. Left out, the text goes as it is.
+   */
+  readonly from?: string;
+}
+
+/**
+ * Options for `send()` on a detachable sandbox, which hands a running
+ * session's agent a message: guidance it reads at its next tool result, in
+ * the turn it's in, or as the next turn once that has ended. With
+ * `interrupt`, its current turn stops first and the message starts the
+ * next. The session carries on and ends as it would have, its result from
+ * its last turn. `send()` works on a held handle, after a detach, and on a
+ * reattached one, while the session supervisor runs. It resolves once the
+ * message is written to the agent's input; `follow()` and the session's
+ * record show it as an `input` event. It rejects with `SessionInputError`
+ * when no such session is running, when several are and `session` is left
+ * out, when the agent has finished its last turn, or when its agent takes no
+ * input (`acceptsInput`).
+ */
+export interface SendOptions extends SessionSendOptions {
+  /** The running session's name. Default the only session running. */
+  readonly session?: string;
+}
+
+/**
+ * Proof that a message was written to a session's agent. It means "on its
+ * way": the agent reads it at its next tool result, or once its turn ends,
+ * as the next one. The session's events show it as an `input` event.
+ */
+export interface SendReceipt {
+  /** The session's name. */
+  readonly session: string;
+  /** When it was written to the agent's input, by the sandbox's clock. */
+  readonly at: Date;
+  /** Whether the agent's turn was stopped first. */
+  readonly interrupted: boolean;
 }

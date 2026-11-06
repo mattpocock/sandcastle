@@ -17,6 +17,12 @@ export interface FakeAgentScript {
    * stray child process holds its output open. Default `false`.
    */
   readonly hang?: boolean;
+  /**
+   * In `claude-code` format, how long a message sent with `send()` while the
+   * agent's turn is still running (`hang`) waits before the agent reads it,
+   * like one sent during a long tool call. Default 0.
+   */
+  readonly inputDelaySeconds?: number;
 }
 
 /**
@@ -28,6 +34,12 @@ export interface FakeAgentScript {
  * user's home), so `continueSession` works only in the same sandbox and
  * directory, and a resumed session fails like the real CLI when it can't
  * find the conversation.
+ *
+ * In `claude-code` format it also takes messages like the real CLI: it reads
+ * each one `send()` hands it and answers by repeating it (as its last text and
+ * its result), so a test sees exactly what the model would read. A message
+ * sent after its last line starts a new turn; one sent while it hangs is read
+ * in the running turn, which then ends. An interrupt stops a hanging turn.
  */
 export const fakeAgent = (script: FakeAgentScript): AgentProvider =>
   registerAgent({
@@ -38,5 +50,8 @@ export const fakeAgent = (script: FakeAgentScript): AgentProvider =>
       lines: [...script.lines],
       exitCode: script.exitCode ?? 0,
       hang: script.hang ?? false,
+      ...(script.inputDelaySeconds === undefined
+        ? {}
+        : { inputDelayMs: script.inputDelaySeconds * 1000 }),
     },
   });

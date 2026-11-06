@@ -33,6 +33,7 @@ export const ReplayScript = Schema.Struct({
   lines: Schema.Array(Schema.String),
   exitCode: Schema.Number,
   hang: Schema.Boolean,
+  inputDelayMs: Schema.optional(Schema.Number),
 });
 
 /** What a fake agent replays. */
@@ -96,11 +97,41 @@ export const DetachRequest = Schema.Struct({
 /** Let go of the running sessions. */
 export type DetachRequest = typeof DetachRequest.Type;
 
+/**
+ * Hand a running session a message, as the next thing its agent reads. The
+ * session is named by request id (a held process) or by name (any handle),
+ * or left out when exactly one session is running. `interrupt` stops the
+ * agent's current turn first.
+ */
+export const InputRequest = Schema.Struct({
+  type: Schema.Literal("input"),
+  id: Schema.optional(Schema.String),
+  name: Schema.optional(Schema.String),
+  text: Schema.String,
+  interrupt: Schema.Boolean,
+  from: Schema.optional(Schema.String),
+});
+
+/** Hand a running session a message. */
+export type InputRequest = typeof InputRequest.Type;
+
+/** Why the supervisor didn't hand a session a message. */
+export const InputRefusal = Schema.Literal(
+  "no-such-session",
+  "ambiguous-session",
+  "stopped-taking-input",
+  "agent-takes-no-input",
+);
+
+/** Why the supervisor didn't hand a session a message. */
+export type InputRefusal = typeof InputRefusal.Type;
+
 /** Everything the host can ask the supervisor. */
 export const Request = Schema.Union(
   Schema.Struct({ type: Schema.Literal("hello") }),
   SessionRequest,
   DetachRequest,
+  InputRequest,
   Schema.Struct({ type: Schema.Literal("kill"), id: Schema.String }),
   Schema.Struct({ type: Schema.Literal("shutdown") }),
 );
@@ -176,6 +207,19 @@ export const Reply = Schema.Union(
   }),
   Schema.Struct({ type: Schema.Literal("ok") }),
   Schema.Struct({ type: Schema.Literal("error"), message: Schema.String }),
+  /** A message is on its way to the agent: written to its input at `at` (ISO 8601). */
+  Schema.Struct({
+    type: Schema.Literal("accepted"),
+    name: Schema.String,
+    at: Schema.String,
+    interrupted: Schema.Boolean,
+  }),
+  /** A message the supervisor didn't hand on, and why. */
+  Schema.Struct({
+    type: Schema.Literal("refused"),
+    reason: InputRefusal,
+    message: Schema.String,
+  }),
   Schema.Struct({ type: Schema.Literal("started") }),
   Schema.Struct({ type: Schema.Literal("event"), event: StreamEvent }),
   /** The session's record, before `ended`, when the host has sinks of its own. */

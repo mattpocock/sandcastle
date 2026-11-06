@@ -9,7 +9,8 @@ import { hostPath } from "./finishReportReceiver.js";
 // are recorded. POSIX only.
 
 /**
- * A stub `claude` in `dir/bin`. It writes what it was run with to `dir`,
+ * A stub `claude` in `dir/bin`. It writes what it was run with to `dir`
+ * (the prompt from its first stream-json message),
  * prints the first of `lines`, waits for `dir/go` when `waitForGo`, then
  * prints the rest.
  */
@@ -32,7 +33,9 @@ export const stubClaude = async (
     `env > "${dir}/agent-env.txt"`,
     `pwd -P > "${dir}/agent-cwd.txt"`,
     `printf '%s\\n' "$*" > "${dir}/agent-argv.txt"`,
-    `cat > "${dir}/agent-prompt.txt"`,
+    // Claude Code reads its prompt as the first stream-json message on stdin.
+    "IFS= read -r message",
+    `printf '%s\\n' "$message" | node -e 'let s="";process.stdin.on("data",(d)=>{s+=d}).on("end",()=>{process.stdout.write(JSON.parse(s).message.content)})' > "${dir}/agent-prompt.txt"`,
     `cat "${dir}/first.jsonl"`,
     wait,
     `cat "${dir}/rest.jsonl"`,

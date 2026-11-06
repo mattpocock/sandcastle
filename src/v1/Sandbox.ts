@@ -4,6 +4,8 @@ import type { RecordedEvent, SessionRecordPointer } from "./SessionRecord.js";
 import type { SandboxProvider } from "./SandboxProvider.js";
 import type {
   OutputType,
+  SendOptions,
+  SendReceipt,
   SessionOptions,
   SessionProcess,
   SessionResult,
@@ -275,6 +277,8 @@ export interface DetachableSandbox<Native = unknown> extends Sandbox<Native> {
    * ended. Break out of the loop to stop following.
    */
   readonly follow: (options?: FollowOptions) => AsyncIterable<RecordedEvent>;
+  /** Hand a running session's agent a message (see `SendOptions`): held, after a detach, or reattached. */
+  readonly send: (options: SendOptions) => Promise<SendReceipt>;
 }
 
 /** Options for `reattachSandbox`. */

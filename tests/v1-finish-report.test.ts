@@ -81,7 +81,8 @@ describe.skipIf(process.platform === "win32")(
         path: "bin/claude",
         content: [
           "#!/bin/sh",
-          'prompt="$(cat)"',
+          // The prompt: the first stream-json message on stdin.
+          "IFS= read -r prompt",
           `printf '%s\\n' '${init("s-held")}'`,
           'while [ ! -f "$HOME/go" ]; do sleep 0.05; done',
           'case "$prompt" in *BREAK*) exit 1 ;; esac',

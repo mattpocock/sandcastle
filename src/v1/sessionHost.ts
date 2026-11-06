@@ -7,10 +7,14 @@ import type {
   SessionResult,
 } from "./Session.js";
 import type { SandboxDetachedError } from "./SandboxDetachedError.js";
-import { SessionFailedError } from "./SessionFailedError.js";
 import { startHostSinks, whenSunk } from "./recordHostSinks.js";
 import { sessionRequest } from "./sessionRequest.js";
-import { lostSession, sessionResult } from "./sessionResult.js";
+import { sendTo } from "./sessionSend.js";
+import {
+  abortedBeforeStart,
+  lostSession,
+  sessionResult,
+} from "./sessionResult.js";
 import type { SupervisorLink } from "./supervisorHost.js";
 import type {
   Reply,
@@ -159,17 +163,14 @@ const sessionProcess = (
         .catch(() => undefined);
       await killing;
     },
+    send: async (sendOptions) => {
+      if (shared.detached !== undefined) {
+        throw shared.detached;
+      }
+      return sendTo(shared.link, { id: request.id }, sendOptions);
+    },
   };
 };
-
-const abortedBeforeStart = (name: string): SessionFailedError =>
-  new SessionFailedError({
-    message: `Session "${name}" was aborted before it started`,
-    sessionName: name,
-    exitReason: "aborted",
-    started: false,
-    outputTail: "",
-  });
 
 /**
  * Lets go of every session after a detach: their `wait()` and `kill()`
