@@ -12,7 +12,7 @@ export const defaultImageName: (repoDir: string) => string;
 // @public
 export const docker: (options?: DockerOptions) => SandboxProvider;
 
-// @public
+// @public (undocumented)
 export interface DockerOptions {
     readonly capDrop?: readonly LinuxCapability[];
     readonly containerGid?: number;
@@ -26,8 +26,15 @@ export interface DockerOptions {
     // Warning: (ae-forgotten-export) The symbol "MountConfig" needs to be exported by the entry point docker.d.ts
     readonly mounts?: readonly MountConfig[];
     readonly network?: string | readonly string[];
+    readonly ports?: readonly DockerPortBinding[];
     // Warning: (ae-forgotten-export) The symbol "SelinuxLabel" needs to be exported by the entry point docker.d.ts
     readonly selinuxLabel?: SelinuxLabel;
+}
+
+// @public
+export interface DockerPortBinding {
+    readonly containerPort: number;
+    readonly hostPort?: number;
 }
 
 // @public
