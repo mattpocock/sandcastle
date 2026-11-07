@@ -1,3 +1,4 @@
+import { runPromise } from "./runPromise.js";
 import { NodeContext, NodeFileSystem } from "@effect/platform-node";
 import {
   appendFileSync,
@@ -673,7 +674,7 @@ const resolveRunHostRepoDir = async (
   options: RunOptions,
   isResuming: boolean,
 ): Promise<string> => {
-  const hostRepoDir = await Effect.runPromise(
+  const hostRepoDir = await runPromise(
     resolveCwd(options.cwd).pipe(Effect.provide(NodeContext.layer)),
   );
   // Validate: resumeSession file must exist on the host
@@ -702,7 +703,7 @@ const resolveRunPrompt = async (
   readonly rawPrompt: string;
   readonly isInlinePrompt: boolean;
 }> => {
-  const resolved = await Effect.runPromise(
+  const resolved = await runPromise(
     resolvePrompt({
       prompt: options.prompt,
       promptFile: options.promptFile,
@@ -741,9 +742,7 @@ const resolveRunBranches = async (
   // Explicit branch when in branch mode
   const branch =
     branchStrategy.type === "branch" ? branchStrategy.branch : undefined;
-  const currentHostBranch = await Effect.runPromise(
-    getCurrentBranch(hostRepoDir),
-  );
+  const currentHostBranch = await runPromise(getCurrentBranch(hostRepoDir));
   return {
     currentHostBranch,
     // When in merge-to-head mode, generate a temporary branch name.
@@ -766,7 +765,7 @@ const resolveRunBranches = async (
 /** Resolve env vars and merge with the agent and sandbox providers' env. */
 const resolveRunEnv = async (options: RunOptions, hostRepoDir: string) =>
   mergeProviderEnv({
-    resolvedEnv: await Effect.runPromise(
+    resolvedEnv: await runPromise(
       resolveEnv(hostRepoDir).pipe(Effect.provide(NodeContext.layer)),
     ),
     agentProviderEnv: options.agent.env,
@@ -925,7 +924,7 @@ const executeRun = async (setup: RunSetup): Promise<OrchestrateResult> => {
       : baseEffect;
   const runLayer = buildRunLayer(setup);
   try {
-    return await Effect.runPromise(withErrorLog.pipe(Effect.provide(runLayer)));
+    return await runPromise(withErrorLog.pipe(Effect.provide(runLayer)));
   } catch (error: unknown) {
     // If the signal was aborted, surface its reason verbatim (no wrapping)
     setup.options.signal?.throwIfAborted();

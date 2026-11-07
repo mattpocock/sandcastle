@@ -11,6 +11,7 @@
  * network, and only the env vars Sandcastle passes in. No image, no daemon.
  */
 
+import { runPromise } from "../runPromise.js";
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { once } from "node:events";
@@ -155,8 +156,7 @@ const runInSeatbelt = async (
 /** Runs a file-system Effect on the host's file system. */
 const runOnHost = async <A, E>(
   effect: Effect.Effect<A, E, FileSystem.FileSystem>,
-): Promise<A> =>
-  effect.pipe(Effect.provide(NodeFileSystem.layer), Effect.runPromise);
+): Promise<A> => effect.pipe(Effect.provide(NodeFileSystem.layer), runPromise);
 
 /** Creates the sandbox's private dirs and the policy and env every exec shares. */
 const prepare = async (

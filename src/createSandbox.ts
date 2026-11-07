@@ -1,3 +1,4 @@
+import { runPromise } from "./runPromise.js";
 import { NodeContext, NodeFileSystem } from "@effect/platform-node";
 import { join } from "node:path";
 import { Effect, Layer, Ref } from "effect";
@@ -550,7 +551,7 @@ const buildSandboxHandle = (
       const displayRef = Ref.unsafeMake<readonly DisplayEntry[]>([]);
       const silentDisplayLayer = SilentDisplay.layer(displayRef);
 
-      const resolvedPrompt = await Effect.runPromise(
+      const resolvedPrompt = await runPromise(
         resolveSandboxPrompt({
           prompt,
           promptFile,
@@ -595,7 +596,7 @@ const buildSandboxHandle = (
 
       let result;
       try {
-        result = await Effect.runPromise(
+        result = await runPromise(
           Effect.gen(function* () {
             const display = yield* Display;
             yield* display.intro(runOptions.name ?? "sandcastle");
@@ -681,7 +682,7 @@ const buildSandboxHandle = (
 
       let lifecycleResult;
       try {
-        lifecycleResult = await Effect.runPromise(
+        lifecycleResult = await runPromise(
           Effect.gen(function* () {
             const resolvedPrompt = yield* resolveSandboxPrompt({
               prompt,
@@ -758,7 +759,7 @@ const buildSandboxHandle = (
         return providerHandle.exec(command, mergedOptions);
       }
       // Test-mode fallback: no providerHandle, only the Effect SandboxService.
-      return Effect.runPromise(sandbox.exec(command, mergedOptions));
+      return runPromise(sandbox.exec(command, mergedOptions));
     },
 
     close: async (): Promise<CloseResult> => close(),
@@ -1031,7 +1032,7 @@ const closeContainerOnly = (
     if (providerHandle) {
       await providerHandle.close();
     }
-    await Effect.runPromise(removeMountTempDirs(mountsToClean));
+    await runPromise(removeMountTempDirs(mountsToClean));
     return { preservedWorktreePath: undefined };
   };
 };
@@ -1048,12 +1049,12 @@ export const createSandboxFromWorktree = async (
   validateTimeoutOptions(options);
 
   // 1. Copy files if requested (bind-mount only)
-  await Effect.runPromise(copyIntoWorktree(options, hostRepoDir, worktreePath));
+  await runPromise(copyIntoWorktree(options, hostRepoDir, worktreePath));
 
   // 2. Start sandbox via provider or local sandbox layer (test mode)
   // Temp dirs behind the git mounts, removed once the sandbox is closed.
   const mountsToClean: MountEntry[] = [];
-  const { providerHandle, sandbox, sandboxRepoDir } = await Effect.runPromise(
+  const { providerHandle, sandbox, sandboxRepoDir } = await runPromise(
     startSandboxOnWorktree({
       options,
       hostRepoDir,
@@ -1067,7 +1068,7 @@ export const createSandboxFromWorktree = async (
 
   // 3. Run onSandboxReady hooks (sandbox-side and host-side in parallel). If
   // they fail, tear down the container that just started; the worktree stays.
-  await Effect.runPromise(
+  await runPromise(
     runOnSandboxReadyHooks({
       sandbox,
       sandboxRepoDir,
@@ -1236,7 +1237,7 @@ export const createSandbox = async (
 
   // Resolve cwd, create the worktree, and set up the sandbox in a single Effect.
   const { hostRepoDir, worktreePath, providerHandle, sandbox, sandboxRepoDir } =
-    await Effect.runPromise(
+    await runPromise(
       setUpWorktreeSandbox(options, mountsToClean).pipe(
         Effect.provide(NodeContext.layer),
       ),
@@ -1254,7 +1255,7 @@ export const createSandbox = async (
       return { preservedWorktreePath: undefined };
     }
     closed = true;
-    return Effect.runPromise(
+    return runPromise(
       closeSandboxAndWorktree({ providerHandle, mountsToClean, worktreePath }),
     );
   };

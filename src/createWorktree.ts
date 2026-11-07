@@ -1,3 +1,4 @@
+import { runPromise } from "./runPromise.js";
 import { NodeContext, NodeFileSystem } from "@effect/platform-node";
 import { join } from "node:path";
 import { assertInteractiveSupported } from "./nativeSandboxProvider.js";
@@ -461,7 +462,7 @@ export const createWorktree = async (
       yield* runHostHooks(onWorktreeReady, info.path);
     }
     return { hostRepoDir: repoDir, worktreeInfo: info };
-  }).pipe(Effect.provide(NodeContext.layer), Effect.runPromise);
+  }).pipe(Effect.provide(NodeContext.layer), runPromise);
 
   let closed = false;
 
@@ -495,7 +496,7 @@ export const createWorktree = async (
       }
 
       return { preservedWorktreePath: undefined };
-    }).pipe(Effect.runPromise);
+    }).pipe(runPromise);
   };
 
   const worktreeInteractive = async (
@@ -687,7 +688,7 @@ export const createWorktree = async (
     });
 
     try {
-      return await Effect.runPromise(
+      return await runPromise(
         inner.pipe(
           Effect.provide(
             Layer.mergeAll(
@@ -865,7 +866,7 @@ export const createWorktree = async (
     });
 
     try {
-      return await Effect.runPromise(
+      return await runPromise(
         inner.pipe(
           Effect.provide(
             Layer.mergeAll(
