@@ -204,7 +204,7 @@ run_wizard() {
 # sandbox per stage. Every stage is skippable: a check whose key is missing
 # reports UNVERIFIABLE and names it.
 ENV_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.env"
-TOTAL_STAGES=7
+TOTAL_STAGES=8
 
 # offer KEY "Label": true if KEY is unset and the human wants to add it now.
 offer() {
@@ -302,6 +302,20 @@ if offer DAYTONA_API_KEY "a Daytona API key"; then
   step "Copy the key right away."
   ask_secret DAYTONA_API_KEY "Paste the Daytona API key:"
   write_env DAYTONA_API_KEY "$DAYTONA_API_KEY"
+fi
+
+stage "CodeBuddy: CODEBUDDY_API_KEY"
+note "Cost: not confirmed; the CLI's default model (deepseek-v4.1-flash) resolved free on a"
+note "Tencent account during verification. A completed interactive login also authenticates"
+note "headless runs, but the verify world's HOME is fresh, so the key is what works there."
+if offer CODEBUDDY_API_KEY "a CodeBuddy API key"; then
+  open_url "https://www.codebuddy.ai"
+  step "Sign in and create an API key. Key auth targets www.codebuddy.ai (the"
+  step "international platform); CN-platform keys do not work here; the CN platform"
+  step "(copilot.tencent.com) authenticates through an IDE login instead, not a key"
+  step "(the CN recipe lives in docs/guide/agent-providers.md)."
+  ask_secret CODEBUDDY_API_KEY "Paste the CodeBuddy API key:"
+  write_env CODEBUDDY_API_KEY "$CODEBUDDY_API_KEY"
 fi
 
 finish
