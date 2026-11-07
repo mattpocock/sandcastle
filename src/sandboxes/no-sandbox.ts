@@ -13,7 +13,6 @@
 
 import { spawn } from "node:child_process";
 import type { ChildProcessByStdio, StdioOptions } from "node:child_process";
-import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import type {
   NoSandboxProvider,
@@ -22,6 +21,7 @@ import type {
   InteractiveExecOptions,
 } from "../SandboxProvider.js";
 import { BoundedTail, MAX_TAIL_CHARS } from "../boundedTail.js";
+import { streamStdoutLines } from "../stdoutLines.js";
 import { planWindowsExec, planWindowsSpawn } from "./windowsCommand.js";
 import type { SpawnPlan } from "./windowsCommand.js";
 
@@ -120,11 +120,7 @@ const streamLines =
   (proc) => {
     const stdoutTail = new BoundedTail(maxTailChars, "\n");
     const stderrTail = new BoundedTail(maxTailChars, "");
-    const rl = createInterface({ input: proc.stdout });
-    rl.on("line", (line) => {
-      stdoutTail.push(line);
-      onLine(line);
-    });
+    streamStdoutLines(proc.stdout, stdoutTail, onLine);
     proc.stderr.on("data", (chunk: string) => {
       stderrTail.push(chunk);
     });

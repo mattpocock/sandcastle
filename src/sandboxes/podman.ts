@@ -9,7 +9,6 @@
 import { execFile, execFileSync, spawn } from "node:child_process";
 import type { StdioOptions } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { createInterface } from "node:readline";
 import { createBindMountSandboxProvider } from "../SandboxProvider.js";
 import type {
   SandboxProvider,
@@ -28,6 +27,7 @@ import {
   processFileMountParents,
 } from "../mountUtils.js";
 import { BoundedTail, MAX_TAIL_CHARS } from "../boundedTail.js";
+import { streamStdoutLines } from "../stdoutLines.js";
 import { registerShutdown } from "../shutdownRegistry.js";
 
 export type { LinuxCapability } from "../LinuxCapability.js";
@@ -371,11 +371,7 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
               const { onLine } = opts;
               const stdoutTail = new BoundedTail(maxOutputTailChars, "\n");
               const stderrTail = new BoundedTail(maxOutputTailChars, "");
-              const rl = createInterface({ input: proc.stdout });
-              rl.on("line", (line) => {
-                stdoutTail.push(line);
-                onLine(line);
-              });
+              streamStdoutLines(proc.stdout, stdoutTail, onLine);
               proc.stderr.on("data", (chunk: Buffer) => {
                 stderrTail.push(chunk.toString());
               });
