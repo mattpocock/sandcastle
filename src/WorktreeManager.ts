@@ -221,7 +221,9 @@ const tryUnlockedGit = (
  *
  * Errors here are non-fatal by design (ADR 0003): the worst case is the same
  * stale-but-usable worktree the caller would have had before this refresh
- * existed.
+ * existed. Each skip message carries git's own error. A fetch failure other
+ * than "branch not on origin yet", and a diverged branch, are warnings: the
+ * run may build on a base that is behind origin.
  */
 const fastForwardFromOrigin = (
   worktreePath: string,
@@ -249,19 +251,34 @@ const fastForwardFromOrigin = (
       worktreePath,
     );
     if (fetchResult._tag === "Left") {
-      yield* Console.log(
-        `Could not fetch from origin (reusing worktree at ${worktreePath} as-is, branch '${branch}')`,
-      );
+      const reason = fetchResult.left.message;
+      const message = `Could not fetch from origin (reusing worktree at ${worktreePath} as-is, branch '${branch}'): ${reason}`;
+      // A branch that was never pushed has no origin copy to be behind, so
+      // that one case is routine. Every other failure (network, auth, a bad
+      // remote) leaves the worktree possibly behind origin. Git runs in the C
+      // locale (hostGit), so matching its message is reliable.
+      yield* /couldn't find remote ref/u.test(reason)
+        ? Console.log(message)
+        : Console.warn(
+            `${message}\nThe worktree may be behind origin/${branch}, so this run may build on a stale base.`,
+          );
       return;
     }
     const before = yield* headSha(worktreePath);
     const mergeResult = yield* tryUnlockedGit(
-      ["merge", "--ff-only", `origin/${branch}`],
+      // No advice: the skip message carries git's error, not its how-to hint.
+      [
+        "-c",
+        "advice.diverging=false",
+        "merge",
+        "--ff-only",
+        `origin/${branch}`,
+      ],
       worktreePath,
     );
     if (mergeResult._tag === "Left") {
-      yield* Console.log(
-        `Branch '${branch}' has diverged from origin (reusing worktree at ${worktreePath} as-is)`,
+      yield* Console.warn(
+        `Branch '${branch}' has diverged from origin (reusing worktree at ${worktreePath} as-is, without origin/${branch}'s new commits): ${mergeResult.left.message}`,
       );
       return;
     }
