@@ -425,6 +425,45 @@ export type { LinuxCapability } from "../DockerLifecycle.js";
 // Re-export for backwards compatibility
 export { defaultImageName } from "../mountUtils.js";
 
+const imageNotFoundError = (imageName: string) =>
+  new Error(
+    `Image '${imageName}' not found locally. Build it first with 'sandcastle docker build-image'.`,
+  );
+
+const dockerEngineUnreachableError = (stderr: string) =>
+  new Error(
+    "Docker engine is not reachable: start Docker Desktop, or the docker daemon, and try again. " +
+      `docker said: ${stderr}`,
+  );
+
+/**
+ * Docker CLI messages that mean the engine itself could not be reached:
+ * the daemon socket on Linux and macOS, the Docker Desktop named pipe on
+ * Windows. Current CLIs (29.x) say "failed to connect to the docker API";
+ * older ones say one of the other two.
+ */
+const ENGINE_UNREACHABLE_PATTERNS = [
+  /failed to connect to the docker API/i,
+  /Cannot connect to the Docker daemon/i,
+  /error during connect/i,
+];
+
+/** Turn a failed `docker image inspect` into the error the user should see. */
+const imageInspectError = (
+  imageName: string,
+  error: Error,
+  stderr: string,
+): Error => {
+  const message = stderr.trim();
+  if (/No such image/i.test(message)) return imageNotFoundError(imageName);
+  if (ENGINE_UNREACHABLE_PATTERNS.some((pattern) => pattern.test(message))) {
+    return dockerEngineUnreachableError(message);
+  }
+  return new Error(
+    `docker image inspect '${imageName}' failed: ${message || error.message}`,
+  );
+};
+
 const checkImageUid = async (
   imageName: string,
   expectedUid: number,
@@ -433,13 +472,9 @@ const checkImageUid = async (
     execFile(
       "docker",
       ["image", "inspect", imageName, "--format", "{{.Config.User}}"],
-      (error, stdout) => {
+      (error, stdout, stderr) => {
         if (error) {
-          reject(
-            new Error(
-              `Image '${imageName}' not found locally. Build it first with 'sandcastle docker build-image'.`,
-            ),
-          );
+          reject(imageInspectError(imageName, error, String(stderr ?? "")));
           return;
         }
         const imageUser = (stdout ?? "").trim();
