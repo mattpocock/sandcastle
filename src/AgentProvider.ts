@@ -5,12 +5,15 @@ import {
   claudeHostSessionPath,
   claudeSandboxSessionPath,
   claudeSubagentsDirOnHost,
+  codebuddyHostSessionPath,
+  codebuddySandboxSessionPath,
   copilotHostSessionsDir,
   copilotSessionPath,
   cursorChatDirName,
   cursorHostChatsDir,
   encodePiSessionDir,
   findClaudeSessionOnHost,
+  findCodebuddySessionOnHost,
   findCodexSessionOnHost,
   findPiSessionOnHost,
   homeDir,
@@ -24,6 +27,7 @@ import {
   requireHostSessionPath,
   sandboxDirsOf,
   transferClaudeSession,
+  transferCodebuddySession,
   transferCodexSession,
   transferCopilotSession,
   transferPiSession,
@@ -1837,5 +1841,174 @@ export const claudeCode = (
 
   parseSessionUsage(content: string): IterationUsage | undefined {
     return parseClaudeSessionUsage(content);
+  },
+});
+
+// ---------------------------------------------------------------------------
+// CodeBuddy agent provider
+// ---------------------------------------------------------------------------
+
+/**
+ * A CodeBuddy session moves as one JSONL file per session under
+ * `~/.codebuddy/projects/<encoded-cwd>/` — no subagent transcripts beside it
+ * (verified against codebuddy-code 2.181.0) — and every entry carries the
+ * same top-level `cwd` field Claude writes, so capture/resume share the
+ * Claude flow minus the subagent pass.
+ */
+const makeCodebuddySessionStorage = (
+  options?: CodebuddyOptions,
+): AgentSessionStorage => {
+  const hostProjectsDir = options?.sessionStorage?.hostProjectsDir;
+  const sandboxProjectsDirOf = (handle: BindMountSandboxHandle): string =>
+    options?.sessionStorage?.sandboxProjectsDir ??
+    posix.join(sandboxDirsOf(handle).home, ".codebuddy", "projects");
+
+  return {
+    hostSessionFilePath: (cwd, id) =>
+      codebuddyHostSessionPath(cwd, id, hostProjectsDir),
+    existsOnHost: (cwd, id) =>
+      pathExists(codebuddyHostSessionPath(cwd, id, hostProjectsDir)),
+    readHostSession: async (cwd, id) => {
+      const path = codebuddyHostSessionPath(cwd, id, hostProjectsDir);
+      if (!(await pathExists(path))) return undefined;
+      return readFile(path, "utf8");
+    },
+    captureToHost: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
+      const jsonl = await readSandboxFile(
+        handle,
+        codebuddySandboxSessionPath(
+          sandboxCwd,
+          sessionId,
+          sandboxProjectsDirOf(handle),
+        ),
+        "codebuddy-cap",
+      );
+      const rewritten = transferCodebuddySession(jsonl, sandboxCwd, hostCwd);
+      const destPath = codebuddyHostSessionPath(
+        hostCwd,
+        sessionId,
+        hostProjectsDir,
+      );
+      await mkdir(dirname(destPath), { recursive: true });
+      await writeFile(destPath, rewritten);
+    },
+    resumeIntoSandbox: async ({ hostCwd, sandboxCwd, sessionId, handle }) => {
+      const hostPath = codebuddyHostSessionPath(
+        hostCwd,
+        sessionId,
+        hostProjectsDir,
+      );
+      const jsonl = await readFile(hostPath, "utf8");
+      await writeSandboxFile(handle, {
+        sandboxPath: codebuddySandboxSessionPath(
+          sandboxCwd,
+          sessionId,
+          sandboxProjectsDirOf(handle),
+        ),
+        content: transferCodebuddySession(jsonl, hostCwd, sandboxCwd),
+        tag: "codebuddy-res",
+      });
+    },
+    findByIdOnHost: (id) => findCodebuddySessionOnHost(id, hostProjectsDir),
+  };
+};
+
+/** Options for the CodeBuddy agent provider. */
+export interface CodebuddyOptions {
+  /**
+   * Maps directly to CodeBuddy's `--permission-mode` flag (same value set as
+   * Claude's). When set, replaces the default `--dangerously-skip-permissions`
+   * Sandcastle passes on AFK runs — the two are mutually exclusive, and an
+   * explicit mode on the provider takes precedence.
+   */
+  readonly permissionMode?:
+    | "default"
+    | "acceptEdits"
+    | "plan"
+    | "auto"
+    | "dontAsk"
+    | "bypassPermissions";
+  /** Environment variables injected by this agent provider. */
+  readonly env?: Record<string, string>;
+  /** When false, session capture is disabled. Default: true. */
+  readonly captureSessions?: boolean;
+  /** Override CodeBuddy session directories for tests or non-standard installs. */
+  readonly sessionStorage?: {
+    readonly hostProjectsDir?: string;
+    readonly sandboxProjectsDir?: string;
+  };
+}
+
+/** The `codebuddy -p` command for a print-mode run. */
+const buildCodebuddyPrintCommand = (
+  model: string,
+  options: CodebuddyOptions | undefined,
+  {
+    prompt,
+    dangerouslySkipPermissions,
+    resumeSession,
+    forkSession,
+  }: AgentCommandOptions,
+): PrintCommand => {
+  const permissionFlag = options?.permissionMode
+    ? ` --permission-mode ${options.permissionMode}`
+    : dangerouslySkipPermissions
+      ? " --dangerously-skip-permissions"
+      : "";
+  // `--fork-session` requires `--resume` (or `--continue`); it writes the
+  // continuation as a new session rather than mutating the resumed one,
+  // matching Claude's flag semantics. See ADR 0018.
+  const resumeFlag = resumeSession
+    ? ` --resume ${shellEscape(resumeSession)}${forkSession ? " --fork-session" : ""}`
+    : "";
+  return {
+    command: `codebuddy -p --output-format stream-json --model ${shellEscape(model)}${permissionFlag}${resumeFlag}`,
+    stdin: prompt,
+  };
+};
+
+export const codebuddy = (
+  model: string,
+  options?: CodebuddyOptions,
+): AgentProvider & { readonly sessionStorage: AgentSessionStorage } => ({
+  name: "codebuddy",
+  // No env is injected by default. CodeBuddy's `-y` leaves HIGH/CRITICAL
+  // tools asking; the full pass needs CODEBUDDY_IS_SANDBOX=1 in the process
+  // env (its own help calls this the "isolated-sandbox full pass") — but that
+  // variable also switches the CLI to a sandboxed auth route that cannot use
+  // a mounted login session (verified: a CN session 401s against
+  // www.codebuddy.ai with it set, and authenticates against
+  // copilot.tencent.com without it). Set it via `options.env` when
+  // authenticating with CODEBUDDY_API_KEY and AFK runs need the full pass.
+  env: options?.env ?? {},
+  captureSessions: options?.captureSessions ?? true,
+  sessionStorage: makeCodebuddySessionStorage(options),
+
+  buildPrintCommand(commandOptions: AgentCommandOptions): PrintCommand {
+    return buildCodebuddyPrintCommand(model, options, commandOptions);
+  },
+
+  buildInteractiveArgs({
+    prompt,
+    dangerouslySkipPermissions,
+  }: AgentCommandOptions): string[] {
+    const args = ["codebuddy"];
+    if (options?.permissionMode) {
+      args.push("--permission-mode", options.permissionMode);
+    } else if (dangerouslySkipPermissions) {
+      args.push("--dangerously-skip-permissions");
+    }
+    args.push("--model", model);
+    if (prompt) args.push(prompt);
+    return args;
+  },
+
+  // CodeBuddy's stream-json events are shape-compatible with Claude Code's
+  // (system/init with session_id, assistant content blocks, result with
+  // is_error/result, Claude-shaped usage); its extra `system` subtypes
+  // (usage_update, keepalive, task_*, mcp_status) fall through as unknown
+  // lines. Verified against a live 2.181.0 run.
+  parseStreamLine(line: string): ParsedStreamEvent[] {
+    return [...parseStreamJsonLine(line), ...parseClaudeContextWindow(line)];
   },
 });
