@@ -2,7 +2,14 @@ import { Effect, Exit, Layer, Ref } from "effect";
 import { NodeFileSystem } from "@effect/platform-node";
 import { exec } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, mkdir, readdir, writeFile, rm } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readdir,
+  readFile,
+  writeFile,
+  rm,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -715,6 +722,61 @@ describe("WorktreeDockerSandboxFactory", () => {
 
     expect(result.preservedWorktreePath).toBeUndefined();
     expect(result.value).toBe("done");
+  });
+
+  /**
+   * Deregister a worktree without deleting its directory, the way an
+   * in-container `git worktree prune` does (#855): remove its admin dir under
+   * the host repo's `.git/worktrees/`, which `git worktree remove` then needs.
+   */
+  const deregisterWorktree = async (worktreePath: string) => {
+    const content = (await readFile(join(worktreePath, ".git"), "utf8")).trim();
+    const gitdir = content.replace(/^gitdir:\s*/u, "");
+    await rm(gitdir, { recursive: true, force: true });
+  };
+
+  it("keeps a successful result when the worktree release fails (#1048)", async () => {
+    const stderrSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    let observedWorktreePath: string | undefined;
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const factory = yield* SandboxFactory;
+        return yield* factory.withSandbox((info) =>
+          Effect.gen(function* () {
+            observedWorktreePath = worktreePathOf(info);
+            yield* Effect.promise(() =>
+              deregisterWorktree(worktreePathOf(info)),
+            );
+            return "done";
+          }),
+        );
+      }).pipe(Effect.provide(makeLayer())),
+    );
+
+    expect(result.value).toBe("done");
+    expect(result.preservedWorktreePath).toBe(observedWorktreePath);
+    const output = stderrSpy.mock.calls.map((c): unknown => c[0]).join(" ");
+    expect(output).toContain("could not remove the worktree");
+    expect(output).toContain(observedWorktreePath);
+    stderrSpy.mockRestore();
+  });
+
+  it("still fails a failed run when the worktree release also fails", async () => {
+    const exit = await Effect.runPromiseExit(
+      Effect.gen(function* () {
+        const factory = yield* SandboxFactory;
+        yield* factory.withSandbox((info) =>
+          Effect.promise(() => deregisterWorktree(worktreePathOf(info))).pipe(
+            Effect.andThen(
+              Effect.fail(new AgentError({ message: "agent failed" })),
+            ),
+          ),
+        );
+      }).pipe(Effect.provide(makeLayer())),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
   });
 });
 

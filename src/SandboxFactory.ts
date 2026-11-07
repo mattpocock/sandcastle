@@ -294,10 +294,28 @@ const cleanupWorktree = (
         );
         return Effect.succeed(worktreePath);
       }
-      const announceRemoval = Exit.isSuccess(exit)
-        ? Effect.void
-        : Console.error(`\nWorktree removed (no uncommitted changes)`);
-      return announceRemoval.pipe(
+      if (Exit.isSuccess(exit)) {
+        // The run finished: a failed removal must not discard its result
+        // (#1048). Keep the worktree, say so, and report its path.
+        return WorktreeManager.remove(worktreePath).pipe(
+          Effect.andThen(
+            temp
+              ? cleanupTempBranch(temp.hostRepoDir, temp.branch)
+              : Effect.void,
+          ),
+          Effect.map(() => undefined as string | undefined),
+          Effect.catchAll((e) =>
+            Effect.sync(() => {
+              printWorktreePreservedMessage(
+                worktreePath,
+                `Run succeeded but sandcastle could not remove the worktree at ${worktreePath}: ${e.message}`,
+              );
+              return worktreePath as string | undefined;
+            }),
+          ),
+        );
+      }
+      return Console.error(`\nWorktree removed (no uncommitted changes)`).pipe(
         Effect.andThen(WorktreeManager.remove(worktreePath)),
         Effect.andThen(
           temp ? cleanupTempBranch(temp.hostRepoDir, temp.branch) : Effect.void,
