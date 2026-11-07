@@ -6,11 +6,11 @@
 
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { dirname } from "node:path";
-import { createInterface } from "node:readline";
 import { FileSystem } from "@effect/platform";
 import { Effect } from "effect";
 import { BoundedTail } from "./boundedTail.js";
 import { CopyError } from "./errors.js";
+import { streamStdoutLines } from "./stdoutLines.js";
 
 /** Collects a child's output: streamed line by line with a bounded tail, or whole. */
 export const collectOutput = (
@@ -28,10 +28,7 @@ export const collectOutput = (
       stdout.push(chunk.toString());
     });
   } else {
-    createInterface({ input: proc.stdout }).on("line", (line) => {
-      stdout.push(line);
-      onLine(line);
-    });
+    streamStdoutLines(proc.stdout, stdout, onLine);
   }
   proc.stderr.on("data", (chunk: Buffer) => {
     stderr.push(chunk.toString());
