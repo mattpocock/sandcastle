@@ -13,7 +13,9 @@ import { daytona } from "./daytona.js";
 // - session commands give no stdin either, and stream stdout and stderr apart.
 //   They run in the session's one long-lived shell, which records each
 //   command's exit code after it. A command that ends that shell (a top-level
-//   `exit`) never gets an exit code, and its log stream never closes.
+//   `exit`) never gets an exit code, and its log stream never closes. A shell
+//   killed by SIGTERM gets no exit code either, but its log stream closes
+//   cleanly; one killed by SIGKILL leaves the stream open.
 // `fs.uploadFile(buffer, path)` writes the file where a command can read it.
 const sdk = vi.hoisted(() => ({
   createParams: [] as unknown[],
@@ -42,6 +44,7 @@ vi.mock("@daytona/sdk", async () => {
     return {
       stdout: r.stdout,
       stderr: r.stderr,
+      signal: r.signal,
       exitCode:
         typeof recorded === "string" && recorded !== ""
           ? Number(recorded)
@@ -102,8 +105,9 @@ vi.mock("@daytona/sdk", async () => {
             if (r.stderr) {
               onStderr(r.stderr);
             }
-            // The session shell died: the stream never closes.
-            if (r.exitCode === undefined) {
+            // The session shell died: the stream never closes, unless
+            // SIGTERM ended it.
+            if (r.exitCode === undefined && r.signal !== "SIGTERM") {
               await new Promise(() => {});
             }
           },
@@ -255,6 +259,21 @@ describe("daytona()", () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it("fails a streamed command whose session shell is SIGTERM'd, instead of reporting success", async () => {
+      // A SIGTERM'd session shell closes its log stream cleanly, but records
+      // no exit code, so the command's outcome is unknown.
+      const handle = await daytona().create({ env: {} });
+
+      const outcome = handle.exec("echo partial; kill -TERM $$", {
+        cwd,
+        onLine: () => {},
+      });
+
+      await expect(outcome).rejects.toThrow(
+        /session shell exited before the command finished/u,
+      );
     });
 
     it("surfaces a failed command's output as stderr", async () => {

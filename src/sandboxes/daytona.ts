@@ -156,6 +156,12 @@ const probeSessionShell = async (
   return typeof cmd?.exitCode === "number" ? "exited" : "lost";
 };
 
+/** The session shell ended without recording the command's exit code. */
+const sessionShellLostError = (command: string): Error =>
+  new Error(
+    `Daytona session shell exited before the command finished, so its exit code is unknown: ${command}`,
+  );
+
 /**
  * Watches a session's shell: if it dies (killed, say) the log stream would
  * wait forever, so once it is gone `gone` settles: it fails if the command
@@ -190,11 +196,7 @@ const watchSessionShell = (
         resolve();
         return;
       }
-      reject(
-        new Error(
-          `Daytona session shell exited before the command finished, so its exit code is unknown: ${command}`,
-        ),
-      );
+      reject(sessionShellLostError(command));
     };
     scheduleCheck();
   });
@@ -292,10 +294,15 @@ const execStreaming = async (
     }
     logs.flush();
     const cmdInfo = await sandbox.process.getSessionCommand(sessionId, cmdId);
+    // A shell killed by SIGTERM closes its log stream cleanly but records
+    // no exit code: the command's outcome is unknown, not a success.
+    if (typeof cmdInfo.exitCode !== "number") {
+      throw sessionShellLostError(command);
+    }
     return {
       stdout: logs.stdoutTail.toString(),
       stderr: logs.stderrTail.toString(),
-      exitCode: cmdInfo.exitCode ?? 0,
+      exitCode: cmdInfo.exitCode,
     };
   } finally {
     await sandbox.process.deleteSession(sessionId).catch(() => {});
