@@ -1,6 +1,6 @@
 # Structured output
 
-Use `Output.object()` to extract a typed, schema-validated JSON payload from the [agent](./glossary.md#agent)'s stdout. The agent emits its answer inside an XML tag you specify, and Sandcastle parses, validates, and returns it on `result.output`. The schema can be any [Standard Schema](https://standardschema.dev) validator — the examples below use [Zod](https://zod.dev), but Valibot, ArkType, and others work identically. See [ADR 0010](../adr/0010-structured-output.md) for design rationale.
+[Structured output](./glossary.md#structured-output) is a typed answer from the [agent](./glossary.md#agent): it prints JSON inside an XML tag you choose, and Sandcastle parses it, checks it, and returns it on `result.output`. Ask for it with `Output.object()`, passing the tag and an [output schema](./glossary.md#output-schema), the validator the JSON must pass. The schema can be any [Standard Schema](https://standardschema.dev) validator — the examples below use [Zod](https://zod.dev), but Valibot, ArkType, and others work identically.
 
 ```ts
 import { run, Output, claudeCode } from "@ai-hero/sandcastle";
@@ -25,6 +25,8 @@ console.log(result.output.score); // typed as number
 ```
 
 `Output.string({ tag })` extracts the tag contents as a plain string (trimmed, no JSON parsing). Both helpers require `maxIterations` to be `1` (the default). The resolved [prompt](./glossary.md#prompt) must contain the configured opening tag literal.
+
+The tag can span several assistant messages. Some agents, such as Claude Code, continue a long reply across messages and then repeat only the last one as their final result. Sandcastle reads the whole reply in order, without the repeated last message, so a tag or a JSON string can continue from one message to the next.
 
 When extraction or validation fails, `run()` throws a `StructuredOutputError`. Alongside `tag`, `rawMatched`, `cause`, `commits`, `branch`, and `preservedWorktreePath`, the error carries the `sessionId` (and `sessionFilePath`, when the session was captured) of the run that produced the bad output.
 

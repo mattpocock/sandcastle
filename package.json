@@ -1,6 +1,6 @@
 {
   "name": "@ai-hero/sandcastle",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "CLI for orchestrating AI agents in isolated sandbox environments",
   "type": "module",
   "main": "./dist/index.js",
@@ -14,6 +14,10 @@
       "import": "./dist/sandboxes/docker.js",
       "types": "./dist/sandboxes/docker.d.ts"
     },
+    "./sandboxes/e2b": {
+      "import": "./dist/sandboxes/e2b.js",
+      "types": "./dist/sandboxes/e2b.d.ts"
+    },
     "./sandboxes/vercel": {
       "import": "./dist/sandboxes/vercel.js",
       "types": "./dist/sandboxes/vercel.d.ts"
@@ -26,6 +30,10 @@
       "import": "./dist/sandboxes/daytona.js",
       "types": "./dist/sandboxes/daytona.d.ts"
     },
+    "./sandboxes/modal": {
+      "import": "./dist/sandboxes/modal.js",
+      "types": "./dist/sandboxes/modal.d.ts"
+    },
     "./sandboxes/no-sandbox": {
       "import": "./dist/sandboxes/no-sandbox.js",
       "types": "./dist/sandboxes/no-sandbox.d.ts"
@@ -37,6 +45,10 @@
     "./sandboxes/seatbelt": {
       "import": "./dist/sandboxes/seatbelt.js",
       "types": "./dist/sandboxes/seatbelt.d.ts"
+    },
+    "./sandboxes/sprites": {
+      "import": "./dist/sandboxes/sprites.js",
+      "types": "./dist/sandboxes/sprites.d.ts"
     }
   },
   "bin": {
@@ -44,7 +56,7 @@
   },
   "scripts": {
     "build": "tsup",
-    "postbuild": "rm -rf dist/templates && cp -r src/templates dist/templates && node scripts/check-public-types-effect-free.mjs",
+    "postbuild": "node scripts/copy-templates.mjs && node scripts/check-public-types-effect-free.mjs",
     "pretest": "tsx scripts/ensure-build.ts",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -53,6 +65,7 @@
     "prelint": "tsx scripts/ensure-build.ts",
     "lint": "tsc --noEmit -p scripts/tsconfig.json && tsx scripts/lint-ratchet.ts",
     "lint:shrink": "tsx scripts/lint-ratchet.ts --shrink",
+    "prelint:report": "tsx scripts/ensure-build.ts",
     "lint:report": "tsx scripts/lint-ratchet.ts --report",
     "format": "biome format --write .",
     "format:check": "biome format .",
@@ -66,6 +79,7 @@
     "verify:world": "npm run build >/dev/null && tsx .sandcastle/verify/verify.ts world",
     "coverage:gate": "tsx scripts/coverage-gate.ts",
     "coverage:floor": "tsx scripts/coverage-floor.ts",
+    "preapi:report": "tsx scripts/ensure-build.ts",
     "api:report": "tsx scripts/api-report.ts"
   },
   "keywords": [
@@ -91,14 +105,17 @@
     "@effect/platform-node": "^0.105.0",
     "@effect/printer": "^0.48.0",
     "@effect/printer-ansi": "^0.48.0",
+    "@fly/sprites": "^0.2.4",
     "@microsoft/api-extractor": "^7.60.1",
     "@types/node": "^25.5.0",
     "@typescript/native": "npm:typescript@7.0.2",
     "@vitest/coverage-v8": "^3.2.4",
     "dependency-cruiser": "^18.7.0",
+    "e2b": "^2.62.0",
     "effect": "^3.20.0",
     "husky": "^9.1.7",
     "lint-staged": "^15.5.1",
+    "modal": "^0.11.1",
     "oxlint": "1.90.0",
     "oxlint-tsgolint": "7.0.2005",
     "tsup": "^8.5.1",
@@ -108,17 +125,30 @@
     "zod": "^4.4.3"
   },
   "dependencies": {
-    "@clack/prompts": "^1.1.0"
+    "@clack/prompts": "^1.1.0",
+    "@standard-schema/spec": "^1.1.0"
   },
   "peerDependencies": {
     "@daytona/sdk": ">=0.164.0 <1.0.0",
-    "@vercel/sandbox": ">=1.0.0"
+    "@fly/sprites": ">=0.2.4 <1.0.0",
+    "@vercel/sandbox": ">=1.0.0",
+    "e2b": ">=2.62.0 <3.0.0",
+    "modal": ">=0.11.0 <1.0.0"
   },
   "peerDependenciesMeta": {
     "@vercel/sandbox": {
       "optional": true
     },
     "@daytona/sdk": {
+      "optional": true
+    },
+    "@fly/sprites": {
+      "optional": true
+    },
+    "e2b": {
+      "optional": true
+    },
+    "modal": {
       "optional": true
     }
   },

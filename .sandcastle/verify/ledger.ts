@@ -143,8 +143,7 @@ const containersAndImages = (world: World): Section => {
     const id = rest.slice(rest.lastIndexOf("@") + 1);
     const a = attributeImage(
       { ref, created: imageCreated(engine, id) },
-      world,
-      others,
+      { self: world, others },
       now,
     );
     if (a.kind === "leak") leaks.push(`image ${img}: ${a.detail}`);
@@ -181,7 +180,10 @@ const sampleContents = (path: string): string[] => {
     } catch {
       return;
     }
-    if (st.isFile()) return read(p);
+    if (st.isFile()) {
+      read(p);
+      return;
+    }
     if (!st.isDirectory() || depth > 2) return;
     try {
       for (const n of readdirSync(p)) walk(join(p, n), depth + 1);

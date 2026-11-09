@@ -7,11 +7,9 @@
  */
 
 import { execSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { readFile, unlink, writeFile, mkdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { Writable } from "node:stream";
 import { createIsolatedSandboxProvider } from "../SandboxProvider.js";
 import type {
   ExecResult,
@@ -19,7 +17,10 @@ import type {
   IsolatedSandboxProvider,
 } from "../SandboxProvider.js";
 import type { SandboxInstance } from "@vercel/sandbox";
-import { BoundedTail, MAX_TAIL_CHARS } from "../boundedTail.js";
+import { MAX_TAIL_CHARS } from "../boundedTail.js";
+import { resolveVercelAuth } from "./vercelAuth.js";
+import { execBuffered, execStreamed, withStdin } from "./vercelExec.js";
+import type { RunCommandParams } from "./vercelExec.js";
 
 /** Worktree path inside the Vercel sandbox. */
 const VERCEL_REPO_PATH = "/vercel/sandbox/workspace";
@@ -118,6 +119,16 @@ export interface VercelOptions {
    */
   readonly template?: string;
 
+  /**
+   * Whether Vercel keeps the sandbox's filesystem when it stops (default:
+   * `false`).
+   *
+   * Vercel snapshots a persistent sandbox each time it stops, and the snapshot
+   * counts against your snapshot storage. Sandcastle makes one sandbox per
+   * run, so it turns this off unless you set it.
+   */
+  readonly persistent?: boolean;
+
   /** Environment variables injected by this provider. Merged at launch time with env resolver and agent provider env. */
   readonly env?: Record<string, string>;
 
@@ -131,56 +142,6 @@ export interface VercelOptions {
    */
   readonly maxOutputTailChars?: number;
 }
-
-/** An option or env var counts as unset when it is missing or empty. */
-const setOrUndefined = (value: string | undefined): string | undefined =>
-  value === "" ? undefined : value;
-
-/**
- * Resolve the auth params for `Sandbox.create()`.
- *
- * `@vercel/sandbox` only accepts a token as an explicit param, together with
- * `teamId` and `projectId` (all three or none); otherwise it falls back to
- * OIDC. So read `VERCEL_TOKEN`, `VERCEL_TEAM_ID` and `VERCEL_PROJECT_ID`
- * here, explicit options first.
- */
-const resolveVercelAuth = (
-  options: VercelOptions | undefined,
-): { token?: string; teamId?: string; projectId?: string } => {
-  const { env } = process;
-  const tokenOption = setOrUndefined(options?.token);
-  const teamIdOption = setOrUndefined(options?.teamId);
-  const projectIdOption = setOrUndefined(options?.projectId);
-  const token = tokenOption ?? setOrUndefined(env.VERCEL_TOKEN);
-
-  if (token === undefined) {
-    // No token: the SDK's OIDC flow, which may use team/project ids as hints.
-    return {
-      ...(teamIdOption === undefined ? {} : { teamId: teamIdOption }),
-      ...(projectIdOption === undefined ? {} : { projectId: projectIdOption }),
-    };
-  }
-
-  const teamId = teamIdOption ?? setOrUndefined(env.VERCEL_TEAM_ID);
-  const projectId = projectIdOption ?? setOrUndefined(env.VERCEL_PROJECT_ID);
-  const missing = [
-    teamId === undefined ? "VERCEL_TEAM_ID (or the teamId option)" : null,
-    projectId === undefined
-      ? "VERCEL_PROJECT_ID (or the projectId option)"
-      : null,
-  ].filter((name): name is string => name !== null);
-
-  if (missing.length > 0) {
-    const source =
-      tokenOption === undefined ? "VERCEL_TOKEN" : "the token option";
-    throw new Error(
-      `vercel(): ${source} is set, but a Vercel token also needs a team and project id. ` +
-        `Missing: ${missing.join(", ")}.`,
-    );
-  }
-
-  return { token, teamId, projectId };
-};
 
 /**
  * Run the setup of a sandbox that `create()` has just made. If it fails, stop
@@ -219,6 +180,8 @@ const toCreateParams = (
     runtime: o.runtime ?? o.template,
     // prefer explicit timeout, fall back to the timeoutMs alias
     timeout: o.timeout ?? o.timeoutMs,
+    // Vercel defaults to persistent, which snapshots the sandbox on stop().
+    persistent: o.persistent ?? false,
   };
   return {
     // An unset option (or an empty runtime) is left out for the SDK default.
@@ -230,102 +193,6 @@ const toCreateParams = (
     env,
     ...resolveVercelAuth(options),
   };
-};
-
-type RunCommandParams = Parameters<SandboxInstance["runCommand"]>[0];
-
-/**
- * The command to run for `exec`. `runCommand` gives a command no stdin
- * unless it is detached: the command reads EOF. So write stdin to a file in
- * the sandbox and redirect it in (a file, not an argument, keeps clear of the
- * per-arg size limit). The redirect opens the file before the group runs, so
- * the group can delete it straight away and leave nothing behind.
- */
-const withStdin = async (
-  sandbox: SandboxInstance,
-  command: string,
-  stdin: string | undefined,
-): Promise<string> => {
-  if (stdin === undefined) {
-    return command;
-  }
-  const stdinPath = `/tmp/sandcastle-stdin-${randomUUID()}`;
-  await sandbox.writeFiles([{ path: stdinPath, content: Buffer.from(stdin) }]);
-  return `{ rm -f ${stdinPath}; ${command}\n} < ${stdinPath}`;
-};
-
-/** A stream that hands each stdout line to `onLine` and keeps a bounded tail. */
-const lineWritable = (
-  onLine: (line: string) => void,
-  tail: BoundedTail,
-): Writable => {
-  let partial = "";
-  return new Writable({
-    write(chunk: Buffer, _encoding, callback) {
-      const text = partial + chunk.toString();
-      const lines = text.split("\n");
-      partial = lines.pop() ?? "";
-      for (const line of lines) {
-        tail.push(line);
-        onLine(line);
-      }
-      callback();
-    },
-    final(callback) {
-      if (partial) {
-        tail.push(partial);
-        onLine(partial);
-        partial = "";
-      }
-      callback();
-    },
-  });
-};
-
-/** A stream that only keeps a bounded tail of what is written to it. */
-const tailWritable = (tail: BoundedTail): Writable =>
-  new Writable({
-    write(chunk: Buffer, _encoding, callback) {
-      tail.push(chunk.toString());
-      callback();
-    },
-  });
-
-/** Run a command, streaming stdout lines to `onLine`; returns bounded tails. */
-const execStreamed = async (
-  sandbox: SandboxInstance,
-  params: RunCommandParams,
-  {
-    onLine,
-    maxOutputTailChars,
-  }: {
-    readonly onLine: (line: string) => void;
-    readonly maxOutputTailChars: number;
-  },
-): Promise<ExecResult> => {
-  const stdoutTail = new BoundedTail(maxOutputTailChars, "\n");
-  const stderrTail = new BoundedTail(maxOutputTailChars, "");
-  const result = await sandbox.runCommand({
-    ...params,
-    stdout: lineWritable(onLine, stdoutTail),
-    stderr: tailWritable(stderrTail),
-  });
-  return {
-    stdout: stdoutTail.toString(),
-    stderr: stderrTail.toString(),
-    exitCode: result.exitCode,
-  };
-};
-
-/** Run a command to completion and return its whole output. */
-const execBuffered = async (
-  sandbox: SandboxInstance,
-  params: RunCommandParams,
-): Promise<ExecResult> => {
-  const result = await sandbox.runCommand(params);
-  const stdout = await result.stdout();
-  const stderr = await result.stderr();
-  return { stdout, stderr, exitCode: result.exitCode };
 };
 
 /** Copy a host directory in as a tarball, unpacked at `sandboxPath`. */

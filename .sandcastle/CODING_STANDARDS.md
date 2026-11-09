@@ -104,7 +104,7 @@ No disable comments (`eslint-disable`, `oxlint-disable`, `@ts-ignore`, `@ts-expe
 
 Host-side git goes through `hostGit()` (`src/hostGit.ts`): a raw `git` spawn in any other `src/` file counts as `ratchet/raw-git-spawn`.
 
-To pay down debt, pick a rule or a file from `npm run lint:report` and fix every violation of it. Fix behaviour-neutrally, one rule or one file per PR; `oxlint --fix` sweeps of one rule across the repo are fine.
+To pay down debt, pick a rule or a file from `npm run lint:report` and fix every violation of it. It counts live, the same way `npm run lint` does (building `dist/` first when stale), and shows each baseline count beside it (`live / baseline`); the baseline itself lags until the lint-shrink PR lands, so never scope work from `scripts/lint-baseline.json` or a bare `npx oxlint` run. Fix behaviour-neutrally, one rule or one file per PR; `oxlint --fix` sweeps of one rule across the repo are fine.
 
 Tests may not assert a property's absence with `toMatchObject({ k: undefined })`: it passes where `k` is set to `undefined` and fails where `k` is omitted, so it can be green on one platform and red on another. Use `expect(x).not.toHaveProperty("k")`. Each one counts as `ratchet/match-object-undefined`.
 
@@ -200,6 +200,11 @@ Mock at **system boundaries** only:
 **Never mock your own classes/modules or internal collaborators.** If something is hard to test without mocking internals, redesign the interface.
 
 Prefer SDK-style interfaces over generic fetchers at boundaries — each function is independently mockable with a single return shape, no conditional logic in test setup.
+
+A sandbox provider's SDK is such a boundary. In `tests/`, fake it one of two ways:
+
+- **Fake the network, run the real SDK**, when the SDK takes a base URL or uses `fetch`: `tests/e2b.test.ts` (a local server) and `tests/sprites.test.ts` (stubbed `fetch` and `WebSocket`). Prefer this: it also tests how the provider drives the SDK.
+- **Mock the module**, when it doesn't: copy `tests/modal.test.ts`. It shows `vi.mock(import("modal"), …)` in the `import()` form, keeps state in `vi.hoisted`, and types the fake constructor as `vi.fn<(params: P) => ReturnType<UntypedMock>>`. That typing satisfies both `require-mock-type-parameters` and `no-unnecessary-type-arguments` without an `as`.
 
 ### TDD Workflow: Vertical Slices
 

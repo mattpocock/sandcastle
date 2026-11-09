@@ -10,8 +10,9 @@
  *   npm run -s verify -- ledger <run>          what the runs left behind (LEDGER-<n>.md); exit 1 on a leak
  *   npm run -s verify -- cleanup <run>|--all   remove the world's containers, images, worktrees
  *   npm run -s verify -- dir <run>             the world's directory
+ *   npm run -s verify -- reap [--delete] [<provider>:<id>…]
+ *                                             sandboxes alive on each remote provider; --delete removes Sandcastle's
  */
-import { rmSync } from "node:fs";
 import { join } from "node:path";
 import {
   AGENT_KEYS,
@@ -27,22 +28,15 @@ import {
   sh,
   works,
 } from "./lib.ts";
+import { cleanup } from "./cleanup.ts";
 import { runLedger } from "./ledger.ts";
+import { reapVerb } from "./remoteAccounts.ts";
 import {
   checkoutStatus,
   createWorld,
-  engineEntries,
-  ENGINES,
-  engineUp,
-  listContainers,
-  listImages,
   liveWorlds,
   loadWorld,
-  observations,
   runInWorld,
-  saveWorld,
-  worldContainer,
-  worldTmp,
 } from "./world.ts";
 import type { World } from "./world.ts";
 
@@ -77,9 +71,10 @@ const doctorSandboxes = (): void => {
   for (const s of SANDBOXES) {
     const need = SANDBOX_NEEDS[s];
     const missing = missingKeys(need.keys);
-    const cmdOk = !need.command || works(need.command);
+    const { command } = need;
+    const cmdFails = command !== undefined && !works(command);
     const why = [
-      ...(cmdOk ? [] : [`\`${need.command!.join(" ")}\` fails`]),
+      ...(cmdFails ? [`\`${command.join(" ")}\` fails`] : []),
       ...(missing.length > 0 ? [`missing ${missing.join(", ")}`] : []),
     ];
     console.log(
@@ -120,82 +115,6 @@ const doctor = (world?: World): number => {
   return fails === 0 ? 0 : 1;
 };
 
-/** Removes the containers this world started; returns what went. */
-const removeContainers = (world: World): string[] => {
-  const removed: string[] = [];
-  const observed = new Set(observations(world).map((o) => o.container));
-  for (const { entry: c, engine, rest: name } of engineEntries(
-    listContainers(),
-  )) {
-    if (world.baseline.containers.includes(c)) continue;
-    if (observed.has(c) || worldContainer(world, engine, name)) {
-      if (sh(engine, ["rm", "-f", name]).code === 0)
-        removed.push(`container ${c}`);
-    }
-  }
-  return removed;
-};
-
-/** Removes the images tagged with this world's run id; returns what went. */
-const removeImages = (world: World): string[] => {
-  const removed: string[] = [];
-  for (const engine of ENGINES.filter(engineUp)) {
-    for (const img of listImages()) {
-      if (!img.startsWith(`${engine}:`)) continue;
-      const ref = img.slice(engine.length + 1, img.lastIndexOf("@"));
-      if (
-        ref.includes(world.runId) &&
-        sh(engine, ["rmi", "-f", ref]).code === 0
-      )
-        removed.push(`image ${engine}:${ref}`);
-    }
-  }
-  return removed;
-};
-
-/** Removes the project's extra worktrees; returns what went. */
-const removeWorktrees = (world: World): string[] => {
-  const wts = sh("git", ["worktree", "list", "--porcelain"], {
-    cwd: world.project,
-  })
-    .stdout.split("\n")
-    .filter((l) => l.startsWith("worktree "))
-    .map((l) => l.slice(9))
-    .filter((p) => p !== world.project);
-  for (const p of wts) {
-    sh("git", ["worktree", "remove", "--force", p], { cwd: world.project });
-  }
-  return wts.map((p) => `worktree ${p}`);
-};
-
-/** Removes the world's project, remote, home, tmp and packed build. */
-const removeWorldFiles = (world: World): void => {
-  for (const p of [world.project, world.remote, world.home, worldTmp(world)])
-    rmSync(p, { recursive: true, force: true });
-  for (const f of sh("ls", [world.dir]).stdout.split("\n")) {
-    if (f.endsWith(".tgz")) rmSync(join(world.dir, f), { force: true });
-  }
-};
-
-const cleanup = (world: World): void => {
-  const removed = [
-    ...removeContainers(world),
-    ...removeImages(world),
-    ...removeWorktrees(world),
-  ];
-  removeWorldFiles(world);
-  removed.push("project, remote, home, tmp and packed build");
-  world.cleanedAt = new Date().toISOString();
-  saveWorld(world);
-  console.log(
-    `cleanup ${world.runId}:\n${removed.map((r) => `  removed ${r}`).join("\n")}`,
-  );
-  console.log(
-    `  kept the evidence: ${world.dir} (world.json, logs/, observed.jsonl, LEDGER-*.md)`,
-  );
-};
-
-/** `world`: creates a world and prints its run id. */
 const newWorld = (): number => {
   const world = createWorld();
   console.error(`world:    ${world.dir}`);
@@ -221,25 +140,30 @@ const runIn = async (
     throw new Error(`world ${world.runId} was cleaned up; make a new one`);
   const args = runArgs.slice(1);
   if (runVerb === "sandcastle") {
-    return runInWorld(world, "sandcastle", process.execPath, [
-      join(
-        world.project,
-        "node_modules",
-        "@ai-hero",
-        "sandcastle",
-        "dist",
-        "main.js",
-      ),
-      ...args,
-    ]);
+    return runInWorld(world, {
+      label: "sandcastle",
+      command: process.execPath,
+      args: [
+        join(
+          world.project,
+          "node_modules",
+          "@ai-hero",
+          "sandcastle",
+          "dist",
+          "main.js",
+        ),
+        ...args,
+      ],
+    });
   }
-  if (args.length === 0)
+  const [command, ...commandArgs] = args;
+  if (command === undefined)
     throw new Error(
       `usage: ${runVerb} <run> <${runVerb === "tsx" ? "file" : "command"}> [args…]`,
     );
   return runVerb === "tsx"
-    ? runInWorld(world, "tsx", TSX, args)
-    : runInWorld(world, "sh", args[0], args.slice(1));
+    ? runInWorld(world, { label: "tsx", command: TSX, args })
+    : runInWorld(world, { label: "sh", command, args: commandArgs });
 };
 
 const main = async (): Promise<number> => {
@@ -271,21 +195,23 @@ const main = async (): Promise<number> => {
       console.log(loadWorld(rest[0]).dir);
       return 0;
     }
+    case "reap": {
+      return reapVerb(rest);
+    }
     default: {
       console.error(
-        "verbs: world | doctor [run] | sandcastle <run> … | tsx <run> <file> … | sh <run> <cmd> … | ledger <run> | cleanup <run>|--all | dir <run>",
+        "verbs: world | doctor [run] | sandcastle <run> … | tsx <run> <file> … | sh <run> <cmd> … | ledger <run> | cleanup <run>|--all | dir <run> | reap [--delete] [<provider>:<id>…]",
       );
       return 2;
     }
   }
 };
 
-main().then(
-  (code) => process.exit(code),
-  (e: unknown) => {
-    console.error(
-      `verify: ${redact(e instanceof Error ? e.message : String(e))}`,
-    );
-    process.exit(2);
-  },
-);
+try {
+  process.exit(await main());
+} catch (error: unknown) {
+  console.error(
+    `verify: ${redact(error instanceof Error ? error.message : String(error))}`,
+  );
+  process.exit(2);
+}

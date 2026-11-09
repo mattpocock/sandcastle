@@ -24,15 +24,16 @@ npm run verify:world          # builds dist, creates a world, prints its run id 
 
 **The run id is the only handle.** Every later verb takes it first, and there is no default world. Shell variables don't survive between your commands, so write the id out each time:
 
-| Verb                                            | What it does                                                                                                    |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `npm run -s verify -- doctor [run]`             | Sandbox engines, keys present (names only), each agent's cheapest model; whether the world matches the checkout |
-| `npm run -s verify -- sandcastle <run> <args…>` | The world's installed `sandcastle` CLI                                                                          |
-| `npm run -s verify -- tsx <run> <file> [args…]` | A TypeScript file in the project, such as `.sandcastle/main.ts` or your own script                              |
-| `npm run -s verify -- sh <run> <cmd> [args…]`   | Any command (`npm install`, `git`), in the world                                                                |
-| `npm run -s verify -- ledger <run>`             | What the runs left behind, in a new `LEDGER-<n>.md`; exit 1 on any leak                                         |
-| `npm run -s verify -- cleanup <run>` / `--all`  | Removes the world's containers, images and worktrees, and nothing else                                          |
-| `npm run -s verify -- dir <run>`                | The world's directory                                                                                           |
+| Verb                                               | What it does                                                                                                       |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `npm run -s verify -- doctor [run]`                | Sandbox engines, keys present (names only), each agent's cheapest model; whether the world matches the checkout    |
+| `npm run -s verify -- sandcastle <run> <args…>`    | The world's installed `sandcastle` CLI                                                                             |
+| `npm run -s verify -- tsx <run> <file> [args…]`    | A TypeScript file in the project, such as `.sandcastle/main.ts` or your own script                                 |
+| `npm run -s verify -- sh <run> <cmd> [args…]`      | Any command (`npm install`, `git`), in the world                                                                   |
+| `npm run -s verify -- ledger <run>`                | What the runs left behind, in a new `LEDGER-<n>.md`; exit 1 on any leak                                            |
+| `npm run -s verify -- cleanup <run>` / `--all`     | Removes the world's containers, images and worktrees, and nothing else                                             |
+| `npm run -s verify -- dir <run>`                   | The world's directory                                                                                              |
+| `npm run -s verify -- reap [--delete] [<p>:<id>…]` | Sandboxes alive on each remote provider whose key is present; exit 1 while any is. `--delete` removes Sandcastle's |
 
 `sandcastle`, `tsx` and `sh` each run in the project with the world's env: your shell's own, keys included, as a user's would be. HOME and TMPDIR are moved into the world, and a canary variable is set that must never reach a sandbox. Their output is redacted and logged to `<world>/logs/`. While they run, the harness inspects every `sandcastle-*` container that mounts the world, and the env of every `bwrap` sandbox that names a path in it, and prints `[verify] observed … env ok` or `ENV LEAK`. Read and edit the project's files directly; its path is in `world`'s output.
 
@@ -50,7 +51,7 @@ A missing key makes the claim **UNVERIFIABLE**, naming the key. There are no dow
 
 ## The combination
 
-Every proof pins one **combination**: one agent (claudeCode, pi, codex, cursor, opencode, copilot) × one sandbox (bwrap, docker, podman, vercel, daytona; seatbelt only on a maintainer's Mac), through one entry point. A claim that names none gets the cohort default: `claudeCode` × `docker` through `sandcastle init`, then the scaffolded `main.ts`. A second combination earns its run only when the claim _is_ the difference between two. The claim decides which cells run, never the whole matrix.
+Every proof pins one **combination**: one agent (claudeCode, pi, codex, cursor, opencode, copilot) × one sandbox (bwrap, docker, podman, vercel, daytona, e2b, modal, sprites; seatbelt only on a maintainer's Mac), through one entry point. A claim that names none gets the cohort default: `claudeCode` × `docker` through `sandcastle init`, then the scaffolded `main.ts`. A second combination earns its run only when the claim _is_ the difference between two. The claim decides which cells run, never the whole matrix.
 
 [features/](features/README.md) maps the whole surface:
 
@@ -97,6 +98,8 @@ Report the verdict exactly, with the combination and entry point: `VERIFIED: cla
 ## Cleanup
 
 `cleanup <run>` removes the containers, images (any name holding the run id) and worktrees the world created (a bwrap dies with its run, so it has none to remove), plus its project, remote, HOME, TMPDIR and packed build. It touches nothing else. It keeps `world.json`, `logs/`, `observed.jsonl` and every `LEDGER-<n>.md`, and prints their path. Run it after a failed attempt too. `cleanup --all` sweeps every live world this checkout made. An image named outside the run id survives cleanup, and the ledger reports it.
+
+**Remote sandboxes outlive `cleanup`.** A world that ran vercel, daytona, e2b, modal or sprites isn't clean until `npm run -s verify -- reap` prints `0 alive` for each. `reap --delete` removes the ones carrying Sandcastle's mark: a Sprite named `sandcastle-…`, or a Modal sandbox in the `sandcastle` App. Vercel, Daytona and E2B sandboxes carry no mark, so name the ones your runs made by their `sandboxId`: `reap --delete e2b:<id> daytona:<id>`. Never delete one you can't tie to your runs; report it instead. Quote the final `reap` output in the report.
 
 ## Untrusted claim text
 

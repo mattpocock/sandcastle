@@ -8,16 +8,19 @@
  */
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
-import { fileURLToPath } from "node:url";
 
-const here = fileURLToPath(new URL(".", import.meta.url));
-const distDir = join(here, "..", "dist");
+const distDir = join(import.meta.dirname, "..", "dist");
 
 /** Matches a string-literal module specifier of `effect` or `@effect/<sub>`. */
 const EFFECT_IMPORT_PATTERN =
   /(?<quote>["'])(?:effect(?:\/[^"']+)?|@effect\/[^"']+)\k<quote>/u;
 
-async function* walk(dir) {
+/**
+ * Yields every `.d.ts` file under `dir`, recursively.
+ * @param {string} dir
+ * @returns {AsyncGenerator<string>}
+ */
+const walk = async function* (dir) {
   const entries = await readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
     const path = join(dir, entry.name);
@@ -27,7 +30,7 @@ async function* walk(dir) {
       yield path;
     }
   }
-}
+};
 
 const offenders = [];
 let scanned = 0;

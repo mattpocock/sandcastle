@@ -1,6 +1,6 @@
 # Sandbox providers
 
-Sandcastle uses a `SandboxProvider` to create isolated environments. The `sandbox` option on `run()`, `interactive()`, and `createSandbox()` accepts any provider, including `noSandbox()`: opt in to running the [agent](./glossary.md#agent) directly on the [host](./glossary.md#host) when isolation is undesired. Built-in providers:
+The `sandbox` option on `run()`, `interactive()`, and `createSandbox()` accepts any [sandbox provider](./glossary.md#sandbox-provider), including `noSandbox()`: opt in to running the [agent](./glossary.md#agent) directly on the [host](./glossary.md#host) when isolation is undesired. Built-in providers:
 
 | Provider   | Import path                                | Type                | Accepted by                                 |
 | ---------- | ------------------------------------------ | ------------------- | ------------------------------------------- |
@@ -8,6 +8,9 @@ Sandcastle uses a `SandboxProvider` to create isolated environments. The `sandbo
 | Seatbelt   | `@ai-hero/sandcastle/sandboxes/seatbelt`   | Native (bind-mount) | `run()`, `createSandbox()`                  |
 | Docker     | `@ai-hero/sandcastle/sandboxes/docker`     | Bind-mount          | `run()`, `createSandbox()`, `interactive()` |
 | Podman     | `@ai-hero/sandcastle/sandboxes/podman`     | Bind-mount          | `run()`, `createSandbox()`, `interactive()` |
+| E2B        | `@ai-hero/sandcastle/sandboxes/e2b`        | Isolated            | `run()`, `createSandbox()`                  |
+| Modal      | `@ai-hero/sandcastle/sandboxes/modal`      | Isolated            | `run()`, `createSandbox()`                  |
+| Sprites    | `@ai-hero/sandcastle/sandboxes/sprites`    | Isolated            | `run()`, `createSandbox()`                  |
 | Vercel     | `@ai-hero/sandcastle/sandboxes/vercel`     | Isolated            | `run()`, `createSandbox()`, `interactive()` |
 | No-sandbox | `@ai-hero/sandcastle/sandboxes/no-sandbox` | None                | `run()`, `createSandbox()`, `interactive()` |
 
@@ -104,6 +107,80 @@ Or, more bluntly, allow user namespaces for every program: `sudo sysctl -w kerne
 
 **Agents' own sandboxes.** The native sandbox is the containment layer, and Sandcastle already runs agents with their permission checks skipped, so turn off the agent's own sandboxing. An agent can't apply its own Seatbelt sandbox inside `seatbelt()`, because macOS refuses to nest them. Inside `bwrap()`, whether an agent's own Bubblewrap sandbox can start depends on your kernel.
 
+## E2B: `e2b()`
+
+`e2b()` runs the agent in an [E2B](https://e2b.dev) sandbox, a Firecracker microVM. Install the SDK (`npm install e2b`; it needs Node 22.19 or later) and set `E2B_API_KEY` in your shell, or pass the `apiKey` option. Don't put the key in `.sandcastle/.env`: the keys declared there are forwarded into the sandbox.
+
+E2B's default template has no agent CLI. Its prebuilt `claude` and `codex` templates ship one:
+
+```typescript
+import { run, claudeCode } from "@ai-hero/sandcastle";
+import { e2b } from "@ai-hero/sandcastle/sandboxes/e2b";
+
+await run({
+  agent: claudeCode("claude-opus-4-8"),
+  sandbox: e2b({ template: "claude" }),
+  prompt: "...",
+});
+```
+
+`e2b()` accepts the SDK's `Sandbox.create()` options (`template`, `timeoutMs`, `apiKey`, `metadata`, `network`, ...) except `envs` and `lifecycle`, which the provider sets. The repo lands in `$HOME/workspace`. Each sandbox is killed on `close()`, or when `timeoutMs` (default 30 minutes) runs out, so the timeout must cover setup, the agent run and syncing the commits back. E2B's free Hobby plan caps a sandbox at 1 hour. The handle's `sandboxId` is the E2B sandbox id. `interactive()` isn't supported yet.
+
+## Fly.io Sprites: `sprites()`
+
+`sprites()` runs each sandbox in a new [Fly.io Sprite](https://fly.io/sprites), a Linux microVM. It's an isolated provider: Sandcastle copies the repo in at `/home/sprite/workspace` and brings the agent's commits back out. Install the SDK alongside Sandcastle:
+
+```bash
+npm install @fly/sprites
+```
+
+- **Auth.** Put a Sprites token in `SPRITES_TOKEN` (in `.sandcastle/.env` or your shell). `SPRITE_TOKEN`, the name the Sprites CLI uses, works too. The `token` option wins over both.
+- **Node 24.** `@fly/sprites` asks for Node 24 or later on the host.
+- **Image.** Sprites have one base image, with `git`, Node and the `claude` CLI already installed. Install any other agent's CLI in an `onSandboxReady` hook.
+- **Teardown.** A Sprite keeps running until it's deleted. `close()` deletes it, and so does a failed setup. If the process is interrupted (`SIGINT`/`SIGTERM`) or exits without closing the sandbox, Sandcastle deletes the Sprite from a background process.
+- **`sandboxId`** is the Sprite's name, which the Sprites CLI and API take.
+- **`sudo: true`** uses the Sprite's own passwordless `sudo`.
+- **No `interactive()`.** Use `run()` or `createSandbox()`.
+
+```typescript
+import { run, claudeCode } from "@ai-hero/sandcastle";
+import { sprites } from "@ai-hero/sandcastle/sandboxes/sprites";
+
+await run({
+  agent: claudeCode("claude-opus-4-8"),
+  sandbox: sprites({
+    env: { MY_VAR: "value" }, // merged at launch, like docker()'s env
+  }),
+  prompt: "...",
+});
+```
+
+## Modal: `modal()`
+
+`modal()` runs the agent in a [Modal](https://modal.com) sandbox. Install the SDK, an optional peer dependency, and give it a Modal token: `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` (from `modal token new` or the dashboard), or the `tokenId` and `tokenSecret` options, which win. With neither, the SDK reads `~/.modal.toml`.
+
+```bash
+npm install modal
+```
+
+```typescript
+import { run, claudeCode } from "@ai-hero/sandcastle";
+import { modal } from "@ai-hero/sandcastle/sandboxes/modal";
+
+await run({
+  agent: claudeCode("claude-opus-4-8"),
+  sandbox: modal(),
+  prompt: "...",
+});
+```
+
+- **Image.** Modal has no default image, so `modal()` builds one: `node:24-bookworm` (Node LTS, `git`, `tar`) with Claude Code installed. Modal builds it once and caches it. Pass `image` to use your own: a registry tag such as `"node:24-bookworm"`, or a Modal `Image`. It needs `sh` and `git`; install other agents' CLIs in it, or in an `onSandboxReady` hook.
+- **Root.** Modal runs every command as root, whatever the image's `USER`, so `sudo: true` changes nothing. `modal()` sets `IS_SANDBOX=1`, which Claude Code needs before it skips its permission checks as root.
+- **Lifetime.** A sandbox lives for at most `timeoutMs`, an hour by default (Modal's own default is 5 minutes, and its limit is 24 hours). Modal can't extend it after create, so set it above your longest run. `close()` terminates the sandbox.
+- **Other options.** Sandboxes go in the Modal App named by `appName` (default `"sandcastle"`), created if missing. `create` passes other `sandboxes.create()` options through, such as `cpu`, `memoryMiB` and `regions`.
+- **`sandboxId`** is the Modal sandbox id (`sb-…`). Reattach with `modal.sandboxes.fromId(<sandboxId>)` from the `modal` SDK, then `terminate()`. Some accounts' sandboxes don't appear in `sandboxes.list()`, so keep the id.
+- **Host.** The `modal` SDK needs Node 22 or later.
+
 ## Containment
 
 What a sandbox protects you from depends on the provider. Native sandboxes are built for **accidents and prompt-injection attacks**: an agent that runs the wrong command, or follows instructions planted in an issue or a web page, can't read your credentials, write outside the repo, or touch your other processes.
@@ -119,11 +196,11 @@ For an image-based sandbox, or a VM boundary on macOS and Windows, use `docker()
 
 ## Build-image and remove-image
 
-An image-based provider (`docker()`, `podman()`) runs the agent in an image built from the [config directory](./glossary.md#config-directory). Rebuild it after you change the `Dockerfile` or `Containerfile`, and remove it when you no longer need it: see [`sandcastle docker build-image`](./cli.md#sandcastle-docker-build-image) and the commands after it. Native providers have no image.
+An image-based provider (`docker()`, `podman()`) runs the agent in an image built from the [config directory](./glossary.md#config-directory), the `.sandcastle/` folder that `sandcastle init` creates in your repo. After you change the `Dockerfile` or `Containerfile`, rebuild the image with [build-image](./glossary.md#build-image), the CLI command that builds it, and when you no longer need it, delete it with [remove-image](./glossary.md#remove-image): see [`sandcastle docker build-image`](./cli.md#sandcastle-docker-build-image) and the commands after it. Native providers have no image.
 
 ## Custom sandbox providers
 
-Sandcastle ships with built-in providers for Docker, Podman, and Vercel, but you can create your own. A [sandbox provider](./glossary.md#sandbox-provider) tells Sandcastle how to execute commands in an isolated environment. There are two kinds:
+Sandcastle ships with built-in providers (see the [table above](#sandbox-providers)), but you can create your own. There are two kinds:
 
 - **Bind-mount** — the sandbox can mount a host directory. Sandcastle creates a worktree on the host and the provider mounts it in. No file sync needed. Use this for Docker, Podman, or any local container runtime.
 - **Isolated** — the sandbox has its own filesystem (e.g. a cloud VM). The provider handles syncing code in and out via `copyIn` and `copyFileOut`. Use this when the sandbox cannot access the host filesystem.
@@ -155,6 +232,11 @@ interface ExecResult {
   readonly exitCode: number;
 }
 ```
+
+The Docker and Podman providers return `exitCode: 1` when their command process
+is terminated by a signal. Numeric exit codes are preserved, including `0` for
+success. Custom providers should also report signal termination as a non-zero
+exit code.
 
 ### Bind-mount provider example
 
@@ -213,7 +295,7 @@ const localProcess = () =>
                 resolve({
                   stdout: stdoutChunks.join("\n"),
                   stderr: stderrChunks.join(""),
-                  exitCode: code ?? 0,
+                  exitCode: code ?? 1,
                 });
               });
             });
@@ -231,7 +313,11 @@ const localProcess = () =>
                   resolve({
                     stdout: stdout.toString(),
                     stderr: stderr.toString(),
-                    exitCode: typeof error?.code === "number" ? error.code : 0,
+                    exitCode: error
+                      ? typeof error.code === "number"
+                        ? error.code
+                        : 1
+                      : 0,
                   });
                 }
               },
@@ -314,7 +400,7 @@ const tempDir = () =>
                 resolve({
                   stdout: stdoutChunks.join("\n"),
                   stderr: stderrChunks.join(""),
-                  exitCode: code ?? 0,
+                  exitCode: code ?? 1,
                 });
               });
             });
@@ -332,7 +418,11 @@ const tempDir = () =>
                   resolve({
                     stdout: stdout.toString(),
                     stderr: stderr.toString(),
-                    exitCode: typeof error?.code === "number" ? error.code : 0,
+                    exitCode: error
+                      ? typeof error.code === "number"
+                        ? error.code
+                        : 1
+                      : 0,
                   });
                 }
               },
@@ -382,7 +472,9 @@ const result = await run({
 For real-world examples, see:
 
 - [`src/sandboxes/docker.ts`](../../src/sandboxes/docker.ts) — bind-mount provider using Docker containers (with SELinux label support)
+- [`src/sandboxes/e2b.ts`](../../src/sandboxes/e2b.ts) — isolated provider using E2B sandboxes via `e2b`
 - [`src/sandboxes/vercel.ts`](../../src/sandboxes/vercel.ts) — isolated provider using Vercel Firecracker microVMs via `@vercel/sandbox`
+- [`src/sandboxes/modal.ts`](../../src/sandboxes/modal.ts) — isolated provider using Modal sandboxes via `modal`
 - [`src/sandboxes/podman.ts`](../../src/sandboxes/podman.ts) — bind-mount provider using Podman containers (with SELinux label support)
 - [`src/sandboxes/test-isolated.ts`](../../src/sandboxes/test-isolated.ts) — isolated provider using temp directories (used in tests)
 
@@ -390,7 +482,7 @@ For real-world examples, see:
 
 - [Core concepts](./core-concepts.md): sandbox, host and agent
 - [Branch strategies](./branch-strategies.md): how a worktree is mounted into a bind-mount sandbox, or synced with an isolated one
-- [Hooks](./hooks.md): [sandbox hooks](./glossary.md#sandbox-hook), and `sudo: true` on each provider
+- [Hooks](./hooks.md): commands that run inside the sandbox as it starts, and `sudo: true` on each provider
 - [Init](./init.md): choosing a provider during [init](./glossary.md#init), and the custom Dockerfile
 - [CLI commands](./cli.md): [build-image](./glossary.md#build-image) and [remove-image](./glossary.md#remove-image)
 - [`createSandbox()`](./run.md#createsandbox--reusable-sandbox): one sandbox for several runs

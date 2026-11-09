@@ -6,12 +6,9 @@ Sandcastle does not add a dedicated `docker()` option for every Docker run featu
 
 Docker exposes a very large configuration surface — contexts, port publishing, networks, GPU reservations, resource limits, ulimits, capabilities, dependent services, and more. Mirroring each one as a typed `docker()` option means the built-in provider grows without bound and its option type drifts toward "all of `docker run`, retyped in TypeScript." Each added flag is also a test and documentation commitment.
 
-There are already two escape hatches that cover the full surface without per-feature flags:
+There is already an escape hatch that covers the full surface without per-feature flags: **a custom sandbox provider.** `createBindMountSandboxProvider()` and the `SandboxProvider` types are public and exported from `src/index.ts`, so a caller who needs a specific `docker run` (or `docker compose`) shape can wrap the container lifecycle themselves. Every Docker option is reachable this way today.
 
-- **`dockerCompose()`** (where available) delegates container configuration to a user-managed `docker-compose.yml`. Image, networks, published ports, GPU reservations, resource limits, and dependent services all live in the compose file; Sandcastle injects only the per-run worktree mount, workdir, and env. Every Docker option is reachable this way today.
-- **A custom `SandboxProvider`.** The interface is public and exported from `src/index.ts`. A caller who needs a specific `docker run` shape can wrap the lifecycle themselves.
-
-So the built-in `docker()` provider stays focused on the common path, and full-fidelity Docker control lives behind the compose provider or a custom provider rather than an ever-growing option list.
+So the built-in `docker()` provider stays focused on the common path, and full-fidelity Docker control lives in a custom provider rather than an ever-growing option list.
 
 ## Prior requests
 

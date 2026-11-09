@@ -1,5 +1,18 @@
 # @ai-hero/sandcastle
 
+## 0.14.0
+
+### Minor Changes
+
+- d99fff8: Add an E2B isolated sandbox provider, `e2b()` from `@ai-hero/sandcastle/sandboxes/e2b`. It needs the optional `e2b` peer dependency and `E2B_API_KEY` (or the `apiKey` option). Use a template that ships your agent's CLI, such as `e2b({ template: "claude" })`.
+- 8783573: Add `modal()`, an isolated sandbox provider for [Modal](https://modal.com) sandboxes, at `@ai-hero/sandcastle/sandboxes/modal`. Install `modal` (an optional peer dependency) and set `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`, or pass `tokenId` and `tokenSecret`. By default it builds a `node:24-bookworm` image with Claude Code installed; pass `image` for your own. Sandboxes live for an hour unless `timeoutMs` says otherwise, and `sandboxId` is the Modal sandbox id.
+- 775a8df: Add `sprites()`, a Fly.io Sprites isolated sandbox provider, at `@ai-hero/sandcastle/sandboxes/sprites`. It needs `@fly/sprites` (an optional peer dependency, which asks for Node 24 or later) and a token in `SPRITES_TOKEN` (or `SPRITE_TOKEN`, or the `token` option). Each sandbox is a new Sprite with the repo at `/home/sprite/workspace`; `sandboxId` is the Sprite's name. Sprites persist until deleted, so Sandcastle deletes the Sprite on `close()`, when setup fails, and from a background process when the run is interrupted or exits without closing it.
+
+### Patch Changes
+
+- 73ce215: docker() and podman(): the worktree admin directories can no longer be renamed from inside the sandbox.
+- 14507d6: Add a Glossary page to the user docs (`docs/guide/glossary.md`, in the Reference group) that defines every term in one place. Guide pages no longer open with definition blocks; instead, each page links the first mention of a term to its glossary entry.
+
 ## 0.13.0
 
 ### Minor Changes

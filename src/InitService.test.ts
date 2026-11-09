@@ -17,13 +17,8 @@ import {
   beadsVersionWarning,
   parseBdVersion,
 } from "./InitService.js";
-import type {
-  AgentEntry,
-  PackageManager,
-  ScaffoldOptions,
-} from "./InitService.js";
+import type { PackageManager, ScaffoldOptions } from "./InitService.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
-import { SKELETON_PROMPT } from "./templates.js";
 
 const makeDir = async () => mkdtemp(join(tmpdir(), "init-service-"));
 
@@ -143,6 +138,34 @@ describe("InitService scaffold", () => {
     );
     expect(envExample).toContain("Issues");
     expect(envExample).toContain("Metadata");
+  });
+
+  it("names the token permissions an agent needs to push branches and open pull requests", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      issueTracker: getIssueTracker("github-issues"),
+    });
+
+    const envExample = await readFile(
+      join(dir, ".sandcastle", ".env.example"),
+      "utf8",
+    );
+    expect(envExample).toContain("Contents (Read and write)");
+    expect(envExample).toContain("Pull requests (Read and write)");
+  });
+
+  it("scaffolds GH_HOST and GH_ENTERPRISE_TOKEN for GitHub Enterprise", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      issueTracker: getIssueTracker("github-issues"),
+    });
+
+    const envExample = await readFile(
+      join(dir, ".sandcastle", ".env.example"),
+      "utf8",
+    );
+    expect(envExample).toMatch(/^GH_HOST=$/mu);
+    expect(envExample).toMatch(/^# GH_ENTERPRISE_TOKEN=/mu);
   });
 
   it("generates .env.example without GH_TOKEN when issue tracker is beads", async () => {
@@ -563,7 +586,7 @@ describe("InitService scaffold", () => {
     const compiledFiles = files.filter((f) =>
       /\.(?:js|d\.ts|js\.map|d\.ts\.map)$/u.test(f),
     );
-    expect(compiledFiles).toEqual([]);
+    expect(compiledFiles).toStrictEqual([]);
   });
 
   describe("getNextStepsLines", () => {
@@ -845,7 +868,7 @@ describe("InitService scaffold", () => {
         )
           .filter((l) => /^\d+\./u.test(l))
           .map((l) => Number(l.split(".")[0]));
-        expect(numbers).toEqual(numbers.map((_, i) => i + 1));
+        expect(numbers).toStrictEqual(numbers.map((_, i) => i + 1));
       });
     });
 
@@ -889,7 +912,8 @@ describe("InitService scaffold", () => {
       "utf8",
     );
     expect(dockerfile).toContain("FROM node:22-bookworm");
-    expect(dockerfile).toContain("@mariozechner/pi-coding-agent");
+    expect(dockerfile).toContain("@earendil-works/pi-coding-agent");
+    expect(dockerfile).not.toContain("@mariozechner/pi-coding-agent");
     expect(dockerfile).not.toContain("{{ISSUE_TRACKER_TOOLS}}");
   });
 
@@ -2228,7 +2252,8 @@ describe("InitService scaffold", () => {
         "utf8",
       );
       expect(dockerfile).toContain("beads");
-      expect(dockerfile).toContain("@mariozechner/pi-coding-agent");
+      expect(dockerfile).toContain("@earendil-works/pi-coding-agent");
+      expect(dockerfile).not.toContain("@mariozechner/pi-coding-agent");
       expect(dockerfile).not.toContain("GitHub CLI");
     });
 

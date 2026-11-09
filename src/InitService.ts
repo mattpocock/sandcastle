@@ -135,7 +135,7 @@ export const detectPackageManager = (
     const pkg = yield* readHostPackageJson(repoDir);
     const field = Option.getOrUndefined(pkg)?.["packageManager"];
     if (typeof field === "string") {
-      const name = field.split("@")[0];
+      const [name] = field.split("@");
       const match = PACKAGE_MANAGERS.find((pm) => pm === name);
       if (match) {
         return match;
@@ -293,7 +293,7 @@ ARG AGENT_GID=1000
 RUN groupmod -o -g $AGENT_GID node && usermod -o -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
 
 # Install pi coding agent (run as root before USER agent)
-RUN npm install -g @mariozechner/pi-coding-agent
+RUN npm install -g @earendil-works/pi-coding-agent
 
 USER \${AGENT_UID}:\${AGENT_GID}
 
@@ -468,7 +468,7 @@ ANTHROPIC_API_KEY=`,
     setupCommand: `pi "$(cat ${SETUP_ISSUE_TRACKER_PATH})"`,
     hostCli: {
       command: "pi",
-      install: "npm install -g @mariozechner/pi-coding-agent",
+      install: "npm install -g @earendil-works/pi-coding-agent",
     },
   },
   {
@@ -746,7 +746,13 @@ const ISSUE_TRACKER_REGISTRY: [IssueTrackerEntry, ...IssueTrackerEntry[]] = [
     envExample: `# GitHub personal access token — the agent uses it to read and manage GitHub Issues
 # Create a fine-grained token: https://github.com/settings/personal-access-tokens/new
 # Required repository permissions: Issues (Read and write) and Metadata (Read)
-GH_TOKEN=`,
+# If your prompts have the agent push branches or open pull requests, also grant
+# Contents (Read and write) and Pull requests (Read and write)
+GH_TOKEN=
+# GitHub Enterprise Server hostname, e.g. github.example.com. Leave blank for github.com.
+GH_HOST=
+# GitHub Enterprise Server only: uncomment and put the token here instead of GH_TOKEN
+# GH_ENTERPRISE_TOKEN=`,
   },
   {
     name: "beads",
@@ -924,6 +930,91 @@ const envNotes = (
     : []),
 ];
 
+/**
+ * The custom issue tracker scaffolds a broken-until-configured project, so
+ * its next steps are about running the setup prompt — not the template's
+ * normal "set env vars and go" flow.
+ */
+const customTrackerNextSteps = (
+  agent: AgentEntry,
+  sandboxProvider: SandboxProviderEntry,
+): string[] => {
+  const hasImage = sandboxProvider.image !== undefined;
+  return [
+    "Next steps:",
+    "1. Your custom issue tracker isn't wired up yet — runs hard-fail until you configure it.",
+    `2. Feed the setup prompt to ${agent.label} on your host to finish wiring it up:`,
+    `   ${agent.setupCommand}`,
+    hasImage
+      ? `   (Runs on the host — you need the ${agent.label} CLI installed locally, since the sandbox image isn't built yet.)`
+      : `   (Runs on the host — you need the ${agent.label} CLI installed locally.)`,
+    hasImage
+      ? `3. Follow .sandcastle/${SETUP_ISSUE_TRACKER_DOC} to edit the scaffolded files in place, build the image, and verify.`
+      : `3. Follow .sandcastle/${SETUP_ISSUE_TRACKER_DOC} to edit the scaffolded files in place and verify.`,
+  ];
+};
+
+/** The blank template's next steps: env vars, prompt, then the main file. */
+const blankTemplateNextSteps = ({
+  mainFilename,
+  notes,
+  runStep,
+}: {
+  readonly mainFilename: string;
+  /** Lines under the env-var step (see `envNotes`). */
+  readonly notes: readonly string[];
+  readonly runStep: string;
+}): string[] => [
+  "Next steps:",
+  `1. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
+  ...notes,
+  "2. Read and customize .sandcastle/prompt.md to describe what you want the agent to do",
+  `3. Customize .sandcastle/${mainFilename} — it uses the JS API (\`run()\`) to control how the agent runs`,
+  `4. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
+  `5. ${runStep}`,
+];
+
+/**
+ * What a non-npm project must add to the image so its install hook runs, or
+ * "" when nothing is needed. The image ships only npm (#177); the beads image
+ * already enables corepack, and a native sandbox runs the host's own tools.
+ */
+const imagePackageManagerNote = (
+  packageManager: PackageManager,
+  issueTracker: IssueTrackerEntry,
+  sandboxProvider: SandboxProviderEntry,
+): string => {
+  const { image } = sandboxProvider;
+  if (image === undefined || packageManager === "npm") {
+    return "";
+  }
+  const file = `.sandcastle/${image.containerfileName}`;
+  if (packageManager === "bun") {
+    return `, then install bun in ${file}, before its \`USER\` line (\`RUN npm install -g bun\`), and rebuild the image`;
+  }
+  return issueTracker.templateArgs.ISSUE_TRACKER_TOOLS.includes(
+    "corepack enable",
+  )
+    ? ""
+    : `, then add \`RUN corepack enable\` to ${file}, before its \`USER\` line, and rebuild the image`;
+};
+
+/** Template step about `copyToWorktree` and the install hook. */
+const copyToWorktreeStep = (
+  packageManager: PackageManager,
+  issueTracker: IssueTrackerEntry,
+  sandboxProvider: SandboxProviderEntry,
+): string =>
+  `Templates use \`copyToWorktree: ["node_modules"]\` to copy your host node_modules into the sandbox for fast startup — the \`npm install\` in the onSandboxReady hook is a safety net for platform-specific binaries. ${
+    packageManager === "npm"
+      ? "Adjust both if you use a different package manager"
+      : `This project uses ${packageManager}, so change the hook to \`${installCommand(packageManager)}\` and check \`copyToWorktree\` suits it${imagePackageManagerNote(packageManager, issueTracker, sandboxProvider)}`
+  }`;
+
+/** Template step for a planner whose `<plan>` schema needs Zod installed. */
+const planSchemaStep = (packageManager: PackageManager): string =>
+  `Install a schema validator for the planner's \`<plan>\` output — the template uses Zod (\`${addDependencyCommand(packageManager, "zod")}\`), but Valibot, ArkType, or any Standard Schema library works (https://standardschema.dev)`;
+
 export const getNextStepsLines = (
   template: string,
   mainFilename: string,
@@ -936,35 +1027,17 @@ export const getNextStepsLines = (
   sandboxProvider: SandboxProviderEntry = SANDBOX_PROVIDER_REGISTRY[0],
 ): string[] => {
   const runStep = `Run \`${runScriptCommand(packageManager, "sandcastle")}\` to start the agent`;
-  // The custom issue tracker scaffolds a broken-until-configured project, so
-  // its next steps are about running the setup prompt — not the template's
-  // normal "set env vars and go" flow. This branch wins over template-specific
-  // steps regardless of the chosen template.
+  // The custom issue tracker's steps win over template-specific steps
+  // regardless of the chosen template.
   if (issueTracker.name === "custom") {
-    const hasImage = sandboxProvider.image !== undefined;
-    return [
-      "Next steps:",
-      "1. Your custom issue tracker isn't wired up yet — runs hard-fail until you configure it.",
-      `2. Feed the setup prompt to ${agent.label} on your host to finish wiring it up:`,
-      `   ${agent.setupCommand}`,
-      hasImage
-        ? `   (Runs on the host — you need the ${agent.label} CLI installed locally, since the sandbox image isn't built yet.)`
-        : `   (Runs on the host — you need the ${agent.label} CLI installed locally.)`,
-      hasImage
-        ? `3. Follow .sandcastle/${SETUP_ISSUE_TRACKER_DOC} to edit the scaffolded files in place, build the image, and verify.`
-        : `3. Follow .sandcastle/${SETUP_ISSUE_TRACKER_DOC} to edit the scaffolded files in place and verify.`,
-    ];
+    return customTrackerNextSteps(agent, sandboxProvider);
   }
   if (template === "blank") {
-    return [
-      "Next steps:",
-      `1. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
-      ...envNotes(issueTracker, agent, sandboxProvider),
-      "2. Read and customize .sandcastle/prompt.md to describe what you want the agent to do",
-      `3. Customize .sandcastle/${mainFilename} — it uses the JS API (\`run()\`) to control how the agent runs`,
-      `4. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
-      `5. ${runStep}`,
-    ];
+    return blankTemplateNextSteps({
+      mainFilename,
+      notes: envNotes(issueTracker, agent, sandboxProvider),
+      runStep,
+    });
   }
   const hasReviewer = template.includes("review");
   const needsPlanSchema =
@@ -976,16 +1049,10 @@ export const getNextStepsLines = (
     `${step++}. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
     ...envNotes(issueTracker, agent, sandboxProvider),
     `${step++}. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
-    `${step++}. Templates use \`copyToWorktree: ["node_modules"]\` to copy your host node_modules into the sandbox for fast startup — the \`npm install\` in the onSandboxReady hook is a safety net for platform-specific binaries. ${
-      packageManager === "npm"
-        ? "Adjust both if you use a different package manager"
-        : `This project uses ${packageManager}, so change the hook to \`${installCommand(packageManager)}\` and check \`copyToWorktree\` suits it`
-    }`,
+    `${step++}. ${copyToWorktreeStep(packageManager, issueTracker, sandboxProvider)}`,
   ];
   if (needsPlanSchema) {
-    lines.push(
-      `${step++}. Install a schema validator for the planner's \`<plan>\` output — the template uses Zod (\`${addDependencyCommand(packageManager, "zod")}\`), but Valibot, ArkType, or any Standard Schema library works (https://standardschema.dev)`,
-    );
+    lines.push(`${step++}. ${planSchemaStep(packageManager)}`);
   }
   lines.push(
     `${step++}. Read and customize the prompt files in .sandcastle/ — they shape what the agent does`,

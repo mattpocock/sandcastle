@@ -22,7 +22,7 @@ Sandcastle uses a **[branch strategy](./glossary.md#branch-strategy)**, chosen w
 
 - **Head** (`{ type: "head" }`) — The agent writes directly to the [host](./glossary.md#host) working directory. No worktree, no branch indirection. This is the default for bind-mount providers like `docker()`.
 - **Merge-to-head** (`{ type: "merge-to-head" }`) — Sandcastle creates a temporary branch in a git worktree. The agent works on the temp branch, and changes are merged back to HEAD when done. The temp branch is cleaned up after merge. If the run fails, the temp branch is deleted too, unless the agent left commits on it: then it is kept, and Sandcastle prints how to merge or discard it. If the merge itself fails (for example on a conflict), Sandcastle aborts it so HEAD is unchanged and keeps the temp branch.
-- **Branch** (`{ type: "branch", branch: "foo" }`) — Commits land on an explicitly named branch in a git worktree. Re-running with the same branch reuses the existing worktree and fast-forwards it from `origin` when safe — see [ADR 0003](../adr/0003-reuse-worktree-by-default.md).
+- **Branch** (`{ type: "branch", branch: "foo" }`) — Commits land on an explicitly named branch in a git worktree. Re-running with the same branch reuses the existing worktree and fast-forwards it from `origin` when safe.
 
 For bind-mount providers (like Docker), the worktree directory is bind-mounted into the container — the agent writes directly to the host filesystem through the mount, so no sync is needed.
 
@@ -126,7 +126,7 @@ await sandbox.close();
 
 `wt.close()` checks for uncommitted changes: if the worktree is dirty, it's preserved on disk; if clean, it's removed. `await using` calls `close()` automatically. The worktree persists after `run()`, `interactive()`, and `createSandbox()` complete, so you can hand it to another agent or inspect it.
 
-With `branchStrategy: { type: "merge-to-head" }`, each `wt.run()` / `wt.interactive()` merges the agent's commits back to the host's current branch before returning, and the worktree's [source branch](./glossary.md#source-branch) is preserved across calls so subsequent ones can reuse the same handle. (This differs from top-level `run()`, where the temp branch is deleted after the merge.) `wt.close()` deletes it, unless it holds commits that are on no other branch (for example after a failed merge), in which case it is kept.
+With `branchStrategy: { type: "merge-to-head" }`, each `wt.run()` / `wt.interactive()` merges the agent's commits back to the host's current branch before returning, and the worktree's branch is preserved across calls so subsequent ones can reuse the same handle. (This differs from top-level `run()`, where the temp branch is deleted after the merge.) `wt.close()` deletes it, unless it holds commits that are on no other branch (for example after a failed merge), in which case it is kept.
 
 **Split ownership**: When a sandbox is created via `wt.createSandbox()`, `sandbox.close()` tears down the container only — the worktree remains. `wt.close()` is responsible for worktree cleanup. This differs from the top-level `createSandbox()`, where `sandbox.close()` owns both container and worktree.
 
@@ -140,15 +140,15 @@ With `branchStrategy: { type: "merge-to-head" }`, each `wt.run()` / `wt.interact
 
 ### `Worktree`
 
-| Property / Method        | Type                                                                  | Description                                                                     |
-| ------------------------ | --------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `branch`                 | string                                                                | The branch the worktree is on                                                   |
-| `worktreePath`           | string                                                                | Host path to the worktree                                                       |
-| `run(options)`           | `(options: WorktreeRunOptions) => Promise<WorktreeRunResult>`         | Run an AFK agent in the worktree (sandbox required)                             |
-| `interactive(options)`   | `(options: WorktreeInteractiveOptions) => Promise<InteractiveResult>` | Run an interactive [agent session](./glossary.md#agent-session) in the worktree |
-| `createSandbox(options)` | `(options: WorktreeCreateSandboxOptions) => Promise<Sandbox>`         | Create a long-lived sandbox backed by this worktree                             |
-| `close()`                | `() => Promise<CloseResult>`                                          | Clean up the worktree (preserves if dirty)                                      |
-| `[Symbol.asyncDispose]`  | `() => Promise<void>`                                                 | Auto cleanup via `await using`                                                  |
+| Property / Method        | Type                                                                  | Description                                         |
+| ------------------------ | --------------------------------------------------------------------- | --------------------------------------------------- |
+| `branch`                 | string                                                                | The branch the worktree is on                       |
+| `worktreePath`           | string                                                                | Host path to the worktree                           |
+| `run(options)`           | `(options: WorktreeRunOptions) => Promise<WorktreeRunResult>`         | Run an AFK agent in the worktree (sandbox required) |
+| `interactive(options)`   | `(options: WorktreeInteractiveOptions) => Promise<InteractiveResult>` | Run the agent interactively in the worktree         |
+| `createSandbox(options)` | `(options: WorktreeCreateSandboxOptions) => Promise<Sandbox>`         | Create a long-lived sandbox backed by this worktree |
+| `close()`                | `() => Promise<CloseResult>`                                          | Clean up the worktree (preserves if dirty)          |
+| `[Symbol.asyncDispose]`  | `() => Promise<void>`                                                 | Auto cleanup via `await using`                      |
 
 ### `WorktreeInteractiveOptions`
 
@@ -156,8 +156,8 @@ With `branchStrategy: { type: "merge-to-head" }`, each `wt.run()` / `wt.interact
 | ------------ | ---------------------- | ------------- | ------------------------------------------------------------------------------------------------- |
 | `agent`      | AgentProvider          | —             | **Required.** [Agent provider](./glossary.md#agent-provider)                                      |
 | `sandbox`    | AnySandboxProvider     | `noSandbox()` | [Sandbox provider](./glossary.md#sandbox-provider) (defaults to no sandbox)                       |
-| `prompt`     | string                 | —             | [Inline prompt](./glossary.md#inline-prompt) (mutually exclusive with `promptFile`)               |
-| `promptFile` | string                 | —             | Path to [prompt](./glossary.md#prompt) file                                                       |
+| `prompt`     | string                 | —             | [Prompt](./glossary.md#prompt) as a string (mutually exclusive with `promptFile`)                 |
+| `promptFile` | string                 | —             | Path to prompt file                                                                               |
 | `name`       | string                 | —             | Optional session name                                                                             |
 | `hooks`      | SandboxHooks           | —             | Lifecycle hooks (`host.*`, `sandbox.*`)                                                           |
 | `promptArgs` | PromptArgs             | —             | Key-value map for `{{KEY}}` placeholder substitution                                              |
@@ -170,12 +170,12 @@ With `branchStrategy: { type: "merge-to-head" }`, each `wt.run()` / `wt.interact
 | -------------------------- | ---------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `agent`                    | AgentProvider          | —       | **Required.** Agent provider                                                                                                         |
 | `sandbox`                  | SandboxProvider        | —       | **Required.** Sandbox provider (AFK agents must be sandboxed)                                                                        |
-| `prompt`                   | string                 | —       | Inline prompt (mutually exclusive with `promptFile`)                                                                                 |
+| `prompt`                   | string                 | —       | Prompt as a string (mutually exclusive with `promptFile`)                                                                            |
 | `promptFile`               | string                 | —       | Path to prompt file                                                                                                                  |
 | `maxIterations`            | number                 | 1       | Maximum iterations to run                                                                                                            |
 | `completionSignal`         | string \| string[]     | —       | Substring(s) to stop the iteration loop early                                                                                        |
 | `idleTimeoutSeconds`       | number                 | 600     | Idle timeout in seconds                                                                                                              |
-| `completionTimeoutSeconds` | number                 | 60      | Grace window after [completion signal](./glossary.md#completion-signal) is seen but agent process hasn't exited                      |
+| `completionTimeoutSeconds` | number                 | 60      | Grace window after the agent signals it is done but its process hasn't exited                                                        |
 | `name`                     | string                 | —       | Optional run name                                                                                                                    |
 | `logging`                  | LoggingOption          | file    | Logging mode                                                                                                                         |
 | `hooks`                    | SandboxHooks           | —       | Lifecycle hooks (`host.*`, `sandbox.*`)                                                                                              |
@@ -189,7 +189,7 @@ With `branchStrategy: { type: "merge-to-head" }`, each `wt.run()` / `wt.interact
 | Property           | Type                | Description                                            |
 | ------------------ | ------------------- | ------------------------------------------------------ |
 | `iterations`       | `IterationResult[]` | Per-iteration results (use `.length` for the count)    |
-| `completionSignal` | string              | The matched completion signal, or undefined            |
+| `completionSignal` | string              | The string that ended the loop early, or undefined     |
 | `stdout`           | string              | Combined stdout output from all agent iterations       |
 | `commits`          | { sha: string }[]   | List of commits made by the agent during the run       |
 | `branch`           | string              | The branch name the agent worked on                    |
@@ -206,7 +206,9 @@ With `branchStrategy: { type: "merge-to-head" }`, each `wt.run()` / `wt.interact
 
 ## Source and target branches
 
-Every [prompt template](./glossary.md#prompt-template) gets the source branch and the [target branch](./glossary.md#target-branch) as the [built-in prompt arguments](./glossary.md#built-in-prompt-argument) `{{SOURCE_BRANCH}}` and `{{TARGET_BRANCH}}`: see [Built-in prompt arguments](./prompts.md#built-in-prompt-arguments).
+The [source branch](./glossary.md#source-branch) is the branch the agent works on, and the strategy picks it: your current branch under head, a temporary branch under merge-to-head, or the one you name under branch. The [target branch](./glossary.md#target-branch) is the branch you had checked out when you called `run()`, the one merge-to-head merges back into.
+
+A prompt read from a file can use both, as `{{SOURCE_BRANCH}}` and `{{TARGET_BRANCH}}`, without you passing them: see [Built-in prompt arguments](./prompts.md#built-in-prompt-arguments).
 
 ## Related terms
 

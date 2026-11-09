@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
@@ -92,7 +93,8 @@ describe("claudeCode factory", () => {
   it("buildPrintCommand delivers prompt via stdin, not argv", () => {
     const provider = claudeCode("claude-opus-4-8");
     const { command, stdin } = provider.buildPrintCommand(opts("do something"));
-    expect(command).toContain("-p -");
+    expect(command).not.toMatch(/ -p\b/u);
+    expect(command).not.toMatch(/ -$/u);
     expect(command).not.toContain("'do something'");
     expect(stdin).toBe("do something");
   });
@@ -146,6 +148,19 @@ describe("claudeCode factory", () => {
     });
     expect(provider.parseStreamLine(line)).toStrictEqual([
       { type: "tool_call", name: "Bash", args: "npm test" },
+    ]);
+  });
+
+  it("parseStreamLine extracts tool_use block (Skill → skill arg)", () => {
+    const provider = claudeCode("claude-opus-4-8");
+    const line = JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [{ type: "tool_use", name: "Skill", input: { skill: "tdd" } }],
+      },
+    });
+    expect(provider.parseStreamLine(line)).toStrictEqual([
+      { type: "tool_call", name: "Skill", args: "tdd" },
     ]);
   });
 
@@ -406,7 +421,7 @@ describe("claudeCode factory", () => {
     expect(command).toContain("'--settings' '/tmp/has space/settings.json'");
   });
 
-  it("buildPrintCommand places extraArgs after other flags and before the trailing -p -", () => {
+  it("buildPrintCommand places extraArgs after all other flags", () => {
     const provider = claudeCode("claude-opus-4-8", {
       effort: "high",
       extraArgs: ["--strict-mcp-config"],
@@ -417,7 +432,7 @@ describe("claudeCode factory", () => {
       resumeSession: "abc-123",
       forkSession: true,
     });
-    expect(command).toMatch(/--fork-session '--strict-mcp-config' -p -$/);
+    expect(command).toMatch(/--fork-session '--strict-mcp-config'$/);
   });
 
   it("buildInteractiveArgs appends extraArgs entries when specified", () => {
@@ -458,6 +473,50 @@ describe("claudeCode factory", () => {
 // ---------------------------------------------------------------------------
 
 describe("pi factory", () => {
+  it("parseStreamLine emits each assistant message_end's usage, so the last call wins", () => {
+    // Real pi 0.73.1 stdout from the 2026-10-31 verify run.
+    const fixture = readFileSync(
+      join(
+        import.meta.dirname,
+        "__fixtures__",
+        "context-window",
+        "pi.stream.jsonl",
+      ),
+      "utf8",
+    );
+    const provider = pi("anthropic/claude-haiku-5-5");
+    const usages = fixture
+      .split("\n")
+      .flatMap((line) => provider.parseStreamLine(line))
+      .filter((e) => e.type === "usage")
+      .map((e) => e.usage);
+    expect(usages).toStrictEqual([
+      {
+        inputTokens: 4,
+        cacheCreationInputTokens: 2190,
+        cacheReadInputTokens: 0,
+        outputTokens: 277,
+      },
+      {
+        inputTokens: 2,
+        cacheCreationInputTokens: 17_694,
+        cacheReadInputTokens: 2190,
+        outputTokens: 0,
+      },
+    ]);
+  });
+
+  it("parseStreamLine emits no usage for a message_end with malformed usage", () => {
+    const provider = pi("anthropic/claude-haiku-5-5");
+    const line = JSON.stringify({
+      type: "message_end",
+      message: { role: "assistant", content: [], usage: { input: "lots" } },
+    });
+    expect(
+      provider.parseStreamLine(line).filter((e) => e.type === "usage"),
+    ).toStrictEqual([]);
+  });
+
   it("returns a provider with name 'pi'", () => {
     const provider = pi("claude-sonnet-4-6");
     expect(provider.name).toBe("pi");
@@ -913,7 +972,7 @@ describe("codex factory", () => {
   });
 
   it("supports all codex effort levels", () => {
-    for (const effort of ["low", "medium", "high", "xhigh"] as const) {
+    for (const effort of ["low", "medium", "high", "xhigh", "max"] as const) {
       const provider = codex("gpt-5.4-mini", { effort });
       expect(provider.buildPrintCommand(opts("test")).command).toContain(
         `model_reasoning_effort="${effort}"`,

@@ -1,6 +1,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   rmSync,
@@ -150,9 +151,20 @@ describe("sandcastle init --help", () => {
   });
 });
 
-describe.each(["docker", "podman"])(
-  "sandcastle %s",
-  (provider) => {
+describe.each([
+  {
+    provider: "docker",
+    fileFlag: "--dockerfile",
+    noFileMessage: "No Dockerfile found",
+  },
+  {
+    provider: "podman",
+    fileFlag: "--containerfile",
+    noFileMessage: "No Containerfile or Dockerfile found",
+  },
+])(
+  "sandcastle $provider",
+  ({ provider, fileFlag, noFileMessage }) => {
     it("--help lists build-image and remove-image", async () => {
       const { output } = await sandcastle([provider, "--help"]);
 
@@ -166,9 +178,52 @@ describe.each(["docker", "podman"])(
       expect(result.exitCode).not.toBe(0);
       expect(result.output).toContain("No .sandcastle/ found");
     });
+
+    it("build-image says the project has no Dockerfile, not that the runtime is down", async () => {
+      const repo = hostRepo();
+      mkdirSync(path.join(repo, ".sandcastle"));
+
+      const result = await sandcastle([provider, "build-image"], repo);
+
+      expect(result.exitCode).not.toBe(0);
+      expect(result.output).toContain(noFileMessage);
+      expect(result.output).not.toContain("running?");
+    });
+
+    it("build-image says a custom file path does not exist", async () => {
+      const repo = hostRepo();
+      mkdirSync(path.join(repo, ".sandcastle"));
+      const result = await sandcastle(
+        [provider, "build-image", fileFlag, "missing/Dockerfile"],
+        repo,
+      );
+
+      expect(result.exitCode).not.toBe(0);
+      expect(result.output).toContain("missing/Dockerfile");
+      expect(result.output).not.toContain("running?");
+    });
   },
   30_000,
 );
+
+describe("sandcastle docker build-image in a project scaffolded for podman", () => {
+  it("points at podman build-image, not at native sandboxes", async () => {
+    const repo = hostRepo();
+    mkdirSync(path.join(repo, ".sandcastle"));
+    writeFileSync(
+      path.join(repo, ".sandcastle", "Containerfile"),
+      "FROM node:22-bookworm\n",
+    );
+
+    const result = await sandcastle(["docker", "build-image"], repo);
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.output).toContain("sandcastle podman build-image");
+    expect(result.output).toContain("--dockerfile .sandcastle/Containerfile");
+    expect(result.output).not.toContain("Native sandboxes");
+    expect(result.output).not.toContain("running?");
+  });
+}, 30_000);
 
 describe("sandcastle podman build-image --help", () => {
   it("documents --containerfile and --image-name", async () => {
