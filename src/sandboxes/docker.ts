@@ -34,6 +34,16 @@ import {
 import { MAX_TAIL_CHARS } from "../boundedTail.js";
 import { registerShutdown } from "../shutdownRegistry.js";
 
+export interface DockerPortBinding {
+  /** Port that the service listens on inside the container. */
+  readonly containerPort: number;
+  /**
+   * Fixed port on host loopback. When omitted, Docker allocates an available
+   * host port. The binding is never published on non-loopback interfaces.
+   */
+  readonly hostPort?: number;
+}
+
 export interface DockerOptions {
   /** Docker image name (default: derived from repo directory name). */
   readonly imageName?: string;
@@ -76,6 +86,14 @@ export interface DockerOptions {
    * When omitted, Docker's default bridge network is used.
    */
   readonly network?: string | readonly string[];
+  /**
+   * Container ports to publish on host loopback.
+   *
+   * A supplied `hostPort` creates a fixed `127.0.0.1` binding. When it is
+   * omitted, Docker allocates an available host port on `127.0.0.1`.
+   * When omitted or empty, no ports are published.
+   */
+  readonly ports?: readonly DockerPortBinding[];
   /**
    * Supplementary groups to add the container user to, via `--group-add`.
    *
@@ -137,6 +155,32 @@ export interface DockerOptions {
   readonly cpus?: number;
 }
 
+const validatePort = (port: number, name: string): void => {
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new RangeError(`${name} must be an integer from 1 to 65535`);
+  }
+};
+
+const resolvePublishedPorts = (
+  bindings: readonly DockerPortBinding[],
+): string[] => {
+  const fixedHostPorts = new Set<number>();
+  return bindings.map(({ containerPort, hostPort }) => {
+    validatePort(containerPort, "containerPort");
+    if (hostPort === undefined) {
+      return `127.0.0.1::${String(containerPort)}`;
+    }
+    validatePort(hostPort, "hostPort");
+    if (fixedHostPorts.has(hostPort)) {
+      throw new Error(
+        `Host port ${String(hostPort)} is configured more than once`,
+      );
+    }
+    fixedHostPorts.add(hostPort);
+    return `127.0.0.1:${String(hostPort)}:${String(containerPort)}`;
+  });
+};
+
 /**
  * Create a Docker sandbox provider.
  *
@@ -147,6 +191,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
   const configuredImageName = options?.imageName;
   const selinuxLabel = options?.selinuxLabel ?? "z";
   const maxOutputTailChars = options?.maxOutputTailChars ?? MAX_TAIL_CHARS;
+  const publishedPorts = resolvePublishedPorts(options?.ports ?? []);
   const sandboxHomedir = "/home/agent";
   const userMounts = options?.mounts
     ? resolveUserMounts(options.mounts, sandboxHomedir)
@@ -190,7 +235,9 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
       // Pre-flight: verify image exists and UID matches
       await checkImageUid(imageName, containerUid);
 
-      // Start container
+      // Docker may create a stopped container before reporting a launch error,
+      // such as a fixed host-port collision. Remove that partial container so a
+      // failed sandbox start does not reserve its generated name or leak state.
       await Effect.runPromise(
         startContainer(
           containerName,
@@ -204,12 +251,19 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
             workdir: worktreePath,
             user: `${containerUid}:${containerGid}`,
             network: options?.network,
+            publishedPorts,
             groups: options?.groups,
             capDrop: options?.capDrop,
             devices: options?.devices,
             cpus: options?.cpus,
             selinuxLabel,
           },
+        ).pipe(
+          Effect.catchAll((error) =>
+            removeContainer(containerName).pipe(
+              Effect.andThen(Effect.fail(error)),
+            ),
+          ),
         ),
       );
 
