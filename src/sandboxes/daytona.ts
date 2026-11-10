@@ -279,7 +279,7 @@ const execStreaming = async (
     const logs = streamSessionLogs(context, { sessionId, cmdId }, onLine);
     // Once the race below is lost, a late failure of the stream
     // must not surface as an unhandled rejection.
-    logs.done.catch(() => {});
+    logs.done.catch(() => undefined);
     const shell = watchSessionShell(
       sandbox,
       { sessionId, cmdId, pidPath },
@@ -298,8 +298,10 @@ const execStreaming = async (
       exitCode: cmdInfo.exitCode ?? 0,
     };
   } finally {
-    await sandbox.process.deleteSession(sessionId).catch(() => {});
-    await sandbox.process.executeCommand(`rm -f ${pidPath}`).catch(() => {});
+    await sandbox.process.deleteSession(sessionId).catch(() => undefined);
+    await sandbox.process
+      .executeCommand(`rm -f ${pidPath}`)
+      .catch(() => undefined);
   }
 };
 
