@@ -190,6 +190,22 @@ describe("vercel() setup", () => {
     expect(sandboxCreate.mock.lastCall?.[0]).not.toHaveProperty("runtime");
   });
 
+  it("creates a non-persistent sandbox, so stopping it leaves no snapshot", async () => {
+    await vercel().create({ env: {} });
+
+    expect(sandboxCreate.mock.lastCall?.[0]).toMatchObject({
+      persistent: false,
+    });
+  });
+
+  it("passes persistent: true through when the user asks for it", async () => {
+    await vercel({ persistent: true }).create({ env: {} });
+
+    expect(sandboxCreate.mock.lastCall?.[0]).toMatchObject({
+      persistent: true,
+    });
+  });
+
   it("passes the runtime option, then the template alias", async () => {
     await vercel({ runtime: "node22", template: "python3.13" }).create({
       env: {},

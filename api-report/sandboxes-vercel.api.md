@@ -14,6 +14,7 @@ export interface VercelOptions {
     readonly env?: Record<string, string>;
     readonly maxOutputTailChars?: number;
     readonly networkPolicy?: Record<string, unknown>;
+    readonly persistent?: boolean;
     readonly ports?: number[];
     readonly projectId?: string;
     readonly resources?: {

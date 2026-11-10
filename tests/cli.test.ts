@@ -206,6 +206,25 @@ describe.each([
   30_000,
 );
 
+describe("sandcastle docker build-image in a project scaffolded for podman", () => {
+  it("points at podman build-image, not at native sandboxes", async () => {
+    const repo = hostRepo();
+    mkdirSync(path.join(repo, ".sandcastle"));
+    writeFileSync(
+      path.join(repo, ".sandcastle", "Containerfile"),
+      "FROM node:22-bookworm\n",
+    );
+
+    const result = await sandcastle(["docker", "build-image"], repo);
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.output).toContain("sandcastle podman build-image");
+    expect(result.output).toContain("--dockerfile .sandcastle/Containerfile");
+    expect(result.output).not.toContain("Native sandboxes");
+    expect(result.output).not.toContain("running?");
+  });
+}, 30_000);
+
 describe("sandcastle podman build-image --help", () => {
   it("documents --containerfile and --image-name", async () => {
     const { output } = await sandcastle(["podman", "build-image", "--help"]);
