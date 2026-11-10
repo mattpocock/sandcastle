@@ -26,9 +26,11 @@ export interface PodmanOptions {
     readonly groups?: readonly (string | number)[];
     readonly imageName?: string;
     readonly maxOutputTailChars?: number;
+    readonly memory?: string;
     // Warning: (ae-forgotten-export) The symbol "MountConfig" needs to be exported by the entry point podman.d.ts
     readonly mounts?: readonly MountConfig[];
     readonly network?: string | readonly string[];
+    readonly pidsLimit?: number;
     // Warning: (ae-forgotten-export) The symbol "SelinuxLabel" needs to be exported by the entry point podman.d.ts
     readonly selinuxLabel?: SelinuxLabel;
     readonly userns?: "keep-id" | false;
