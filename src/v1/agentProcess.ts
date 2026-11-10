@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import type { WriteStream } from "node:fs";
 import { constants } from "node:os";
 import { createInterface } from "node:readline";
+import type { Writable } from "node:stream";
 import { Effect, Queue } from "effect";
 import { BoundedTail } from "../boundedTail.js";
 
@@ -14,7 +15,9 @@ import { BoundedTail } from "../boundedTail.js";
 export type AgentItem =
   | { readonly _tag: "line"; readonly line: string }
   | { readonly _tag: "exit"; readonly code: number; readonly error?: string }
-  | { readonly _tag: "kill"; readonly reason: "aborted" | "time-limit" };
+  | { readonly _tag: "kill"; readonly reason: "aborted" | "time-limit" }
+  /** A message was written to its stdin: the session's timeouts start over. */
+  | { readonly _tag: "input" };
 
 /** A running agent process. */
 export interface AgentProcess {
@@ -24,6 +27,10 @@ export interface AgentProcess {
   readonly killGroup: Effect.Effect<void>;
   /** The last of what it printed, stdout and stderr together. */
   readonly tail: () => string;
+  /** Writes to its stdin, when that was kept open. */
+  readonly write: (text: string) => void;
+  /** Closes its stdin. Safe to call twice. */
+  readonly endInput: () => void;
 }
 
 const exitCodeOf = (code: number | null, signal: string | null): number => {
@@ -45,11 +52,40 @@ const killProcessGroup = (pid: number | undefined): void => {
   }
 };
 
+/** Writes the prompt to the agent's stdin, and closes it unless it's kept open for more. */
+const stdinOf = (
+  stdin: Writable,
+  options: {
+    readonly stdin: string | undefined;
+    readonly keepInputOpen: boolean;
+  },
+): Pick<AgentProcess, "write" | "endInput"> => {
+  // An agent that exits without reading its prompt closes the pipe early.
+  stdin.on("error", () => undefined);
+  if (options.keepInputOpen) {
+    stdin.write(options.stdin ?? "");
+  } else {
+    stdin.end(options.stdin ?? "");
+  }
+  return {
+    write: (text) => {
+      if (stdin.writable) {
+        stdin.write(text);
+      }
+    },
+    endInput: () => {
+      stdin.end();
+    },
+  };
+};
+
 /** Starts `sh -c command` in its own process group, writing each stdout line to `log`. */
 export const startAgentProcess = (options: {
   readonly command: string;
   readonly workingDirectory: string;
   readonly stdin: string | undefined;
+  /** Keep stdin open after `stdin` for later writes, until `endInput()`. */
+  readonly keepInputOpen: boolean;
   readonly log: WriteStream;
 }): Effect.Effect<AgentProcess> =>
   Effect.gen(function* () {
@@ -77,13 +113,12 @@ export const startAgentProcess = (options: {
       options.log.write(`${line}\n`);
       offer({ _tag: "line", line });
     });
-    // An agent that exits without reading its prompt closes the pipe early.
-    child.stdin.on("error", () => undefined).end(options.stdin ?? "");
     return {
       items,
       killGroup: Effect.sync(() => {
         killProcessGroup(child.pid);
       }),
       tail: () => tail.toString(),
+      ...stdinOf(child.stdin, options),
     };
   });

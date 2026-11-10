@@ -161,8 +161,8 @@ const withDetach = <Native>(
       }
       return detach(options);
     },
-    // Reads files only, so these work after a detach too.
-    ...supervisorFiles(parts.sandbox, parts.supervisor.directory),
+    // Hold nothing, so these work after a detach too.
+    ...supervisorFiles(parts.sandbox, parts.supervisor),
   });
 };
 

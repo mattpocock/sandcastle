@@ -27,10 +27,23 @@ export interface RecordParts {
 export const redactEvent = (
   event: RecordedEvent,
   redact: Redact,
-): RecordedEvent =>
-  event.type === "text"
-    ? { ...event, text: redact(event.text) }
-    : { ...event, args: redact(event.args) };
+): RecordedEvent => {
+  switch (event.type) {
+    case "text": {
+      return { ...event, text: redact(event.text) };
+    }
+    case "toolCall": {
+      return { ...event, args: redact(event.args) };
+    }
+    case "input": {
+      return {
+        ...event,
+        text: redact(event.text),
+        ...(event.from === undefined ? {} : { from: redact(event.from) }),
+      };
+    }
+  }
+};
 
 /** The session's record, with every secret masked. */
 export const buildSessionRecord = (

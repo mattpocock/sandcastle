@@ -23,7 +23,8 @@ export const Usage = Schema.Struct({
   cacheCreationInputTokens: Schema.Number,
 });
 
-const RecordedEvent = Schema.Union(
+/** One event of a session's record or events file (`RecordedEvent`). */
+export const RecordedEvent = Schema.Union(
   Schema.Struct({
     type: Schema.Literal("text"),
     text: Schema.String,
@@ -33,6 +34,13 @@ const RecordedEvent = Schema.Union(
     type: Schema.Literal("toolCall"),
     name: Schema.String,
     args: Schema.String,
+    at: Schema.String,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("input"),
+    text: Schema.String,
+    from: Schema.optional(Schema.String),
+    interrupt: Schema.Boolean,
     at: Schema.String,
   }),
 );

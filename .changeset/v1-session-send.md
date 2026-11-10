@@ -1,0 +1,5 @@
+---
+"@ai-hero/sandcastle": minor
+---
+
+v1 (`@ai-hero/sandcastle/v1`): talk to a running session. `send({ session?, text, interrupt?, from? })` on a detachable sandbox, and `send({ text, interrupt?, from? })` on a spawned `SessionProcess`, hand the running agent a message: it reads it at its next tool result, or as the next turn once its turn has ended. `interrupt: true` stops the current turn first; `from` reaches the agent as a `[from <from>]` prefix. It works on a held handle, after `detach()` and on a reattached handle, resolves with a `SendReceipt` once the message is written, and rejects with the new `SessionInputError` when it can't be delivered. Each message shows up in `follow()` and the session record as a new `RecordedEvent` of type `input`. Agents gain a read-only `acceptsInput`: only `claudeCode()` takes input, so Claude Code sessions now always run with `--input-format stream-json --replay-user-messages`, and their stdin stays open until every message sent has been read. `fakeAgent()` holds a conversation in `claude-code` format and takes a new `inputDelaySeconds`.

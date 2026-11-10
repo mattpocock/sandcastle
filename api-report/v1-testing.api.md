@@ -9,6 +9,7 @@ export type AgentName = "claude-code" | "codex" | "cursor" | "opencode" | "copil
 
 // @public
 export interface AgentProvider {
+    readonly acceptsInput: boolean;
     readonly model: string;
     readonly name: AgentName;
 }
@@ -21,6 +22,7 @@ export interface FakeAgentScript {
     readonly exitCode?: number;
     readonly format?: AgentName;
     readonly hang?: boolean;
+    readonly inputDelaySeconds?: number;
     readonly lines: readonly string[];
 }
 

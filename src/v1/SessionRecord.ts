@@ -14,8 +14,9 @@ export interface NativeSessionFile {
 }
 
 /**
- * Something the agent did, with when the supervisor saw it. Version 1 of the
- * normalised event stream: what the session's `events` show, timestamped.
+ * Something the agent did, or a message it was sent, with when the
+ * supervisor saw it. Version 1 of the normalised event stream: what the
+ * session's `events` show, timestamped, plus each message `send()` handed it.
  */
 export type RecordedEvent =
   | { readonly type: "text"; readonly text: string; readonly at: string }
@@ -24,6 +25,18 @@ export type RecordedEvent =
       readonly name: string;
       /** The tool's main argument (a command, a URL, a query). */
       readonly args: string;
+      readonly at: string;
+    }
+  | {
+      /** A message `send()` handed the running agent. */
+      readonly type: "input";
+      /** The message as sent, without the `[from …]` prefix the agent reads. */
+      readonly text: string;
+      /** Who sent it, when `send()` said. */
+      readonly from?: string;
+      /** Whether it stopped the agent's turn first. */
+      readonly interrupt: boolean;
+      /** When it was written to the agent's input. */
       readonly at: string;
     };
 

@@ -64,14 +64,19 @@ export type {
 export type {
   AgentStreamEvent,
   OutputType,
+  SendOptions,
+  SendReceipt,
   SessionContextWindow,
   SessionExitReason,
   SessionOptions,
   SessionProcess,
   SessionResult,
+  SessionSendOptions,
   SessionUsage,
 } from "./v1/Session.js";
 export { SessionFailedError } from "./v1/SessionFailedError.js";
+export { SessionInputError } from "./v1/SessionInputError.js";
+export type { SessionInputErrorReason } from "./v1/SessionInputError.js";
 export { StructuredOutputError } from "./v1/StructuredOutputError.js";
 export { DetachError } from "./v1/DetachError.js";
 export type { DetachErrorReason } from "./v1/DetachError.js";
