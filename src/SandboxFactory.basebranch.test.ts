@@ -30,9 +30,11 @@ const initRepo = async (dir: string) => {
 
 const commitFile = async (
   dir: string,
-  name: string,
-  content: string,
-  message: string,
+  {
+    name,
+    content,
+    message,
+  }: { name: string; content: string; message: string },
 ) => {
   await writeFile(join(dir, name), content);
   await execAsync(`git add "${name}"`, { cwd: dir });
@@ -68,12 +70,20 @@ describe("WorktreeDockerSandboxFactory — baseBranch (real git)", () => {
     const hostRepoDir = await mkdtemp(join(tmpdir(), "sandcastle-bb-test-"));
     tempDirs.push(hostRepoDir);
     await initRepo(hostRepoDir);
-    await commitFile(hostRepoDir, "init.txt", "init", "initial commit");
+    await commitFile(hostRepoDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     const { stdout: baseSha } = await execAsync("git rev-parse HEAD", {
       cwd: hostRepoDir,
     });
-    await commitFile(hostRepoDir, "second.txt", "second", "second commit");
+    await commitFile(hostRepoDir, {
+      name: "second.txt",
+      content: "second",
+      message: "second commit",
+    });
 
     const childBranch = "sandcastle/child-from-base";
     const layer = Layer.provide(
