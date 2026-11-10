@@ -1243,7 +1243,7 @@ describe("InitService scaffold", () => {
       );
       expect(mainTs).toContain("implement-prompt.md");
       expect(mainTs).toContain("review-prompt.md");
-      expect(mainTs).toContain("implement.commits.length > 0");
+      expect(mainTs).toContain("if (await isAheadOfHead(issue.branch))");
     });
 
     it("main.mts captures reviewer result and merges commits from both runs", async () => {
