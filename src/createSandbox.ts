@@ -702,14 +702,14 @@ const buildSandboxHandle = (
                 keepSourceBranch: mergeToHead,
               },
               sandbox,
-              (ctx) =>
+              (sandboxCtx) =>
                 Effect.gen(function* () {
                   const fullPrompt = resolvedPrompt.isInline
                     ? resolvedPrompt.text
                     : yield* preprocessPrompt(
                         resolvedPrompt.text,
-                        ctx.sandbox,
-                        ctx.sandboxRepoDir,
+                        sandboxCtx.sandbox,
+                        sandboxCtx.sandboxRepoDir,
                       );
 
                   const interactiveArgs = buildInteractiveArgs({
@@ -1013,7 +1013,7 @@ const tearDownStartedSandbox = (
   mountsToClean: readonly MountEntry[],
 ): Effect.Effect<void> =>
   (providerHandle
-    ? Effect.promise(() => providerHandle.close().catch(() => {}))
+    ? Effect.promise(() => providerHandle.close().catch(() => undefined))
     : Effect.void
   ).pipe(Effect.andThen(removeMountTempDirs(mountsToClean)));
 
