@@ -31,7 +31,7 @@ import {
 import type { RunOptions, RunResult } from "./run.js";
 import { claudeCode, copilot, cursor } from "./AgentProvider.js";
 import type { AgentProvider } from "./AgentProvider.js";
-import { ForkNotSupportedError } from "./errors.js";
+import { ExecError, ForkNotSupportedError } from "./errors.js";
 import { Output, StructuredOutputError } from "./Output.js";
 import { claudeHostSessionPath } from "./SessionStore.js";
 import type { InteractiveOptions } from "./interactive.js";
@@ -1855,6 +1855,60 @@ describe("fork on an agent provider that resumes but cannot fork", () => {
       });
       await expect(forked).rejects.toThrow(/cursor cannot fork/u);
       expect(creates).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("run() errors reach the caller as the typed error (#1365)", () => {
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    consoleSpy.mockRestore();
+  });
+
+  it("a failing onSandboxReady hook rejects with ExecError, not a FiberFailure", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sandcastle-failing-hook-"));
+    const sandbox = createBindMountSandboxProvider({
+      name: "failing-hook",
+      create: async () => ({
+        worktreePath: process.cwd(),
+        exec: async (command: string) =>
+          command.includes("exit 7")
+            ? { stdout: "", stderr: "hook broke", exitCode: 7 }
+            : { stdout: "", stderr: "", exitCode: 0 },
+        copyFileIn: async () => {},
+        copyFileOut: async () => {},
+        close: async () => {},
+      }),
+    });
+
+    try {
+      const promise = run({
+        agent: noResumeAgent,
+        sandbox,
+        prompt: "do nothing",
+        branchStrategy: { type: "head" },
+        hooks: { sandbox: { onSandboxReady: [{ command: "exit 7" }] } },
+        logging: { type: "file", path: join(dir, "run.log") },
+      });
+      const error = await promise.then(
+        () => assert.fail("run() should reject"),
+        (e: unknown) => e,
+      );
+      expect(error).toBeInstanceOf(ExecError);
+      expect(error).toMatchObject({ _tag: "ExecError", exitCode: 7 });
+      expect((error as ExecError).command).toContain("exit 7");
+      expect((error as ExecError).message).toContain("hook broke");
+      // No Effect FiberFailure wrapper: the rejection is the error itself.
+      expect((error as Error).name).not.toBe("(FiberFailure) ExecError");
+      expect(
+        Object.getOwnPropertySymbols(error as object).map(String),
+      ).not.toContain("Symbol(effect/Runtime/FiberFailure)");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

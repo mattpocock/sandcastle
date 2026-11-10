@@ -7,6 +7,7 @@
  *   await run({ agent: claudeCode("claude-opus-4-8"), sandbox: sprites() });
  */
 
+import { runPromise } from "../runPromise.js";
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, posix, relative } from "node:path";
@@ -66,7 +67,7 @@ const envTokens = Effect.all([
 const resolveToken = async (
   options: SpritesOptions | undefined,
 ): Promise<string> => {
-  const [plural, singular] = await Effect.runPromise(envTokens);
+  const [plural, singular] = await runPromise(envTokens);
   const token =
     setOrUndefined(options?.token) ??
     setOrUndefined(plural) ??

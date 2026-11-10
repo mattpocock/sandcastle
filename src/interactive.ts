@@ -1,3 +1,4 @@
+import { runPromise } from "./runPromise.js";
 import { NodeContext, NodeFileSystem } from "@effect/platform-node";
 import { join } from "node:path";
 import { assertInteractiveSupported } from "./nativeSandboxProvider.js";
@@ -486,7 +487,7 @@ export const interactive = async (
 
   let result: InteractiveResult;
   try {
-    result = await Effect.runPromise(
+    result = await runPromise(
       inner.pipe(
         Effect.provide(
           Layer.mergeAll(
