@@ -5,12 +5,13 @@ import { podman } from "@ai-hero/sandcastle/sandboxes/podman";
 import { setUpFakeEngine } from "./helpers/fakeEngine.js";
 import type { FakeEngineWorld } from "./helpers/fakeEngine.js";
 
-// A command killed by a signal never counts as success. Node reports such an
-// exit as `close(null, signal)`; docker() and podman() map it to a non-zero
-// exit code, and keep a real numeric exit code as it is. A fake
-// `docker`/`podman` on PATH (tests/helpers/fakeEngine.ts) kills its own
-// `exec` with SIGTERM when the command asks it to. The fake is a POSIX shell
-// script, so these don't run on Windows.
+// A command whose engine CLI is killed by a signal never counts as success.
+// The real `docker` and `podman` CLIs trap SIGTERM and exit 0, so their exit
+// code can't tell; docker() and podman() report a non-zero exit code unless
+// the command itself said how it ended. A fake `docker`/`podman` on PATH
+// (tests/helpers/fakeEngine.ts) runs `exec` commands on the host, and gets
+// SIGTERM, traps it and exits 0 when the command asks it to. The fake is a
+// POSIX shell script, so these don't run on Windows.
 
 describe.skipIf(process.platform === "win32").each([
   { engine: "docker", provider: docker },
@@ -30,7 +31,12 @@ describe.skipIf(process.platform === "win32").each([
   const execIn = async (
     command: string,
     streamed: boolean,
-  ): Promise<{ exitCode: number; stdout: string; lines: string[] }> => {
+  ): Promise<{
+    exitCode: number;
+    stdout: string;
+    stderr: string;
+    lines: string[];
+  }> => {
     const sandbox = await createSandbox({
       branch: "w",
       cwd: world.repo,
@@ -67,5 +73,21 @@ describe.skipIf(process.platform === "win32").each([
     const result = await execIn("true", false);
 
     expect(result.exitCode).toBe(0);
+  }, 30_000);
+
+  it.each([false, true])(
+    "keeps a command's own exit code and stderr (streamed: %s)",
+    async (streamed) => {
+      const result = await execIn("echo out; echo oops >&2; exit 3", streamed);
+
+      expect(result).toMatchObject({ exitCode: 3, stderr: "oops\n" });
+    },
+    30_000,
+  );
+
+  it("runs the command as `sh -c` would, with no arguments", async () => {
+    const result = await execIn(`printf '%s %s' "$0" "$#" # a comment`, false);
+
+    expect(result).toMatchObject({ exitCode: 0, stdout: "sh 0", stderr: "" });
   }, 30_000);
 });
