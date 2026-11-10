@@ -95,6 +95,46 @@ export interface StartContainerOptions {
   readonly selinuxLabel?: SelinuxLabel;
 }
 
+/** Repeats `flag` before each value: `["--device", a, "--device", b]`. */
+const repeatFlag = (
+  flag: string,
+  values: readonly (string | number)[] | undefined,
+): string[] => (values ?? []).flatMap((value) => [flag, String(value)]);
+
+/** `[flag, value]` when `value` is set and non-empty, else nothing. */
+const optionalFlag = (flag: string, value: string | undefined): string[] =>
+  value !== undefined && value !== "" ? [flag, value] : [];
+
+/** The `docker run` flags for `env` and `options`, in the order docker gets them. */
+const runFlags = (
+  env: Record<string, string>,
+  options: StartContainerOptions | undefined,
+): string[] => {
+  const selinuxLabel = options?.selinuxLabel ?? "z";
+  const network = options?.network;
+  const networks =
+    network === undefined || network === "" ? [] : [network].flat();
+  return [
+    ...repeatFlag(
+      "-e",
+      Object.entries(env).map(([k, v]) => `${k}=${v}`),
+    ),
+    ...repeatFlag(
+      "-v",
+      (options?.volumeMounts ?? []).map((mount) =>
+        formatVolumeMount(mount, selinuxLabel),
+      ),
+    ),
+    ...optionalFlag("-w", options?.workdir),
+    ...optionalFlag("--user", options?.user),
+    ...repeatFlag("--network", networks),
+    ...repeatFlag("--group-add", options?.groups),
+    ...repeatFlag("--cap-drop", options?.capDrop),
+    ...repeatFlag("--device", options?.devices),
+    ...(options?.cpus === undefined ? [] : ["--cpus", String(options.cpus)]),
+  ];
+};
+
 /**
  * Start a new container with environment variables injected.
  */
@@ -121,55 +161,12 @@ export const startContainer = (
       });
     }
 
-    const envFlags = Object.entries(env).flatMap(([k, v]) => [
-      "-e",
-      `${k}=${v}`,
-    ]);
-
-    const selinuxLabel = options?.selinuxLabel ?? "z";
-    const volumeFlags = (options?.volumeMounts ?? []).flatMap((mount) => [
-      "-v",
-      formatVolumeMount(mount, selinuxLabel),
-    ]);
-
-    const workdir = options?.workdir;
-    const workdirFlags =
-      workdir !== undefined && workdir !== "" ? ["-w", workdir] : [];
-    const user = options?.user;
-    const userFlags = user !== undefined && user !== "" ? ["--user", user] : [];
-    const network = options?.network;
-    const networks =
-      network === undefined || network === "" ? [] : [network].flat();
-    const networkFlags = networks.flatMap((n) => ["--network", n]);
-    const groupAddFlags = (options?.groups ?? []).flatMap((g) => [
-      "--group-add",
-      String(g),
-    ]);
-    const capDropFlags = (options?.capDrop ?? []).flatMap((cap) => [
-      "--cap-drop",
-      cap,
-    ]);
-    const deviceFlags = (options?.devices ?? []).flatMap((d) => [
-      "--device",
-      d,
-    ]);
-    const cpusFlags =
-      options?.cpus === undefined ? [] : ["--cpus", String(options.cpus)];
-
     return yield* dockerExec([
       "run",
       "-d",
       "--name",
       containerName,
-      ...envFlags,
-      ...volumeFlags,
-      ...workdirFlags,
-      ...userFlags,
-      ...networkFlags,
-      ...groupAddFlags,
-      ...capDropFlags,
-      ...deviceFlags,
-      ...cpusFlags,
+      ...runFlags(env, options),
       imageName,
     ]).pipe(Effect.asVoid);
   });
