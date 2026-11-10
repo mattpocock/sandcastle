@@ -67,6 +67,30 @@ const outputSink = (
   };
 };
 
+/** Drop the query string from every URL in `text`. */
+const stripUrlQueries = (text: string): string =>
+  text.replaceAll(
+    /(?<url>(?:wss?|https?):\/\/[^\s?#)]*)[?#][^\s)]*/giu,
+    "$<url>",
+  );
+
+/**
+ * The error for a failed exec connection. The SDK's error names the exec URL,
+ * whose query string carries the command's env, so the error and its `cause`
+ * keep only the URL's path.
+ */
+const connectionError = (command: string, error: unknown): Error => {
+  const sdkError = error instanceof Error ? error : new Error(String(error));
+  const cause = new Error(stripUrlQueries(sdkError.message));
+  cause.name = sdkError.name;
+  cause.stack =
+    sdkError.stack === undefined ? undefined : stripUrlQueries(sdkError.stack);
+  return new Error(
+    `sprites(): the connection failed: ${command} (${cause.message})`,
+    { cause },
+  );
+};
+
 /**
  * Run a command in the Sprite. stdin is always sent and closed (empty when
  * unset), so a command that reads it gets EOF rather than waiting. With
@@ -104,7 +128,9 @@ export const execInSprite = async (
     once(proc, "exit"),
     once(proc.stdout, "end"),
     once(proc.stderr, "end"),
-  ]);
+  ]).catch((error: unknown) => {
+    throw connectionError(command, error);
+  });
   const exitCode = exitArgs?.[0];
   stdout.flush();
   if (typeof exitCode !== "number" || exitCode < 0) {
