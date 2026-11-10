@@ -119,6 +119,16 @@ export interface VercelOptions {
    */
   readonly template?: string;
 
+  /**
+   * Whether Vercel keeps the sandbox's filesystem when it stops (default:
+   * `false`).
+   *
+   * Vercel snapshots a persistent sandbox each time it stops, and the snapshot
+   * counts against your snapshot storage. Sandcastle makes one sandbox per
+   * run, so it turns this off unless you set it.
+   */
+  readonly persistent?: boolean;
+
   /** Environment variables injected by this provider. Merged at launch time with env resolver and agent provider env. */
   readonly env?: Record<string, string>;
 
@@ -170,6 +180,8 @@ const toCreateParams = (
     runtime: o.runtime ?? o.template,
     // prefer explicit timeout, fall back to the timeoutMs alias
     timeout: o.timeout ?? o.timeoutMs,
+    // Vercel defaults to persistent, which snapshots the sandbox on stop().
+    persistent: o.persistent ?? false,
   };
   return {
     // An unset option (or an empty runtime) is left out for the SDK default.

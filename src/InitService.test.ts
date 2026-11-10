@@ -570,7 +570,7 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.mts"),
         "utf8",
       );
-      const noCommitIndex = mainTs.indexOf("!implement.commits.length");
+      const noCommitIndex = mainTs.indexOf("implement.commits.length === 0");
       const section = mainTs.slice(noCommitIndex, noCommitIndex + 400);
       expect(section).toContain("break");
       expect(section).not.toContain("continue");
