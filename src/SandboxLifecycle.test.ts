@@ -1,5 +1,5 @@
 import { Effect, Ref } from "effect";
-import { exec } from "node:child_process";
+import { exec, spawnSync } from "node:child_process";
 import { constants, existsSync } from "node:fs";
 import {
   mkdir,
@@ -520,14 +520,12 @@ describe("withSandboxLifecycle (worktree mode)", () => {
 
     // The suggested retry reaches the conflict itself, rather than failing
     // with "Merging is not possible because you have unmerged files".
-    const retry = await execAsync("git merge sandcastle/test", {
+    // spawnSync hands back git's output whether or not the merge fails.
+    const { stdout, stderr } = spawnSync("git", ["merge", "sandcastle/test"], {
       cwd: hostDir,
-    }).then(
-      () => "",
-      // join() renders a missing stdout or stderr as "".
-      (e: { stdout?: string; stderr?: string }) =>
-        [e.stdout, e.stderr].join(""),
-    );
+      encoding: "utf8",
+    });
+    const retry = stdout + stderr;
     expect(retry).not.toMatch(/unmerged files/u);
     expect(retry).toMatch(/CONFLICT/u);
   });

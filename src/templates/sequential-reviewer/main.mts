@@ -83,7 +83,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
       promptFile: "./.sandcastle/implement-prompt.md",
     });
 
-    if (!implement.commits.length) {
+    if (implement.commits.length === 0) {
       // No commits means the backlog is empty or every remaining issue is
       // blocked — there is nothing left to implement or review, so stop.
       console.log("Implementation agent made no commits. Stopping.");
