@@ -114,14 +114,12 @@
   "src/createSandbox-windowsMounts.test.ts": {
     "eslint(max-params)": 1,
     "typescript(no-unsafe-type-assertion)": 1,
-    "typescript(strict-void-return)": 1,
     "unicorn(filename-case)": 1,
     "vitest(prefer-import-in-mock)": 1,
     "vitest(require-mock-type-parameters)": 1
   },
   "src/createSandbox.agentEnv.test.ts": {
-    "import(max-dependencies)": 1,
-    "typescript(strict-void-return)": 1
+    "import(max-dependencies)": 1
   },
   "src/createSandbox.test.ts": {
     "eslint(max-params)": 1,
@@ -137,7 +135,6 @@
     "typescript(no-unsafe-call)": 1,
     "typescript(no-unsafe-member-access)": 4,
     "typescript(strict-boolean-expressions)": 1,
-    "typescript(strict-void-return)": 1,
     "unicorn(no-immediate-mutation)": 2,
     "vitest(no-conditional-in-test)": 14
   },
@@ -157,9 +154,7 @@
   },
   "src/createWorktree-windowsMounts.test.ts": {
     "eslint(max-params)": 1,
-    "import(max-dependencies)": 1,
     "typescript(no-unsafe-type-assertion)": 1,
-    "typescript(strict-void-return)": 1,
     "unicorn(filename-case)": 1,
     "unicorn(no-immediate-mutation)": 1,
     "vitest(prefer-import-in-mock)": 1,
@@ -175,7 +170,6 @@
     "typescript(no-unsafe-assignment)": 3,
     "typescript(no-unsafe-call)": 2,
     "typescript(no-unsafe-member-access)": 5,
-    "typescript(strict-void-return)": 1,
     "unicorn(catch-error-name)": 1,
     "unicorn(no-await-expression-member)": 1,
     "unicorn(no-immediate-mutation)": 1,
@@ -241,9 +235,7 @@
   },
   "src/interactive-windowsMounts.test.ts": {
     "eslint(max-params)": 1,
-    "import(max-dependencies)": 1,
     "typescript(no-unsafe-type-assertion)": 1,
-    "typescript(strict-void-return)": 1,
     "unicorn(filename-case)": 1,
     "vitest(prefer-import-in-mock)": 1,
     "vitest(require-mock-type-parameters)": 1
@@ -295,7 +287,7 @@
     "typescript(consistent-type-imports)": 8,
     "typescript(no-unsafe-type-assertion)": 9,
     "typescript(strict-boolean-expressions)": 1,
-    "typescript(strict-void-return)": 4,
+    "typescript(strict-void-return)": 3,
     "unicorn(no-array-method-this-argument)": 1,
     "unicorn(no-await-expression-member)": 1,
     "unicorn(no-immediate-mutation)": 2,
@@ -434,9 +426,7 @@
     "node(no-sync)": 1
   },
   "src/SandboxFactory.basebranch.test.ts": {
-    "eslint(max-params)": 1,
-    "import(max-dependencies)": 1,
-    "typescript(strict-void-return)": 1
+    "eslint(max-params)": 1
   },
   "src/SandboxFactory.test.ts": {
     "eslint(max-params)": 1,
@@ -444,7 +434,6 @@
     "import(max-dependencies)": 1,
     "typescript(no-unsafe-return)": 2,
     "typescript(no-unsafe-type-assertion)": 2,
-    "typescript(strict-void-return)": 1,
     "unicorn(no-object-as-default-parameter)": 2
   },
   "src/SandboxFactory.ts": {
@@ -459,7 +448,6 @@
   "src/SandboxLifecycle.test.ts": {
     "eslint(no-await-in-loop)": 1,
     "import(max-dependencies)": 1,
-    "typescript(strict-void-return)": 1,
     "typescript(use-unknown-in-catch-callback-variable)": 1,
     "unicorn(catch-error-name)": 1
   },
@@ -490,8 +478,7 @@
   "src/startSandbox.test.ts": {
     "effect/anyUnknownInErrorContext": 1,
     "eslint(max-params)": 1,
-    "import(max-dependencies)": 1,
-    "typescript(strict-void-return)": 1
+    "import(max-dependencies)": 1
   },
   "src/startSandbox.ts": {
     "import(no-cycle)": 2,
@@ -531,7 +518,6 @@
     "eslint(max-params)": 2,
     "eslint(no-promise-executor-return)": 1,
     "eslint(no-unused-vars)": 1,
-    "typescript(strict-void-return)": 2,
     "unicorn(no-await-expression-member)": 1
   },
   "src/WorktreeManager.ts": {
