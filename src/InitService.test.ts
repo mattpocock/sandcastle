@@ -188,7 +188,7 @@ describe("InitService scaffold", () => {
     const { access } = await import("node:fs/promises");
     await expect(
       access(join(dir, ".sandcastle", "config.json")),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/ENOENT/u);
   });
 
   it("errors if .sandcastle/ already exists", async () => {
@@ -814,50 +814,56 @@ describe("InitService scaffold", () => {
         },
       ];
 
-      for (const { pm, run, add, mustContain, mustNotMatch } of managers) {
-        it.each([
-          {
-            zod: "not installed",
-            installed: [],
-            present: [add, ...mustContain],
-            absent: [],
-          },
-          {
-            zod: "installed",
-            installed: ["zod"],
-            present: mustContain,
-            absent: ["zod", "schema validator"],
-          },
-        ])(
-          `parallel-planner, ${pm}, zod $zod`,
-          ({ installed, present, absent }) => {
-            const joined = next(
-              "parallel-planner",
-              "main.ts",
-              pm,
-              installed,
-            ).join("\n");
-            expect(joined).toContain(`Run \`${run}\``);
-            for (const text of present) {
-              expect(joined).toContain(text);
-            }
-            for (const text of absent) {
-              expect(joined).not.toContain(text);
-            }
-            for (const pattern of mustNotMatch) {
-              expect(joined).not.toMatch(pattern);
-            }
-          },
-        );
+      // Each manager, with zod not installed and installed.
+      const zodCases = managers.flatMap((manager) => [
+        {
+          ...manager,
+          zod: "not installed",
+          installed: [],
+          present: [manager.add, ...manager.mustContain],
+          absent: [],
+        },
+        {
+          ...manager,
+          zod: "installed",
+          installed: ["zod"],
+          present: manager.mustContain,
+          absent: ["zod", "schema validator"],
+        },
+      ]);
 
-        it(`blank, ${pm}: run step uses ${run}`, () => {
+      it.each(zodCases)(
+        "parallel-planner, $pm, zod $zod",
+        ({ pm, run, mustNotMatch, installed, present, absent }) => {
+          const joined = next(
+            "parallel-planner",
+            "main.ts",
+            pm,
+            installed,
+          ).join("\n");
+          expect(joined).toContain(`Run \`${run}\``);
+          for (const text of present) {
+            expect(joined).toContain(text);
+          }
+          for (const text of absent) {
+            expect(joined).not.toContain(text);
+          }
+          for (const pattern of mustNotMatch) {
+            expect(joined).not.toMatch(pattern);
+          }
+        },
+      );
+
+      it.each(managers)(
+        "blank, $pm: run step uses $run",
+        ({ pm, run, mustNotMatch }) => {
           const joined = next("blank", "main.ts", pm).join("\n");
           expect(joined).toContain(`Run \`${run}\``);
           for (const pattern of mustNotMatch) {
             expect(joined).not.toMatch(pattern);
           }
-        });
-      }
+        },
+      );
 
       it("steps stay numbered consecutively when the zod step is skipped", () => {
         const numbers = next(
@@ -1715,7 +1721,7 @@ describe("InitService scaffold", () => {
       const { access } = await import("node:fs/promises");
       await expect(
         access(join(dir, ".sandcastle", "SETUP_ISSUE_TRACKER.md")),
-      ).rejects.toThrow();
+      ).rejects.toThrow(/ENOENT/u);
     });
 
     it("custom Dockerfile leaves a TODO install block instead of a real CLI", async () => {
@@ -2269,7 +2275,7 @@ describe("InitService scaffold", () => {
       );
       expect(dockerfile).toMatch(/ARG BEADS_VERSION=\d+\.\d+\.\d+/u);
       expect(dockerfile).toContain(
-        "https://github.com/gastownhall/beads/releases/download/v${BEADS_VERSION}",
+        `https://github.com/gastownhall/beads/releases/download/v\${BEADS_VERSION}`,
       );
       expect(dockerfile).toContain("sha256sum -c");
       expect(dockerfile).not.toContain("scripts/install.sh");
@@ -2288,8 +2294,9 @@ describe("InitService scaffold", () => {
         "parallel-planner-with-review",
       ];
 
-      for (const templateName of templates) {
-        it(`${templateName}: every sandbox mounts the host .beads/ and sets BEADS_DIR`, async () => {
+      it.each(templates)(
+        "%s: every sandbox mounts the host .beads/ and sets BEADS_DIR",
+        async (templateName) => {
           const dir = await makeDir();
           await runScaffold(dir, {
             templateName,
@@ -2311,8 +2318,8 @@ describe("InitService scaffold", () => {
           expect(main).toContain('hostPath: ".beads"');
           expect(main).toContain('sandboxPath: "/home/agent/host-beads"');
           expect(main).toContain('BEADS_DIR: "/home/agent/host-beads"');
-        });
-      }
+        },
+      );
 
       it("rewrites the podman factory calls too", async () => {
         const dir = await makeDir();
@@ -2418,7 +2425,7 @@ describe("InitService scaffold", () => {
       // main.mts should NOT exist
       await expect(
         access(join(dir, ".sandcastle", "main.mts")),
-      ).rejects.toThrow();
+      ).rejects.toThrow(/ENOENT/u);
     });
 
     it("main.ts scaffolded with type: module has correct imports and factory calls", async () => {
@@ -2517,7 +2524,7 @@ describe("InitService scaffold", () => {
       const { access } = await import("node:fs/promises");
       await expect(
         access(join(dir, ".sandcastle", "Dockerfile")),
-      ).rejects.toThrow();
+      ).rejects.toThrow(/ENOENT/u);
     });
 
     it("selecting docker does not write Containerfile", async () => {
@@ -2527,7 +2534,7 @@ describe("InitService scaffold", () => {
       const { access } = await import("node:fs/promises");
       await expect(
         access(join(dir, ".sandcastle", "Containerfile")),
-      ).rejects.toThrow();
+      ).rejects.toThrow(/ENOENT/u);
     });
 
     it("selecting podman rewrites the main file to import and call podman", async () => {
@@ -2666,7 +2673,7 @@ describe("init scaffold consistency (every agent x template x sandbox x tracker)
         join(configDir, image.containerfileName),
         "utf8",
       );
-      expect(containerfile).not.toContain("${SANDBOX_REPO_DIR}");
+      expect(containerfile).not.toContain(`\${SANDBOX_REPO_DIR}`);
       expect(containerfile).not.toMatch(/\{\{[A-Z_]+\}\}/u);
       expect(containerfile).toContain(SANDBOX_REPO_DIR);
 
