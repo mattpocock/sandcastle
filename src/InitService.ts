@@ -974,12 +974,41 @@ const blankTemplateNextSteps = ({
   `5. ${runStep}`,
 ];
 
+/**
+ * What a non-npm project must add to the image so its install hook runs, or
+ * "" when nothing is needed. The image ships only npm (#177); the beads image
+ * already enables corepack, and a native sandbox runs the host's own tools.
+ */
+const imagePackageManagerNote = (
+  packageManager: PackageManager,
+  issueTracker: IssueTrackerEntry,
+  sandboxProvider: SandboxProviderEntry,
+): string => {
+  const { image } = sandboxProvider;
+  if (image === undefined || packageManager === "npm") {
+    return "";
+  }
+  const file = `.sandcastle/${image.containerfileName}`;
+  if (packageManager === "bun") {
+    return `, then install bun in ${file}, before its \`USER\` line (\`RUN npm install -g bun\`), and rebuild the image`;
+  }
+  return issueTracker.templateArgs.ISSUE_TRACKER_TOOLS.includes(
+    "corepack enable",
+  )
+    ? ""
+    : `, then add \`RUN corepack enable\` to ${file}, before its \`USER\` line, and rebuild the image`;
+};
+
 /** Template step about `copyToWorktree` and the install hook. */
-const copyToWorktreeStep = (packageManager: PackageManager): string =>
+const copyToWorktreeStep = (
+  packageManager: PackageManager,
+  issueTracker: IssueTrackerEntry,
+  sandboxProvider: SandboxProviderEntry,
+): string =>
   `Templates use \`copyToWorktree: ["node_modules"]\` to copy your host node_modules into the sandbox for fast startup — the \`npm install\` in the onSandboxReady hook is a safety net for platform-specific binaries. ${
     packageManager === "npm"
       ? "Adjust both if you use a different package manager"
-      : `This project uses ${packageManager}, so change the hook to \`${installCommand(packageManager)}\` and check \`copyToWorktree\` suits it`
+      : `This project uses ${packageManager}, so change the hook to \`${installCommand(packageManager)}\` and check \`copyToWorktree\` suits it${imagePackageManagerNote(packageManager, issueTracker, sandboxProvider)}`
   }`;
 
 /** Template step for a planner whose `<plan>` schema needs Zod installed. */
@@ -1020,7 +1049,7 @@ export const getNextStepsLines = (
     `${step++}. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
     ...envNotes(issueTracker, agent, sandboxProvider),
     `${step++}. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
-    `${step++}. ${copyToWorktreeStep(packageManager)}`,
+    `${step++}. ${copyToWorktreeStep(packageManager, issueTracker, sandboxProvider)}`,
   ];
   if (needsPlanSchema) {
     lines.push(`${step++}. ${planSchemaStep(packageManager)}`);
