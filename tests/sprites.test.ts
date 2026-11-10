@@ -34,6 +34,8 @@ const api = {
   execs: new Array<Exec>(),
   files: new Map<string, string>(),
   createFails: false,
+  /** Fail the next exec WebSocket before it opens, as a network error does. */
+  connectFails: false,
   run: (_line: string, _stdin: string): Outcome => ({ exitCode: 0 }),
   /** Called with each stdout chunk as the fake sends it. */
   onChunk: (_chunk: string): void => undefined,
@@ -111,7 +113,18 @@ class FakeWebSocket extends EventTarget {
     super();
     this.url = new URL(url);
     api.tokens.add(bearer(init.headers));
+    const fails = api.connectFails && this.url.pathname.endsWith("/exec");
+    api.connectFails = false;
     setImmediate(() => {
+      if (fails) {
+        this.readyState = 3;
+        this.dispatchEvent(
+          Object.assign(new Event("error"), {
+            message: "Received network error or non-101 status code.",
+          }),
+        );
+        return;
+      }
       this.readyState = FakeWebSocket.OPEN;
       this.dispatchEvent(new Event("open"));
     });
@@ -180,6 +193,7 @@ beforeEach(() => {
   api.execs.length = 0;
   api.files.clear();
   api.createFails = false;
+  api.connectFails = false;
   api.run = () => ({ exitCode: 0 });
   api.onChunk = () => undefined;
   vi.stubGlobal("fetch", fakeFetch);
@@ -375,6 +389,35 @@ describe("sprites() exec", () => {
       "sprites(): the connection closed before the command exited: long-run",
     );
     await handle.close();
+  });
+});
+
+describe("sprites() exec connection errors", () => {
+  it("leaves the exec URL's query string, and so the env values, out of the error", async () => {
+    const handle = await create({ SECRET: "abc" });
+    const name = z.string().parse(handle.sandboxId);
+    api.connectFails = true;
+
+    const rejection: unknown = await handle
+      .exec("cat")
+      .catch((error: unknown) => error);
+    await handle.close();
+
+    const error = z.instanceof(Error).parse(rejection);
+    const cause = z.instanceof(Error).parse(error.cause);
+    expect(error.message).toBe(
+      `sprites(): the connection failed: cat (WebSocket error: Received network error or non-101 status code. (url: wss://api.sprites.dev/v1/sprites/${name}/exec))`,
+    );
+    expect(cause.message).toContain("WebSocket error");
+    // The Sprite's name is random hex, so drop it before looking for "abc".
+    const texts = [error.message, error.stack, cause.message, cause.stack].map(
+      (text) => String(text).replaceAll(name, "<name>"),
+    );
+    for (const text of texts) {
+      expect(text).not.toContain("abc");
+      expect(text).not.toContain("SECRET");
+      expect(text).not.toContain("env=");
+    }
   });
 });
 

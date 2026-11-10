@@ -38,6 +38,8 @@ const sandcastleInit = async (
   options: {
     readonly template: string;
     readonly installTemplateDeps?: "false";
+    readonly sandbox?: string;
+    readonly issueTracker?: string;
   },
 ): Promise<CliResult> => {
   const args = [
@@ -48,9 +50,9 @@ const sandcastleInit = async (
     "--agent",
     "claude-code",
     "--sandbox",
-    "docker",
+    options.sandbox ?? "docker",
     "--issue-tracker",
-    "github-issues",
+    options.issueTracker ?? "github-issues",
     "--create-label",
     "false",
     "--build-image",
@@ -173,6 +175,74 @@ describe("sandcastle init: host package manager", () => {
       expect(result.output).toContain("the template uses Zod (`yarn add zod`)");
     },
   );
+}, 60_000);
+
+// The scaffolded image ships only npm (#177), so switching the hook to another
+// package manager also means adding it to the image.
+describe("sandcastle init: the package manager in the image", () => {
+  const COREPACK_STEP =
+    "add `RUN corepack enable` to .sandcastle/Dockerfile, before its `USER` line";
+
+  it.each(["pnpm-lock.yaml", "yarn.lock"])(
+    "tells a %s project to enable corepack in the Dockerfile",
+    async (lockfile) => {
+      const result = await initPlanner({ [lockfile]: "" });
+
+      expect(result).toMatchObject({ exitCode: 0 });
+      expect(result.output).toContain(COREPACK_STEP);
+    },
+  );
+
+  it("tells a bun project to install bun in the Dockerfile", async () => {
+    const result = await initPlanner({ "bun.lock": "" });
+
+    expect(result).toMatchObject({ exitCode: 0 });
+    expect(result.output).toContain(
+      "install bun in .sandcastle/Dockerfile, before its `USER` line (`RUN npm install -g bun`)",
+    );
+    expect(result.output).not.toContain("corepack");
+  });
+
+  it("names the Containerfile for podman", async () => {
+    const result = await sandcastleInit(hostProject({ "pnpm-lock.yaml": "" }), {
+      template: "simple-loop",
+      sandbox: "podman",
+    });
+
+    expect(result).toMatchObject({ exitCode: 0 });
+    expect(result.output).toContain(
+      "add `RUN corepack enable` to .sandcastle/Containerfile",
+    );
+  });
+
+  it("says nothing about the image for a native sandbox", async () => {
+    const result = await sandcastleInit(hostProject({ "pnpm-lock.yaml": "" }), {
+      template: "simple-loop",
+      sandbox: "bwrap",
+    });
+
+    expect(result).toMatchObject({ exitCode: 0 });
+    expect(result.output).toContain("change the hook to `pnpm install`");
+    expect(result.output).not.toContain("corepack");
+  });
+
+  it("says nothing for beads, whose image already enables corepack", async () => {
+    const result = await sandcastleInit(hostProject({ "pnpm-lock.yaml": "" }), {
+      template: "simple-loop",
+      issueTracker: "beads",
+    });
+
+    expect(result).toMatchObject({ exitCode: 0 });
+    expect(result.output).toContain("change the hook to `pnpm install`");
+    expect(result.output).not.toContain("RUN corepack enable");
+  });
+
+  it("says nothing for an npm project", async () => {
+    const result = await initPlanner({});
+
+    expect(result).toMatchObject({ exitCode: 0 });
+    expect(result.output).not.toContain("corepack");
+  });
 }, 60_000);
 
 describe("sandcastle init: zod for the planner templates", () => {
