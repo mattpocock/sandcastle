@@ -36,6 +36,27 @@ import { testIsolated } from "./sandboxes/test-isolated.js";
 
 const execAsync = promisify(exec);
 
+/** The text of a stream an `execSync` error captured, or "" if it has none. */
+const capturedOutput = (value: unknown): string => {
+  if (typeof value === "string") {
+    return value;
+  }
+  return Buffer.isBuffer(value) ? value.toString() : "";
+};
+
+/** The exec result for a command whose `execSync` threw. */
+const execSyncFailure = (error: unknown): ExecResult => {
+  if (typeof error !== "object" || error === null) {
+    return { stdout: "", stderr: "", exitCode: 1 };
+  }
+  const status = "status" in error ? error.status : undefined;
+  return {
+    stdout: capturedOutput("stdout" in error ? error.stdout : undefined),
+    stderr: capturedOutput("stderr" in error ? error.stderr : undefined),
+    exitCode: typeof status === "number" ? status : 1,
+  };
+};
+
 /**
  * A bind-mount exec that hands `claude ...` to `onClaude`, streams the lines
  * it returns to `onLine`, and runs every other command on the host.
@@ -61,13 +82,8 @@ const execWithFakeClaude =
         stdio: ["pipe", "pipe", "pipe"],
       });
       return { stdout: result, stderr: "", exitCode: 0 };
-    } catch (e: any) {
-      return {
-        stdout: e?.stdout?.toString() ?? "",
-        stderr: e?.stderr?.toString() ?? "",
-        exitCode:
-          typeof e?.status === "number" && e.status !== null ? e.status : 1,
-      };
+    } catch (e) {
+      return execSyncFailure(e);
     }
   };
 
@@ -149,7 +165,7 @@ describe("createWorktree", () => {
 
     try {
       expect(ws.worktreePath).toContain(".sandcastle/worktrees");
-      expect(ws.branch).toMatch(/^sandcastle\//);
+      expect(ws.branch).toMatch(/^sandcastle\//u);
       expect(existsSync(ws.worktreePath)).toBe(true);
     } finally {
       await ws.close();
@@ -335,7 +351,7 @@ describe("createWorktree", () => {
         branchStrategy: { type: "branch", branch: "dispose-test" },
         cwd: hostDir,
       });
-      worktreePath = ws.worktreePath;
+      ({ worktreePath } = ws);
       expect(existsSync(worktreePath)).toBe(true);
     }
     assert.isDefined(worktreePath);
@@ -648,7 +664,7 @@ describe("worktree.interactive()", () => {
 
       expect(result.exitCode).toBe(42);
       expect(result.commits).toHaveLength(1);
-      expect(result.commits[0]?.sha).toMatch(/^[0-9a-f]{40}$/);
+      expect(result.commits[0]?.sha).toMatch(/^[0-9a-f]{40}$/u);
       expect(result.branch).toBe("result-test");
     } finally {
       await ws.close();
@@ -659,14 +675,13 @@ describe("worktree.interactive()", () => {
 
 /** Format a mock agent result as stream-json lines (mimicking Claude's output) */
 const toStreamJson = (output: string): string => {
-  const lines: string[] = [];
-  lines.push(
+  const lines = [
     JSON.stringify({
       type: "assistant",
       message: { content: [{ type: "text", text: output }] },
     }),
     JSON.stringify({ type: "result", result: output }),
-  );
+  ];
   return lines.join("\n");
 };
 
@@ -1042,7 +1057,7 @@ describe("worktree.run()", () => {
       });
 
       expect(result.commits.length).toBeGreaterThanOrEqual(1);
-      expect(result.commits[0]?.sha).toMatch(/^[0-9a-f]{40}$/);
+      expect(result.commits[0]?.sha).toMatch(/^[0-9a-f]{40}$/u);
       expect(result.branch).toBe("commits-run-test");
     } finally {
       await ws.close();
@@ -1582,10 +1597,13 @@ describe("worktree.createSandbox()", () => {
 
 describe("isolated provider: createWorktree({ copyToWorktree })", () => {
   /** Reads `secret.txt` from where the agent runs inside the sandbox. */
-  const readSecret = async (cwd: string) =>
-    existsSync(join(cwd, "secret.txt"))
-      ? (await readFile(join(cwd, "secret.txt"), "utf8")).trim()
-      : "MISSING";
+  const readSecret = async (cwd: string) => {
+    if (!existsSync(join(cwd, "secret.txt"))) {
+      return "MISSING";
+    }
+    const secret = await readFile(join(cwd, "secret.txt"), "utf8");
+    return secret.trim();
+  };
 
   /**
    * An isolated provider whose agent records what `secret.txt` holds inside
