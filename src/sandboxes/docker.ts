@@ -9,11 +9,14 @@
 import { execFile, execFileSync, spawn } from "node:child_process";
 import type { StdioOptions } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { createInterface } from "node:readline";
 import { Effect } from "effect";
 import { startContainer, removeContainer } from "../DockerLifecycle.js";
 import type { LinuxCapability } from "../DockerLifecycle.js";
 import { createBindMountSandboxProvider } from "../SandboxProvider.js";
+import {
+  collectEngineExec,
+  shellArgsReportingExit,
+} from "./engineExitStatus.js";
 import type {
   SandboxProvider,
   BindMountCreateOptions,
@@ -28,7 +31,7 @@ import {
   resolveUserMounts,
   processFileMountParents,
 } from "../mountUtils.js";
-import { BoundedTail, MAX_TAIL_CHARS } from "../boundedTail.js";
+import { MAX_TAIL_CHARS } from "../boundedTail.js";
 import { registerShutdown } from "../shutdownRegistry.js";
 
 export interface DockerOptions {
@@ -282,7 +285,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
           if (opts?.cwd !== undefined && opts.cwd !== "") {
             args.push("-w", opts.cwd);
           }
-          args.push(containerName, "sh", "-c", command);
+          args.push(containerName, ...shellArgsReportingExit(command));
 
           return new Promise((resolve, reject) => {
             const stdin = opts?.stdin;
@@ -302,42 +305,11 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
               reject(new Error(`docker exec failed: ${error.message}`));
             });
 
-            if (opts?.onLine) {
-              const { onLine } = opts;
-              const stdoutTail = new BoundedTail(maxOutputTailChars, "\n");
-              const stderrTail = new BoundedTail(maxOutputTailChars, "");
-              const rl = createInterface({ input: proc.stdout });
-              rl.on("line", (line) => {
-                stdoutTail.push(line);
-                onLine(line);
-              });
-              proc.stderr.on("data", (chunk: Buffer) => {
-                stderrTail.push(chunk.toString());
-              });
-              proc.on("close", (code: number | null) => {
-                resolve({
-                  stdout: stdoutTail.toString(),
-                  stderr: stderrTail.toString(),
-                  exitCode: code ?? 1,
-                });
-              });
-            } else {
-              const stdoutChunks: string[] = [];
-              const stderrChunks: string[] = [];
-              proc.stdout.on("data", (chunk: Buffer) => {
-                stdoutChunks.push(chunk.toString());
-              });
-              proc.stderr.on("data", (chunk: Buffer) => {
-                stderrChunks.push(chunk.toString());
-              });
-              proc.on("close", (code: number | null) => {
-                resolve({
-                  stdout: stdoutChunks.join(""),
-                  stderr: stderrChunks.join(""),
-                  exitCode: code ?? 1,
-                });
-              });
-            }
+            collectEngineExec(
+              proc,
+              { onLine: opts?.onLine, maxOutputTailChars },
+              resolve,
+            );
           });
         },
 
