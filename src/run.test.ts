@@ -16,6 +16,7 @@ import {
   vi,
   beforeEach,
   afterEach,
+  expectTypeOf,
 } from "vitest";
 import {
   buildAgentStreamHandler,
@@ -348,16 +349,14 @@ describe("DEFAULT_MAX_ITERATIONS", () => {
 
 describe("RunOptions", () => {
   it("requires agent field typed as AgentProvider", () => {
-    // @ts-expect-error agent is required
-    const _opts: RunOptions = { prompt: "test" };
+    expectTypeOf<{ prompt: string }>().not.toExtend<RunOptions>();
   });
 
   it("requires sandbox field typed as SandboxProvider", () => {
-    // @ts-expect-error sandbox is required
-    const _opts: RunOptions = {
-      agent: claudeCode("claude-opus-4-8"),
-      prompt: "test",
-    };
+    expectTypeOf<{
+      agent: ReturnType<typeof claudeCode>;
+      prompt: string;
+    }>().not.toExtend<RunOptions>();
   });
 
   it("allows idleTimeoutSeconds to be specified", () => {
@@ -886,7 +885,7 @@ describe("run() error logging to file", () => {
         promptArgs: { SOURCE_BRANCH: "override" },
         logging: { type: "file", path: logPath },
       }),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/built-in prompt argument/u);
 
     const log = readFileSync(logPath, "utf8");
     expect(log).toContain("SOURCE_BRANCH");
