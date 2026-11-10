@@ -140,7 +140,9 @@ describe("generateTempBranchName", () => {
 
   it("returns different names when called at different times", async () => {
     const a = generateTempBranchName();
-    await new Promise((resolve) => setTimeout(resolve, 1100));
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 1100);
+    });
     const b = generateTempBranchName();
     expect(a).not.toBe(b);
   });
@@ -662,7 +664,8 @@ describe("WorktreeManager.create", () => {
     );
     // resolvePath() keeps an absolute git path and joins a relative one.
     const resolvedRebaseDir = resolvePath(second.path, rebaseMergePath.trim());
-    expect((await stat(resolvedRebaseDir)).isDirectory()).toBe(true);
+    const rebaseDirStat = await stat(resolvedRebaseDir);
+    expect(rebaseDirStat.isDirectory()).toBe(true);
 
     await execAsync("git rebase --abort", { cwd: first.path }).catch(() => {});
     await run(remove(first.path));
@@ -758,7 +761,7 @@ describe("WorktreeManager.create", () => {
       cwd: repoDir,
     });
 
-    const { path, branch } = await run(
+    const { path } = await run(
       create(repoDir, { branch: "sandcastle/no-tracking-test" }),
     );
 
