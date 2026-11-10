@@ -1,6 +1,7 @@
 import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import { rm } from "node:fs/promises";
 import { dirname } from "node:path";
+import type * as os from "node:os";
 import { Effect } from "effect";
 import {
   defaultImageName,
@@ -23,7 +24,7 @@ vi.mock("node:fs", () => ({
 }));
 
 vi.mock("node:os", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("node:os")>();
+  const actual = await importOriginal<typeof os>();
   return {
     ...actual,
     homedir: () => "/home/testuser",
