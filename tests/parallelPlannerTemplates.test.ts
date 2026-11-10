@@ -26,8 +26,8 @@ describe("parallel-planner templates (#1467)", () => {
       const plan = sectionBetween(main, "Phase 1: Plan", "Phase 2:");
       const merge = main.slice(main.indexOf("Phase 3: Merge"));
 
-      expect(plan).not.toMatch(/\bhooks\b/);
-      expect(merge).not.toMatch(/\bhooks\b/);
+      expect(plan).not.toMatch(/\bhooks\b/u);
+      expect(merge).not.toMatch(/\bhooks\b/u);
       expect(plan).not.toContain("npm install");
       expect(merge).not.toContain("npm install");
     },
@@ -39,7 +39,7 @@ describe("parallel-planner templates (#1467)", () => {
       const main = templateMain(template);
       const execute = sectionBetween(main, "Phase 2:", "Phase 3: Merge");
 
-      expect(execute).toMatch(/hooks:\s*installHooks/);
+      expect(execute).toMatch(/hooks:\s*installHooks/u);
       expect(execute).toContain("copyToWorktree");
       expect(main).toContain(
         'sandbox: { onSandboxReady: [{ command: "npm install" }] }',
