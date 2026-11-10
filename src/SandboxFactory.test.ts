@@ -43,6 +43,9 @@ import type { SandboxInfo } from "./SandboxFactory.js";
 
 const execAsync = promisify(exec);
 
+const MERGE_TO_HEAD_STRATEGY: BranchStrategy = { type: "merge-to-head" };
+const HEAD_STRATEGY: BranchStrategy = { type: "head" };
+
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });
   await execAsync('git config user.email "test@test.com"', { cwd: dir });
@@ -51,9 +54,11 @@ const initRepo = async (dir: string) => {
 
 const commitFile = async (
   dir: string,
-  name: string,
-  content: string,
-  message: string,
+  {
+    name,
+    content,
+    message,
+  }: { name: string; content: string; message: string },
 ) => {
   await writeFile(join(dir, name), content);
   await execAsync(`git add "${name}"`, { cwd: dir });
@@ -63,7 +68,11 @@ const commitFile = async (
 /** Initialize a real git repo with an initial commit so WorktreeManager.create succeeds. */
 const initRepoWithCommit = async (dir: string) => {
   await initRepo(dir);
-  await commitFile(dir, "initial.txt", "initial", "initial commit");
+  await commitFile(dir, {
+    name: "initial.txt",
+    content: "initial",
+    message: "initial commit",
+  });
 };
 
 /** Find the sole worktree directory created under hostDir/.sandcastle/worktrees. */
@@ -128,7 +137,7 @@ describe("WorktreeDockerSandboxFactory", () => {
 
   const makeLayer = (
     displayRef = Ref.unsafeMake<readonly DisplayEntry[]>([]),
-    branchStrategy: BranchStrategy = { type: "merge-to-head" },
+    branchStrategy: BranchStrategy = MERGE_TO_HEAD_STRATEGY,
   ) =>
     Layer.provide(
       WorktreeDockerSandboxFactory.layer,
@@ -245,7 +254,7 @@ describe("WorktreeDockerSandboxFactory", () => {
     );
 
     expect(mockProvider.createCalls).toHaveLength(1);
-    const opts = mockProvider.createCalls[0];
+    const [opts] = mockProvider.createCalls;
     expect(observedWorktree).toBeDefined();
     expect(opts?.mounts).toContainEqual({
       hostPath: observedWorktree,
@@ -511,12 +520,11 @@ describe("WorktreeDockerSandboxFactory", () => {
             const factory = yield* SandboxFactory;
             yield* factory.withSandbox((info) =>
               Effect.promise(async () =>
-                commitFile(
-                  worktreePathOf(info),
-                  "agent.txt",
-                  "agent",
-                  "agent commit",
-                ),
+                commitFile(worktreePathOf(info), {
+                  name: "agent.txt",
+                  content: "agent",
+                  message: "agent commit",
+                }),
               ).pipe(
                 Effect.andThen(
                   Effect.fail(new AgentError({ message: "agent failed" })),
@@ -666,7 +674,7 @@ describe("WorktreeDockerSandboxFactory", () => {
       );
 
       expect(mockProvider.createCalls).toHaveLength(1);
-      const opts = mockProvider.createCalls[0];
+      const [opts] = mockProvider.createCalls;
       expect(opts?.mounts).toContainEqual({
         hostPath: hostRepoDir,
         sandboxPath: SANDBOX_REPO_DIR,
@@ -748,7 +756,11 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
     tempDirs.push(hostDir);
     await initRepoWithCommit(hostDir);
-    await commitFile(hostDir, "extra.txt", "extra content", "add extra");
+    await commitFile(hostDir, {
+      name: "extra.txt",
+      content: "extra content",
+      message: "add extra",
+    });
 
     let fileContent = "";
     await Effect.runPromise(
@@ -801,7 +813,11 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
     tempDirs.push(hostDir);
     await initRepoWithCommit(hostDir);
-    await commitFile(hostDir, "hello.txt", "hello world", "add hello");
+    await commitFile(hostDir, {
+      name: "hello.txt",
+      content: "hello world",
+      message: "add hello",
+    });
 
     let fileContent = "";
     await Effect.runPromise(
@@ -854,7 +870,11 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
     tempDirs.push(hostDir);
     await initRepoWithCommit(hostDir);
-    await commitFile(hostDir, ".gitignore", "secret.txt\n", "ignore secret");
+    await commitFile(hostDir, {
+      name: ".gitignore",
+      content: "secret.txt\n",
+      message: "ignore secret",
+    });
     // Gitignored, so it exists only in the host repo, never in a fresh worktree
     await writeFile(join(hostDir, "secret.txt"), "host secret");
 
@@ -1106,7 +1126,7 @@ describe("WorktreeDockerSandboxFactory — no-sandbox provider", () => {
 
   const makeNoSandboxLayer = (
     hostRepoDir: string,
-    branchStrategy: BranchStrategy = { type: "head" },
+    branchStrategy: BranchStrategy = HEAD_STRATEGY,
   ) =>
     Layer.provide(
       WorktreeDockerSandboxFactory.layer,
@@ -1133,7 +1153,11 @@ describe("WorktreeDockerSandboxFactory — no-sandbox provider", () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
     tempDirs.push(hostDir);
     await initRepoWithCommit(hostDir);
-    await commitFile(hostDir, "hello.txt", "hi", "add hello");
+    await commitFile(hostDir, {
+      name: "hello.txt",
+      content: "hi",
+      message: "add hello",
+    });
 
     let receivedInfo: { hostWorktreePath?: string } | undefined;
     let execOut = "";

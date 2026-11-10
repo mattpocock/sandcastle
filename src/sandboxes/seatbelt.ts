@@ -45,7 +45,7 @@ import type {
 } from "../SandboxProvider.js";
 import { MAX_TAIL_CHARS } from "../boundedTail.js";
 import { markNativeSandboxProvider } from "../nativeSandboxProvider.js";
-import { registerShutdown } from "../shutdownRegistry.js";
+import { registerNativeSandboxShutdown } from "../nativeSandboxShutdown.js";
 
 /** Options for {@link seatbelt}. */
 export interface SeatbeltOptions {
@@ -192,7 +192,7 @@ const createHandle = async (
       killGroup(proc);
     }
   };
-  const unregisterShutdown = registerShutdown(killAll);
+  const unregisterShutdown = registerNativeSandboxShutdown(killAll, dirs);
   let closed = false;
   const hostPathOf = (p: string): string => toHostPath(p, dirs, options.mounts);
 
@@ -242,7 +242,7 @@ const createHandle = async (
  * aside. It can't signal host processes, but Seatbelt can't fully hide them.
  * The private home is exposed to Sandcastle as `/home/agent`: copies to and
  * from paths under it land in the private dir. Both private dirs are removed
- * on close, and every process an `exec` started is killed when it exits, on
+ * on close and on shutdown (SIGINT, SIGTERM, exit), and every process an `exec` started is killed when it exits, on
  * close, on shutdown and when this Node process is hard-killed (a detached
  * host watchdog per `exec` does that). The toolchain comes from the host
  * `PATH`: each `PATH` dir (never the home dir or an ancestor of it) and the
