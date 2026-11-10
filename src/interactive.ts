@@ -332,7 +332,10 @@ export const interactive = async (
         );
         return startResult.handle;
       }
-      const gitPath = join(hostRepoDir, ".git");
+      // From the path mounted into the sandbox (the worktree, or the repo in
+      // head mode), not hostRepoDir: a host repo that is itself a linked
+      // worktree has a `.git` pointer file the Windows patch cannot remap (#996).
+      const gitPath = join(hostWorkPath, ".git");
       const rawGitMounts = yield* resolveGitMounts(gitPath);
       const gitMounts = yield* patchGitMountsForWindows(
         rawGitMounts,
