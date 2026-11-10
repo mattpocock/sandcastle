@@ -11,8 +11,8 @@ import { isAbsolute, resolve, join, dirname } from "node:path";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { Effect } from "effect";
 import type { MountConfig } from "./MountConfig.js";
-import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
-import type { MountEntry } from "./SandboxFactory.js";
+import { SANDBOX_REPO_DIR } from "./sandboxService.js";
+import type { MountEntry } from "./sandboxService.js";
 import { WorktreeError } from "./errors.js";
 
 /**
@@ -311,7 +311,7 @@ const readWorktreeGitdir = (
     if (content === null) {
       return undefined;
     }
-    return /^gitdir:\s*(.+)$/u.exec(content)?.[1];
+    return /^gitdir:\s*(?<gitdir>.+)$/u.exec(content)?.groups?.gitdir;
   });
 
 /**

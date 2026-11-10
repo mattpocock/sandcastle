@@ -17,8 +17,8 @@ import type {
   NoSandboxProvider,
   NoSandboxHandle,
 } from "./SandboxProvider.js";
-import { makeSandboxFromHandle, SANDBOX_REPO_DIR } from "./SandboxFactory.js";
-import type { SandboxService, MountEntry } from "./SandboxFactory.js";
+import { makeSandboxFromHandle, SANDBOX_REPO_DIR } from "./sandboxService.js";
+import type { MountEntry, SandboxService } from "./sandboxService.js";
 import { syncIn } from "./syncIn.js";
 import { createClosingIfAbandoned } from "./createClosingIfAbandoned.js";
 import { normalizeMounts } from "./mountUtils.js";

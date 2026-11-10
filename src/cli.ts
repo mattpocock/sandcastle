@@ -115,6 +115,24 @@ const requireBuildFile = (
     Effect.asVoid,
   );
 
+/**
+ * Why `docker build-image` found no `.sandcastle/Dockerfile`. A project
+ * scaffolded for podman has a Containerfile instead, so point at the podman
+ * command rather than at native sandboxes.
+ */
+const missingDockerfileMessage = (
+  dockerfileDir: string,
+): Effect.Effect<string, never, FileSystem.FileSystem> =>
+  FileSystem.FileSystem.pipe(
+    Effect.flatMap((fs) => fs.exists(join(dockerfileDir, "Containerfile"))),
+    Effect.orElseSucceed(() => false),
+    Effect.map((hasContainerfile) =>
+      hasContainerfile
+        ? `No Dockerfile found at ${CONFIG_DIR}/Dockerfile, but found ${CONFIG_DIR}/Containerfile: this project was scaffolded for podman. Run \`sandcastle podman build-image\`, or pass --dockerfile ${CONFIG_DIR}/Containerfile.`
+        : `No Dockerfile found at ${CONFIG_DIR}/Dockerfile. ${NATIVE_SANDBOX_HINT} To build one, add ${CONFIG_DIR}/Dockerfile or pass --dockerfile <path>.`,
+    ),
+  );
+
 // --- Init flag resolution ---
 
 const nonInteractiveMessage = (flags: readonly string[]): string =>
@@ -965,7 +983,7 @@ const buildImageCommand = Command.make(
       yield* dockerfilePath === undefined
         ? requireBuildFile(
             [join(dockerfileDir, "Dockerfile")],
-            `No Dockerfile found at ${CONFIG_DIR}/Dockerfile. ${NATIVE_SANDBOX_HINT} To build one, add ${CONFIG_DIR}/Dockerfile or pass --dockerfile <path>.`,
+            yield* missingDockerfileMessage(dockerfileDir),
           )
         : requireBuildFile(
             [resolve(dockerfilePath)],
