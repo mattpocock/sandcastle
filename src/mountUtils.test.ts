@@ -1,5 +1,5 @@
 import { afterEach, assert, describe, expect, it, vi } from "vitest";
-import { rm } from "node:fs/promises";
+import { rm, stat } from "node:fs/promises";
 import { dirname } from "node:path";
 import type * as os from "node:os";
 import { Effect } from "effect";
@@ -490,7 +490,11 @@ describe("patchGitMountsForWindows", () => {
       // Overlay mount for corrected .git file
       expect(result[1]?.sandboxPath).toBe(`${SANDBOX_REPO_DIR}/.git`);
       // The hostPath is a temp file — just verify it exists
-      expect(result[1]?.hostPath).toBeTruthy();
+      const [, override] = result;
+      assert(override !== undefined);
+      expect(override.hostPath).toMatch(/git-override$/u);
+      const overrideStat = await stat(override.hostPath);
+      expect(overrideStat.isFile()).toBe(true);
     });
 
     it("replaces .git file mount when host repo is a worktree", async () => {
