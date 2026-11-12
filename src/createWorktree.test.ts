@@ -4,12 +4,14 @@ import {
   copyFile,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rm,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
 import { assert, describe, expect, expectTypeOf, it } from "vitest";
 import { createWorktree } from "./createWorktree.js";
@@ -1370,6 +1372,48 @@ describe("worktree.run()", () => {
 
       // Worktree should still exist after abort
       expect(existsSync(ws.worktreePath)).toBe(true);
+    } finally {
+      await ws.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("abort leaves the log file settled once run() rejects", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-run-abort-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const ac = new AbortController();
+    const sandbox = makeRunTestProvider(async () => {
+      ac.abort("cancel-mid-run");
+      // Short text with no sentence end: the delta buffer holds it on a timer.
+      return "partial output";
+    });
+
+    const ws = await createWorktree({
+      branchStrategy: { type: "branch", branch: "abort-log-settled-test" },
+      cwd: hostDir,
+    });
+
+    try {
+      await expect(
+        ws.run({
+          agent: claudeCode("claude-opus-4-8"),
+          sandbox,
+          prompt: "do something",
+          signal: ac.signal,
+        }),
+      ).rejects.toBe("cancel-mid-run");
+
+      const logsDir = join(hostDir, ".sandcastle", "logs");
+      const [logFile] = await readdir(logsDir);
+      assert(logFile !== undefined, "expected a log file");
+      const logPath = join(logsDir, logFile);
+      const atReject = await readFile(logPath, "utf8");
+
+      // Nothing may write to the log after run() has settled.
+      await sleep(200);
+      await expect(readFile(logPath, "utf8")).resolves.toBe(atReject);
     } finally {
       await ws.close();
       await rm(hostDir, { recursive: true, force: true });
