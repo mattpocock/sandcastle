@@ -86,6 +86,13 @@ export interface StartContainerOptions {
   /** Limit CPU resources via `--cpus` (e.g. `1.5`). Fractional values allowed. */
   readonly cpus?: number;
   /**
+   * Limit container memory via `--memory` (e.g. `"2g"`, `"512m"`).
+   * Also sets `--memory-swap` to the same value (hard cap, no swap headroom).
+   */
+  readonly memory?: string;
+  /** Limit container process count via `--pids-limit` (e.g. `256`). */
+  readonly pidsLimit?: number;
+  /**
    * SELinux volume label suffix applied to bind mounts (default `"z"`).
    *
    * - `"z"` — shared label. No-op on non-SELinux systems.
@@ -132,6 +139,12 @@ const runFlags = (
     ...repeatFlag("--cap-drop", options?.capDrop),
     ...repeatFlag("--device", options?.devices),
     ...(options?.cpus === undefined ? [] : ["--cpus", String(options.cpus)]),
+    ...(options?.memory === undefined
+      ? []
+      : ["--memory", options.memory, "--memory-swap", options.memory]),
+    ...(options?.pidsLimit === undefined
+      ? []
+      : ["--pids-limit", String(options.pidsLimit)]),
   ];
 };
 
