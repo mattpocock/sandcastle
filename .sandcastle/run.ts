@@ -13,10 +13,11 @@ const PlanSchema = z.object({
 const MAX_ITERATIONS = 10;
 const MAX_PARALLEL = 4;
 
-// True when `branch` has commits the current branch doesn't. The merge phase
-// asks git rather than trusting this cycle's `commits`: a branch an earlier
-// cycle advanced but never merged gets no new commits when its issue comes
-// round again, so gating on `commits.length` would strand it forever.
+// True when `branch` has commits the current branch doesn't. The review and
+// merge phases ask git rather than trusting this cycle's `commits`: a branch
+// an earlier cycle advanced but never merged gets no new commits when its
+// issue comes round again, so gating on `commits.length` would skip its
+// review and strand it forever.
 const isAheadOfHead = (branch: string): boolean => {
   try {
     const count = execFileSync(
@@ -110,7 +111,11 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
           },
         });
 
-        if (result.commits.length > 0) {
+        // Review whenever the branch has work the current branch lacks, not
+        // only when this run committed. An earlier cycle may have committed
+        // and then failed before or during its review; the merge phase picks
+        // that branch up (see isAheadOfHead), so it must be reviewed here first.
+        if (isAheadOfHead(issue.branch)) {
           await sandbox.run({
             name: `Reviewer #${issue.number}`,
             agent: sandcastle.claudeCode("claude-opus-4-8"),
@@ -139,7 +144,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   }
 
   // Merge every finished branch that is ahead of HEAD, whichever cycle made
-  // its commits.
+  // its commits. Each one was reviewed in this cycle's Phase 2.
   const completedIssues = issues.filter(
     (issue, i) =>
       settled[i]?.status === "fulfilled" && isAheadOfHead(issue.branch),
