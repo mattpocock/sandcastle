@@ -82,8 +82,8 @@ const execWithFakeClaude =
         stdio: ["pipe", "pipe", "pipe"],
       });
       return { stdout: result, stderr: "", exitCode: 0 };
-    } catch (e) {
-      return execSyncFailure(e);
+    } catch (error) {
+      return execSyncFailure(error);
     }
   };
 
