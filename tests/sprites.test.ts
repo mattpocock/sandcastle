@@ -13,6 +13,8 @@ import { sprites } from "@ai-hero/sandcastle/sandboxes/sprites";
 // stderr (2) frames, one per turn of the event loop, and an exit frame (3).
 // A negative exit code closes the socket with no exit frame instead, as a
 // dropped connection does. Each command's behaviour comes from `api.run`.
+// Deleting a Sprite that doesn't exist (never created, or already deleted)
+// answers 404 with `{"error":"sprite not found"}`, as the live API does.
 
 interface Outcome {
   readonly stdout?: readonly string[];
@@ -30,7 +32,11 @@ interface Exec {
 const api = {
   tokens: new Set<string>(),
   created: new Array<string>(),
+  /** Sprites that exist now: created, and not yet deleted. */
+  live: new Set<string>(),
   deleted: new Array<string>(),
+  /** Fail the next DELETE with a 500, as a server error does. */
+  deleteFails: false,
   execs: new Array<Exec>(),
   files: new Map<string, string>(),
   createFails: false,
@@ -61,7 +67,20 @@ const createSprite = async (body: Response): Promise<Response> => {
   if (api.createFails) {
     return new Response("capacity exhausted", { status: 500 });
   }
+  api.live.add(request.name);
   return json({ id: `id-${request.name}`, name: request.name }, 201);
+};
+
+const deleteSprite = (name: string): Response => {
+  api.deleted.push(name);
+  if (api.deleteFails) {
+    api.deleteFails = false;
+    return json({ error: "internal error" }, 500);
+  }
+  if (!api.live.delete(name)) {
+    return json({ error: "sprite not found" }, 404);
+  }
+  return new Response(null, { status: 204 });
 };
 
 const fsRequest = async (
@@ -95,8 +114,9 @@ const fakeFetch = async (
     return fsRequest(method, url, body);
   }
   if (method === "DELETE") {
-    api.deleted.push(decodeURIComponent(url.pathname.split("/").at(-1) ?? ""));
-    return new Response(null, { status: 204 });
+    return deleteSprite(
+      decodeURIComponent(url.pathname.split("/").at(-1) ?? ""),
+    );
   }
   return new Response("unexpected", { status: 500 });
 };
@@ -189,7 +209,9 @@ class FakeWebSocket extends EventTarget {
 beforeEach(() => {
   api.tokens.clear();
   api.created.length = 0;
+  api.live.clear();
   api.deleted.length = 0;
+  api.deleteFails = false;
   api.execs.length = 0;
   api.files.clear();
   api.createFails = false;
@@ -224,6 +246,24 @@ describe("sprites() lifecycle", () => {
 
     await handle.close();
     expect(api.deleted).toStrictEqual([handle.sandboxId]);
+    expect([...api.live]).toStrictEqual([]);
+  });
+
+  it("closes without error when the Sprite is already gone", async () => {
+    const handle = await create();
+    // Deleted out-of-band: from the dashboard, the CLI, or by expiry.
+    api.live.delete(z.string().parse(handle.sandboxId));
+
+    await expect(handle.close()).resolves.toBeUndefined();
+    expect(api.deleted).toStrictEqual([handle.sandboxId]);
+  });
+
+  it("rejects close when deleting the Sprite fails for another reason", async () => {
+    const handle = await create();
+    api.deleteFails = true;
+
+    await expect(handle.close()).rejects.toThrow("internal error");
+    expect([...api.live]).toStrictEqual([handle.sandboxId]);
   });
 
   it("deletes the Sprite and rethrows when the worktree folder can't be made", async () => {
