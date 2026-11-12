@@ -6,7 +6,8 @@
  *   await run({ agent: claudeCode("claude-opus-4-8"), sandbox: vercel() });
  */
 
-import { execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { readFile, unlink, writeFile, mkdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -195,6 +196,23 @@ const toCreateParams = (
   };
 };
 
+/** Pack `dir` into a gzipped tarball at `archive` on the host. */
+const tarDirectory = async (archive: string, dir: string): Promise<void> => {
+  const tar = spawn("tar", ["-czf", archive, "-C", dir, "."], {
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  let stderr = "";
+  tar.stderr.on("data", (chunk: Buffer) => {
+    stderr += chunk.toString();
+  });
+  await once(tar, "close");
+  if (tar.exitCode !== 0) {
+    throw new Error(
+      `tar exited with ${String(tar.exitCode)}: ${stderr.trim()}`,
+    );
+  }
+};
+
 /** Copy a host directory in as a tarball, unpacked at `sandboxPath`. */
 const copyDirIn = async (
   sandbox: SandboxInstance,
@@ -202,7 +220,7 @@ const copyDirIn = async (
   sandboxPath: string,
 ): Promise<void> => {
   const tarPath = join(tmpdir(), `sandcastle-copyin-${Date.now()}.tar.gz`);
-  execSync(`tar -czf "${tarPath}" -C "${hostPath}" .`);
+  await tarDirectory(tarPath, hostPath);
   try {
     const tarContent = await readFile(tarPath);
     const sandboxTarPath = `/tmp/sandcastle-copyin-${Date.now()}.tar.gz`;
