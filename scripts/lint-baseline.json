@@ -18,7 +18,6 @@
   ".sandcastle/run.ts": {
     "eslint(no-await-in-loop)": 3,
     "eslint(no-promise-executor-return)": 1,
-    "node(callback-return)": 1,
     "promise(avoid-new)": 1,
     "typescript(strict-void-return)": 1
   },
@@ -29,7 +28,6 @@
     "eslint(max-params)": 1
   },
   ".sandcastle/verify/ledger.ts": {
-    "eslint(curly)": 24,
     "eslint(max-lines)": 1,
     "typescript(no-confusing-void-expression)": 1
   },
@@ -37,11 +35,9 @@
     "unicorn(prefer-import-meta-properties)": 1
   },
   ".sandcastle/verify/verify.ts": {
-    "eslint(curly)": 11,
     "promise(catch-or-return)": 1,
     "promise(prefer-catch)": 1,
     "typescript(no-non-null-assertion)": 1,
-    "unicorn(catch-error-name)": 1,
     "unicorn(no-array-callback-reference)": 1,
     "unicorn(no-lonely-if)": 1,
     "unicorn(prefer-top-level-await)": 1
@@ -79,7 +75,6 @@
     "effect/globalDate": 2,
     "effect/globalRandom": 2,
     "eslint(complexity)": 4,
-    "eslint(curly)": 38,
     "eslint(max-lines-per-function)": 4,
     "eslint(max-lines)": 1,
     "eslint(max-statements)": 3,
@@ -91,9 +86,6 @@
     "typescript(no-unsafe-member-access)": 108,
     "typescript(no-unsafe-type-assertion)": 8,
     "typescript(strict-boolean-expressions)": 21
-  },
-  "src/ClackDisplay.test.ts": {
-    "vitest(prefer-import-in-mock)": 1
   },
   "src/cli.ts": {
     "eslint(max-lines)": 1,
@@ -116,7 +108,6 @@
     "typescript(no-unsafe-type-assertion)": 1,
     "typescript(strict-void-return)": 1,
     "unicorn(filename-case)": 1,
-    "vitest(prefer-import-in-mock)": 1,
     "vitest(require-mock-type-parameters)": 1
   },
   "src/createSandbox.agentEnv.test.ts": {
@@ -162,7 +153,6 @@
     "typescript(strict-void-return)": 1,
     "unicorn(filename-case)": 1,
     "unicorn(no-immediate-mutation)": 1,
-    "vitest(prefer-import-in-mock)": 1,
     "vitest(require-mock-type-parameters)": 1
   },
   "src/createWorktree.test.ts": {
@@ -176,7 +166,6 @@
     "typescript(no-unsafe-call)": 2,
     "typescript(no-unsafe-member-access)": 5,
     "typescript(strict-void-return)": 1,
-    "unicorn(catch-error-name)": 1,
     "unicorn(no-await-expression-member)": 1,
     "unicorn(no-immediate-mutation)": 1,
     "vitest(expect-expect)": 6,
@@ -195,8 +184,7 @@
   },
   "src/DockerLifecycle.test.ts": {
     "import(first)": 2,
-    "typescript(consistent-type-imports)": 1,
-    "vitest(prefer-import-in-mock)": 1
+    "typescript(consistent-type-imports)": 1
   },
   "src/DockerLifecycle.ts": {
     "eslint(complexity)": 1,
@@ -207,7 +195,6 @@
     "effect/processEnvInEffect": 1
   },
   "src/ErrorHandler.ts": {
-    "effect/lazyPromiseInEffectSync": 1,
     "effect/unsafeEffectTypeAssertion": 1,
     "typescript(no-unsafe-type-assertion)": 1
   },
@@ -226,7 +213,6 @@
     "eslint(no-await-in-loop)": 6,
     "eslint(no-template-curly-in-string)": 2,
     "eslint(no-unused-vars)": 2,
-    "node(callback-return)": 27,
     "vitest(prefer-each)": 2,
     "vitest(prefer-strict-equal)": 2,
     "vitest(require-to-throw-message)": 5,
@@ -245,7 +231,6 @@
     "typescript(no-unsafe-type-assertion)": 1,
     "typescript(strict-void-return)": 1,
     "unicorn(filename-case)": 1,
-    "vitest(prefer-import-in-mock)": 1,
     "vitest(require-mock-type-parameters)": 1
   },
   "src/interactive.test.ts": {
@@ -263,12 +248,10 @@
     "typescript(no-unsafe-type-assertion)": 1
   },
   "src/interactiveArgCollection.test.ts": {
-    "typescript(no-unsafe-type-assertion)": 1,
-    "vitest(prefer-import-in-mock)": 1
+    "typescript(no-unsafe-type-assertion)": 1
   },
   "src/mountUtils.test.ts": {
     "typescript(consistent-type-imports)": 1,
-    "vitest(prefer-import-in-mock)": 2,
     "vitest(prefer-strict-boolean-matchers)": 1
   },
   "src/mountUtils.ts": {
@@ -316,9 +299,6 @@
   "src/Output.ts": {
     "effect/extendsNativeError": 1
   },
-  "src/PodmanLifecycle.test.ts": {
-    "vitest(prefer-import-in-mock)": 1
-  },
   "src/PromptPreprocessor.test.ts": {
     "import(max-dependencies)": 1
   },
@@ -340,12 +320,8 @@
     "import(max-dependencies)": 1,
     "node(no-sync)": 6
   },
-  "src/sandboxes/daytona.sudo.test.ts": {
-    "vitest(prefer-import-in-mock)": 1
-  },
   "src/sandboxes/daytona.test.ts": {
-    "eslint(max-params)": 1,
-    "vitest(prefer-import-in-mock)": 1
+    "eslint(max-params)": 1
   },
   "src/sandboxes/daytona.ts": {
     "effect/globalTimers": 2,
@@ -365,7 +341,6 @@
     "eslint(no-await-in-loop)": 2,
     "eslint(require-unicode-regexp)": 5,
     "import(first)": 8,
-    "node(callback-return)": 9,
     "typescript(consistent-type-imports)": 1,
     "typescript(no-explicit-any)": 45,
     "typescript(no-unsafe-assignment)": 22,
@@ -374,7 +349,6 @@
     "typescript(no-unsafe-type-assertion)": 45,
     "unicorn(prefer-event-target)": 1,
     "vitest(no-conditional-in-test)": 44,
-    "vitest(prefer-import-in-mock)": 1,
     "vitest(prefer-mock-return-shorthand)": 1,
     "vitest(prefer-strict-equal)": 5,
     "vitest(require-mock-type-parameters)": 3
@@ -398,7 +372,6 @@
     "eslint(no-await-in-loop)": 2,
     "eslint(require-unicode-regexp)": 3,
     "import(first)": 8,
-    "node(callback-return)": 2,
     "typescript(consistent-type-imports)": 1,
     "typescript(no-explicit-any)": 61,
     "typescript(no-unsafe-assignment)": 28,
@@ -407,7 +380,6 @@
     "typescript(no-unsafe-type-assertion)": 55,
     "unicorn(prefer-event-target)": 1,
     "vitest(no-conditional-in-test)": 42,
-    "vitest(prefer-import-in-mock)": 1,
     "vitest(prefer-mock-return-shorthand)": 1,
     "vitest(prefer-strict-equal)": 6,
     "vitest(require-mock-type-parameters)": 3
@@ -424,9 +396,6 @@
   },
   "src/sandboxes/test-shared.ts": {
     "promise(avoid-new)": 1
-  },
-  "src/sandboxes/vercel.test.ts": {
-    "vitest(prefer-import-in-mock)": 1
   },
   "src/sandboxes/vercel.ts": {
     "effect/globalDate": 2,
@@ -460,8 +429,7 @@
     "eslint(no-await-in-loop)": 1,
     "import(max-dependencies)": 1,
     "typescript(strict-void-return)": 1,
-    "typescript(use-unknown-in-catch-callback-variable)": 1,
-    "unicorn(catch-error-name)": 1
+    "typescript(use-unknown-in-catch-callback-variable)": 1
   },
   "src/SandboxLifecycle.ts": {
     "node(no-sync)": 1,
@@ -480,9 +448,6 @@
     "eslint(max-lines)": 1,
     "eslint(max-params)": 1,
     "eslint(no-await-in-loop)": 2
-  },
-  "src/SessionStore.windowsPath.test.ts": {
-    "vitest(prefer-import-in-mock)": 1
   },
   "src/shutdownRegistry.test.ts": {
     "typescript(no-unsafe-type-assertion)": 1
