@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { existsSync } from "node:fs";
+import { access } from "node:fs/promises";
 import { join, posix } from "node:path";
 import {
   ContainerStartTimeoutError,
@@ -205,7 +205,13 @@ const copyPathsIn = (
   Effect.gen(function* () {
     for (const relativePath of paths) {
       const hostPath = join(sourceDir, relativePath);
-      if (!existsSync(hostPath)) {
+      const exists = yield* Effect.promise(() =>
+        access(hostPath).then(
+          () => true,
+          () => false,
+        ),
+      );
+      if (!exists) {
         continue;
       }
       // Sandbox-side path: Linux container, must use POSIX separators
