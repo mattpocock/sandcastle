@@ -20,7 +20,6 @@
  * `SyncOutPathError`; it is never skipped.
  */
 
-import { existsSync } from "node:fs";
 import {
   mkdir,
   readdir,
@@ -185,9 +184,10 @@ const createPatchDir = (
           const patchesRoot = join(hostRepoDir, ".sandcastle", "patches");
           await mkdir(patchesRoot, { recursive: true });
 
+          const taken = new Set(await readdir(patchesRoot));
           let dirName = base;
           let counter = 0;
-          while (existsSync(join(patchesRoot, dirName))) {
+          while (taken.has(dirName)) {
             counter++;
             dirName = `${base}-${counter}`;
           }
@@ -249,8 +249,8 @@ export const countCommitsToSync = (
     if (countResult.exitCode !== 0) {
       return 0;
     }
-    const parsed = Number.parseInt(countResult.stdout.trim(), 10);
-    return Number.isNaN(parsed) ? 0 : parsed;
+    const parsed = Number(countResult.stdout.trim());
+    return Number.isInteger(parsed) ? parsed : 0;
   });
 
 /** What the sandbox has that the host doesn't. */
