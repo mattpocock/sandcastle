@@ -2,7 +2,7 @@
 // per file × rule, to its own baseline.
 //
 // The lint ratchet, scripts/lint-baseline.json:
-// - oxlint (.oxlintrc.json, type-aware)               rule: `eslint(curly)`
+// - oxlint (.oxlintrc.json, type-aware)               rule: `eslint(complexity)`
 // - Effect's language service (tsconfig.json plugin)  rule: `effect/<name>`
 // - inline disable comments outside the allowlist     rule: `ratchet/disable-comment`
 // - `toMatchObject({ k: undefined })` in a test        rule: `ratchet/match-object-undefined`
