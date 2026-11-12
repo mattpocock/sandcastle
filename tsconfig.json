@@ -72,7 +72,7 @@
           "importFromBarrel": "off", // fights the repo's `import { Effect } from "effect"`
           "instanceOfSchema": "error",
           "layerMergeAllWithDependencies": "error",
-          "lazyPromiseInEffectSync": "error",
+          "lazyPromiseInEffectSync": "off", // flags `Effect.sync(() => process.exit(1))`: it reads the `never` return as a Promise
           "leakingRequirements": "error",
           "missedPipeableOpportunity": "error",
           "missingEffectContext": "error",
