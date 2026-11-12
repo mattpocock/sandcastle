@@ -88,6 +88,10 @@ const result = await run({
     capDrop: ["NET_RAW"],
     // Optional: limit CPU resources via --cpus. Fractional values allowed (e.g. 1.5).
     // cpus: 2,
+    // Optional: cap memory via --memory (--memory-swap is set to the same value,
+    // so there is no swap headroom) and the process count via --pids-limit.
+    // memory: "2g",
+    // pidsLimit: 256,
   }),
 
   // Host repo directory — replaces process.cwd() as the anchor for
