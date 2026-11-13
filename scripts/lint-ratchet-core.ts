@@ -215,5 +215,5 @@ export const missingBaseBaseline = (
   ci: string | undefined,
 ): string | undefined =>
   ci === "true"
-    ? `Cannot read origin/main:${baselinePath}, so the "grew against origin/main" check cannot run. CI must fetch main first (\`git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main\`, see .github/workflows/ci.yml).`
+    ? `Cannot read origin/main:${baselinePath}, so the "grew against origin/main" check cannot run. CI must check out with origin/main (\`fetch-depth: 0\` on actions/checkout, see .github/workflows/ci.yml).`
     : undefined;
