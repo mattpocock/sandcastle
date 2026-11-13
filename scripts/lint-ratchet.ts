@@ -23,7 +23,7 @@
 // falls below the baseline passes: lowering the baseline is optional in a PR,
 // and .github/workflows/lint-shrink.yml opens a "shrink baseline" PR after
 // each push to main. It also fails if a baseline grew against origin/main
-// (where that ref exists), and if .oxlintrc.json gains an override beyond
+// (where that ref exists; in CI it must, or the run fails), and if .oxlintrc.json gains an override beyond
 // the five reviewed ones in scripts/lint-ratchet-config.ts.
 //
 //   npm run lint          both ratchets
@@ -53,6 +53,7 @@ import {
   compare,
   countViolations,
   driftReport,
+  missingBaseBaseline,
   report,
   shrink,
 } from "./lint-ratchet-core.ts";
@@ -127,14 +128,18 @@ const writeBaseline = async (
   );
 };
 
-/** The baseline on origin/main, or undefined where it is not available. */
+/** The baseline on origin/main, or undefined where it is not available. In CI it must be: see missingBaseBaseline. */
 const readBaseBaseline = async (
   baselinePath: string,
 ): Promise<Counts | undefined> => {
   try {
     const out = await run("git", ["show", `origin/main:${baselinePath}`]);
     return Baseline.parse(JSON.parse(out));
-  } catch {
+  } catch (error) {
+    const missing = missingBaseBaseline(baselinePath, process.env["CI"]);
+    if (missing !== undefined) {
+      throw new Error(missing, { cause: error });
+    }
     return undefined;
   }
 };

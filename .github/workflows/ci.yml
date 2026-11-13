@@ -54,6 +54,11 @@ jobs:
       # api-report/ must match the built .d.ts: a public API change shows up
       # in the PR as a report diff, which CODEOWNERS routes to Matt.
       - run: npm run api:report -- --check
+      # The ratchet also fails if a baseline grew against origin/main, which
+      # the checkout above (the PR's merge commit, depth 1) does not fetch. It
+      # reads main's baselines with `git show`, so main's tip is enough. With
+      # CI set, a missing origin/main fails the lint rather than skipping it.
+      - run: git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
       - run: npm run lint
       # `npm test`, split so the e2e tests run once: the floor runs them with
       # coverage, fails on a failing test, and holds their line coverage to

@@ -203,3 +203,17 @@ export const tscErrors = (out: string): Violation[] =>
     file: m.groups?.["file"] ?? "",
     rule: `tsc/${m.groups?.["code"] ?? ""}`,
   }));
+
+/**
+ * What the "baseline grew against origin/main" check does when it cannot read
+ * a baseline from origin/main: locally it skips (a clone may lack the ref), but
+ * in CI it fails, so a checkout that drops the ref cannot switch the check off
+ * unseen. Resolves to the failure text, or undefined to skip.
+ */
+export const missingBaseBaseline = (
+  baselinePath: string,
+  ci: string | undefined,
+): string | undefined =>
+  ci === "true"
+    ? `Cannot read origin/main:${baselinePath}, so the "grew against origin/main" check cannot run. CI must fetch main first (\`git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main\`, see .github/workflows/ci.yml).`
+    : undefined;
