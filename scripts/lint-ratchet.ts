@@ -23,7 +23,7 @@
 // falls below the baseline passes: lowering the baseline is optional in a PR,
 // and .github/workflows/lint-shrink.yml opens a "shrink baseline" PR after
 // each push to main. It also fails if a baseline grew against origin/main
-// (where that ref exists), and if .oxlintrc.json gains an override beyond
+// (where that ref exists; in CI it must, or the run fails), and if .oxlintrc.json gains an override beyond
 // the five reviewed ones in scripts/lint-ratchet-config.ts.
 //
 //   npm run lint          both ratchets
@@ -39,7 +39,7 @@
 // See .sandcastle/CODING_STANDARDS.md, "The lint ratchet" and "Where tests
 // live".
 
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import {
@@ -61,6 +61,12 @@ import {
   transfer,
 } from "./lint-ratchet-core.ts";
 import {
+  baselineExists,
+  readBaseBaseline,
+  readBaseline,
+  writeBaseline,
+} from "./lint-ratchet-baseline.ts";
+import {
   ROOT,
   changedFiles,
   collectDepcruise,
@@ -72,7 +78,6 @@ import {
   collectRawGitSpawns,
   collectSandcastleTypes,
   collectTestTypeAssertions,
-  run,
 } from "./lint-ratchet-sources.ts";
 
 interface Ratchet {
@@ -114,35 +119,6 @@ const RATCHETS: readonly Ratchet[] = [
 ];
 
 const REPORT_LIMIT = 10;
-
-const Baseline = z.record(z.string(), z.record(z.string(), z.number()));
-
-const readBaseline = async (baselinePath: string): Promise<Counts> => {
-  const source = await readFile(path.join(ROOT, baselinePath), "utf8");
-  return Baseline.parse(JSON.parse(source));
-};
-
-const writeBaseline = async (
-  baselinePath: string,
-  counts: Counts,
-): Promise<void> => {
-  await writeFile(
-    path.join(ROOT, baselinePath),
-    `${JSON.stringify(counts, null, 2)}\n`,
-  );
-};
-
-/** The baseline on origin/main, or undefined where it is not available. */
-const readBaseBaseline = async (
-  baselinePath: string,
-): Promise<Counts | undefined> => {
-  try {
-    const out = await run("git", ["show", `origin/main:${baselinePath}`]);
-    return Baseline.parse(JSON.parse(out));
-  } catch {
-    return undefined;
-  }
-};
 
 const OxlintConfig = z.object({
   overrides: z.array(z.object({ files: z.array(z.string()) })).default([]),
@@ -203,15 +179,6 @@ const check = async (
       growth,
     ),
   ].join("");
-};
-
-const baselineExists = async (baselinePath: string): Promise<boolean> => {
-  try {
-    await readFile(path.join(ROOT, baselinePath), "utf8");
-    return true;
-  } catch {
-    return false;
-  }
 };
 
 /** Writes each missing first baseline. Never touches one that exists: it only shrinks. */
