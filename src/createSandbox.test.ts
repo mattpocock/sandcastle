@@ -1,4 +1,3 @@
-import { exec } from "node:child_process";
 import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import {
   copyFile,
@@ -11,7 +10,6 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { promisify } from "node:util";
 import { Effect } from "effect";
 import { assert, describe, expect, it } from "vitest";
 import { claudeCode, codex, copilot, cursor, pi } from "./AgentProvider.js";
@@ -29,6 +27,7 @@ import type { BindMountSandboxHandle } from "./SandboxProvider.js";
 import { encodeProjectPath } from "./SessionStore.js";
 import { testIsolated } from "./sandboxes/test-isolated.js";
 import { makeLocalSandbox } from "./testSandbox.js";
+import { execAsync } from "./testExec.js";
 
 /** Dummy sandbox provider used to satisfy the required `sandbox` field in test mode. */
 const testSandbox = createBindMountSandboxProvider({
@@ -41,8 +40,6 @@ const testSandbox = createBindMountSandboxProvider({
     close: async () => {},
   }),
 });
-
-const execAsync = promisify(exec);
 
 interface AgentRun {
   readonly command: string;
