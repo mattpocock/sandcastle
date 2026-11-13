@@ -1,4 +1,4 @@
-import { exec, execSync } from "node:child_process";
+import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import {
   copyFile,
@@ -12,7 +12,6 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { promisify } from "node:util";
 import { assert, describe, expect, expectTypeOf, it } from "vitest";
 import { createWorktree } from "./createWorktree.js";
 import type {
@@ -35,8 +34,7 @@ import type {
 import { encodeProjectPath } from "./SessionStore.js";
 import { makeLocalSandbox } from "./testSandbox.js";
 import { testIsolated } from "./sandboxes/test-isolated.js";
-
-const execAsync = promisify(exec);
+import { execAsync } from "./testExec.js";
 
 /** The text of a stream an `execSync` error captured, or "" if it has none. */
 const capturedOutput = (value: unknown): string => {
