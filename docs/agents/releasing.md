@@ -5,6 +5,10 @@ Releases go through [changesets](https://github.com/changesets/changesets). On e
 - While `.changeset/` holds unreleased changesets, it opens (or updates) the **Version Packages** PR from `changeset-release/main`. That PR bumps `package.json` and writes `CHANGELOG.md`.
 - Merging that PR is the release: the next run on `main` finds no changesets and publishes to npm (`npx changeset publish`).
 
+## The release App
+
+`release.yml` pushes the Version Packages PR with a token minted from a GitHub App, not `GITHUB_TOKEN`: GitHub never starts workflows for pushes made with `GITHUB_TOKEN`, so the PR's required checks (`ci`, `windows`) would never run. The App has no webhook, has Contents, Pull requests and Workflows set to read and write (Workflows because the release branch is reset onto `main`, and a push that changes `.github/workflows/` needs it), and is installed on this repo only. The workflow reads its Client ID from the repo variable `RELEASE_APP_CLIENT_ID` and its private key from the repo secret `RELEASE_APP_PRIVATE_KEY`. npm publishing is untouched: it still uses trusted publishing (`id-token: write`).
+
 ## Before you merge the Version Packages PR
 
 Run the local tests on the PR's branch, with Docker and Podman both running:
