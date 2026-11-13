@@ -232,22 +232,6 @@ const parseStreamJsonLine = (line: string): ParsedStreamEvent[] => {
   return [];
 };
 
-/**
- * Cursor Agent CLI print mode passes the prompt as a positional argv argument; stdin is not
- * documented for delivering the prompt. Linux enforces a per-argument limit (~128 KiB, ARG_MAX
- * stack). Stay slightly under so users get a clear error instead of spawn E2BIG.
- */
-const CURSOR_PRINT_PROMPT_MAX_BYTES = 120 * 1024;
-
-const assertCursorPrintPromptFitsArgv = (prompt: string): void => {
-  const n = Buffer.byteLength(prompt, "utf8");
-  if (n > CURSOR_PRINT_PROMPT_MAX_BYTES) {
-    throw new Error(
-      `Cursor print-mode prompt is ${n} bytes (max ${CURSOR_PRINT_PROMPT_MAX_BYTES} bytes). The Cursor CLI accepts the prompt only as a command-line argument; shorten the prompt or split the work. Other Sandcastle providers use stdin for large prompts.`,
-    );
-  }
-};
-
 /** Reads `<kind>ToolCall.args[field]` when it is a string. */
 const cursorToolCallArg = (
   toolCall: unknown,
@@ -1297,15 +1281,21 @@ export const cursor = (
         agentProvider: "cursor",
       });
     }
-    assertCursorPrintPromptFitsArgv(prompt);
     const forceFlag = dangerouslySkipPermissions ? " --force" : "";
     // `--resume` takes an optional value, so the id is bound with `=`.
     const resumeFlag =
       resumeSession === undefined
         ? ""
         : ` --resume=${shellEscape(resumeSession)}`;
+    // Print mode takes an optional positional prompt. With none, and stdin
+    // not a TTY, the CLI reads stdin to EOF and uses that as the prompt.
+    // A lone `-` is prompt text, not a stdin sentinel, so it stays off argv:
+    // that is the ~128 KiB per-argument limit, and what cmd.exe cannot carry
+    // through an `agent.cmd` shim (a newline, or a command line over 8191
+    // characters).
     return {
-      command: `agent --print --output-format stream-json --model ${shellEscape(model)} ${forceFlag}${resumeFlag} ${shellEscape(prompt)}`,
+      command: `agent --print --output-format stream-json --model ${shellEscape(model)}${forceFlag}${resumeFlag}`,
+      stdin: prompt,
     };
   },
 
@@ -1478,8 +1468,13 @@ export const opencode = (
       resumeSession === undefined
         ? ""
         : ` --session ${shellEscape(resumeSession)}${forkSession === true ? " --fork" : ""}`;
+    // `opencode run` reads non-TTY stdin to EOF and, with no positional
+    // message, uses that as the prompt. Keeping the prompt off argv avoids
+    // the per-argument limit (spawn E2BIG) and cmd.exe's refusal to pass a
+    // newline, or a command line over 8191 characters, through `opencode.cmd`.
     return {
-      command: `opencode run --format json --model ${shellEscape(model)}${variantFlag}${agentFlag}${permissionsFlag}${sessionFlags} ${shellEscape(prompt)}`,
+      command: `opencode run --format json --model ${shellEscape(model)}${variantFlag}${agentFlag}${permissionsFlag}${sessionFlags}`,
+      stdin: prompt,
     };
   },
 
@@ -1501,24 +1496,6 @@ export const opencode = (
 // ---------------------------------------------------------------------------
 // GitHub Copilot CLI agent provider
 // ---------------------------------------------------------------------------
-
-/**
- * Copilot CLI print mode passes the prompt as the `-p` argv argument. (The CLI
- * can also read a prompt piped on stdin — `echo "..." | copilot` — but we use
- * the `-p` argv form here for parity with the tested print-command path.) Linux
- * enforces a per-argument limit (~128 KiB, ARG_MAX stack). Stay slightly under
- * so users get a clear error instead of spawn E2BIG. Mirrors the Cursor guard.
- */
-const COPILOT_PRINT_PROMPT_MAX_BYTES = 120 * 1024;
-
-const assertCopilotPrintPromptFitsArgv = (prompt: string): void => {
-  const n = Buffer.byteLength(prompt, "utf8");
-  if (n > COPILOT_PRINT_PROMPT_MAX_BYTES) {
-    throw new Error(
-      `Copilot print-mode prompt is ${n} bytes (max ${COPILOT_PRINT_PROMPT_MAX_BYTES} bytes). This provider passes the prompt as a command-line argument; shorten the prompt or split the work. Other Sandcastle providers use stdin for large prompts.`,
-    );
-  }
-};
 
 /**
  * Parse one line of `copilot --output-format json` JSONL output.
@@ -1676,7 +1653,6 @@ export const copilot = (
         agentProvider: "copilot",
       });
     }
-    assertCopilotPrintPromptFitsArgv(prompt);
     const allowAll = dangerouslySkipPermissions ? " --allow-all-tools" : "";
     const effortFlag = options?.effort ? ` --effort ${options.effort}` : "";
     // `--resume` takes an optional value, so the id is bound with `=`.
@@ -1684,8 +1660,13 @@ export const copilot = (
       resumeSession === undefined
         ? ""
         : ` --resume=${shellEscape(resumeSession)}`;
+    // A prompt piped on stdin is a non-interactive run, the same path as
+    // `-p`. `-p` takes the prompt text, so print mode omits it: argv stays
+    // under the per-argument limit, and a `.cmd` shim is never asked to
+    // carry a newline or a command line over 8191 characters.
     return {
-      command: `copilot -p ${shellEscape(prompt)} --output-format json --model ${shellEscape(model)}${allowAll}${effortFlag}${resumeFlag}`,
+      command: `copilot --output-format json --model ${shellEscape(model)}${allowAll}${effortFlag}${resumeFlag}`,
+      stdin: prompt,
     };
   },
 
