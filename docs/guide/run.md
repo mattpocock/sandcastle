@@ -190,18 +190,18 @@ console.log(result.branch); // target branch name
 
 ## `RunResult`
 
-| Field                   | Type                                        | Description                                                                                                                                                |
-| ----------------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `iterations`            | `IterationResult[]`                         | Per-iteration results (use `.length` for the count). See [Iterations](./iterations.md).                                                                    |
-| `completionSignal`      | string?                                     | The matched completion signal string, or `undefined` if none fired. See [Iterations](./iterations.md).                                                     |
-| `stdout`                | string                                      | Agent output                                                                                                                                               |
-| `commits`               | `{ sha }[]`                                 | Commits created during the run. See [Branch strategies](./branch-strategies.md).                                                                           |
-| `branch`                | string                                      | [Target branch](./glossary.md#target-branch) name. See [Branch strategies](./branch-strategies.md).                                                        |
-| `logFilePath`           | string?                                     | Path to the log file (only when logging to a file). See [Run logs](./run-logs.md).                                                                         |
-| `output`                | T?                                          | Typed structured output (only present when `output` option is set). See [Structured output](./structured-output.md).                                       |
-| `preservedWorktreePath` | string?                                     | Host path to the preserved worktree, set when the run succeeded but the worktree had uncommitted changes. See [Branch strategies](./branch-strategies.md). |
-| `resume`                | `(prompt, options?) => Promise<RunResult>`? | Continue the last captured [agent session](./glossary.md#agent-session) for one iteration. See [Session resume](./agent-sessions.md#session-resume).       |
-| `fork`                  | `(prompt, options?) => Promise<RunResult>`? | Fork the last captured agent session for one iteration. See [Session fork](./agent-sessions.md#session-fork).                                              |
+| Field                   | Type                                        | Description                                                                                                                                                                        |
+| ----------------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `iterations`            | `IterationResult[]`                         | Per-iteration results (use `.length` for the count). See [Iterations](./iterations.md).                                                                                            |
+| `completionSignal`      | string?                                     | The matched completion signal string, or `undefined` if none fired. See [Iterations](./iterations.md).                                                                             |
+| `stdout`                | string                                      | Agent output                                                                                                                                                                       |
+| `commits`               | `{ sha }[]`                                 | Commits created during the run. See [Branch strategies](./branch-strategies.md).                                                                                                   |
+| `branch`                | string                                      | [Target branch](./glossary.md#target-branch) name. See [Branch strategies](./branch-strategies.md).                                                                                |
+| `logFilePath`           | string?                                     | Path to the log file (only when logging to a file). See [Run logs](./run-logs.md).                                                                                                 |
+| `output`                | T?                                          | Typed structured output (only present when `output` option is set). See [Structured output](./structured-output.md).                                                               |
+| `preservedWorktreePath` | string?                                     | Host path to the preserved worktree, set when the run succeeded but the worktree had uncommitted changes or could not be removed. See [Branch strategies](./branch-strategies.md). |
+| `resume`                | `(prompt, options?) => Promise<RunResult>`? | Continue the last captured [agent session](./glossary.md#agent-session) for one iteration. See [Session resume](./agent-sessions.md#session-resume).                               |
+| `fork`                  | `(prompt, options?) => Promise<RunResult>`? | Fork the last captured agent session for one iteration. See [Session fork](./agent-sessions.md#session-fork).                                                                      |
 
 ## `IterationResult`
 
