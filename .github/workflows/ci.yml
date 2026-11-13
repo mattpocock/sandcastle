@@ -62,7 +62,6 @@ jobs:
       # api-report/ must match the built .d.ts: a public API change shows up
       # in the PR as a report diff, which CODEOWNERS routes to Matt.
       - run: npm run api:report -- --check
-      - run: git rev-parse origin/main && git merge-base HEAD origin/main && git rev-parse --is-shallow-repository
       - run: npm run lint
       # `npm test`, split so the e2e tests run once: the floor runs them with
       # coverage, fails on a failing test, and holds their line coverage to
