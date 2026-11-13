@@ -5,6 +5,20 @@
  * handles worktree creation, git mount resolution, and commit extraction.
  */
 
+export type {
+  BindMountBranchStrategy,
+  BranchStrategy,
+  HeadBranchStrategy,
+  IsolatedBranchStrategy,
+  MergeToHeadBranchStrategy,
+  NamedBranchStrategy,
+  NoSandboxBranchStrategy,
+} from "./BranchStrategy.js";
+export {
+  createBindMountSandboxProvider,
+  createIsolatedSandboxProvider,
+} from "./createSandboxProvider.js";
+
 /** Result of executing a command inside a sandbox. */
 export interface ExecResult {
   readonly stdout: string;
@@ -268,54 +282,6 @@ export interface NoSandboxProvider {
   }) => Promise<NoSandboxHandle>;
 }
 
-// ---------- Branch strategy types ----------
-
-/** Head strategy: agent writes directly to host working directory. Bind-mount only. */
-export interface HeadBranchStrategy {
-  readonly type: "head";
-}
-
-/** Merge-to-head strategy: temp branch, merge back to HEAD, delete temp branch. */
-export interface MergeToHeadBranchStrategy {
-  readonly type: "merge-to-head";
-}
-
-/** Branch strategy: commits land on an explicit named branch. */
-export interface NamedBranchStrategy {
-  readonly type: "branch";
-  readonly branch: string;
-  /**
-   * Git ref to use as the starting point when creating a new branch.
-   * Only used when the branch doesn't already exist — ignored otherwise.
-   * Callers are responsible for ensuring the ref is current (e.g. `git fetch`).
-   * Defaults to `HEAD` when omitted.
-   */
-  readonly baseBranch?: string;
-}
-
-/** Branch strategy for bind-mount providers (all three variants). */
-export type BindMountBranchStrategy =
-  | HeadBranchStrategy
-  | MergeToHeadBranchStrategy
-  | NamedBranchStrategy;
-
-/** Branch strategy for isolated providers (no head — can't write to host). */
-export type IsolatedBranchStrategy =
-  | MergeToHeadBranchStrategy
-  | NamedBranchStrategy;
-
-/** Branch strategy for no-sandbox providers (all three — same as bind-mount). */
-export type NoSandboxBranchStrategy =
-  | HeadBranchStrategy
-  | MergeToHeadBranchStrategy
-  | NamedBranchStrategy;
-
-/** Union of all branch strategy variants. */
-export type BranchStrategy =
-  | BindMountBranchStrategy
-  | IsolatedBranchStrategy
-  | NoSandboxBranchStrategy;
-
 /**
  * A sandbox provider — the pluggable unit that `run()`, `interactive()`, and
  * `createSandbox()` accept. Tagged for internal dispatch: "bind-mount",
@@ -329,30 +295,3 @@ export type SandboxProvider =
 
 /** @deprecated Use `SandboxProvider` — it now includes `NoSandboxProvider`. */
 export type AnySandboxProvider = SandboxProvider;
-
-/**
- * Create a bind-mount sandbox provider from a config object.
- * The returned provider can be passed to `run()` or `createSandbox()`.
- */
-export const createBindMountSandboxProvider = (
-  config: BindMountSandboxProviderConfig,
-): BindMountSandboxProvider => ({
-  tag: "bind-mount",
-  name: config.name,
-  env: config.env ?? {},
-  sandboxHomedir: config.sandboxHomedir,
-  create: config.create,
-});
-
-/**
- * Create an isolated sandbox provider from a config object.
- * The returned provider can be passed to `run()` or `createSandbox()`.
- */
-export const createIsolatedSandboxProvider = (
-  config: IsolatedSandboxProviderConfig,
-): IsolatedSandboxProvider => ({
-  tag: "isolated",
-  name: config.name,
-  env: config.env ?? {},
-  create: config.create,
-});
