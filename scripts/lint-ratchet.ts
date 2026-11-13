@@ -29,6 +29,8 @@
 //   npm run lint          both ratchets
 //   npm run lint:shrink   lower the baselines to what is found (never raises
 //                         them); optional, the shrink workflow does it on main
+//   npm run lint:transfer carry the counts a move-only split moved; no rule's
+//                         total rises (`transfer`, lint-ratchet-core.ts)
 //   npm run lint:report   live totals, worst rules, worst files of each
 //                         ratchet, each beside its baseline (live / baseline);
 //                         builds dist/ first when stale, as `npm run lint` does
@@ -50,14 +52,17 @@ import {
 import type { Counts, Violation } from "./lint-ratchet-core.ts";
 import {
   baselineGrowth,
+  belowBaseline,
   compare,
   countViolations,
   driftReport,
   report,
   shrink,
+  transfer,
 } from "./lint-ratchet-core.ts";
 import {
   ROOT,
+  changedFiles,
   collectDepcruise,
   collectDirectives,
   collectEffect,
@@ -90,7 +95,7 @@ const RATCHETS: readonly Ratchet[] = [
       collectRawGitSpawns,
     ],
     grownTitle:
-      "New violations (file: rule baseline -> found). Fix them; never add a disable comment or raise the baseline. `npx oxlint <file>` shows where:",
+      "New violations (file: rule baseline -> found). Fix them; never add a disable comment or raise the baseline. `npx oxlint <file>` shows where. A move-only split that carried counts to a new file: `npm run lint:transfer`.",
   },
   {
     name: "test ratchet",
@@ -186,7 +191,11 @@ const check = async (
 ): Promise<string> => {
   const { grown } = compare(found, baseline);
   const base = await readBaseBaseline(ratchet.baselinePath);
-  const growth = base === undefined ? [] : baselineGrowth(baseline, base);
+  const changed = await changedFiles();
+  const growth =
+    base === undefined
+      ? []
+      : baselineGrowth(baseline, base, transfer(found, base, changed));
   return [
     section(ratchet.grownTitle, grown),
     section(
@@ -234,24 +243,19 @@ const printReport = async (): Promise<void> => {
   process.stdout.write(reports.join("\n"));
 };
 
-/** A note on counts below the baseline. They pass; the workflow lowers it. */
-const belowBaseline = (found: Counts, baseline: Counts): string => {
-  const { stale } = compare(found, baseline);
-  return stale.length === 0
-    ? ""
-    : ` ${String(stale.length)} file × rule counts are below the baseline; the lint-shrink workflow lowers it after merge (or run \`npm run lint:shrink\`).`;
-};
+/** Lowers (or, for a transfer, moves) a baseline before the check. */
+type Update = (found: Counts, baseline: Counts) => Promise<Counts>;
 
 /** Runs one ratchet; resolves to its failure text, or "" when it passes. */
 const verifyOne = async (
   ratchet: Ratchet,
-  shrinkFirst: boolean,
+  update?: Update,
 ): Promise<string> => {
   const found = await collect(ratchet);
-  if (shrinkFirst) {
+  if (update !== undefined) {
     await writeBaseline(
       ratchet.baselinePath,
-      shrink(found, await readBaseline(ratchet.baselinePath)),
+      await update(found, await readBaseline(ratchet.baselinePath)),
     );
   }
   const baseline = await readBaseline(ratchet.baselinePath);
@@ -266,9 +270,9 @@ const verifyOne = async (
   return "";
 };
 
-const verify = async (shrinkFirst: boolean): Promise<void> => {
+const verify = async (update?: Update): Promise<void> => {
   const results = await Promise.all(
-    RATCHETS.map(async (r) => verifyOne(r, shrinkFirst)),
+    RATCHETS.map(async (r) => verifyOne(r, update)),
   );
   const config = section("Config:", await checkOverrides());
   const failures = [
@@ -286,7 +290,9 @@ const verify = async (shrinkFirst: boolean): Promise<void> => {
 const MODES: Readonly<Record<string, () => Promise<void>>> = {
   "--init": init,
   "--report": printReport,
-  "--shrink": async () => verify(true),
+  "--shrink": async () => verify(async (found, b) => shrink(found, b)),
+  "--transfer": async () =>
+    verify(async (found, b) => transfer(found, b, await changedFiles())),
 };
 
-await (MODES[process.argv[2] ?? ""] ?? (async () => verify(false)))();
+await (MODES[process.argv[2] ?? ""] ?? (async () => verify()))();

@@ -106,12 +106,13 @@ export interface PodmanOptions {
    * Names are written without the `CAP_` prefix, as `podman run` accepts them,
    * and a misspelt name is a type error:
    *
-   * - `["NET_RAW"]` → `--cap-drop NET_RAW` (no raw sockets, so no `ping`)
-   * - `["NET_RAW", "MKNOD"]` → `--cap-drop NET_RAW --cap-drop MKNOD`
+   * - `["CHOWN"]` → `--cap-drop CHOWN` (no changing file ownership)
+   * - `["CHOWN", "SETUID"]` → `--cap-drop CHOWN --cap-drop SETUID`
    * - `["ALL"]` → `--cap-drop ALL` (drop every capability)
    *
    * When omitted, no `--cap-drop` flags are added and the container keeps
-   * Podman's default capability set.
+   * Podman's default capability set. Note that Podman's defaults already
+   * exclude `NET_RAW` and `MKNOD`, so dropping those has no effect.
    */
   readonly capDrop?: readonly LinuxCapability[];
   /**
