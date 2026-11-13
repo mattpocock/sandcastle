@@ -1,10 +1,8 @@
 import { Effect, Layer, Ref } from "effect";
 import { NodeFileSystem } from "@effect/platform-node";
-import { exec } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { SilentDisplay } from "./Display.js";
 import type { DisplayEntry } from "./Display.js";
@@ -19,8 +17,7 @@ import {
   SANDBOX_REPO_DIR,
   WorktreeDockerSandboxFactory,
 } from "./SandboxFactory.js";
-
-const execAsync = promisify(exec);
+import { execAsync } from "./testExec.js";
 
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });
