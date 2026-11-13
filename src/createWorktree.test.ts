@@ -131,6 +131,41 @@ describe("createWorktree", () => {
     }
   });
 
+  it("rejects a non-positive timeouts.worktreeMs before creating a worktree", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-test-"));
+    try {
+      await initRepo(hostDir);
+      await commitFile(hostDir, "init.txt", "init", "initial commit");
+      await expect(
+        createWorktree({
+          branchStrategy: { type: "merge-to-head" },
+          cwd: hostDir,
+          timeouts: { worktreeMs: 0 },
+        }),
+      ).rejects.toThrow("timeouts.worktreeMs must be a positive number");
+      expect(existsSync(join(hostDir, ".sandcastle", "worktrees"))).toBe(false);
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("passes timeouts.worktreeMs to worktree creation (#924)", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-test-"));
+    try {
+      await initRepo(hostDir);
+      await commitFile(hostDir, "init.txt", "init", "initial commit");
+      await expect(
+        createWorktree({
+          branchStrategy: { type: "merge-to-head" },
+          cwd: hostDir,
+          timeouts: { worktreeMs: 1 },
+        }),
+      ).rejects.toThrow("Worktree creation timed out after 1ms");
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
   it("creates a worktree with 'branch' strategy", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "ws-test-"));
     await initRepo(hostDir);

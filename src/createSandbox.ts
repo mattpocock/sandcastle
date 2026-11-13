@@ -1217,12 +1217,14 @@ const setUpWorktreeSandbox = (
   Effect.gen(function* () {
     const hostRepoDir = yield* resolveCwd(options.cwd);
 
-    yield* WorktreeManager.pruneStale(hostRepoDir).pipe(
+    const worktreeMs = options.timeouts?.worktreeMs;
+    yield* WorktreeManager.pruneStale(hostRepoDir, worktreeMs).pipe(
       Effect.catchAll(() => Effect.void),
     );
     const { path: worktreePath } = yield* WorktreeManager.create(hostRepoDir, {
       branch: options.branch,
       baseBranch: options.baseBranch,
+      timeoutMs: worktreeMs,
     });
 
     const prepared = yield* prepareSandboxOnWorktree(options, {

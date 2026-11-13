@@ -797,6 +797,32 @@ describe("WorktreeManager.create", () => {
   });
 });
 
+describe("WorktreeManager timeouts", () => {
+  // Regression test for #924: the 30s worktree timeout was hard-coded, so a
+  // slow-but-finite checkout could not be given more time.
+  it("create honours timeoutMs and reports it in the error", async () => {
+    const repoDir = await setupRepo();
+    const error = await runFail(create(repoDir, { timeoutMs: 1 }));
+    expect(error).toMatchObject({
+      _tag: "WorktreeTimeoutError",
+      message: "Worktree creation timed out after 1ms",
+      timeoutMs: 1,
+      operation: "create",
+    });
+  });
+
+  it("pruneStale honours timeoutMs and reports it in the error", async () => {
+    const repoDir = await setupRepo();
+    const error = await runFail(pruneStale(repoDir, 1));
+    expect(error).toMatchObject({
+      _tag: "WorktreeTimeoutError",
+      message: "Worktree prune timed out after 1ms",
+      timeoutMs: 1,
+      operation: "prune",
+    });
+  });
+});
+
 describe("WorktreeManager.remove", () => {
   it("removes the worktree directory", async () => {
     const repoDir = await setupRepo();
