@@ -279,3 +279,19 @@ export const collectSandcastleTypes = async (): Promise<Violation[]> => {
   ]);
   return tscErrors(out).filter((v) => v.file.startsWith(".sandcastle/"));
 };
+
+/** The files the branch touches since it left origin/main, uncommitted changes included; none where origin/main is not available. */
+export const changedFiles = async (): Promise<ReadonlySet<string>> => {
+  try {
+    const mergeBase = await run("git", ["merge-base", "HEAD", "origin/main"]);
+    const out = await run("git", [
+      "diff",
+      "--name-only",
+      "--no-renames",
+      mergeBase.trim(),
+    ]);
+    return new Set(out.split("\n").filter((f) => f !== ""));
+  } catch {
+    return new Set();
+  }
+};
