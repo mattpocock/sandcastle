@@ -5,15 +5,24 @@
  * Requires `@daytona/sdk` as a peer dependency.
  */
 
-import { readdir, stat } from "node:fs/promises";
-import { join, posix, relative } from "node:path";
 import { createIsolatedSandboxProvider } from "../SandboxProvider.js";
 import type {
   ExecResult,
   IsolatedSandboxHandle,
   IsolatedSandboxProvider,
 } from "../SandboxProvider.js";
-import { BoundedTail, MAX_TAIL_CHARS } from "../boundedTail.js";
+import { MAX_TAIL_CHARS } from "../boundedTail.js";
+import { copyInToSandbox, createWorkspaceFolder } from "./daytonaFiles.js";
+import {
+  prepareCommand,
+  probeSessionShell,
+  streamSessionLogs,
+} from "./daytonaSession.js";
+import type {
+  DaytonaExecContext,
+  DaytonaExecOptions,
+  SessionCommand,
+} from "./daytonaSession.js";
 
 import type {
   Daytona as DaytonaClient,
@@ -22,9 +31,6 @@ import type {
   CreateSandboxFromImageParams,
   CreateSandboxFromSnapshotParams,
 } from "@daytona/sdk";
-
-const shellEscape = (s: string): string =>
-  `'${s.replaceAll("'", String.raw`'\''`)}'`;
 
 /** Options for the Daytona sandbox provider. */
 export interface DaytonaOptions {
@@ -87,75 +93,6 @@ const toDaytonaConfig = (options?: DaytonaOptions): DaytonaConfig => {
   return config;
 };
 
-/** Options `exec` accepts. */
-interface DaytonaExecOptions {
-  readonly onLine?: (line: string) => void;
-  readonly cwd?: string;
-  readonly sudo?: boolean;
-  readonly stdin?: string;
-}
-
-/** The sandbox a handle drives, and the settings its `exec` needs. */
-interface DaytonaExecContext {
-  readonly sandbox: DaytonaSandbox;
-  readonly worktreePath: string;
-  readonly maxOutputTailChars: number;
-}
-
-/**
- * `command` ready to run: wrapped in `sudo sh -c` when asked, and with any
- * stdin uploaded to a file in the sandbox and redirected in.
- */
-const prepareCommand = async (
-  sandbox: DaytonaSandbox,
-  command: string,
-  opts: DaytonaExecOptions | undefined,
-): Promise<string> => {
-  // Wrap the whole command in `sh -c`, so sudo elevates all of it
-  // (`a && b`, not just `a`).
-  const effectiveCommand =
-    opts?.sudo === true ? `sudo sh -c ${shellEscape(command)}` : command;
-  if (opts?.stdin === undefined) {
-    return effectiveCommand;
-  }
-  // Daytona's exec APIs have no stdin channel: the command reads
-  // EOF. So write stdin to a file in the sandbox and redirect it in
-  // (a file, not an argument, keeps clear of the per-arg size
-  // limit). The redirect opens the file before the group runs, so
-  // the group can delete it straight away and leave nothing behind.
-  const stdinPath = `/tmp/sandcastle-stdin-${crypto.randomUUID()}`;
-  await sandbox.fs.uploadFile(Buffer.from(opts.stdin), stdinPath);
-  return `{ rm -f ${stdinPath}; ${effectiveCommand}\n} < ${stdinPath}`;
-};
-
-/** A running session command, and the file holding its shell's PID. */
-interface SessionCommand {
-  readonly sessionId: string;
-  readonly cmdId: string;
-  readonly pidPath: string;
-}
-
-/**
- * Whether a session's shell is still `alive`; if not, whether its command
- * `exited` with a recorded exit code or was `lost` without one.
- */
-const probeSessionShell = async (
-  sandbox: DaytonaSandbox,
-  { sessionId, cmdId, pidPath }: SessionCommand,
-): Promise<"alive" | "exited" | "lost"> => {
-  const alive = await sandbox.process
-    .executeCommand(`test ! -f ${pidPath} || kill -0 "$(cat ${pidPath})"`)
-    .then((r) => r.exitCode === 0)
-    .catch(() => true);
-  if (alive) {
-    return "alive";
-  }
-  const cmd = await sandbox.process
-    .getSessionCommand(sessionId, cmdId)
-    .catch(() => undefined);
-  return typeof cmd?.exitCode === "number" ? "exited" : "lost";
-};
-
 /**
  * Watches a session's shell: if it dies (killed, say) the log stream would
  * wait forever, so once it is gone `gone` settles: it fails if the command
@@ -205,43 +142,6 @@ const watchSessionShell = (
       clearTimeout(watchTimer);
     },
   };
-};
-
-/**
- * Streams a running session command's stdout to `onLine`, line by line,
- * keeping a bounded tail of stdout and stderr. `done` settles once the log
- * stream closes; `flush` then emits any final unterminated line.
- */
-const streamSessionLogs = (
-  { sandbox, maxOutputTailChars }: DaytonaExecContext,
-  { sessionId, cmdId }: { readonly sessionId: string; readonly cmdId: string },
-  onLine: (line: string) => void,
-) => {
-  const stdoutTail = new BoundedTail(maxOutputTailChars, "\n");
-  const stderrTail = new BoundedTail(maxOutputTailChars, "");
-  let partial = "";
-  const done = sandbox.process.getSessionCommandLogs(
-    sessionId,
-    cmdId,
-    (chunk: string) => {
-      const lines = (partial + chunk).split("\n");
-      partial = lines.pop() ?? "";
-      for (const line of lines) {
-        stdoutTail.push(line);
-        onLine(line);
-      }
-    },
-    (chunk: string) => {
-      stderrTail.push(chunk);
-    },
-  );
-  const flush = () => {
-    if (partial) {
-      stdoutTail.push(partial);
-      onLine(partial);
-    }
-  };
-  return { done, flush, stdoutTail, stderrTail };
 };
 
 /**
@@ -331,61 +231,6 @@ const daytonaExec = async (
     stderr: response.exitCode === 0 ? "" : response.result,
     exitCode: response.exitCode,
   };
-};
-
-/**
- * Creates the sandbox's worktree folder and returns its path. It is a
- * subdirectory of the work dir, not the work dir itself: sync-in clones into
- * `${worktreePath}_clone` and then replaces worktreePath, which needs a
- * parent the sandbox user can write. On the default snapshot the work dir is
- * the user's home (/home/daytona), and /home is root-owned.
- */
-const createWorkspaceFolder = async (
-  sandbox: DaytonaSandbox,
-): Promise<string> => {
-  const workDir =
-    (await sandbox.getWorkDir()) ??
-    (await sandbox.getUserHomeDir()) ??
-    "/home/daytona";
-  const worktreePath = posix.join(workDir, "workspace");
-  await sandbox.fs.createFolder(worktreePath, "755");
-  return worktreePath;
-};
-
-/** Every file under `dir`, recursively. */
-const walkFiles = async (dir: string): Promise<string[]> => {
-  const entries = await readdir(dir, { withFileTypes: true });
-  const nested = await Promise.all(
-    entries.map(async (entry) => {
-      const full = join(dir, entry.name);
-      return entry.isDirectory() ? walkFiles(full) : [full];
-    }),
-  );
-  return nested.flat();
-};
-
-/** Uploads a host file, or a directory's files, to `sandboxPath`. */
-const copyInToSandbox = async (
-  sandbox: DaytonaSandbox,
-  hostPath: string,
-  sandboxPath: string,
-): Promise<void> => {
-  const info = await stat(hostPath);
-  if (!info.isDirectory()) {
-    await sandbox.fs.uploadFile(hostPath, sandboxPath);
-    return;
-  }
-  const files = await walkFiles(hostPath);
-  if (files.length === 0) {
-    return;
-  }
-  // One batched request, as `uploadFile` itself is `uploadFiles` of one file.
-  await sandbox.fs.uploadFiles(
-    files.map((file) => ({
-      source: file,
-      destination: join(sandboxPath, relative(hostPath, file)),
-    })),
-  );
 };
 
 /**
