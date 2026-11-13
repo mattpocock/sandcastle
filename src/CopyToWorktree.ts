@@ -1,7 +1,6 @@
 import { execFile } from "node:child_process";
 import type { ChildProcess, ExecFileException } from "node:child_process";
-import { existsSync, statSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
 import { dirname, join, sep } from "node:path";
 import { Effect } from "effect";
 import {
@@ -62,7 +61,7 @@ const copyPath = (copy: {
   readonly dest: string;
   readonly relativePath: string;
 }): Effect.Effect<void, CopyToWorktreeError> =>
-  Effect.async<void, CopyToWorktreeError>((resume) => {
+  Effect.async((resume) => {
     const { cowFlags, cpSrc, dest, relativePath } = copy;
     // The cp currently running, killed if the copy is interrupted (e.g.
     // by the timeout in copyToWorktree) so it can't keep writing into the
@@ -118,11 +117,15 @@ export const copyToWorktree = (
     const cowFlags = getCopyOnWriteFlags(process.platform);
     for (const relativePath of paths) {
       const src = join(hostRepoDir, relativePath);
-      if (!existsSync(src)) {
+      // Missing (or unreadable) paths are skipped.
+      const srcStats = yield* Effect.promise(() =>
+        stat(src).catch(() => undefined),
+      );
+      if (srcStats === undefined) {
         continue;
       }
       const dest = join(worktreePath, relativePath);
-      const isDirectory = statSync(src).isDirectory();
+      const isDirectory = srcStats.isDirectory();
       // For a directory, create dest itself and copy its contents (`src/.`)
       // so an existing dest is merged into rather than nested (`cfg/cfg`).
       // For a file, create its parent dirs so a nested path can land.

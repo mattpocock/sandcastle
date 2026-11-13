@@ -6,7 +6,8 @@
  *   await run({ agent: claudeCode("claude-opus-4-8"), sandbox: vercel() });
  */
 
-import { execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { readFile, unlink, writeFile, mkdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -119,6 +120,16 @@ export interface VercelOptions {
    */
   readonly template?: string;
 
+  /**
+   * Whether Vercel keeps the sandbox's filesystem when it stops (default:
+   * `false`).
+   *
+   * Vercel snapshots a persistent sandbox each time it stops, and the snapshot
+   * counts against your snapshot storage. Sandcastle makes one sandbox per
+   * run, so it turns this off unless you set it.
+   */
+  readonly persistent?: boolean;
+
   /** Environment variables injected by this provider. Merged at launch time with env resolver and agent provider env. */
   readonly env?: Record<string, string>;
 
@@ -170,6 +181,8 @@ const toCreateParams = (
     runtime: o.runtime ?? o.template,
     // prefer explicit timeout, fall back to the timeoutMs alias
     timeout: o.timeout ?? o.timeoutMs,
+    // Vercel defaults to persistent, which snapshots the sandbox on stop().
+    persistent: o.persistent ?? false,
   };
   return {
     // An unset option (or an empty runtime) is left out for the SDK default.
@@ -183,6 +196,23 @@ const toCreateParams = (
   };
 };
 
+/** Pack `dir` into a gzipped tarball at `archive` on the host. */
+const tarDirectory = async (archive: string, dir: string): Promise<void> => {
+  const tar = spawn("tar", ["-czf", archive, "-C", dir, "."], {
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  let stderr = "";
+  tar.stderr.on("data", (chunk: Buffer) => {
+    stderr += chunk.toString();
+  });
+  await once(tar, "close");
+  if (tar.exitCode !== 0) {
+    throw new Error(
+      `tar exited with ${String(tar.exitCode)}: ${stderr.trim()}`,
+    );
+  }
+};
+
 /** Copy a host directory in as a tarball, unpacked at `sandboxPath`. */
 const copyDirIn = async (
   sandbox: SandboxInstance,
@@ -190,7 +220,7 @@ const copyDirIn = async (
   sandboxPath: string,
 ): Promise<void> => {
   const tarPath = join(tmpdir(), `sandcastle-copyin-${Date.now()}.tar.gz`);
-  execSync(`tar -czf "${tarPath}" -C "${hostPath}" .`);
+  await tarDirectory(tarPath, hostPath);
   try {
     const tarContent = await readFile(tarPath);
     const sandboxTarPath = `/tmp/sandcastle-copyin-${Date.now()}.tar.gz`;

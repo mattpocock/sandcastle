@@ -30,7 +30,7 @@ Before implementing, confirm the agent's CLI satisfies the must-haves below. If 
 For a JSON stream, we want to extract:
 
 - **Assistant text** — the agent's natural-language output, ideally as deltas.
-- **Tool calls** — name + a single display arg (we currently show `Bash`, `WebSearch`, `WebFetch`, `Agent`; see `TOOL_ARG_FIELDS`).
+- **Tool calls** — name + a single display arg (we currently show `Bash`, `WebSearch`, `WebFetch`, `Agent`, `Skill`; see `TOOL_ARG_FIELDS`).
 - **Final result** — the agent's last message, used for orchestration.
 - **Errors** — note whether the CLI emits errors on stdout vs. stderr. Codex and Pi emit auth/rate-limit errors as JSON events on stdout; we capture those as `result` events so they surface to the user.
 - **Session ID.** A stable per-run identifier emitted in the stream output and accepted back by a resume CLI flag. Required — see [Resume support](#resume-support-required) below.

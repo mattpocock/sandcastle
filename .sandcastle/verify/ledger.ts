@@ -180,7 +180,10 @@ const sampleContents = (path: string): string[] => {
     } catch {
       return;
     }
-    if (st.isFile()) return read(p);
+    if (st.isFile()) {
+      read(p);
+      return;
+    }
     if (!st.isDirectory() || depth > 2) return;
     try {
       for (const n of readdirSync(p)) walk(join(p, n), depth + 1);

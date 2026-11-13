@@ -11,8 +11,8 @@
  *                               (e.g. "origin/main" or "origin/<parent>").
  *   FACTORY_TASK_ID             Stable task identifier from the plan.
  *   FACTORY_TASK_DESCRIPTION    Human-readable task description.
- *   FACTORY_TASK_ISSUE_NUMBER   (optional) GitHub issue number, if the task
- *                               is linked to one. Absent otherwise.
+ *   FACTORY_TASK_ISSUE_NUMBER   GitHub issue number the task is linked to.
+ *                               Required: both prompts fill {{ISSUE_NUMBER}}.
  *
  * Exit 0 on success, non-zero on failure. Stdout/stderr are inherited by
  * the daemon. Commits landed on FACTORY_BRANCH will be pushed and opened
@@ -21,11 +21,20 @@
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 
-const branch = process.env["FACTORY_BRANCH"]!;
+/** Read an env var the daemon always sets; fail fast if it is missing. */
+const requireEnv = (name: string): string => {
+  const value = process.env[name];
+  if (value === undefined) {
+    throw new Error(`implement-task: ${name} is not set`);
+  }
+  return value;
+};
+
+const branch = requireEnv("FACTORY_BRANCH");
 const base = process.env["FACTORY_BASE"];
 const repoPath = process.env["FACTORY_REPO_PATH"];
-const taskDescription = process.env["FACTORY_TASK_DESCRIPTION"]!;
-const issueNumber = process.env["FACTORY_TASK_ISSUE_NUMBER"]!;
+const taskDescription = requireEnv("FACTORY_TASK_DESCRIPTION");
+const issueNumber = requireEnv("FACTORY_TASK_ISSUE_NUMBER");
 
 await using worktree = await sandcastle.createWorktree({
   cwd: repoPath,
@@ -51,7 +60,7 @@ const result = await sandbox.run({
   agent: sandcastle.claudeCode("claude-opus-4-8"),
   promptFile: "./.sandcastle/implement-prompt.md",
   promptArgs: {
-    ISSUE_NUMBER: String(issueNumber),
+    ISSUE_NUMBER: issueNumber,
     ISSUE_TITLE: taskDescription,
     BRANCH: branch,
   },
@@ -63,7 +72,7 @@ if (result.commits.length > 0) {
     agent: sandcastle.claudeCode("claude-opus-4-8"),
     promptFile: "./.sandcastle/review-prompt.md",
     promptArgs: {
-      ISSUE_NUMBER: String(issueNumber),
+      ISSUE_NUMBER: issueNumber,
       ISSUE_TITLE: taskDescription,
       BRANCH: branch,
     },
