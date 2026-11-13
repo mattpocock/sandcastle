@@ -10,10 +10,11 @@ import type {
   InteractiveExecOptions,
 } from "./SandboxProvider.js";
 import { claudeCode } from "./AgentProvider.js";
+import type * as ClackPrompts from "@clack/prompts";
 
 const mockText = vi.fn<(...args: unknown[]) => unknown>();
 vi.mock("@clack/prompts", async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>;
+  const actual = await importOriginal<typeof ClackPrompts>();
   return {
     ...actual,
     text: (...args: unknown[]) => mockText(...args),
