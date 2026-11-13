@@ -35,7 +35,9 @@ const fsCall = <A>(
 
 const realPath = (args: readonly string[], p: string) =>
   fsCall<string>(args, `cannot resolve ${p}`, (done) => {
-    realpath(p, done);
+    // Ordinary realpath preserves Windows 8.3 spelling; git uses long paths.
+    const canonical = process.platform === "win32" ? realpath.native : realpath;
+    canonical(p, done);
   });
 
 const readText = (args: readonly string[], p: string) =>
