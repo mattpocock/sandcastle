@@ -39,7 +39,7 @@
 // See .sandcastle/CODING_STANDARDS.md, "The lint ratchet" and "Where tests
 // live".
 
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import {
@@ -56,11 +56,16 @@ import {
   compare,
   countViolations,
   driftReport,
-  missingBaseBaseline,
   report,
   shrink,
   transfer,
 } from "./lint-ratchet-core.ts";
+import {
+  baselineExists,
+  readBaseBaseline,
+  readBaseline,
+  writeBaseline,
+} from "./lint-ratchet-baseline.ts";
 import {
   ROOT,
   changedFiles,
@@ -73,7 +78,6 @@ import {
   collectRawGitSpawns,
   collectSandcastleTypes,
   collectTestTypeAssertions,
-  run,
 } from "./lint-ratchet-sources.ts";
 
 interface Ratchet {
@@ -115,39 +119,6 @@ const RATCHETS: readonly Ratchet[] = [
 ];
 
 const REPORT_LIMIT = 10;
-
-const Baseline = z.record(z.string(), z.record(z.string(), z.number()));
-
-const readBaseline = async (baselinePath: string): Promise<Counts> => {
-  const source = await readFile(path.join(ROOT, baselinePath), "utf8");
-  return Baseline.parse(JSON.parse(source));
-};
-
-const writeBaseline = async (
-  baselinePath: string,
-  counts: Counts,
-): Promise<void> => {
-  await writeFile(
-    path.join(ROOT, baselinePath),
-    `${JSON.stringify(counts, null, 2)}\n`,
-  );
-};
-
-/** The baseline on origin/main, or undefined where it is not available. In CI it must be: see missingBaseBaseline. */
-const readBaseBaseline = async (
-  baselinePath: string,
-): Promise<Counts | undefined> => {
-  try {
-    const out = await run("git", ["show", `origin/main:${baselinePath}`]);
-    return Baseline.parse(JSON.parse(out));
-  } catch (error) {
-    const missing = missingBaseBaseline(baselinePath, process.env["CI"]);
-    if (missing !== undefined) {
-      throw new Error(missing, { cause: error });
-    }
-    return undefined;
-  }
-};
 
 const OxlintConfig = z.object({
   overrides: z.array(z.object({ files: z.array(z.string()) })).default([]),
@@ -208,15 +179,6 @@ const check = async (
       growth,
     ),
   ].join("");
-};
-
-const baselineExists = async (baselinePath: string): Promise<boolean> => {
-  try {
-    await readFile(path.join(ROOT, baselinePath), "utf8");
-    return true;
-  } catch {
-    return false;
-  }
 };
 
 /** Writes each missing first baseline. Never touches one that exists: it only shrinks. */

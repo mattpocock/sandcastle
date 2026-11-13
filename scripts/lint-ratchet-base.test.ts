@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { missingBaseBaseline } from "./lint-ratchet-core.ts";
+import { missingBaseBaseline } from "./lint-ratchet-baseline.ts";
 
 describe("missingBaseBaseline", () => {
   it("fails in CI, naming the baseline and the checkout that fixes it", () => {
