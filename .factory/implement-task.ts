@@ -11,8 +11,8 @@
  *                               (e.g. "origin/main" or "origin/<parent>").
  *   FACTORY_TASK_ID             Stable task identifier from the plan.
  *   FACTORY_TASK_DESCRIPTION    Human-readable task description.
- *   FACTORY_TASK_ISSUE_NUMBER   (optional) GitHub issue number, if the task
- *                               is linked to one. Absent otherwise.
+ *   FACTORY_TASK_ISSUE_NUMBER   GitHub issue number the task is linked to.
+ *                               Required: both prompts fill {{ISSUE_NUMBER}}.
  *
  * Exit 0 on success, non-zero on failure. Stdout/stderr are inherited by
  * the daemon. Commits landed on FACTORY_BRANCH will be pushed and opened
@@ -34,7 +34,7 @@ const branch = requireEnv("FACTORY_BRANCH");
 const base = process.env["FACTORY_BASE"];
 const repoPath = process.env["FACTORY_REPO_PATH"];
 const taskDescription = requireEnv("FACTORY_TASK_DESCRIPTION");
-const issueNumber = process.env["FACTORY_TASK_ISSUE_NUMBER"]!;
+const issueNumber = requireEnv("FACTORY_TASK_ISSUE_NUMBER");
 
 await using worktree = await sandcastle.createWorktree({
   cwd: repoPath,
