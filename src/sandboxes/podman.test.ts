@@ -1,19 +1,17 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, describe, expect, it, vi } from "vitest";
+import type * as ChildProcessModule from "node:child_process";
+import { ChildProcess, execFile } from "node:child_process";
+import { podman } from "./podman.js";
 
 vi.mock("node:child_process", async () => {
   const actual =
-    await vi.importActual<typeof import("node:child_process")>(
-      "node:child_process",
-    );
+    await vi.importActual<typeof ChildProcessModule>("node:child_process");
 
   return {
     ...actual,
-    execFile: vi.fn(),
+    execFile: vi.fn<typeof actual.execFile>(),
   };
 });
-
-import { execFile } from "node:child_process";
-import { podman } from "./podman.js";
 
 // What's left of the podman() unit tests. Everything else moved to real
 // containers in tests/local/ (`npm run test:local`) and to
@@ -23,6 +21,26 @@ import { podman } from "./podman.js";
 // which neither CI nor the local suite's Linux hosts have.
 
 const mockExecFile = vi.mocked(execFile);
+
+type ExecFileCallback = (
+  error: Error | null,
+  stdout: string,
+  stderr: string,
+) => void;
+
+const isExecFileCallback = (value: unknown): value is ExecFileCallback =>
+  typeof value === "function";
+
+/** Answers an `execFile(command, args, callback)` call: the callback comes last. */
+const answerExecFile = (args: unknown[], stdout: string): ChildProcess => {
+  const callback = args.at(-1);
+  assert(
+    isExecFileCallback(callback),
+    "execFile was called without a callback",
+  );
+  callback(null, stdout, "");
+  return new ChildProcess();
+};
 
 afterEach(() => {
   mockExecFile.mockReset();
@@ -35,10 +53,9 @@ describe("podman()", () => {
 
     try {
       // podman machine list returns no running machines
-      mockExecFile.mockImplementationOnce((_command, _args, callback: any) => {
-        callback(null, "[]", "");
-        return undefined as any;
-      });
+      mockExecFile.mockImplementationOnce((...args: unknown[]) =>
+        answerExecFile(args, "[]"),
+      );
 
       const provider = podman();
 
