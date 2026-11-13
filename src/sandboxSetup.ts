@@ -275,9 +275,10 @@ export const runOnSandboxReadyHooks = (
         runHostHook(hook, hooks.hostWorktreePath, hooks.signal),
       ),
     ];
-    yield* (
+    // Typed so the ternary's union doesn't widen to unknown through .pipe.
+    const runAll: Effect.Effect<unknown, ExecError | HookTimeoutError> =
       all.length > 0
         ? Effect.all(all, { concurrency: "unbounded" })
-        : Effect.void
-    ).pipe(Effect.ensuring(Effect.sync(() => cleanup?.())));
+        : Effect.void;
+    yield* runAll.pipe(Effect.ensuring(Effect.sync(() => cleanup?.())));
   });
