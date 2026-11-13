@@ -6,6 +6,7 @@ import {
   driftReport,
   matchObjectUndefinedCount,
   shrink,
+  transfer,
   tscErrors,
 } from "./lint-ratchet-core.ts";
 
@@ -66,6 +67,27 @@ describe("lint ratchet", () => {
     ).toStrictEqual(["b.ts: x 0 -> 1"]);
   });
 
+  it("passes a baseline grown by a transfer, and still fails a raised one", () => {
+    const base = { "a.ts": { x: 4 } };
+    const found = { "a.ts": { x: 1 }, "b.ts": { x: 3 } };
+    const moved = transfer(found, base, new Set(["a.ts"]));
+    expect(baselineGrowth(moved, base, moved)).toStrictEqual([]);
+    // Raises b.ts without lowering a.ts: x's total would rise from 4 to 7.
+    const raised = { "a.ts": { x: 4 }, "b.ts": { x: 3 } };
+    expect(baselineGrowth(raised, base, moved)).toStrictEqual([
+      "b.ts: x 0 -> 3",
+    ]);
+  });
+
+  it("fails a grown baseline whose rule is not a transfer", () => {
+    const base = { "a.ts": { x: 1 } };
+    const found = { "a.ts": { x: 1 }, "b.ts": { x: 1 } };
+    const allowed = transfer(found, base, new Set(["a.ts"]));
+    expect(baselineGrowth(found, base, allowed)).toStrictEqual([
+      "b.ts: x 0 -> 1",
+    ]);
+  });
+
   it("counts toMatchObject calls that give a key the value undefined", () => {
     // Built from parts so this file does not trip the check it tests.
     const call = "toMatchObject";
@@ -124,5 +146,57 @@ describe("driftReport", () => {
       "Top rules (live / baseline):",
       "Top files (live / baseline):",
     ]);
+  });
+});
+
+describe("transfer", () => {
+  it("carries a rule's counts from the file they left to the new file", () => {
+    expect(
+      transfer(
+        { "a.ts": { x: 1 }, "b.ts": { x: 4 } },
+        { "a.ts": { x: 5, y: 2 } },
+        new Set(["a.ts"]),
+      ),
+    ).toStrictEqual({ "a.ts": { x: 1, y: 2 }, "b.ts": { x: 4 } });
+  });
+
+  it("carries nothing for a rule whose total rises: a new violation hidden as a transfer", () => {
+    const baseline = { "a.ts": { x: 5 } };
+    const found = { "a.ts": { x: 1 }, "b.ts": { x: 5 } };
+    const moved = transfer(found, baseline, new Set(["a.ts"]));
+    expect(moved).toStrictEqual(baseline);
+    expect(compare(found, moved).grown).toStrictEqual(["b.ts: x 0 -> 5"]);
+  });
+
+  it("offsets one rule only with falls in that rule", () => {
+    const baseline = { "a.ts": { x: 3, y: 3 } };
+    const found = { "a.ts": { x: 3, y: 0 }, "b.ts": { x: 3 } };
+    expect(transfer(found, baseline, new Set(["a.ts"]))).toStrictEqual(
+      baseline,
+    );
+  });
+
+  it("offsets only with falls in files the branch touches", () => {
+    const baseline = { "a.ts": { x: 3 }, "stale.ts": { x: 3 } };
+    const found = { "a.ts": { x: 3 }, "stale.ts": { x: 0 }, "b.ts": { x: 3 } };
+    expect(transfer(found, baseline, new Set(["a.ts"]))).toStrictEqual(
+      baseline,
+    );
+  });
+
+  it("leaves rules with no rise alone, stale counts included", () => {
+    const baseline = { "a.ts": { x: 4, y: 2 } };
+    const found = { "a.ts": { x: 0, y: 1 }, "b.ts": { x: 4 } };
+    expect(transfer(found, baseline, new Set(["a.ts"]))).toStrictEqual({
+      "a.ts": { y: 2 },
+      "b.ts": { x: 4 },
+    });
+  });
+
+  it("changes nothing when nothing rose", () => {
+    const baseline = { "a.ts": { x: 4 } };
+    expect(
+      transfer({ "a.ts": { x: 2 } }, baseline, new Set(["a.ts"])),
+    ).toStrictEqual(baseline);
   });
 });
