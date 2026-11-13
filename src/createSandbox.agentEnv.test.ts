@@ -1,4 +1,4 @@
-import { exec, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,18 +9,7 @@ import { createSandbox } from "./createSandbox.js";
 import { createWorktree } from "./createWorktree.js";
 import { createBindMountSandboxProvider } from "./SandboxProvider.js";
 import type { ExecResult } from "./SandboxProvider.js";
-
-/** Runs a shell command; rejects on a non-zero exit, as `promisify(exec)` does. */
-const execAsync = (command: string, options: { cwd: string }) =>
-  new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-    exec(command, options, (error, stdout, stderr) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-      resolve({ stdout, stderr });
-    });
-  });
+import { execAsync } from "./testExec.js";
 
 /**
  * Regression tests for agent-factory env (`claudeCode(m, { env })`) under the
