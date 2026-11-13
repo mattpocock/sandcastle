@@ -190,15 +190,6 @@
   "src/sandboxes/no-sandbox.ts": {
     "promise(avoid-new)": 1
   },
-  "src/sandboxes/podman.test.ts": {
-    "import(first)": 2,
-    "typescript(consistent-type-imports)": 1,
-    "typescript(no-explicit-any)": 2,
-    "typescript(no-unsafe-call)": 1,
-    "typescript(no-unsafe-return)": 1,
-    "typescript(no-unsafe-type-assertion)": 1,
-    "vitest(require-mock-type-parameters)": 1
-  },
   "src/sandboxes/podman.ts": {
     "eslint(complexity)": 1,
     "eslint(max-lines-per-function)": 2,
