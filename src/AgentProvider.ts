@@ -102,6 +102,7 @@ const TOOL_ARG_FIELDS: Record<string, string> = {
   WebSearch: "query",
   WebFetch: "url",
   Agent: "description",
+  Skill: "skill",
 };
 
 /** `value.message` when `value` is an object whose `message` is a string. */
@@ -862,6 +863,35 @@ const parsePiAgentEnd = (
   return texts.length > 0 ? [{ type: "result", result: texts.join("") }] : [];
 };
 
+/**
+ * Map one pi message's `usage` (`input`, `output`, `cacheRead` and
+ * `cacheWrite` are separate buckets) to IterationUsage.
+ */
+const parsePiUsage = (u: unknown): IterationUsage | undefined => {
+  if (typeof u !== "object" || u === null) {
+    return undefined;
+  }
+  const field = (key: string): unknown => Reflect.get(u, key);
+  const input = field("input");
+  const output = field("output");
+  const cacheRead = field("cacheRead");
+  const cacheWrite = field("cacheWrite");
+  if (
+    typeof input !== "number" ||
+    typeof output !== "number" ||
+    typeof cacheRead !== "number" ||
+    typeof cacheWrite !== "number"
+  ) {
+    return undefined;
+  }
+  return {
+    inputTokens: input,
+    cacheCreationInputTokens: cacheWrite,
+    cacheReadInputTokens: cacheRead,
+    outputTokens: output,
+  };
+};
+
 const parsePiStreamLine = (line: string): ParsedStreamEvent[] => {
   if (!line.startsWith("{")) return [];
   try {
@@ -874,10 +904,15 @@ const parsePiStreamLine = (line: string): ParsedStreamEvent[] => {
       return [{ type: "session_id", sessionId: obj.id }];
     }
     // Each assistant message_end is one model call with its own usage. Not
-    // agent_end, whose messages[] repeat every call's usage.
+    // agent_end, whose messages[] repeat every call's usage. The Orchestrator
+    // keeps the last event of each kind, so both report the last call.
     if (obj.type === "message_end" && obj.message?.role === "assistant") {
       const u = obj.message.usage;
-      return contextWindowEvent(u?.input, u?.cacheRead, u?.cacheWrite);
+      const usage = parsePiUsage(u);
+      return [
+        ...contextWindowEvent(u?.input, u?.cacheRead, u?.cacheWrite),
+        ...(usage ? [{ type: "usage" as const, usage }] : []),
+      ];
     }
     if (obj.type === "message_update" && obj.assistantMessageEvent) {
       const evt = obj.assistantMessageEvent as {

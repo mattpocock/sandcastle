@@ -1,10 +1,8 @@
 import { Effect, Layer, Ref } from "effect";
 import { NodeFileSystem } from "@effect/platform-node";
-import { exec } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { SilentDisplay } from "./Display.js";
 import type { DisplayEntry } from "./Display.js";
@@ -19,8 +17,7 @@ import {
   SANDBOX_REPO_DIR,
   WorktreeDockerSandboxFactory,
 } from "./SandboxFactory.js";
-
-const execAsync = promisify(exec);
+import { execAsync } from "./testExec.js";
 
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });
@@ -30,9 +27,11 @@ const initRepo = async (dir: string) => {
 
 const commitFile = async (
   dir: string,
-  name: string,
-  content: string,
-  message: string,
+  {
+    name,
+    content,
+    message,
+  }: { name: string; content: string; message: string },
 ) => {
   await writeFile(join(dir, name), content);
   await execAsync(`git add "${name}"`, { cwd: dir });
@@ -68,12 +67,20 @@ describe("WorktreeDockerSandboxFactory — baseBranch (real git)", () => {
     const hostRepoDir = await mkdtemp(join(tmpdir(), "sandcastle-bb-test-"));
     tempDirs.push(hostRepoDir);
     await initRepo(hostRepoDir);
-    await commitFile(hostRepoDir, "init.txt", "init", "initial commit");
+    await commitFile(hostRepoDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     const { stdout: baseSha } = await execAsync("git rev-parse HEAD", {
       cwd: hostRepoDir,
     });
-    await commitFile(hostRepoDir, "second.txt", "second", "second commit");
+    await commitFile(hostRepoDir, {
+      name: "second.txt",
+      content: "second",
+      message: "second commit",
+    });
 
     const childBranch = "sandcastle/child-from-base";
     const layer = Layer.provide(
