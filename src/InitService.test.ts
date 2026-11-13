@@ -2788,4 +2788,10 @@ describe("beadsVersionWarning", () => {
   it("warns when bd isn't on the host", () => {
     expect(beadsVersionWarning()).toContain("bd isn't on your PATH");
   });
+
+  it("warns when bd fails on the host, reporting its stderr", () => {
+    const warning = beadsVersionWarning({ failed: "database schema corrupt" });
+    expect(warning).toContain("The host's bd failed: database schema corrupt");
+    expect(warning).not.toContain("isn't on your PATH");
+  });
 });
