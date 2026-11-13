@@ -1,7 +1,4 @@
 {
-  ".factory/implement-task.ts": {
-    "typescript(no-non-null-assertion)": 1
-  },
   ".sandcastle/agent-workflows/explore/apply.ts": {
     "unicorn(no-array-sort)": 1
   },
@@ -19,9 +16,6 @@
     "eslint(max-lines)": 1,
     "promise(avoid-new)": 1,
     "unicorn(no-array-sort)": 1
-  },
-  "lint-staged.config.mjs": {
-    "import(no-anonymous-default-export)": 1
   },
   "src/AgentProvider.test.ts": {
     "typescript(no-unnecessary-type-conversion)": 2,
@@ -52,8 +46,7 @@
     "node(no-sync)": 2
   },
   "src/CopyToWorktree.ts": {
-    "eslint(max-params)": 1,
-    "node(no-sync)": 2
+    "eslint(max-params)": 1
   },
   "src/createSandbox-windowsMounts.test.ts": {
     "eslint(max-params)": 1,
@@ -100,10 +93,6 @@
   "src/EnvResolver.ts": {
     "effect/processEnvInEffect": 1
   },
-  "src/ErrorHandler.ts": {
-    "effect/unsafeEffectTypeAssertion": 1,
-    "typescript(no-unsafe-type-assertion)": 1
-  },
   "src/extractStructuredOutput.ts": {
     "effect/asyncFunction": 2
   },
@@ -130,10 +119,6 @@
     "unicorn(filename-case)": 1,
     "vitest(require-mock-type-parameters)": 1
   },
-  "src/interactive.test.ts": {
-    "eslint(require-unicode-regexp)": 3,
-    "unicorn(prefer-at)": 2
-  },
   "src/interactive.ts": {
     "effect/globalErrorInEffectFailure": 1,
     "eslint(complexity)": 1,
@@ -144,15 +129,8 @@
     "import(max-dependencies)": 1,
     "typescript(no-unsafe-type-assertion)": 1
   },
-  "src/interactiveArgCollection.test.ts": {
-    "typescript(no-unsafe-type-assertion)": 1
-  },
-  "src/mountUtils.test.ts": {
-    "vitest(prefer-strict-boolean-matchers)": 1
-  },
   "src/mountUtils.ts": {
     "effect/asyncFunction": 2,
-    "eslint(max-lines)": 1,
     "eslint(max-params)": 1,
     "node(no-sync)": 1,
     "typescript(method-signature-style)": 1
@@ -212,8 +190,6 @@
   },
   "src/sandboxes/daytona.ts": {
     "effect/globalTimers": 1,
-    "eslint(max-lines)": 1,
-    "eslint(no-await-in-loop)": 2,
     "promise(avoid-new)": 1
   },
   "src/sandboxes/docker.ts": {
@@ -231,15 +207,6 @@
     "promise(avoid-new)": 2,
     "typescript(no-unsafe-type-assertion)": 1
   },
-  "src/sandboxes/podman.test.ts": {
-    "import(first)": 2,
-    "typescript(consistent-type-imports)": 1,
-    "typescript(no-explicit-any)": 2,
-    "typescript(no-unsafe-call)": 1,
-    "typescript(no-unsafe-return)": 1,
-    "typescript(no-unsafe-type-assertion)": 1,
-    "vitest(require-mock-type-parameters)": 1
-  },
   "src/sandboxes/podman.ts": {
     "eslint(complexity)": 1,
     "eslint(max-lines-per-function)": 2,
@@ -255,8 +222,7 @@
   },
   "src/sandboxes/vercel.ts": {
     "effect/globalDate": 2,
-    "eslint(max-lines)": 1,
-    "node(no-sync)": 1
+    "eslint(max-lines)": 1
   },
   "src/SandboxFactory.test.ts": {
     "import(max-dependencies)": 1,
@@ -277,7 +243,6 @@
     "node(no-sync)": 1
   },
   "src/SandboxProvider.ts": {
-    "eslint(max-lines)": 1,
     "typescript(method-signature-style)": 13
   },
   "src/SessionStore.test.ts": {
@@ -294,18 +259,12 @@
     "effect/anyUnknownInErrorContext": 1,
     "import(max-dependencies)": 1
   },
-  "src/startSandbox.ts": {
-    "node(no-sync)": 1
-  },
   "src/syncOut.test.ts": {
     "import(max-dependencies)": 1
   },
   "src/syncOut.ts": {
     "effect/asyncFunction": 2,
-    "eslint(max-lines)": 1,
-    "eslint(no-await-in-loop)": 3,
-    "node(no-sync)": 1,
-    "unicorn(prefer-number-coercion)": 1
+    "eslint(no-await-in-loop)": 3
   },
   "src/syncOutSave.ts": {
     "effect/asyncFunction": 3
