@@ -1,7 +1,6 @@
 import { Effect } from "effect";
 import type { FileSystem } from "@effect/platform";
 import { NodeFileSystem } from "@effect/platform-node";
-import { exec } from "node:child_process";
 import {
   chmod,
   mkdir,
@@ -14,7 +13,6 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
-import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   create,
@@ -25,8 +23,7 @@ import {
   remove,
   sanitizeName,
 } from "./WorktreeManager.js";
-
-const execAsync = promisify(exec);
+import { execAsync } from "./testExec.js";
 
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });
