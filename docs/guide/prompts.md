@@ -84,6 +84,8 @@ Work on issue #{{ISSUE_NUMBER}} (priority: {{PRIORITY}}).
 !`gh issue view {{ISSUE_NUMBER}} --json body -q .body`
 ```
 
+Arguments substituted inside a `` !`command` `` expression are automatically shell-quoted, so each always reaches the command as a single argument. Substitution outside shell expressions is unchanged.
+
 A `{{KEY}}` placeholder with no matching prompt argument is an error. Unused prompt arguments produce a warning.
 
 `` !`command` `` expansion only runs on shell blocks written in the prompt file itself. Any `` !`…` `` pattern that appears inside an argument value is treated as inert text — it won't be executed against the host shell. This makes it safe to pass user-authored content (issue titles, PR descriptions, docs excerpts) through `promptArgs`.
