@@ -301,11 +301,14 @@
     "import(max-dependencies)": 1
   },
   "src/syncOut.ts": {
-    "effect/asyncFunction": 5,
+    "effect/asyncFunction": 2,
     "eslint(max-lines)": 1,
     "eslint(no-await-in-loop)": 3,
     "node(no-sync)": 1,
     "unicorn(prefer-number-coercion)": 1
+  },
+  "src/syncOutSave.ts": {
+    "effect/asyncFunction": 3
   },
   "src/templates/parallel-planner-with-review/main.mts": {
     "eslint(prefer-destructuring)": 1
