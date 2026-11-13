@@ -1,11 +1,9 @@
 import { Effect, Exit, Layer, Ref } from "effect";
 import { NodeFileSystem } from "@effect/platform-node";
-import { exec } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, readdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import {
   assert,
   describe,
@@ -40,8 +38,7 @@ import {
   SANDBOX_REPO_DIR,
 } from "./SandboxFactory.js";
 import type { SandboxInfo } from "./SandboxFactory.js";
-
-const execAsync = promisify(exec);
+import { execAsync } from "./testExec.js";
 
 const MERGE_TO_HEAD_STRATEGY: BranchStrategy = { type: "merge-to-head" };
 const HEAD_STRATEGY: BranchStrategy = { type: "head" };
