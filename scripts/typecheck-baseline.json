@@ -4,8 +4,5 @@
   },
   ".sandcastle/verify/lib.ts": {
     "tsc/TS2345": 1
-  },
-  ".sandcastle/verify/verify.ts": {
-    "tsc/TS2345": 1
   }
 }

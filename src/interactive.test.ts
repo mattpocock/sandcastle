@@ -44,7 +44,7 @@ describe("buildInteractiveArgs with prompts", () => {
   it("claudeCode omits prompt when empty string", () => {
     const provider = claudeCode("claude-opus-4-8");
     const args = buildInteractiveArgs(provider, "");
-    expect(args[args.length - 1]).not.toBe("");
+    expect(args.at(-1)).not.toBe("");
     expect(args).toContain("--model");
   });
 
@@ -211,7 +211,7 @@ describe("interactive()", () => {
     });
 
     expect(result.commits).toHaveLength(1);
-    expect(result.commits[0]?.sha).toMatch(/^[0-9a-f]{40}$/);
+    expect(result.commits[0]?.sha).toMatch(/^[0-9a-f]{40}$/u);
   });
 
   it("returns non-zero exitCode from the interactive session", async () => {
@@ -489,7 +489,7 @@ describe("interactive()", () => {
     const promptArg = receivedArgs.at(-1);
     expect(promptArg).not.toContain("!`");
     // The expanded value should be a branch name (from the sandbox worktree)
-    expect(promptArg).toMatch(/Current branch: .+/);
+    expect(promptArg).toMatch(/Current branch: .+/u);
   });
 
   it("throws when built-in prompt arg is overridden", async () => {
@@ -576,7 +576,7 @@ describe("interactive()", () => {
     let actualBranch: string | undefined;
 
     const provider = makeTestProvider(async (args, opts) => {
-      promptArg = args[args.length - 1];
+      promptArg = args.at(-1);
       assert.isDefined(opts.cwd);
       actualBranch = execSync("git rev-parse --abbrev-ref HEAD", {
         cwd: opts.cwd,
@@ -592,7 +592,7 @@ describe("interactive()", () => {
       branchStrategy: { type: "merge-to-head" },
     });
 
-    expect(actualBranch).toMatch(/^sandcastle\//);
+    expect(actualBranch).toMatch(/^sandcastle\//u);
     expect(promptArg).toBe(`SOURCE=${actualBranch}`);
   });
 
