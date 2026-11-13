@@ -211,7 +211,7 @@ const syncToHost = (
 
 /**
  * Temp branch mode: merges the temp branch into the host's branch and
- * returns the commits now on it.
+ * returns the commits made by the agent on the temp branch.
  */
 const mergeBack = (
   run: LifecycleRun,
@@ -223,13 +223,12 @@ const mergeBack = (
 ): Effect.Effect<{ sha: string }[], SandboxError, Display> =>
   Effect.gen(function* () {
     const { baseHead } = branches;
-    // Check if there are any new commits on the temp branch
-    const hasNewCommits = yield* hostGit(
-      ["rev-list", `${baseHead}..HEAD`, "--count"],
+    // Collect the agent's commits from the temp branch before merging,
+    // so host-branch drift (and the merge commit itself) does not bleed into the result.
+    const commits = yield* collectCommitsLogged(
+      `${baseHead}..HEAD`,
       run.hostSideWorktreePath,
-    ).pipe(
-      Effect.map((stdout) => Number(stdout.trim()) > 0),
-      Effect.orElseSucceed(() => false),
+      run.commitCollectionTimeoutMs,
     );
     yield* mergeTempBranch({
       sandbox: run.sandbox,
@@ -237,16 +236,11 @@ const mergeBack = (
       hostRepoDir: run.options.hostRepoDir,
       keepSourceBranch: run.options.keepSourceBranch === true,
       mergeToHostTimeoutMs: run.mergeToHostTimeoutMs,
-      hasNewCommits,
+      hasNewCommits: commits.length > 0,
       tempBranch: branches.tempBranch,
       hostBranch: branches.hostBranch,
     });
-    // Collect the commits now on the host branch
-    return yield* collectCommitsLogged(
-      `${baseHead}..HEAD`,
-      run.options.hostRepoDir,
-      run.commitCollectionTimeoutMs,
-    );
+    return commits;
   });
 
 export const withSandboxLifecycle = <A>(
