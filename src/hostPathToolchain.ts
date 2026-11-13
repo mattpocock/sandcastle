@@ -125,14 +125,18 @@ const symlinkTargetsIn = (
     return targets.flatMap((t) => (Option.isSome(t) ? [t.value] : []));
   });
 
-/** The rules every resolved path is held to. */
-interface Rules {
+/** The refusal rules every resolved `PATH` dir and executable is held to. */
+interface RefusalRules {
   readonly home: string;
-  readonly coveredRoots: readonly string[];
   readonly deniedRoots: readonly string[];
 }
 
-const isRefused = (path: string, rules: Rules): boolean =>
+/** The rules every resolved path is held to. */
+interface Rules extends RefusalRules {
+  readonly coveredRoots: readonly string[];
+}
+
+const isRefused = (path: string, rules: RefusalRules): boolean =>
   isHomeOrAncestor(path, rules.home) || isWithinAny(path, rules.deniedRoots);
 
 /** A `PATH` entry the sandbox may see, and the real dir behind it. */
@@ -182,6 +186,15 @@ const outermost = (dirs: readonly string[]): string[] => {
   );
 };
 
+const splitPosixPath = (path: string): string[] => [
+  ...new Set(
+    path
+      .split(":")
+      .filter((entry) => entry.startsWith("/"))
+      .map((entry) => normalizeEntry(entry)),
+  ),
+];
+
 /** Resolves the toolchain a sandbox needs from the host `PATH`. */
 export const resolveHostPathToolchain = (
   input: HostPathToolchainInput,
@@ -189,14 +202,7 @@ export const resolveHostPathToolchain = (
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const rules: Rules = { ...input, home: normalizeEntry(input.home) };
-    const entries = [
-      ...new Set(
-        input.path
-          .split(":")
-          .filter((entry) => entry.startsWith("/"))
-          .map((entry) => normalizeEntry(entry)),
-      ),
-    ];
+    const entries = splitPosixPath(input.path);
     const accepted = (yield* Effect.all(
       entries.map((entry) => acceptEntry(fs, entry, rules)),
     )).flatMap((a) => (Option.isSome(a) ? [a.value] : []));
@@ -234,4 +240,47 @@ export const hostPathToolchainFromEnv = (roots: {
   Effect.gen(function* () {
     const path = yield* Config.string("PATH").pipe(Config.withDefault(""));
     return yield* resolveHostPathToolchain({ path, home: homedir(), ...roots });
+  }).pipe(Effect.orDie);
+
+/** True when `candidate` is a file whose resolved dir isn't refused by `rules`. */
+const hasExecutableAt = (
+  fs: FileSystem.FileSystem,
+  candidate: string,
+  rules: RefusalRules,
+): Effect.Effect<boolean> =>
+  Effect.gen(function* () {
+    const isRegularFile = yield* fs.stat(candidate).pipe(
+      Effect.map((info) => info.type === "File"),
+      Effect.orElseSucceed(() => false),
+    );
+    if (!isRegularFile) {
+      return false;
+    }
+    return Option.exists(
+      yield* realPathOf(fs, candidate),
+      (resolved) => !isRefused(posix.dirname(resolved), rules),
+    );
+  });
+
+/**
+ * Whether an executable named `command` is on the host `PATH` in a dir the
+ * toolchain doesn't refuse.
+ */
+export const isOnHostPathToolchain = (
+  command: string,
+  deniedRoots: readonly string[],
+): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Config.string("PATH").pipe(Config.withDefault(""));
+    const rules: RefusalRules = {
+      home: normalizeEntry(homedir()),
+      deniedRoots,
+    };
+    const dirs = splitPosixPath(path).filter((dir) => !isRefused(dir, rules));
+    const found = yield* Effect.all(
+      dirs.map((dir) => hasExecutableAt(fs, posix.join(dir, command), rules)),
+      { concurrency: "unbounded" },
+    );
+    return found.includes(true);
   }).pipe(Effect.orDie);

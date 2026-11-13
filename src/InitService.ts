@@ -1,9 +1,11 @@
 import { FileSystem } from "@effect/platform";
-import { Config, Effect, Option, Schema } from "effect";
-import { delimiter, dirname, join } from "node:path";
+import { Effect, Option, Schema } from "effect";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertBwrapUsable } from "./bwrapPreflight.js";
+import { BWRAP_DENIED_ROOTS } from "./bwrapSandbox.js";
 import { InitError } from "./errors.js";
+import { isOnHostPathToolchain } from "./hostPathToolchain.js";
 import { assertSeatbeltUsable } from "./seatbeltPreflight.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 
@@ -535,43 +537,6 @@ COPILOT_GITHUB_TOKEN=`,
 
 export const listAgents = (): AgentEntry[] => AGENT_REGISTRY;
 
-/** True when `candidate` is a file (or a symlink to one). */
-const isFile = (
-  fs: FileSystem.FileSystem,
-  candidate: string,
-): Effect.Effect<boolean> =>
-  fs.stat(candidate).pipe(
-    Effect.map((info) => info.type === "File"),
-    Effect.orElseSucceed(() => false),
-  );
-
-/** True when a file named `command` is in one of the host `PATH` dirs. */
-const isOnHostPath = (
-  command: string,
-): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const pathValue = yield* Config.string("PATH").pipe(
-      Config.withDefault(""),
-      Effect.orElseSucceed(() => ""),
-    );
-    const pathExt = yield* Config.string("PATHEXT").pipe(
-      Config.withDefault(".EXE;.CMD;.BAT"),
-      Effect.orElseSucceed(() => ""),
-    );
-    const extensions =
-      process.platform === "win32" ? ["", ...pathExt.split(";")] : [""];
-    const candidates = pathValue
-      .split(delimiter)
-      .filter((dir) => dir !== "")
-      .flatMap((dir) => extensions.map((ext) => join(dir, `${command}${ext}`)));
-    const found = yield* Effect.all(
-      candidates.map((candidate) => isFile(fs, candidate)),
-      { concurrency: "unbounded" },
-    );
-    return found.includes(true);
-  });
-
 /**
  * What init warns a native-provider user whose agent CLI isn't on the host
  * `PATH`, or undefined when it is. A native sandbox runs the host's own
@@ -581,10 +546,15 @@ export const agentCliWarning = (
   agent: AgentEntry,
   sandboxProvider: SandboxProviderEntry,
 ): Effect.Effect<string | undefined, never, FileSystem.FileSystem> =>
-  Effect.map(isOnHostPath(agent.hostCli.command), (found) =>
-    found
-      ? undefined
-      : `The ${agent.label} CLI (\`${agent.hostCli.command}\`) isn't on your PATH, and ${sandboxProvider.name}() runs the host's own agent CLI. Install it with: ${agent.hostCli.install}`,
+  Effect.map(
+    isOnHostPathToolchain(
+      agent.hostCli.command,
+      sandboxProvider.deniedRoots ?? [],
+    ),
+    (found) =>
+      found
+        ? undefined
+        : `The ${agent.label} CLI (\`${agent.hostCli.command}\`) isn't on your PATH, and ${sandboxProvider.name}() runs the host's own agent CLI. Install it with: ${agent.hostCli.install}`,
   );
 
 // ---------------------------------------------------------------------------
@@ -827,6 +797,12 @@ export interface SandboxProviderEntry {
    * host can't run the provider. Init runs it and warns, but still scaffolds.
    */
   readonly preflight?: () => void;
+  /**
+   * Host roots the native provider hides even when the host `PATH` names them
+   * (e.g. WSL's `/mnt` and `/run/WSL` for `bwrap()`). Init's agent-CLI check
+   * refuses CLIs found only under these roots.
+   */
+  readonly deniedRoots?: readonly string[];
 }
 
 // A non-empty tuple type, so `[0]` (the default) is known to exist.
@@ -849,6 +825,7 @@ const SANDBOX_PROVIDER_REGISTRY: [
     label: "Bubblewrap",
     nativePlatform: "linux",
     preflight: assertBwrapUsable,
+    deniedRoots: BWRAP_DENIED_ROOTS,
   },
   {
     name: "seatbelt",

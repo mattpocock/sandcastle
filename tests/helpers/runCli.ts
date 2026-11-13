@@ -24,18 +24,23 @@ const TSX_LOADER = pathToFileURL(
   createRequire(import.meta.url).resolve("tsx"),
 ).href;
 
-/** `env` with its `PATH` replaced by `path`, when one is given. */
-const withPath = (
+/** `env` with `PATH` and `HOME` replaced when given. */
+const withEnvOverrides = (
   env: NodeJS.ProcessEnv,
-  path: string | undefined,
+  options: { readonly path?: string; readonly home?: string },
 ): NodeJS.ProcessEnv => {
-  if (path === undefined) {
-    return env;
-  }
-  const rest = Object.fromEntries(
-    Object.entries(env).filter(([key]) => key.toUpperCase() !== "PATH"),
-  );
-  return { ...rest, PATH: path };
+  const withUpdatedPath =
+    options.path === undefined
+      ? env
+      : {
+          ...Object.fromEntries(
+            Object.entries(env).filter(([key]) => key.toUpperCase() !== "PATH"),
+          ),
+          PATH: options.path,
+        };
+  return options.home === undefined
+    ? withUpdatedPath
+    : { ...withUpdatedPath, HOME: options.home };
 };
 
 /** What a CLI run left behind. */
@@ -56,6 +61,8 @@ export const runCli = async (
     readonly cwd: string;
     /** Replaces the inherited `PATH` (whatever its case on Windows). */
     readonly path?: string;
+    /** Replaces the inherited `HOME`. */
+    readonly home?: string;
   },
 ): Promise<CliResult> =>
   new Promise((resolve, reject) => {
@@ -64,7 +71,7 @@ export const runCli = async (
       ["--import", TSX_LOADER, CLI_ENTRY, ...args],
       {
         cwd: options.cwd,
-        env: withPath(process.env, options.path),
+        env: withEnvOverrides(process.env, options),
         stdio: ["pipe", "pipe", "pipe"],
       },
     );
