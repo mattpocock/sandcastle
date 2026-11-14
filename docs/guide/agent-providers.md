@@ -1,6 +1,6 @@
 # Agent providers
 
-Sandcastle ships [agent providers](./glossary.md#agent-provider) for Claude Code, Codex, Pi, Copilot, Cursor and OpenCode: `claudeCode()`, `codex()`, `pi()`, `copilot()`, `cursor()` and `opencode()`, all exported from `@ai-hero/sandcastle`. Each takes a model string and, optionally, provider-specific options:
+Sandcastle ships [agent providers](./glossary.md#agent-provider) for Claude Code, Codex, Pi, Copilot, Cursor, OpenCode and CodeBuddy: `claudeCode()`, `codex()`, `pi()`, `copilot()`, `cursor()`, `opencode()` and `codebuddy()`, all exported from `@ai-hero/sandcastle`. Each takes a model string and, optionally, provider-specific options:
 
 ```typescript
 import { run, codex } from "@ai-hero/sandcastle";
@@ -58,6 +58,32 @@ agent: pi("claude-sonnet-4-6", { thinking: "high" });
 | `captureSessions` | `boolean`                                                                | `true`  | Capture pi session JSONL to host for `pi --session <id>` |
 
 Without `thinking`, Sandcastle passes no `--thinking` flag, and pi uses its own default (`medium`). Some models reject that default. With pi 0.73.1, `anthropic/claude-haiku-5-5` fails with a 400 (`"thinking.type.enabled" is not supported for this model`). For a model like that, pass `{ thinking: "off" }`.
+
+## `CodebuddyOptions`
+
+The `codebuddy()` factory accepts an optional second argument for provider-specific options:
+
+```typescript
+agent: codebuddy("deepseek-v4.1-flash", {
+  permissionMode: "bypassPermissions",
+});
+```
+
+| Option            | Type                                                                                           | Default | Description                                                                                                                         |
+| ----------------- | ---------------------------------------------------------------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `permissionMode`  | `"default"` \| `"acceptEdits"` \| `"plan"` \| `"auto"` \| `"dontAsk"` \| `"bypassPermissions"` | —       | Maps to CodeBuddy's `--permission-mode` flag. When set, replaces Sandcastle's default `--dangerously-skip-permissions` on AFK runs. |
+| `env`             | `Record<string, string>`                                                                       | `{}`    | Environment variables injected by this agent provider                                                                               |
+| `captureSessions` | `boolean`                                                                                      | `true`  | Capture the CodeBuddy session JSONL to host for `codebuddy --resume`                                                                |
+
+The `codebuddy()` provider also injects `CODEBUDDY_IS_SANDBOX=1` by default: CodeBuddy's `--dangerously-skip-permissions` still asks about HIGH/CRITICAL-risk tools, and this environment variable upgrades it to a full pass so an unattended run cannot stall waiting for approval. Pass your own `env.CODEBUDDY_IS_SANDBOX` to opt out.
+
+Auth differs by platform. A key from the international platform (www.codebuddy.ai) authenticates headless runs through `CODEBUDDY_API_KEY` with no further setup. Keys from Tencent's CN platform (copilot.tencent.com) do not, and the CLI's login state lives under the home dir a [sandbox](./glossary.md#sandbox) replaces. On the CN platform (verified end to end on Docker):
+
+1. Use the native CN build of the CLI (`codebuddy install stable`), not the npm package — the npm build authenticates CN sessions against www.codebuddy.ai, which rejects them. bwrap picks the host's build up from `PATH` automatically; a Docker image must install the native build.
+2. Mount the login state into the sandbox: `~/.local/share/CodeBuddyExtension` (read-only — the CLI refreshes tokens on 401 and a writable mount lets a mis-resolved endpoint rewrite the host's auth) and `~/.codebuddy` (read-write — session capture writes there).
+3. Pin the CN product line with `env: { ACC_PRODUCT_CONFIG_PATH: "/path/to/cn-product.json" }` on the provider, the config file mounted read-only into the sandbox. Without it the CLI syncs the international product config and the session is rejected; `CODEBUDDY_COPILOT_INTERNET_ENVIRONMENT: "internal"` is a harmless belt-and-braces alongside.
+
+Do not set `CODEBUDDY_IS_SANDBOX=1` with a login session — it switches the CLI to a sandboxed auth route the session cannot serve; set it via `env` only with `CODEBUDDY_API_KEY`, when AFK runs need the HIGH/CRITICAL full pass.
 
 ## Provider `env`
 

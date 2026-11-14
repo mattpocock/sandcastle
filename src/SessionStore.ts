@@ -267,6 +267,70 @@ export const transferClaudeSession = (
 ): string => rewriteSessionCwd(jsonl, fromCwd, toCwd);
 
 // ---------------------------------------------------------------------------
+// CodeBuddy session paths and transfer
+// ---------------------------------------------------------------------------
+
+/**
+ * CodeBuddy encodes a session's cwd as its project dir under
+ * `~/.codebuddy/projects`: path segments joined by `-`, every other
+ * character kept (`/tmp/cb-spike` → `tmp-cb-spike`, verified against a live
+ * codebuddy-code 2.181.0 install). Unlike Claude's encoder it preserves
+ * `.`, `@` and `_`, and no length cap or hash suffix was observed.
+ */
+export const encodeCodebuddyProjectPath = (cwd: string): string =>
+  cwd.replaceAll("/", "-").replace(/^-+/u, "");
+
+/** Host-side path to a CodeBuddy session JSONL file. */
+export const codebuddyHostSessionPath = (
+  cwd: string,
+  id: string,
+  projectsDir?: string,
+): string => {
+  const base = projectsDir ?? join(homeDir(), ".codebuddy", "projects");
+  return join(base, encodeCodebuddyProjectPath(cwd), `${id}.jsonl`);
+};
+
+/** Sandbox-side path to a CodeBuddy session JSONL file (always POSIX separators). */
+export const codebuddySandboxSessionPath = (
+  cwd: string,
+  id: string,
+  projectsDir: string,
+): string =>
+  posix.join(projectsDir, encodeCodebuddyProjectPath(cwd), `${id}.jsonl`);
+
+/**
+ * Locate a CodeBuddy session on the host by its unique id, scanning every
+ * encoded-cwd dir under `~/.codebuddy/projects`.
+ */
+export const findCodebuddySessionOnHost = async (
+  id: string,
+  projectsDir?: string,
+): Promise<HostSessionLookup> => {
+  const root = projectsDir ?? join(homeDir(), ".codebuddy", "projects");
+  let entries;
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch {
+    return { path: undefined, searchedRoot: root };
+  }
+  const candidates = entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => join(root, entry.name, `${id}.jsonl`));
+  return { path: await firstExistingPath(candidates), searchedRoot: root };
+};
+
+/**
+ * Rewrite a CodeBuddy session JSONL string, replacing top-level `cwd` fields
+ * that match `fromCwd` with `toCwd` — every entry carries the same `cwd`
+ * shape as Claude, so the rewrite is shared. Pure function — no file I/O.
+ */
+export const transferCodebuddySession = (
+  jsonl: string,
+  fromCwd: string,
+  toCwd: string,
+): string => rewriteSessionCwd(jsonl, fromCwd, toCwd);
+
+// ---------------------------------------------------------------------------
 // Codex session paths and transfer
 // ---------------------------------------------------------------------------
 

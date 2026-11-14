@@ -1,0 +1,5 @@
+---
+"@ai-hero/sandcastle": minor
+---
+
+Add the `codebuddy()` agent provider for Tencent's CodeBuddy CLI (`@tencent-ai/codebuddy-code`, binaries `codebuddy`/`cbc`). Its stream-json events, permission flags and `~/.codebuddy/projects/` session layout are Claude-Code-shaped, so session capture, resume and fork run through the same machinery as `claudeCode()`. The provider injects no env by default. CodeBuddy's `--dangerously-skip-permissions` leaves HIGH/CRITICAL tools asking; set `CODEBUDDY_IS_SANDBOX=1` via the provider's `env` option for the full pass when authenticating with `CODEBUDDY_API_KEY` — with a mounted login session it must stay unset, because it switches the CLI to a sandboxed auth route the session cannot serve. CN-platform users mount `~/.local/share/CodeBuddyExtension` (read-only) and `~/.codebuddy` into the sandbox, pin `ACC_PRODUCT_CONFIG_PATH` to a CN product config, and use the native CN build (`codebuddy install stable`) — the npm package is the international product line and rejects CN sessions. Verified end to end on Docker. `sandcastle init` scaffolds a matching Dockerfile.
