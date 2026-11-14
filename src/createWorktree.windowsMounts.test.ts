@@ -12,23 +12,24 @@ import { createWorktree } from "./createWorktree.js";
 import { createBindMountSandboxProvider } from "./SandboxProvider.js";
 import type { BindMountSandboxHandle, ExecResult } from "./SandboxProvider.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
+import type { MountEntry } from "./SandboxFactory.js";
 import { claudeCode } from "./AgentProvider.js";
 import { execAsync } from "./testExec.js";
 
-const mockPatchGitMountsForWindows = vi.fn(
+const mockPatchGitMountsForWindows = vi.fn<
   (
-    gitMounts: { hostPath: string; sandboxPath: string }[],
-    _worktreePath: string,
-    _sandboxRepoDir: string,
-  ) => gitMounts,
-);
+    gitMounts: MountEntry[],
+    worktreePath: string,
+    sandboxRepoDir: string,
+  ) => MountEntry[]
+>((gitMounts) => gitMounts);
 
-vi.mock("./mountUtils.js", async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>;
+vi.mock(import("./mountUtils.js"), async (importOriginal) => {
+  const actual = await importOriginal();
   return {
     ...actual,
     patchGitMountsForWindows: (
-      gitMounts: { hostPath: string; sandboxPath: string }[],
+      gitMounts: MountEntry[],
       worktreePath: string,
       sandboxRepoDir: string,
     ) =>
@@ -39,17 +40,14 @@ vi.mock("./mountUtils.js", async (importOriginal) => {
 });
 
 /** Format a minimal stream-json response so the orchestrator parses agent output. */
-const toStreamJson = (output: string): string => {
-  const lines: string[] = [];
-  lines.push(
+const toStreamJson = (output: string): string =>
+  [
     JSON.stringify({
       type: "assistant",
       message: { content: [{ type: "text", text: output }] },
     }),
     JSON.stringify({ type: "result", result: output }),
-  );
-  return lines.join("\n");
-};
+  ].join("\n");
 
 const makeInteractiveProvider = () =>
   createBindMountSandboxProvider({
@@ -100,21 +98,14 @@ const makeRunProvider = () =>
     },
   });
 
+/** A git repo on `main` with one commit, of init.txt. */
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });
   await execAsync('git config user.email "test@test.com"', { cwd: dir });
   await execAsync('git config user.name "Test"', { cwd: dir });
-};
-
-const commitFile = async (
-  dir: string,
-  name: string,
-  content: string,
-  message: string,
-) => {
-  await writeFile(join(dir, name), content);
-  await execAsync(`git add "${name}"`, { cwd: dir });
-  await execAsync(`git commit -m "${message}"`, { cwd: dir });
+  await writeFile(join(dir, "init.txt"), "init");
+  await execAsync('git add "init.txt"', { cwd: dir });
+  await execAsync('git commit -m "initial commit"', { cwd: dir });
 };
 
 describe("createWorktree() Windows mount patching", () => {
@@ -130,7 +121,6 @@ describe("createWorktree() Windows mount patching", () => {
   it("worktree.interactive() calls patchGitMountsForWindows with the worktree path", async () => {
     hostDir = await mkdtemp(join(tmpdir(), "wm-test-wt-interactive-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
 
     const ws = await createWorktree({
       branchStrategy: { type: "branch", branch: "wt-interactive-win" },
@@ -161,7 +151,6 @@ describe("createWorktree() Windows mount patching", () => {
   it("worktree.run() calls patchGitMountsForWindows with the worktree path", async () => {
     hostDir = await mkdtemp(join(tmpdir(), "wm-test-wt-run-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
 
     const ws = await createWorktree({
       branchStrategy: { type: "branch", branch: "wt-run-win" },
