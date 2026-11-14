@@ -41,10 +41,10 @@
   "src/InitService.test.ts": {
     "ratchet/test-outside-tests": 1
   },
-  "src/interactive-windowsMounts.test.ts": {
+  "src/interactive.test.ts": {
     "ratchet/test-outside-tests": 1
   },
-  "src/interactive.test.ts": {
+  "src/interactive.windowsMounts.test.ts": {
     "ratchet/test-outside-tests": 1
   },
   "src/interactiveArgCollection.test.ts": {
