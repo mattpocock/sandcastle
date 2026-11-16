@@ -1242,7 +1242,7 @@ const rewriteMainTs = (
 const applyIssueTrackerSandboxOptions = (
   choices: MainFileChoices,
 ): Effect.Effect<void, InitError, FileSystem.FileSystem> => {
-  const { issueTracker, sandboxProvider, mainFilename } = choices;
+  const { issueTracker, sandboxProvider, mainFilename, imageName } = choices;
   const sandboxOptions =
     sandboxProvider.image === undefined
       ? (issueTracker.nativeSandboxOptions ?? issueTracker.sandboxOptions)
@@ -1255,22 +1255,29 @@ const applyIssueTrackerSandboxOptions = (
     `^import \\{ ${provider} \\} from "@ai-hero/sandcastle/sandboxes/${provider}";$`,
     "mu",
   );
-  return editMainFile(choices, (content) =>
-    importRe.test(content)
-      ? Effect.succeed(
-          content
-            .replace(importRe, (line) => `${line}\n\n${sandboxOptions}`)
-            .replaceAll(
-              new RegExp(`\\b${provider}\\(\\)`, "gu"),
-              `${provider}(sandboxOptions)`,
-            ),
-        )
-      : Effect.fail(
-          new InitError({
-            message: `Cannot apply ${issueTracker.label} sandbox options: ${mainFilename} has no ${provider} import.`,
-          }),
-        ),
-  );
+  return editMainFile(choices, (content) => {
+    if (!importRe.test(content)) {
+      return Effect.fail(
+        new InitError({
+          message: `Cannot apply ${issueTracker.label} sandbox options: ${mainFilename} has no ${provider} import.`,
+        }),
+      );
+    }
+    let updated = content
+      .replace(importRe, (line) => `${line}\n\n${sandboxOptions}`)
+      .replaceAll(
+        new RegExp(`\\b${provider}\\(\\)`, "gu"),
+        `${provider}(sandboxOptions)`,
+      );
+    if (imageName !== undefined && sandboxProvider.image !== undefined) {
+      const serializedImageName = JSON.stringify(imageName);
+      updated = updated.replaceAll(
+        `${provider}({ imageName: ${serializedImageName} })`,
+        `${provider}({ ...sandboxOptions, imageName: ${serializedImageName} })`,
+      );
+    }
+    return Effect.succeed(updated);
+  });
 };
 
 /**
@@ -1485,7 +1492,7 @@ export interface ScaffoldOptions {
   sandboxProvider?: SandboxProviderEntry;
   /**
    * Custom image name (`init --image-name`). When set, every sandbox factory
-   * call in the main file is scaffolded as `<provider>({ imageName })`.
+   * call includes it, merged with any sandbox options from the issue tracker.
    * Omit to keep the provider's default, repo-scoped image name.
    */
   imageName?: string;
