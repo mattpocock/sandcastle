@@ -1,6 +1,11 @@
 import type { OutputDefinition } from "./Output.js";
-import type { FinishReport, FinishReportDestination } from "./FinishReport.js";
-import type { RecordedEvent, SessionRecordPointer } from "./SessionRecord.js";
+import type { FinishReportDestination } from "./FinishReport.js";
+import type { RecordedEvent } from "./SessionRecord.js";
+import type {
+  RunningWork,
+  SandboxStatus,
+  StatusOptions,
+} from "./SandboxStatusTypes.js";
 import type { SandboxProvider } from "./SandboxProvider.js";
 import type {
   OutputType,
@@ -10,6 +15,15 @@ import type {
   SessionProcess,
   SessionResult,
 } from "./Session.js";
+
+export type {
+  DetachStatus,
+  EndedWork,
+  FinishReportDelivery,
+  RunningWork,
+  SandboxStatus,
+  StatusOptions,
+} from "./SandboxStatusTypes.js";
 
 /** Options for `createSandbox`. */
 export interface CreateSandboxOptions<
@@ -139,15 +153,6 @@ export interface DetachOptions {
   readonly abortSignal?: AbortSignal;
 }
 
-/** Spawned work still running in a sandbox. */
-export interface RunningWork {
-  readonly kind: "session";
-  /** The session's name. */
-  readonly name: string;
-  /** The built-in agent's id, e.g. `"claude-code"`. */
-  readonly agent: string;
-}
-
 /**
  * Proof that you've let go of a sandbox and its spawned work carries on
  * without you. It means "started", nothing more: the finish arrives at your
@@ -164,77 +169,6 @@ export interface DetachReceipt {
   readonly carriedOn: readonly RunningWork[];
   /** The URL the finish report goes to, or `false` for fire-and-forget. */
   readonly reportsTo: string | false;
-}
-
-/**
- * How the last detach's finish report is getting on: `not-finished` while its
- * work runs, `delivering` while it is being sent, then `delivered`, `gone`
- * (the receiver answered 410) or `gave-up` (out of time before the kill
- * time). `no-destination` when the detach had none: it was only written.
- */
-export type FinishReportDelivery =
-  | "not-finished"
-  | "delivering"
-  | "delivered"
-  | "gone"
-  | "gave-up"
-  | "no-destination";
-
-/** A session that has ended in the sandbox. */
-export interface EndedWork {
-  readonly kind: "session";
-  /** The session's name. */
-  readonly name: string;
-  /** The built-in agent's id, e.g. `"claude-code"`. */
-  readonly agent: string;
-  /** How it ended, as its result or the finish report says. */
-  readonly exitReason:
-    | "completed"
-    | "closing-tag"
-    | "failed"
-    | "idle-timeout"
-    | "aborted"
-    | "time-limit";
-  /** Where its record went from inside the sandbox, and how delivery went, when it had in-sandbox sinks. */
-  readonly record?: SessionRecordPointer;
-}
-
-/** Options for `status()`. */
-export interface StatusOptions {
-  /** How many trailing lines of the session supervisor's log to return. Default 50. */
-  readonly logLines?: number;
-}
-
-/**
- * A look inside a sandbox, read from the session supervisor's files. It is
- * never a finish signal when a detach has a finish report destination: the
- * report that arrives there is the one source of truth, and `finishReport`
- * here is for finding one that never arrived.
- */
-export interface SandboxStatus {
-  /** The provider's sandbox id. */
-  readonly sandboxId: string;
-  /** When the provider will kill the sandbox and everything in it. */
-  readonly killTime: Date;
-  /** Spawned sessions still running, held or carried on past a detach. */
-  readonly running: readonly RunningWork[];
-  /** Sessions that have ended, in the order they ended. */
-  readonly ended: readonly EndedWork[];
-  /** The last detach, if there was one. */
-  readonly detached?: {
-    readonly detachId: string;
-    /** When the supervisor took the work on, by the sandbox's clock. */
-    readonly detachedAt: Date;
-    /** When it stops whatever is still running and reports `time-limit`, by the sandbox's clock. */
-    readonly deadline: Date;
-    /** The URL the finish report goes to, or `false` for fire-and-forget. */
-    readonly reportsTo: string | false;
-    readonly delivery: FinishReportDelivery;
-    /** The finish report, once written: read from its file in the sandbox, whether or not it was delivered. */
-    readonly finishReport?: FinishReport;
-  };
-  /** The last lines of the session supervisor's log. */
-  readonly logs: readonly string[];
 }
 
 /** Options for `follow()`. */
@@ -254,7 +188,10 @@ export interface DetachableSandbox<Native = unknown> extends Sandbox<Native> {
    * session supervisor. Resolves once the supervisor holds them. Only work
    * spawned before the detach carries on. When the last of it ends, or the
    * deadline passes, the supervisor writes the finish report to a file in the
-   * sandbox and POSTs it to `finishReport`, if given.
+   * sandbox, POSTs it to `finishReport`, if given, and exits. To use the
+   * sandbox again, `reattachSandbox` it: that handle starts a new supervisor
+   * and can spawn and detach again, each detach with its own id, deadline and
+   * report.
    *
    * Rejects with `DetachError` when nothing is running or an awaited call on
    * the handle is pending. After it resolves, every call on the handle
@@ -262,10 +199,10 @@ export interface DetachableSandbox<Native = unknown> extends Sandbox<Native> {
    */
   readonly detach: (options?: DetachOptions) => Promise<DetachReceipt>;
   /**
-   * What's running, what has ended, the last detach and its finish report,
+   * What's running, what has ended, every detach and its finish report,
    * and the supervisor's log tail, read from the supervisor's files. Works
    * after a detach too, and on a reattached handle after the supervisor has
-   * exited. Rejects with `SandboxUnavailableError` once the sandbox has ended.
+   * exited, without starting it again. Rejects with `SandboxUnavailableError` once the sandbox has ended.
    */
   readonly status: (options?: StatusOptions) => Promise<SandboxStatus>;
   /**
@@ -291,8 +228,10 @@ export interface ReattachSandboxOptions<Native = unknown> {
    * Env for this handle's `exec` calls, under each call's own env. Sandcastle
    * doesn't store the env a sandbox was created with (it's secrets), so a
    * provider that can't read it back (Daytona) runs the reattached handle's
-   * commands with only this. Sessions are unaffected: they run under the
-   * supervisor, which kept the env it was started with.
+   * commands with only this. Sessions running past a detach are unaffected:
+   * they run under the supervisor, which kept the env it was started with. A
+   * supervisor this handle restarts runs with this env, so the sessions it
+   * starts get it under their own.
    */
   readonly env?: Readonly<Record<string, string>>;
 }

@@ -1,6 +1,7 @@
 import { access } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { DetachableSandbox } from "@ai-hero/sandcastle/v1";
 import {
   CreateSandboxError,
   createSandbox,
@@ -61,6 +62,17 @@ const exists = async (file: string): Promise<boolean> =>
     () => true,
     () => false,
   );
+
+/** A Daytona sandbox reattached by id, failing the test when its supervisor isn't there. */
+const reattachOrFail = async (
+  sandboxId: string,
+): Promise<DetachableSandbox> => {
+  const handle = await reattachSandbox({ provider: daytona(), sandboxId });
+  if (handle === undefined) {
+    throw new Error("the supervisor should be there");
+  }
+  return handle;
+};
 
 describe.skipIf(process.platform === "win32")("daytona() (v1)", () => {
   let receivers: FinishReportReceiver[] = [];
@@ -378,6 +390,63 @@ describe.skipIf(process.platform === "win32")("daytona() (v1)", () => {
       ),
     ).toStrictEqual([]);
   });
+
+  it("reuses a sandbox after its report: a reattached handle restarts the supervisor in a new Daytona session and reports again", async () => {
+    const hook = await finishReportReceiver();
+    receivers.push(hook);
+    const secret = "whsec_c2FuZGNhc3RsZS1kYXl0b25hLXRlc3Qtc2VjcmV0";
+    const step = async (sandbox: DetachableSandbox) => {
+      await sandbox.spawnSession({
+        name: "step",
+        agent: fakeAgent({
+          lines: [
+            JSON.stringify({
+              type: "system",
+              subtype: "init",
+              session_id: "s",
+            }),
+            JSON.stringify({
+              type: "result",
+              is_error: false,
+              result: '<answer>{"answer": 42}</answer>',
+            }),
+          ],
+          hang: true,
+        }),
+        prompt: "Reply in <answer> tags.",
+        output: ANSWER,
+        completionTimeoutSeconds: 2,
+      });
+      return sandbox.detach({ finishReport: { url: hook.url, secret } });
+    };
+    const sandbox = await createSandbox({ provider: daytona() });
+    const first = await step(sandbox);
+    await hook.received(1);
+
+    const second = await step(await reattachOrFail(sandbox.sandboxId));
+    const deliveries = await hook.received(2);
+    const reports = await Promise.all(
+      deliveries.map(async ({ body, headers }) =>
+        verifyFinishReport({
+          body,
+          headers,
+          secret,
+          outputs: { step: ANSWER },
+        }),
+      ),
+    );
+
+    expect(
+      reports.map(({ data }) => [data.detachId, data.status]),
+    ).toStrictEqual([
+      [first.detachId, "succeeded"],
+      [second.detachId, "succeeded"],
+    ]);
+    const daemons = fakeDaytona.commands.filter(({ command }) =>
+      command.includes("supervisor.mjs daemon"),
+    );
+    expect(daemons).toHaveLength(2);
+  }, 30_000);
 
   it("reattaches by id, ignoring `create`: status() reads the detached run, exec gets the env passed again, and a gone sandbox is unavailable", async () => {
     const sandbox = await createSandbox({

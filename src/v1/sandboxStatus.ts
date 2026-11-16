@@ -2,7 +2,12 @@ import { posix } from "node:path";
 import { DateTime, Either, Schema } from "effect";
 import type { FinishReport } from "./FinishReport.js";
 import { FinishReportJson } from "./finishReportSchema.js";
-import type { EndedWork, SandboxStatus, StatusOptions } from "./Sandbox.js";
+import type {
+  DetachStatus,
+  EndedWork,
+  SandboxStatus,
+  StatusOptions,
+} from "./Sandbox.js";
 import type { ProviderSandbox } from "./SandboxProvider.js";
 import { SandboxUnavailableError } from "./SandboxUnavailableError.js";
 import { REPORTS_DIRECTORY } from "./supervisorDetach.js";
@@ -89,7 +94,7 @@ const detachedPart = async (
   sandbox: ProviderSandbox,
   directory: string,
   detached: NonNullable<SupervisorStatus["detached"]>,
-): Promise<SandboxStatus["detached"]> => {
+): Promise<DetachStatus> => {
   const report = await readReport(sandbox, directory, detached.detachId);
   return {
     detachId: detached.detachId,
@@ -130,12 +135,17 @@ export const readStatus = async (
       sandboxId: sandbox.sandboxId,
     });
   }
-  const [detached, logs] = await Promise.all([
-    status.detached === undefined
-      ? undefined
-      : detachedPart(sandbox, directory, status.detached),
+  const every = [
+    ...(status.earlier ?? []),
+    ...(status.detached === undefined ? [] : [status.detached]),
+  ];
+  const [detaches, logs] = await Promise.all([
+    Promise.all(
+      every.map(async (detached) => detachedPart(sandbox, directory, detached)),
+    ),
     logTail(sandbox, directory, logLines),
   ]);
+  const detached = detaches.at(-1);
   return {
     sandboxId: sandbox.sandboxId,
     killTime: sandbox.killTime,
@@ -146,6 +156,7 @@ export const readStatus = async (
     })),
     ended: status.ended.map((work) => endedWork(work)),
     ...(detached === undefined ? {} : { detached }),
+    detaches,
     logs,
   };
 };

@@ -16,6 +16,7 @@ export type {
   DetachableSandbox,
   DetachOptions,
   DetachReceipt,
+  DetachStatus,
   EndedWork,
   ExecOptions,
   ExecResult,
