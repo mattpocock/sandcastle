@@ -20,10 +20,10 @@
   "src/createSandbox.test.ts": {
     "ratchet/test-outside-tests": 1
   },
-  "src/createWorktree-windowsMounts.test.ts": {
+  "src/createWorktree.test.ts": {
     "ratchet/test-outside-tests": 1
   },
-  "src/createWorktree.test.ts": {
+  "src/createWorktree.windowsMounts.test.ts": {
     "ratchet/test-outside-tests": 1
   },
   "src/Display.test.ts": {
