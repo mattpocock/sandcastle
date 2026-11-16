@@ -1,4 +1,4 @@
-import { Effect, Ref } from "effect";
+import { Data, Effect, Exit, Ref } from "effect";
 import {
   afterEach,
   assert,
@@ -222,6 +222,23 @@ describe("withFriendlyErrors", () => {
     assert.isDefined(s);
     expect(s.message).toContain("600");
     expect(s.severity).toBe("error");
+  });
+
+  it("passes through errors that are not SandboxErrors", async () => {
+    class UnrelatedError extends Data.TaggedError("UnrelatedError")<{
+      readonly message: string;
+    }> {}
+    const ref = Ref.unsafeMake<readonly DisplayEntry[]>([]);
+    const exit = await Effect.runPromiseExit(
+      withFriendlyErrors(
+        Effect.fail(new UnrelatedError({ message: "not ours" })),
+      ).pipe(Effect.provide(SilentDisplay.layer(ref))),
+    );
+    expect(exit).toStrictEqual(
+      Exit.fail(new UnrelatedError({ message: "not ours" })),
+    );
+    expect(Effect.runSync(Ref.get(ref))).toStrictEqual([]);
+    expect(mockExit).not.toHaveBeenCalled();
   });
 
   it("passes through successful effects unchanged", async () => {

@@ -3,18 +3,15 @@
  * patchGitMountsForWindows between resolveGitMounts and startSandbox,
  * mirroring the SandboxFactory pattern (ADR-0006).
  */
-import { exec } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import { createSandbox, createSandboxFromWorktree } from "./createSandbox.js";
 import { createBindMountSandboxProvider } from "./SandboxProvider.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
-
-const execAsync = promisify(exec);
+import { execAsync } from "./testExec.js";
 
 // Mock patchGitMountsForWindows to track calls
 const mockPatchGitMountsForWindows = vi.fn(

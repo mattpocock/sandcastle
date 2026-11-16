@@ -17,7 +17,11 @@ import { vi } from "vitest";
  *
  * The fake records the arguments of each `<engine> run`, one per line; it
  * answers `podman machine list` (checked on macOS) with a running machine;
- * every other call succeeds silently.
+ * an `<engine> exec` runs its command (from `sh` on) on the host, as the
+ * container would, except that one whose command contains
+ * `fake-engine-sigterm` prints `partial` and then gets SIGTERM before the
+ * command ends. Like the real `docker` and `podman` CLIs, it traps the signal
+ * and exits 0. Every other call succeeds silently.
  */
 export interface FakeEngineWorld {
   /** Host path to the repo. */
@@ -49,6 +53,12 @@ export const setUpFakeEngine = (
       "#!/bin/sh",
       `if [ "$1" = run ]; then printf '%s\\n' "$@" > '${runLog}'; fi`,
       `if [ "$1" = machine ]; then echo '[{"Running":true}]'; fi`,
+      `if [ "$1" = exec ]; then`,
+      `  case "$*" in *fake-engine-sigterm*) trap 'exit 0' TERM; echo partial; kill -TERM $$; sleep 5;; esac`,
+      // Drop `exec`, its flags and the container name, up to `sh -c …`.
+      `  shift; while [ "$#" -gt 0 ] && [ "$1" != sh ]; do shift; done`,
+      `  exec "$@"`,
+      "fi",
       "exit 0",
       "",
     ].join("\n"),

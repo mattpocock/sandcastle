@@ -16,3 +16,4 @@ The marginal benefit of a renamable prefix doesn't justify the permanent surface
 ## Prior requests
 
 - #553 — "Add `namespace` option to customize the `sandcastle` prefix" (closes #552)
+- #961 — "Add a configurable `stateDir` option" (relocate only the `.sandcastle/` working area via a new option on `run()` / `interactive()` / `createSandbox()` / `createWorktree()`)

@@ -1,4 +1,3 @@
-import { exec } from "node:child_process";
 import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import {
   copyFile,
@@ -11,7 +10,6 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { promisify } from "node:util";
 import { Effect } from "effect";
 import { assert, describe, expect, it } from "vitest";
 import { claudeCode, codex, copilot, cursor, pi } from "./AgentProvider.js";
@@ -29,6 +27,7 @@ import type { BindMountSandboxHandle } from "./SandboxProvider.js";
 import { encodeProjectPath } from "./SessionStore.js";
 import { testIsolated } from "./sandboxes/test-isolated.js";
 import { makeLocalSandbox } from "./testSandbox.js";
+import { execAsync } from "./testExec.js";
 
 /** Dummy sandbox provider used to satisfy the required `sandbox` field in test mode. */
 const testSandbox = createBindMountSandboxProvider({
@@ -41,8 +40,6 @@ const testSandbox = createBindMountSandboxProvider({
     close: async () => {},
   }),
 });
-
-const execAsync = promisify(exec);
 
 interface AgentRun {
   readonly command: string;
@@ -153,9 +150,11 @@ const initRepo = async (dir: string) => {
 
 const commitFile = async (
   dir: string,
-  name: string,
-  content: string,
-  message: string,
+  {
+    name,
+    content,
+    message,
+  }: { name: string; content: string; message: string },
 ) => {
   await writeFile(join(dir, name), content);
   await execAsync(`git add "${name}"`, { cwd: dir });
@@ -163,25 +162,21 @@ const commitFile = async (
 };
 
 /** Format a mock agent result as stream-json lines (mimicking Claude's output) */
-const toStreamJson = (output: string): string => {
-  const lines: string[] = [];
-  lines.push(
+const toStreamJson = (output: string): string =>
+  [
     JSON.stringify({
       type: "assistant",
       message: { content: [{ type: "text", text: output }] },
     }),
     JSON.stringify({ type: "result", result: output }),
-  );
-  return lines.join("\n");
-};
+  ].join("\n");
 
 const testProvider = claudeCode("test-model");
 const testPiProvider = pi("test-model");
 
 /** Format a mock pi agent result as stream-json lines */
-const toPiStreamJson = (output: string): string => {
-  const lines: string[] = [];
-  lines.push(
+const toPiStreamJson = (output: string): string =>
+  [
     JSON.stringify({
       type: "message_update",
       assistantMessageEvent: { type: "text_delta", delta: output },
@@ -195,9 +190,7 @@ const toPiStreamJson = (output: string): string => {
         },
       ],
     }),
-  );
-  return lines.join("\n");
-};
+  ].join("\n");
 
 /** Known agent command prefixes and their stream formatters */
 const AGENT_PREFIXES: { prefix: string; toStream: (o: string) => string }[] = [
@@ -245,7 +238,7 @@ const makeMockCodexLayerWithUsage = (
         const streamOutput = toCodexStreamJsonWithUsage(output, usage);
         if (options?.onLine) {
           const { onLine } = options;
-          return Effect.gen(function* () {
+          return Effect.sync(() => {
             for (const line of streamOutput.split("\n")) {
               onLine(line);
             }
@@ -360,7 +353,11 @@ describe("createSandbox", () => {
   it("creates a sandbox with branch and worktreePath properties", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     const sandbox = await createSandbox({
       branch: "test-branch",
@@ -384,7 +381,11 @@ describe("createSandbox", () => {
   it("sandbox.run() invokes agent and returns SandboxRunResult", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     const sandbox = await createSandbox({
       branch: "test-run-branch",
@@ -415,7 +416,11 @@ describe("createSandbox", () => {
   it("sandbox.run() never shows codex's turn total as the context window", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
     const logPath = join(hostDir, "ctxwin.log");
 
     const sandbox = await createSandbox({
@@ -462,7 +467,11 @@ describe("createSandbox", () => {
       join(tmpdir(), "sandbox-claude-sb-projects-"),
     );
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
     const logPath = join(hostDir, "ctxwin.log");
     const mockSessionId = "createSandbox-cap-session-1";
 
@@ -591,7 +600,11 @@ describe("createSandbox", () => {
   it("rejects invalid timeouts before creating the worktree", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-timeouts-validate-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
     try {
       await expect(
         createSandbox({
@@ -610,7 +623,11 @@ describe("createSandbox", () => {
   it("sandbox.run() rejects idleTimeoutSeconds: 0", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-idle-validate-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
     let agentRan = false;
     const sandbox = await createSandbox({
       branch: "idle-validate",
@@ -644,7 +661,11 @@ describe("createSandbox", () => {
   it("sandbox.run() rejects a fork on copilot with ForkNotSupportedError before the agent runs", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-copilot-fork-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     let agentRan = false;
     const sandbox = await createSandbox({
@@ -679,7 +700,11 @@ describe("createSandbox", () => {
   it("sandbox.run() rejects a fork on cursor with ForkNotSupportedError before the agent runs", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-cursor-fork-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     let agentRan = false;
     const sandbox = await createSandbox({
@@ -714,7 +739,11 @@ describe("createSandbox", () => {
   it("sandbox.run() rejects resumeSession with maxIterations > 1", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-resume-validate-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     const sandbox = await createSandbox({
       branch: "resume-validate",
@@ -760,7 +789,11 @@ describe("createSandbox", () => {
       join(tmpdir(), "sandbox-resume-sb-projects-"),
     );
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
     const mockSessionId = "resume-sandbox-session-1";
     const sandboxBaseDir = mkdtempSync(join(tmpdir(), "sandbox-resume-sb-"));
 
@@ -885,7 +918,11 @@ describe("createSandbox", () => {
       join(tmpdir(), "sandbox-resume-args-sb-projects-"),
     );
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
     const promptPath = join(hostProjectsDir, "prompt.md");
     await writeFile(promptPath, "Remember {{TOKEN}}");
     const mockSessionId = "resume-args-session-1";
@@ -986,7 +1023,11 @@ describe("createSandbox", () => {
   it("sandbox.run() appends raw stdout to the same log file when logging.verbose is true", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-verbose-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
     const logPath = join(hostDir, "verbose.log");
 
     // Use a mock that emits both a recognised stream-JSON line and a line
@@ -1016,7 +1057,7 @@ describe("createSandbox", () => {
       _test: {
         buildSandbox: (sandboxDir) =>
           localSandboxWithAgent(sandboxDir, ({ onLine }) =>
-            Effect.gen(function* () {
+            Effect.sync(() => {
               for (const line of [droppedToolLine, recognisedLine]) {
                 onLine(line);
               }
@@ -1050,7 +1091,11 @@ describe("createSandbox", () => {
   it("sandbox.run() does NOT append raw stdout to the log file when verbose is false/unset", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-verbose-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
     const logPath = join(hostDir, "verbose-off.log");
 
     // Same dropped-tool line as the verbose-on test. With verbose unset it
@@ -1080,7 +1125,7 @@ describe("createSandbox", () => {
       _test: {
         buildSandbox: (sandboxDir) =>
           localSandboxWithAgent(sandboxDir, ({ onLine }) =>
-            Effect.gen(function* () {
+            Effect.sync(() => {
               for (const line of [droppedToolLine, recognisedLine]) {
                 onLine(line);
               }
@@ -1114,7 +1159,11 @@ describe("createSandbox", () => {
   it("sandbox.exec() runs a command and returns the ExecResult (test-mode path)", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     const sandbox = await createSandbox({
       branch: "test-exec-branch",
@@ -1138,7 +1187,11 @@ describe("createSandbox", () => {
   it("sandbox.exec() defaults cwd to the sandbox repo path", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     const sandbox = await createSandbox({
       branch: "test-exec-cwd-branch",
@@ -1162,7 +1215,11 @@ describe("createSandbox", () => {
   it("sandbox.exec() returns non-zero exit codes without throwing", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     const sandbox = await createSandbox({
       branch: "test-exec-nonzero-branch",
@@ -1185,7 +1242,11 @@ describe("createSandbox", () => {
   it("sandbox.exec() allows the caller to override the default cwd", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     const sandbox = await createSandbox({
       branch: "test-exec-cwd-override",
@@ -1208,7 +1269,11 @@ describe("createSandbox", () => {
   it("sandbox.exec() delegates to providerHandle.exec() (non-test mode)", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     const gitTmpDir = mkdtempSync(join(tmpdir(), "test-gitconfig-"));
     const globalConfigPath = join(gitTmpDir, ".gitconfig");
@@ -1267,7 +1332,11 @@ describe("createSandbox", () => {
   it("sandbox.close() removes worktree when clean, returns no preservedWorktreePath", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     const sandbox = await createSandbox({
       branch: "test-clean-close",
@@ -1289,7 +1358,11 @@ describe("createSandbox", () => {
   it("sandbox.close() preserves worktree when dirty, returns preservedWorktreePath", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     const sandbox = await createSandbox({
       branch: "test-dirty-close",
@@ -1317,7 +1390,11 @@ describe("createSandbox", () => {
   it("Symbol.asyncDispose works via await using", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     let worktreePath: string;
     {
@@ -1329,7 +1406,7 @@ describe("createSandbox", () => {
           buildSandbox: (sandboxDir) => makeLocalSandbox(sandboxDir),
         },
       });
-      worktreePath = sandbox.worktreePath;
+      ({ worktreePath } = sandbox);
       expect(existsSync(worktreePath)).toBe(true);
     }
     // After block exit, worktree should be cleaned up
@@ -1341,7 +1418,11 @@ describe("createSandbox", () => {
   it("reuses clean worktree when branch is already checked out", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     const sandbox1 = await createSandbox({
       branch: "collision-branch",
@@ -1374,7 +1455,11 @@ describe("createSandbox", () => {
   it("reuses dirty worktree with warning (ADR 0003)", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     const sandbox1 = await createSandbox({
       branch: "dirty-collision",
@@ -1413,7 +1498,11 @@ describe("createSandbox", () => {
   it("sandbox.run() returns commits made during the run", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     const sandbox = await createSandbox({
       branch: "test-commits-branch",
@@ -1447,7 +1536,11 @@ describe("createSandbox", () => {
   it("sandbox.close() is idempotent", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     const sandbox = await createSandbox({
       branch: "test-idempotent-close",
@@ -1469,7 +1562,11 @@ describe("createSandbox", () => {
   it("two sequential runs with different agents and prompts succeed on the same sandbox", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     const sandbox = await createSandbox({
       branch: "test-multi-run",
@@ -1507,7 +1604,11 @@ describe("createSandbox", () => {
   it("commits from multiple runs accumulate on the branch", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     let runCount = 0;
     const sandbox = await createSandbox({
@@ -1561,7 +1662,11 @@ describe("createSandbox", () => {
   it("onSandboxReady hooks execute once at creation time", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     const sandbox = await createSandbox({
       branch: "test-hooks",
@@ -1596,7 +1701,11 @@ describe("createSandbox", () => {
   it("runs host and sandbox onSandboxReady hooks together at creation time", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     const sandbox = await createSandbox({
       branch: "test-host-hooks",
@@ -1633,7 +1742,11 @@ describe("createSandbox", () => {
   it("provider's create() is called exactly once across multiple .run() calls", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     let createCallCount = 0;
     let closeCallCount = 0;
@@ -1699,7 +1812,11 @@ describe("createSandbox", () => {
   it("close() delegates to the provider handle's close()", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     let providerClosed = false;
 
@@ -1741,7 +1858,11 @@ describe("createSandbox", () => {
   it("state persists between runs — file created in run 1 exists in run 2", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     // Run 1: create a file (non-committed state)
     let agentBehavior = async (cwd: string) => {
@@ -1796,7 +1917,11 @@ describe("createSandbox", () => {
   it("works with isolated sandbox providers", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     const provider = testIsolated();
     const sandbox = await createSandbox({
@@ -1818,7 +1943,11 @@ describe("createSandbox", () => {
   it("isolated provider: run() syncs commits to host worktree", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     const provider = makeMockIsolatedProvider();
     const sandbox = await createSandbox({
@@ -1851,7 +1980,11 @@ describe("createSandbox", () => {
   it("isolated provider: copyToWorktree copies gitignored files from the host repo", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, ".gitignore", "secret.txt\n", "initial commit");
+    await commitFile(hostDir, {
+      name: ".gitignore",
+      content: "secret.txt\n",
+      message: "initial commit",
+    });
     // Gitignored, so it exists only in the host repo, never in a fresh worktree
     await writeFile(join(hostDir, "secret.txt"), "host secret");
 
@@ -1874,7 +2007,11 @@ describe("createSandbox", () => {
   it("isolated provider: worktree.createSandbox() copyToWorktree copies gitignored files from the host repo", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, ".gitignore", "secret.txt\n", "initial commit");
+    await commitFile(hostDir, {
+      name: ".gitignore",
+      content: "secret.txt\n",
+      message: "initial commit",
+    });
     await writeFile(join(hostDir, "secret.txt"), "host secret");
 
     const worktree = await createWorktree({
@@ -1899,7 +2036,11 @@ describe("createSandbox", () => {
   it("isolated provider: close() cleans up properly", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     const provider = testIsolated();
     const sandbox = await createSandbox({
@@ -1919,7 +2060,11 @@ describe("createSandbox", () => {
   it("isolated provider: sequential runs with commits sync correctly", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     let runCount = 0;
     const provider = makeMockIsolatedProvider(async (cwd) => {
@@ -1968,7 +2113,11 @@ describe("createSandbox", () => {
   it("sandbox.run() accepts signal option (type check)", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     const sandbox = await createSandbox({
       branch: "test-signal-type",
@@ -1997,7 +2146,11 @@ describe("createSandbox", () => {
   it("sandbox.run() rejects immediately with pre-aborted signal", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     const sandbox = await createSandbox({
       branch: "test-signal-pre-abort",
@@ -2030,7 +2183,11 @@ describe("createSandbox", () => {
   it("sandbox.run() abort leaves handle usable for next run", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     const sandbox = await createSandbox({
       branch: "test-signal-reuse",
@@ -2070,7 +2227,11 @@ describe("createSandbox", () => {
   it("sandbox.run() abort then close() works cleanly", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     const sandbox = await createSandbox({
       branch: "test-signal-then-close",
@@ -2116,13 +2277,21 @@ describe("createSandbox", () => {
   it("forks new branch from baseBranch when specified", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     // Record the base commit's SHA before adding a second commit on main
     const { stdout: baseSha } = await execAsync("git rev-parse HEAD", {
       cwd: hostDir,
     });
-    await commitFile(hostDir, "second.txt", "second", "second commit");
+    await commitFile(hostDir, {
+      name: "second.txt",
+      content: "second",
+      message: "second commit",
+    });
 
     const sandbox = await createSandbox({
       branch: "feature/from-base",
@@ -2148,7 +2317,11 @@ describe("createSandbox", () => {
   it("removes the worktree when sandbox start fails (no orphan)", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     const failingProvider = createBindMountSandboxProvider({
       name: "failing-create",
@@ -2182,7 +2355,11 @@ describe("createSandbox", () => {
   it("copyToWorktree copies files into the worktree at creation time", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
+    await commitFile(hostDir, {
+      name: "init.txt",
+      content: "init",
+      message: "initial commit",
+    });
 
     // Create untracked files in the host repo that should be copied
     await writeFile(join(hostDir, "config.json"), '{"key": "value"}');

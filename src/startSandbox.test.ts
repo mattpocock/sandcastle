@@ -1,11 +1,9 @@
 import { Duration, Effect, Exit, TestClock, TestContext } from "effect";
 import { afterEach, assert, describe, expect, it } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { exec } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { promisify } from "node:util";
 import {
   createBindMountSandboxProvider,
   createIsolatedSandboxProvider,
@@ -22,8 +20,7 @@ import {
   ContainerStartTimeoutError,
   CopyToWorktreeTimeoutError,
 } from "./errors.js";
-
-const execAsync = promisify(exec);
+import { execAsync } from "./testExec.js";
 
 type CopyIn = (hostPath: string, sandboxPath: string) => Promise<void>;
 

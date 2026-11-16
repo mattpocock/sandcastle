@@ -137,6 +137,10 @@
     // 10 (the default) blocks extracting a helper that names its steps; 20
     // still flags a function doing too much, and complexity 15 caps branching.
     "eslint/max-statements": ["error", { "max": 20 }],
+    // The rule's default names are callback, cb and next. Every `next` it
+    // flagged was a test helper or a queued resolver, never a Node-style
+    // callback; dropping `next` keeps the double-callback check on the rest.
+    "node/callback-return": ["error", ["callback", "cb"]],
     "unicorn/filename-case": [
       "error",
       { "cases": { "camelCase": true, "pascalCase": true, "kebabCase": true } }
@@ -146,6 +150,10 @@
     "unicorn/number-literal-case": "off",
     "unicorn/empty-brace-spaces": "off",
     "unicorn/no-nested-ternary": "off",
+    // Biome indents every brace-less body to match its structure, so the
+    // misleading-indentation bug curly guards against can't hide; the braces
+    // only push one-line guards over the function-size rules.
+    "eslint/curly": "off",
 
     // --- Off: they duplicate or contradict another enabled rule -------------
     // import/no-duplicates covers it, and lets `import type` stand apart.
@@ -215,6 +223,10 @@
     "eslint/max-classes-per-file": "off",
     // Low value: a test file without a top-level describe is still clear.
     "vitest/require-top-level-describe": "off",
+    // `vi.mock(import("x"), factory)` types the factory as the whole module,
+    // so the partial mocks the tests return stop typechecking. The string
+    // form mocks the same module.
+    "vitest/prefer-import-in-mock": "off",
 
     // --- Off: wrong for this codebase ---------------------------------------
     // A Node CLI imports Node.

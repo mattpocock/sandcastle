@@ -31,13 +31,25 @@ export const withStdin = async (
   return `{ rm -f ${stdinPath}; ${command}\n} < ${stdinPath}`;
 };
 
-/** A stream that hands each stdout line to `onLine` and keeps a bounded tail. */
+/**
+ * A stream that hands each stdout line to `onLine` and keeps a bounded tail.
+ * The SDK never ends it, so `final()` never runs: call `flush()` once the
+ * command has finished to deliver a last line that has no trailing newline.
+ * Flushing twice delivers it once.
+ */
 const lineWritable = (
   onLine: (line: string) => void,
   tail: BoundedTail,
-): Writable => {
+): { readonly stream: Writable; readonly flush: () => void } => {
   let partial = "";
-  return new Writable({
+  const flush = (): void => {
+    if (partial) {
+      tail.push(partial);
+      onLine(partial);
+      partial = "";
+    }
+  };
+  const stream = new Writable({
     write(chunk: Buffer, _encoding, callback) {
       const text = partial + chunk.toString();
       const lines = text.split("\n");
@@ -49,14 +61,11 @@ const lineWritable = (
       callback();
     },
     final(callback) {
-      if (partial) {
-        tail.push(partial);
-        onLine(partial);
-        partial = "";
-      }
+      flush();
       callback();
     },
   });
+  return { stream, flush };
 };
 
 /** A stream that only keeps a bounded tail of what is written to it. */
@@ -82,11 +91,13 @@ export const execStreamed = async (
 ): Promise<ExecResult> => {
   const stdoutTail = new BoundedTail(maxOutputTailChars, "\n");
   const stderrTail = new BoundedTail(maxOutputTailChars, "");
+  const stdout = lineWritable(onLine, stdoutTail);
   const result = await sandbox.runCommand({
     ...params,
-    stdout: lineWritable(onLine, stdoutTail),
+    stdout: stdout.stream,
     stderr: tailWritable(stderrTail),
   });
+  stdout.flush();
   return {
     stdout: stdoutTail.toString(),
     stderr: stderrTail.toString(),

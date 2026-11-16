@@ -1,5 +1,4 @@
 import { Cause, Effect, Layer, Ref } from "effect";
-import { exec } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import {
@@ -12,7 +11,6 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { assert, describe, expect, it, vi } from "vitest";
 import { Display, SilentDisplay } from "./Display.js";
 import type { DisplayEntry } from "./Display.js";
@@ -34,10 +32,9 @@ import { encodeProjectPath } from "./SessionStore.js";
 import { agentStreamEmitterLayer } from "./AgentStreamEmitter.js";
 import type { AgentStreamEvent } from "./AgentStreamEmitter.js";
 import type { BindMountSandboxHandle } from "./SandboxProvider.js";
+import { execAsync } from "./testExec.js";
 
 const noopAgentStreamEmitterLayer = agentStreamEmitterLayer();
-
-const execAsync = promisify(exec);
 
 /** The item at `index`, failing the test if the array is too short. */
 const itemAt = <T>(items: readonly T[], index: number): T => {

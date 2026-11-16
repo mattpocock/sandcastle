@@ -1,7 +1,8 @@
 // Runs `npm run build` when dist/ is missing or older than its inputs, and
-// does nothing otherwise. Wired in as `pretest` and `prelint`: the CLI tests
-// spawn dist/main.js, and lint's type-aware rules read the package's types
-// (the scripts in .sandcastle/ import @ai-hero/sandcastle, typed from dist).
+// does nothing otherwise. Wired in as `pretest`, `prelint`, `prelint:report`
+// and `preapi:report`: the CLI tests spawn dist/main.js, lint's type-aware
+// rules read the package's types (the scripts in .sandcastle/ import
+// @ai-hero/sandcastle, typed from dist), and the API report reads dist/*.d.ts.
 // A fresh checkout, or a stale dist/ after a branch switch, gets built once;
 // repeat runs skip straight to the command.
 //

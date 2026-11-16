@@ -279,7 +279,7 @@ const execStreaming = async (
     const logs = streamSessionLogs(context, { sessionId, cmdId }, onLine);
     // Once the race below is lost, a late failure of the stream
     // must not surface as an unhandled rejection.
-    logs.done.catch(() => {});
+    logs.done.catch(() => undefined);
     const shell = watchSessionShell(
       sandbox,
       { sessionId, cmdId, pidPath },
@@ -298,8 +298,10 @@ const execStreaming = async (
       exitCode: cmdInfo.exitCode ?? 0,
     };
   } finally {
-    await sandbox.process.deleteSession(sessionId).catch(() => {});
-    await sandbox.process.executeCommand(`rm -f ${pidPath}`).catch(() => {});
+    await sandbox.process.deleteSession(sessionId).catch(() => undefined);
+    await sandbox.process
+      .executeCommand(`rm -f ${pidPath}`)
+      .catch(() => undefined);
   }
 };
 
@@ -353,16 +355,13 @@ const createWorkspaceFolder = async (
 /** Every file under `dir`, recursively. */
 const walkFiles = async (dir: string): Promise<string[]> => {
   const entries = await readdir(dir, { withFileTypes: true });
-  const files: string[] = [];
-  for (const entry of entries) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...(await walkFiles(full)));
-    } else {
-      files.push(full);
-    }
-  }
-  return files;
+  const nested = await Promise.all(
+    entries.map(async (entry) => {
+      const full = join(dir, entry.name);
+      return entry.isDirectory() ? walkFiles(full) : [full];
+    }),
+  );
+  return nested.flat();
 };
 
 /** Uploads a host file, or a directory's files, to `sandboxPath`. */
@@ -377,10 +376,16 @@ const copyInToSandbox = async (
     return;
   }
   const files = await walkFiles(hostPath);
-  for (const file of files) {
-    const rel = relative(hostPath, file);
-    await sandbox.fs.uploadFile(file, join(sandboxPath, rel));
+  if (files.length === 0) {
+    return;
   }
+  // One batched request, as `uploadFile` itself is `uploadFiles` of one file.
+  await sandbox.fs.uploadFiles(
+    files.map((file) => ({
+      source: file,
+      destination: join(sandboxPath, relative(hostPath, file)),
+    })),
+  );
 };
 
 /**

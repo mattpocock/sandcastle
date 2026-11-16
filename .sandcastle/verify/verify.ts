@@ -71,9 +71,10 @@ const doctorSandboxes = (): void => {
   for (const s of SANDBOXES) {
     const need = SANDBOX_NEEDS[s];
     const missing = missingKeys(need.keys);
-    const cmdOk = !need.command || works(need.command);
+    const { command } = need;
+    const cmdFails = command !== undefined && !works(command);
     const why = [
-      ...(cmdOk ? [] : [`\`${need.command!.join(" ")}\` fails`]),
+      ...(cmdFails ? [`\`${command.join(" ")}\` fails`] : []),
       ...(missing.length > 0 ? [`missing ${missing.join(", ")}`] : []),
     ];
     console.log(
@@ -206,12 +207,11 @@ const main = async (): Promise<number> => {
   }
 };
 
-main().then(
-  (code) => process.exit(code),
-  (e: unknown) => {
-    console.error(
-      `verify: ${redact(e instanceof Error ? e.message : String(e))}`,
-    );
-    process.exit(2);
-  },
-);
+try {
+  process.exit(await main());
+} catch (error: unknown) {
+  console.error(
+    `verify: ${redact(error instanceof Error ? error.message : String(error))}`,
+  );
+  process.exit(2);
+}

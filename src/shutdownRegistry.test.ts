@@ -9,14 +9,21 @@ describe("shutdownRegistry", () => {
     restoreExit = undefined;
   });
 
+  // Like the real process.exit, the stub never returns: it throws, so the
+  // signal handler stops where the process would have ended.
   const stubExit = () => {
-    const spy = vi
-      .spyOn(process, "exit")
-      .mockImplementation((() => undefined) as never);
+    const spy = vi.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("process.exit called");
+    });
     restoreExit = () => {
       spy.mockRestore();
     };
     return spy;
+  };
+
+  /** Emits a signal whose handler ends by calling the stubbed process.exit. */
+  const emitExitingSignal = (signal: "SIGINT" | "SIGTERM") => {
+    expect(() => process.emit(signal)).toThrow("process.exit called");
   };
 
   it("installs one listener per signal regardless of how many shutdowns are registered", () => {
@@ -51,7 +58,7 @@ describe("shutdownRegistry", () => {
       calls.push("b");
     });
 
-    process.emit("SIGINT");
+    emitExitingSignal("SIGINT");
 
     expect(calls).toStrictEqual(["a", "b"]);
     expect(exit).toHaveBeenCalledTimes(1);
@@ -68,7 +75,7 @@ describe("shutdownRegistry", () => {
       calls.push("x");
     });
 
-    process.emit("SIGTERM");
+    emitExitingSignal("SIGTERM");
 
     expect(calls).toStrictEqual(["x"]);
     u1();
@@ -92,7 +99,7 @@ describe("shutdownRegistry", () => {
     const exitBefore = process.listenerCount("exit");
     const u1 = registerShutdown(() => {});
 
-    process.emit("SIGINT");
+    emitExitingSignal("SIGINT");
 
     // The handler removes every listener before calling process.exit(1), so the
     // synchronous "exit" event the real exit fires finds nothing to run again.
@@ -112,7 +119,7 @@ describe("shutdownRegistry", () => {
     });
 
     gone();
-    process.emit("SIGINT");
+    emitExitingSignal("SIGINT");
 
     expect(calls).toStrictEqual(["stay"]);
     stay();
@@ -128,7 +135,7 @@ describe("shutdownRegistry", () => {
       calls.push("ran");
     });
 
-    process.emit("SIGINT");
+    emitExitingSignal("SIGINT");
 
     expect(calls).toStrictEqual(["ran"]);
     u1();

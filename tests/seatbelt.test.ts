@@ -19,6 +19,7 @@ import {
   assertUsable,
   skipsHere,
 } from "./helpers/nativeProviders.js";
+import { spawnSandboxHolder } from "./helpers/sandboxHolder.js";
 
 // seatbelt() through the public API, on the real Seatbelt. Gated like the
 // containment suite: skipped off macOS, but a broken sandbox-exec fails when
@@ -209,6 +210,40 @@ describe.skipIf(skipsHere(SEATBELT))("seatbelt() with createSandbox()", () => {
       rmSync(hostTmp, { recursive: true, force: true });
     }
   });
+
+  // On a signal nothing calls close(): only the shutdown handlers run, just
+  // before the process exits.
+  it.each(["SIGINT", "SIGTERM"] as const)(
+    "removes the private home and temp dir when the host process gets %s",
+    async (signal) => {
+      // The holder inherits TMPDIR, so its private dirs land here.
+      const hostTmp = mkdtempSync(
+        path.join(tmpdir(), "e2e-seatbelt-host-tmp-"),
+      );
+      const originalTmpdir = process.env["TMPDIR"];
+      process.env["TMPDIR"] = hostTmp;
+      const privateDirs = (): string[] =>
+        readdirSync(hostTmp).filter((name) =>
+          name.startsWith("sandcastle-seatbelt-"),
+        );
+      try {
+        const holder = await spawnSandboxHolder("seatbelt()", repo, "60");
+        const exited = new Promise((resolve) => {
+          holder.once("exit", resolve);
+        });
+        expect(privateDirs()).toHaveLength(1);
+
+        holder.kill(signal);
+        await exited;
+
+        expect(privateDirs()).toStrictEqual([]);
+      } finally {
+        process.env["TMPDIR"] = originalTmpdir;
+        rmSync(hostTmp, { recursive: true, force: true });
+      }
+    },
+    15_000,
+  );
 
   it("kills the processes it started on close()", async () => {
     const sandbox = await open();

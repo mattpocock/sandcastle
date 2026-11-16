@@ -110,6 +110,14 @@ const copyIntoSprite = async (
   );
 };
 
+/**
+ * Whether `error` is the Sprites API's answer to deleting a Sprite that
+ * doesn't exist: the SDK's `APIError` with status 404 (body
+ * `{"error":"sprite not found"}`).
+ */
+const isSpriteNotFound = (error: unknown): boolean =>
+  error instanceof Error && "statusCode" in error && error.statusCode === 404;
+
 /** What a handle needs beyond its Sprite. */
 interface HandleContext {
   readonly env: Record<string, string>;
@@ -145,7 +153,12 @@ const makeHandle = (
   },
 
   close: async (): Promise<void> => {
-    await sprite.delete();
+    await sprite.delete().catch((error: unknown) => {
+      // Already gone (deleted out-of-band, expired or reaped): closed.
+      if (!isSpriteNotFound(error)) {
+        throw error;
+      }
+    });
     // Only once the delete has gone through: if it threw, the exit teardown
     // tries again.
     unregisterShutdown();

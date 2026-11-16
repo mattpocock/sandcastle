@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { existsSync } from "node:fs";
+import { access } from "node:fs/promises";
 import { join, posix } from "node:path";
 import {
   ContainerStartTimeoutError,
@@ -17,8 +17,8 @@ import type {
   NoSandboxProvider,
   NoSandboxHandle,
 } from "./SandboxProvider.js";
-import { makeSandboxFromHandle, SANDBOX_REPO_DIR } from "./SandboxFactory.js";
-import type { SandboxService, MountEntry } from "./SandboxFactory.js";
+import { makeSandboxFromHandle, SANDBOX_REPO_DIR } from "./sandboxService.js";
+import type { MountEntry, SandboxService } from "./sandboxService.js";
 import { syncIn } from "./syncIn.js";
 import { createClosingIfAbandoned } from "./createClosingIfAbandoned.js";
 import { normalizeMounts } from "./mountUtils.js";
@@ -205,7 +205,13 @@ const copyPathsIn = (
   Effect.gen(function* () {
     for (const relativePath of paths) {
       const hostPath = join(sourceDir, relativePath);
-      if (!existsSync(hostPath)) {
+      const exists = yield* Effect.promise(() =>
+        access(hostPath).then(
+          () => true,
+          () => false,
+        ),
+      );
+      if (!exists) {
         continue;
       }
       // Sandbox-side path: Linux container, must use POSIX separators

@@ -51,6 +51,7 @@ export const coverage = {
     "src/testSetup.ts",
     "src/testGlobalSetup.ts",
     "src/testSandbox.ts",
+    "src/testExec.ts",
     "src/sandboxes/test-*.ts",
   ],
 };

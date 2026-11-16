@@ -1,5 +1,5 @@
 import { Effect, Ref } from "effect";
-import { exec } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { constants, existsSync } from "node:fs";
 import {
   mkdir,
@@ -12,7 +12,6 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { promisify } from "node:util";
 import { assert, describe, expect, it } from "vitest";
 import { SilentDisplay } from "./Display.js";
 import type { DisplayEntry } from "./Display.js";
@@ -20,6 +19,7 @@ import type { ExecResult, SandboxService } from "./SandboxFactory.js";
 import { makeLocalSandbox } from "./testSandbox.js";
 import { SyncError } from "./errors.js";
 import { withSandboxLifecycle, runHostHooks } from "./SandboxLifecycle.js";
+import { execAsync } from "./testExec.js";
 
 /**
  * Creates a sandbox that translates container paths to host paths,
@@ -45,8 +45,6 @@ const makePathTranslatingSandbox = (
     copyFileOut: (sp, hp) => baseSandbox.copyFileOut(sp, hp),
   };
 };
-
-const execAsync = promisify(exec);
 
 const EXEC_OK: ExecResult = { stdout: "", stderr: "", exitCode: 0 };
 
@@ -87,7 +85,7 @@ const getHead = async (dir: string) => {
  */
 const makeFifoGate = async (dir: string) => {
   const path = join(dir, "gate.fifo");
-  await execAsync(`mkfifo "${path}"`);
+  await execAsync(`mkfifo "${path}"`, { cwd: dir });
   return {
     path,
     release: async () => {
@@ -520,14 +518,12 @@ describe("withSandboxLifecycle (worktree mode)", () => {
 
     // The suggested retry reaches the conflict itself, rather than failing
     // with "Merging is not possible because you have unmerged files".
-    const retry = await execAsync("git merge sandcastle/test", {
+    // spawnSync hands back git's output whether or not the merge fails.
+    const { stdout, stderr } = spawnSync("git", ["merge", "sandcastle/test"], {
       cwd: hostDir,
-    }).then(
-      () => "",
-      // join() renders a missing stdout or stderr as "".
-      (e: { stdout?: string; stderr?: string }) =>
-        [e.stdout, e.stderr].join(""),
-    );
+      encoding: "utf8",
+    });
+    const retry = stdout + stderr;
     expect(retry).not.toMatch(/unmerged files/u);
     expect(retry).toMatch(/CONFLICT/u);
   });

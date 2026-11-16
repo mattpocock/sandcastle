@@ -228,7 +228,7 @@ const mergeBack = (
       ["rev-list", `${baseHead}..HEAD`, "--count"],
       run.hostSideWorktreePath,
     ).pipe(
-      Effect.map((stdout) => Number.parseInt(stdout.trim(), 10) > 0),
+      Effect.map((stdout) => Number(stdout.trim()) > 0),
       Effect.orElseSucceed(() => false),
     );
     yield* mergeTempBranch({

@@ -1,17 +1,15 @@
-import { exec, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { promisify } from "node:util";
 import { assert, describe, expect, it } from "vitest";
 import { claudeCode } from "./AgentProvider.js";
 import { createSandbox } from "./createSandbox.js";
 import { createWorktree } from "./createWorktree.js";
 import { createBindMountSandboxProvider } from "./SandboxProvider.js";
 import type { ExecResult } from "./SandboxProvider.js";
-
-const execAsync = promisify(exec);
+import { execAsync } from "./testExec.js";
 
 /**
  * Regression tests for agent-factory env (`claudeCode(m, { env })`) under the

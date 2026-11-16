@@ -1,5 +1,5 @@
 import { NodeContext } from "@effect/platform-node";
-import { mkdtemp, rm, writeFile, symlink } from "node:fs/promises";
+import { mkdtemp, realpath, rm, writeFile, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -22,7 +22,7 @@ describe("resolveCwd", () => {
   });
 
   it("passes through an absolute path", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "cwd-abs-"));
+    const dir = await realpath(await mkdtemp(join(tmpdir(), "cwd-abs-")));
     try {
       const result = await Effect.runPromise(
         resolveCwd(dir).pipe(Effect.provide(NodeContext.layer)),
@@ -64,15 +64,15 @@ describe("resolveCwd", () => {
     }
   });
 
-  it("resolves a symlink to a directory", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "cwd-sym-"));
+  it("resolves a symlink to the directory's real path", async () => {
+    const dir = await realpath(await mkdtemp(join(tmpdir(), "cwd-sym-")));
     const linkPath = join(dir, "link");
     await symlink(dir, linkPath);
     try {
       const result = await Effect.runPromise(
         resolveCwd(linkPath).pipe(Effect.provide(NodeContext.layer)),
       );
-      expect(result).toBe(linkPath);
+      expect(result).toBe(dir);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

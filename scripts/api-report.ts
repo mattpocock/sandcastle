@@ -3,7 +3,7 @@
 // One report per entry point, committed under api-report/. CODEOWNERS makes
 // Matt the owner, so any change to the public surface gets his review.
 //
-//   npm run api:report          rewrite the reports from dist (build first)
+//   npm run api:report          rewrite the reports from dist (builds it when stale)
 //   npm run api:report -- --check   fail if a report is stale (CI)
 //
 // See .sandcastle/CODING_STANDARDS.md, "Where tests live": the public API is

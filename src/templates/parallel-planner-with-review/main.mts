@@ -6,10 +6,11 @@
 //                               listing unblocked issues with branch names.
 //   Phase 2 (Execute + Review): For each issue, a sandbox is created via
 //                               createSandbox(). The implementer runs first
-//                               (100 iterations). If it produces commits, a
-//                               reviewer runs in the same sandbox on the same
-//                               branch (1 iteration). All issue pipelines run
-//                               concurrently via Promise.allSettled().
+//                               (100 iterations). If the branch is then ahead
+//                               of the current branch, a reviewer runs in the
+//                               same sandbox on the same branch (1 iteration).
+//                               All issue pipelines run concurrently via
+//                               Promise.allSettled().
 //   Phase 3 (Merge):            A single agent merges all completed branches
 //                               into the current branch.
 //
@@ -21,6 +22,8 @@
 // Or add to package.json:
 //   "scripts": { "sandcastle": "npx tsx .sandcastle/main.mts" }
 
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { z } from "zod";
@@ -34,6 +37,24 @@ const planSchema = z.object({
     z.object({ id: z.string(), title: z.string(), branch: z.string() }),
   ),
 });
+
+// True when `branch` has commits the current branch doesn't. The review and
+// merge phases ask git rather than trusting this cycle's `commits`: a branch
+// an earlier cycle advanced but never merged gets no new commits when its
+// issue comes round again, so gating on `commits.length` would skip its
+// review and strand it forever.
+const isAheadOfHead = async (branch: string): Promise<boolean> => {
+  const git = spawn("git", ["rev-list", "--count", `HEAD..${branch}`], {
+    stdio: ["ignore", "pipe", "inherit"],
+  });
+  const closed = once(git, "close");
+  let count = "";
+  for await (const chunk of git.stdout) {
+    count += String(chunk);
+  }
+  await closed;
+  return git.exitCode === 0 && Number(count.trim()) > 0;
+};
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -106,7 +127,8 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   //
   // For each issue, create a sandbox via createSandbox() so the implementer
   // and reviewer share the same sandbox instance per branch. The implementer
-  // runs first; if it produces commits, the reviewer runs in the same sandbox.
+  // runs first; if the branch is ahead of the current branch, the reviewer
+  // runs in the same sandbox.
   //
   // Promise.allSettled means one failing pipeline doesn't cancel the others.
   // -------------------------------------------------------------------------
@@ -134,8 +156,11 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
           },
         });
 
-        // Only review if the implementer produced commits
-        if (implement.commits.length > 0) {
+        // Review whenever the branch has work the current branch lacks, not
+        // only when this run committed. An earlier cycle may have committed
+        // and then failed before or during its review; the merge phase picks
+        // that branch up (see isAheadOfHead), so it must be reviewed here first.
+        if (await isAheadOfHead(issue.branch)) {
           const review = await sandbox.run({
             name: "reviewer",
             maxIterations: 1,
@@ -162,35 +187,37 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   );
 
   // Log any agents that threw (network error, sandbox crash, etc.), and
-  // only pass branches that actually produced commits to the merge phase.
-  // An agent that ran successfully but made no commits has nothing to merge.
-  const completedIssues: typeof issues = [];
+  // only pass branches that are ahead of the current branch to the merge
+  // phase, whichever cycle made their commits (see isAheadOfHead). Each one
+  // was reviewed in this cycle's Phase 2.
+  const finishedIssues: typeof issues = [];
   for (const [i, issue] of issues.entries()) {
     const outcome = settled[i];
     if (outcome?.status === "rejected") {
       console.error(
         `  ✗ ${issue.id} (${issue.branch}) failed: ${outcome.reason}`,
       );
-    } else if (
-      outcome?.status === "fulfilled" &&
-      outcome.value.commits.length > 0
-    ) {
-      completedIssues.push(issue);
+    } else if (outcome?.status === "fulfilled") {
+      finishedIssues.push(issue);
     }
   }
+  const ahead = await Promise.all(
+    finishedIssues.map(async (issue) => isAheadOfHead(issue.branch)),
+  );
+  const completedIssues = finishedIssues.filter((_, i) => ahead[i] === true);
 
   const completedBranches = completedIssues.map((i) => i.branch);
 
   console.log(
-    `\nExecution complete. ${completedBranches.length} branch(es) with commits:`,
+    `\nExecution complete. ${completedBranches.length} branch(es) ahead of HEAD:`,
   );
   for (const branch of completedBranches) {
     console.log(`  ${branch}`);
   }
 
   if (completedBranches.length === 0) {
-    // All agents ran but none made commits — nothing to merge this cycle.
-    console.log("No commits produced. Nothing to merge.");
+    // No branch has work the current branch lacks — nothing to merge.
+    console.log("No branches ahead of HEAD. Nothing to merge.");
     continue;
   }
 

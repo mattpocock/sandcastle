@@ -26,6 +26,8 @@ console.log(result.output.score); // typed as number
 
 `Output.string({ tag })` extracts the tag contents as a plain string (trimmed, no JSON parsing). Both helpers require `maxIterations` to be `1` (the default). The resolved [prompt](./glossary.md#prompt) must contain the configured opening tag literal.
 
+The tag can span several assistant messages. Some agents, such as Claude Code, continue a long reply across messages and then repeat only the last one as their final result. Sandcastle reads the whole reply in order, without the repeated last message, so a tag or a JSON string can continue from one message to the next.
+
 When extraction or validation fails, `run()` throws a `StructuredOutputError`. Alongside `tag`, `rawMatched`, `cause`, `commits`, `branch`, and `preservedWorktreePath`, the error carries the `sessionId` (and `sessionFilePath`, when the session was captured) of the run that produced the bad output.
 
 Pass `maxRetries` to have Sandcastle handle the retry loop for you. Each retry resumes the same [agent session](./glossary.md#agent-session) and feeds back a token-efficient description of the error, so the agent can re-emit a corrected tag without redoing the work. Retries require an [agent provider](./glossary.md#agent-provider) that supports session resumption (`claudeCode`, `codex`, `pi`, `copilot`, `cursor`, `opencode`) — every built-in agent provider resumes. Calling `run()` with `maxRetries > 0` against a custom provider without `sessionStorage` throws immediately.

@@ -1,4 +1,4 @@
-import { exec, execSync } from "node:child_process";
+import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import {
   copyFile,
@@ -10,8 +10,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { promisify } from "node:util";
-import { assert, describe, expect, it } from "vitest";
+import { assert, describe, expect, expectTypeOf, it } from "vitest";
 import { createWorktree } from "./createWorktree.js";
 import type {
   CreateWorktreeOptions,
@@ -31,8 +30,28 @@ import type {
 import { encodeProjectPath } from "./SessionStore.js";
 import { makeLocalSandbox } from "./testSandbox.js";
 import { testIsolated } from "./sandboxes/test-isolated.js";
+import { execAsync } from "./testExec.js";
 
-const execAsync = promisify(exec);
+/** The text of a stream an `execSync` error captured, or "" if it has none. */
+const capturedOutput = (value: unknown): string => {
+  if (typeof value === "string") {
+    return value;
+  }
+  return Buffer.isBuffer(value) ? value.toString() : "";
+};
+
+/** The exec result for a command whose `execSync` threw. */
+const execSyncFailure = (error: unknown): ExecResult => {
+  if (typeof error !== "object" || error === null) {
+    return { stdout: "", stderr: "", exitCode: 1 };
+  }
+  const status = "status" in error ? error.status : undefined;
+  return {
+    stdout: capturedOutput("stdout" in error ? error.stdout : undefined),
+    stderr: capturedOutput("stderr" in error ? error.stderr : undefined),
+    exitCode: typeof status === "number" ? status : 1,
+  };
+};
 
 /**
  * A bind-mount exec that hands `claude ...` to `onClaude`, streams the lines
@@ -59,13 +78,8 @@ const execWithFakeClaude =
         stdio: ["pipe", "pipe", "pipe"],
       });
       return { stdout: result, stderr: "", exitCode: 0 };
-    } catch (e: any) {
-      return {
-        stdout: e?.stdout?.toString() ?? "",
-        stderr: e?.stderr?.toString() ?? "",
-        exitCode:
-          typeof e?.status === "number" && e.status !== null ? e.status : 1,
-      };
+    } catch (error) {
+      return execSyncFailure(error);
     }
   };
 
@@ -147,7 +161,7 @@ describe("createWorktree", () => {
 
     try {
       expect(ws.worktreePath).toContain(".sandcastle/worktrees");
-      expect(ws.branch).toMatch(/^sandcastle\//);
+      expect(ws.branch).toMatch(/^sandcastle\//u);
       expect(existsSync(ws.worktreePath)).toBe(true);
     } finally {
       await ws.close();
@@ -191,18 +205,13 @@ describe("createWorktree", () => {
   });
 
   it("rejects 'head' branch strategy at the type level", () => {
-    const _options: CreateWorktreeOptions = {
-      // @ts-expect-error - head strategy should be a compile-time error
-      branchStrategy: { type: "head" },
-    };
+    expectTypeOf<{ type: "head" }>().not.toExtend<
+      CreateWorktreeOptions["branchStrategy"]
+    >();
   });
 
   it("does not accept signal option (compile-time check)", () => {
-    const _options: CreateWorktreeOptions = {
-      branchStrategy: { type: "branch", branch: "test" },
-      // @ts-expect-error - signal should not be accepted on createWorktree
-      signal: new AbortController().signal,
-    };
+    expectTypeOf<CreateWorktreeOptions>().not.toHaveProperty("signal");
   });
 
   it("copies files into the worktree with copyToWorktree", async () => {
@@ -338,7 +347,7 @@ describe("createWorktree", () => {
         branchStrategy: { type: "branch", branch: "dispose-test" },
         cwd: hostDir,
       });
-      worktreePath = ws.worktreePath;
+      ({ worktreePath } = ws);
       expect(existsSync(worktreePath)).toBe(true);
     }
     assert.isDefined(worktreePath);
@@ -367,14 +376,13 @@ describe("createWorktree", () => {
 
 /** Format a mock agent result as stream-json lines (mimicking Claude's output) */
 const toStreamJson = (output: string): string => {
-  const lines: string[] = [];
-  lines.push(
+  const lines = [
     JSON.stringify({
       type: "assistant",
       message: { content: [{ type: "text", text: output }] },
     }),
     JSON.stringify({ type: "result", result: output }),
-  );
+  ];
   return lines.join("\n");
 };
 
@@ -750,7 +758,7 @@ describe("worktree.run()", () => {
       });
 
       expect(result.commits.length).toBeGreaterThanOrEqual(1);
-      expect(result.commits[0]?.sha).toMatch(/^[0-9a-f]{40}$/);
+      expect(result.commits[0]?.sha).toMatch(/^[0-9a-f]{40}$/u);
       expect(result.branch).toBe("commits-run-test");
     } finally {
       await ws.close();
@@ -992,12 +1000,9 @@ describe("worktree.run()", () => {
   );
 
   it("sandbox is required (type error if omitted)", () => {
-    // This test validates at the type level — sandbox is required in WorktreeRunOptions
-    const _options = {
-      agent: claudeCode("claude-opus-4-8"),
-      prompt: "test",
-      // @ts-expect-error — sandbox is required
-    } satisfies WorktreeRunOptions;
+    expectTypeOf<
+      Omit<WorktreeRunOptions, "sandbox">
+    >().not.toExtend<WorktreeRunOptions>();
   });
 
   it("pre-aborted signal rejects immediately without running agent", async () => {
@@ -1114,12 +1119,9 @@ describe("worktree.run()", () => {
   });
 
   it("signal option has the correct type on WorktreeRunOptions", () => {
-    const _options: WorktreeRunOptions = {
-      agent: claudeCode("claude-opus-4-8"),
-      sandbox: testSandbox,
-      prompt: "test",
-      signal: new AbortController().signal,
-    };
+    expectTypeOf<WorktreeRunOptions>()
+      .toHaveProperty("signal")
+      .toEqualTypeOf<AbortSignal | undefined>();
   });
 });
 
@@ -1290,20 +1292,19 @@ describe("worktree.createSandbox()", () => {
   });
 
   it("does not accept branch options", () => {
-    const _options: WorktreeCreateSandboxOptions = {
-      sandbox: testSandbox,
-      // @ts-expect-error - branch should not be accepted
-      branch: "should-not-work",
-    };
+    expectTypeOf<WorktreeCreateSandboxOptions>().not.toHaveProperty("branch");
   });
 });
 
 describe("isolated provider: createWorktree({ copyToWorktree })", () => {
   /** Reads `secret.txt` from where the agent runs inside the sandbox. */
-  const readSecret = async (cwd: string) =>
-    existsSync(join(cwd, "secret.txt"))
-      ? (await readFile(join(cwd, "secret.txt"), "utf8")).trim()
-      : "MISSING";
+  const readSecret = async (cwd: string) => {
+    if (!existsSync(join(cwd, "secret.txt"))) {
+      return "MISSING";
+    }
+    const secret = await readFile(join(cwd, "secret.txt"), "utf8");
+    return secret.trim();
+  };
 
   /**
    * An isolated provider whose agent records what `secret.txt` holds inside

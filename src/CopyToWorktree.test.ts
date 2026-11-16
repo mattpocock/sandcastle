@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile, mkdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { Cause, Chunk, Effect, Exit } from "effect";
 import { assert, describe, expect, it, vi } from "vitest";
 import { copyToWorktree, getCopyOnWriteFlags } from "./CopyToWorktree.js";
@@ -239,7 +240,7 @@ describe("copyToWorktree", () => {
 
         // Yield to the event loop so the killed cp's exit callback runs: a
         // fallback cp spawned from it would block on the FIFO forever.
-        await new Promise((r) => setTimeout(r, 500));
+        await sleep(500);
         expect(cpAlive()).toBe(false);
       } finally {
         // Kill any surviving cp before deleting the FIFO: once the FIFO is

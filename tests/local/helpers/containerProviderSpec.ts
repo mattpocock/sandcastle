@@ -24,6 +24,8 @@ export interface SharedOptions {
   readonly groups?: readonly (string | number)[];
   readonly devices?: readonly string[];
   readonly cpus?: number;
+  readonly memory?: string;
+  readonly pidsLimit?: number;
   readonly mounts?: readonly {
     readonly hostPath: string;
     readonly sandboxPath: string;
@@ -204,6 +206,20 @@ export const describeContainerProvider = (target: EngineUnderTest): void => {
         await expect(sh(handle, "cat /sys/fs/cgroup/cpu.max")).resolves.toBe(
           "150000 100000",
         );
+      });
+
+      it("caps the container's memory with no swap, and its process count", async () => {
+        const boxes = useSandboxes(engine);
+        const handle = await boxes.open(
+          make({ imageName: image, memory: "64m", pidsLimit: 32 }),
+        );
+
+        await expect(
+          sh(
+            handle,
+            "cat /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory.swap.max /sys/fs/cgroup/pids.max",
+          ),
+        ).resolves.toBe("67108864\n0\n32");
       });
 
       it("bind-mounts user mounts: read-only ones refuse writes, writable ones reach the host", async () => {
