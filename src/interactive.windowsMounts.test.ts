@@ -12,23 +12,24 @@ import { interactive } from "./interactive.js";
 import { createBindMountSandboxProvider } from "./SandboxProvider.js";
 import type { BindMountSandboxHandle } from "./SandboxProvider.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
+import type { MountEntry } from "./SandboxFactory.js";
 import { claudeCode } from "./AgentProvider.js";
 import { execAsync } from "./testExec.js";
 
-const mockPatchGitMountsForWindows = vi.fn(
+const mockPatchGitMountsForWindows = vi.fn<
   (
-    gitMounts: { hostPath: string; sandboxPath: string }[],
-    _worktreePath: string,
-    _sandboxRepoDir: string,
-  ) => gitMounts,
-);
+    gitMounts: MountEntry[],
+    worktreePath: string,
+    sandboxRepoDir: string,
+  ) => MountEntry[]
+>((gitMounts) => gitMounts);
 
-vi.mock("./mountUtils.js", async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>;
+vi.mock(import("./mountUtils.js"), async (importOriginal) => {
+  const actual = await importOriginal();
   return {
     ...actual,
     patchGitMountsForWindows: (
-      gitMounts: { hostPath: string; sandboxPath: string }[],
+      gitMounts: MountEntry[],
       worktreePath: string,
       sandboxRepoDir: string,
     ) =>
@@ -55,21 +56,14 @@ const makeInteractiveProvider = () =>
     },
   });
 
+/** A git repo on `main` with one commit, of init.txt. */
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });
   await execAsync('git config user.email "test@test.com"', { cwd: dir });
   await execAsync('git config user.name "Test"', { cwd: dir });
-};
-
-const commitFile = async (
-  dir: string,
-  name: string,
-  content: string,
-  message: string,
-) => {
-  await writeFile(join(dir, name), content);
-  await execAsync(`git add "${name}"`, { cwd: dir });
-  await execAsync(`git commit -m "${message}"`, { cwd: dir });
+  await writeFile(join(dir, "init.txt"), "init");
+  await execAsync('git add "init.txt"', { cwd: dir });
+  await execAsync('git commit -m "initial commit"', { cwd: dir });
 };
 
 describe("interactive() Windows mount patching", () => {
@@ -85,7 +79,6 @@ describe("interactive() Windows mount patching", () => {
   it("calls patchGitMountsForWindows with worktreePath and SANDBOX_REPO_DIR in non-head mode", async () => {
     hostDir = await mkdtemp(join(tmpdir(), "wm-test-interactive-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
 
     const provider = makeInteractiveProvider();
 
@@ -109,7 +102,6 @@ describe("interactive() Windows mount patching", () => {
   it("calls patchGitMountsForWindows with hostRepoDir as worktreeHostPath in head mode", async () => {
     hostDir = await mkdtemp(join(tmpdir(), "wm-test-interactive-head-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "init.txt", "init", "initial commit");
 
     const provider = makeInteractiveProvider();
 
