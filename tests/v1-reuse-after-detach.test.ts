@@ -76,6 +76,22 @@ const verified = async (delivery: Delivery | undefined) => {
   });
 };
 
+/** Whether every process working in `dir` ends within about 10 seconds (Linux /proc). */
+const processesGone = async (
+  dir: string,
+  triesLeft = 200,
+): Promise<boolean> => {
+  const found = await procfsOf(dir);
+  if (found.length === 0) {
+    return true;
+  }
+  if (triesLeft === 0) {
+    return false;
+  }
+  await delay(50);
+  return processesGone(dir, triesLeft - 1);
+};
+
 /**
  * A finish-report receiver that holds its answer to the first report until
  * `release()`, so the supervisor that sent it is still delivering.
@@ -303,6 +319,8 @@ describe.skipIf(process.platform === "win32")(
         const sandbox = await createSandbox({ provider });
         await reportedStep(sandbox, hook, "one");
         const dir = supervisorDir(provider, sandbox.sandboxId);
+        // It writes `exited` just before its process ends.
+        const gone = await processesGone(dir);
 
         const again = await reattach(rootDir, sandbox.sandboxId);
         await again.status();
@@ -310,6 +328,7 @@ describe.skipIf(process.platform === "win32")(
         await runStep(again, hook.url, "two");
         const restarted = await procfsOf(dir);
 
+        expect(gone).toBe(true);
         expect(idle).toHaveLength(0);
         expect(restarted).not.toHaveLength(0);
       },
