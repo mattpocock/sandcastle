@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -8,7 +9,12 @@ import { claudeCode, createSandbox, Output } from "@ai-hero/sandcastle/v1";
 import type { FakeSandboxProvider } from "@ai-hero/sandcastle/v1/testing";
 import { fakeAgent, fakeSandbox } from "@ai-hero/sandcastle/v1/testing";
 import type { TaskAgentOptions } from "@ai-hero/sandcastle/v1/tasks";
-import { general, implement, review } from "@ai-hero/sandcastle/v1/tasks";
+import {
+  general,
+  implement,
+  merge,
+  review,
+} from "@ai-hero/sandcastle/v1/tasks";
 import {
   bareRepo,
   pullRequest,
@@ -19,7 +25,8 @@ import {
 // Every bundled task with the caller's own agent: `fakeAgent` from
 // `/v1/testing` in place of the real CLI, or a built-in agent other than the
 // task's default. A local bare repo stands in for GitHub, with a pull request
-// for `review` and a stub `gh` that answers `gh pr view`; a stub `claude`
+// for `review`, an `integration` branch for `merge` to merge it into, and a
+// stub `gh` that answers `gh pr view`; a stub `claude`
 // records how it was run, so a test can tell whether the real CLI ran. POSIX
 // only, like the other task tests.
 
@@ -42,6 +49,13 @@ const IMPLEMENTED = `Opened the PR.\n<implementResult>${JSON.stringify({
   summary: "Added the widget.",
 })}</implementResult>`;
 
+const MERGED = `Pushed.\n<mergeResult>${JSON.stringify({
+  status: "merged",
+  into: "integration",
+  commit: "0123456789abcdef0123456789abcdef01234567",
+  summary: "Merged.",
+})}</mergeResult>`;
+
 const REVIEWED = `Posted.\n<reviewResult>${JSON.stringify({
   verdict: "approve",
   comments: [],
@@ -50,7 +64,7 @@ const REVIEWED = `Posted.\n<reviewResult>${JSON.stringify({
 
 /** Each bundled task, started on `origin` with the caller's agent options, and its final message. */
 interface TaskCase {
-  readonly name: "general" | "implement" | "review";
+  readonly name: "general" | "implement" | "merge" | "review";
   readonly timeLimitMinutes: number;
   readonly finalMessage: string;
   readonly start: (
@@ -107,6 +121,21 @@ const CASES: readonly TaskCase[] = [
       }),
     output: expect.objectContaining({ verdict: "approve" }),
   },
+  {
+    name: "merge",
+    timeLimitMinutes: merge.limits.timeLimitMinutes,
+    finalMessage: MERGED,
+    start: async (sandbox, origin, options) =>
+      merge.start(sandbox, {
+        repo: origin,
+        from: PR.branch,
+        into: "integration",
+        githubToken: TOKEN,
+        skillsContext: GITHUB,
+        ...options,
+      }),
+    output: expect.objectContaining({ status: "merged" }),
+  },
 ];
 
 describe.skipIf(process.platform === "win32")(
@@ -123,6 +152,7 @@ describe.skipIf(process.platform === "win32")(
       provider = fakeSandbox({ rootDir: path.join(rootDir, "sandboxes") });
       origin = await bareRepo(rootDir);
       await pullRequest(rootDir, origin, PR);
+      execFileSync("git", ["-C", origin, "branch", "integration", "main"]);
     });
 
     afterEach(async () => {

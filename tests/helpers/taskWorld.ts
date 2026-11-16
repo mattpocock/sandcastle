@@ -11,19 +11,21 @@ import { hostPath } from "./finishReportReceiver.js";
 /**
  * A stub `claude` in `dir/bin`. It writes what it was run with to `dir`
  * (the prompt from its first stream-json message),
- * prints the first of `lines`, waits for `dir/go` when `waitForGo`, then
- * prints the rest.
+ * prints the first of `lines`, waits for `dir/go` when `waitForGo`, runs
+ * `script` (shell, in the session's working directory) when given, then
+ * prints the rest. A failing `script` doesn't stop it.
  */
 export const stubClaude = async (
   dir: string,
   lines: readonly string[],
-  options: { readonly waitForGo?: boolean } = {},
+  options: { readonly waitForGo?: boolean; readonly script?: string } = {},
 ) => {
   const bin = path.join(dir, "bin");
   await mkdir(bin, { recursive: true });
   const [first = "", ...rest] = lines;
   await writeFile(path.join(dir, "first.jsonl"), `${first}\n`);
   await writeFile(path.join(dir, "rest.jsonl"), `${rest.join("\n")}\n`);
+  await writeFile(path.join(dir, "script.sh"), `${options.script ?? ""}\n`);
   const wait =
     options.waitForGo === true
       ? `while [ ! -f "${dir}/go" ]; do sleep 0.05; done`
@@ -38,6 +40,7 @@ export const stubClaude = async (
     `printf '%s\\n' "$message" | node -e 'let s="";process.stdin.on("data",(d)=>{s+=d}).on("end",()=>{process.stdout.write(JSON.parse(s).message.content)})' > "${dir}/agent-prompt.txt"`,
     `cat "${dir}/first.jsonl"`,
     wait,
+    `sh "${dir}/script.sh" > "${dir}/script.log" 2>&1 < /dev/null`,
     `cat "${dir}/rest.jsonl"`,
   ].join("\n");
   await writeFile(path.join(bin, "claude"), `${script}\n`);
