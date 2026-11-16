@@ -6,9 +6,19 @@
  * assumptions. The types they take and return are re-exported here too;
  * they're the same ones `@ai-hero/sandcastle/v1` exports.
  *
+ * A chooser picks which of a spec's tickets to build next: `sessionChooser()`
+ * (a short session on Haiku), `jevChooser()` (TypeSafe's Jev decision model,
+ * optional), or any function of the `Chooser` type.
+ *
  * @packageDocumentation
  */
 
+export type { Choice, Chooser, ChooserContext } from "./chooser.js";
+export type { SpecTicket, SpecTickets } from "./chooserGithubTickets.js";
+export { jevChooser } from "./chooserJev.js";
+export type { JevChooserOptions } from "./chooserJev.js";
+export { sessionChooser } from "./chooserSession.js";
+export type { SessionChooserOptions } from "./chooserSession.js";
 export { general } from "./taskGeneral.js";
 export type {
   GeneralInput,
