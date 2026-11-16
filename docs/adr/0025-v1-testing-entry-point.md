@@ -1,6 +1,6 @@
 # v1 testing entry point: a fake provider on real temp dirs and real processes
 
-Status: proposed, for the v1 pre-release line (`@ai-hero/sandcastle/v1/testing`). Accepted for v1 pre-releases by the coordinator on 2026-11-04; Matt's review is required before 1.0.0.
+Status: accepted (pre-alpha; may change without notice), POSIX only, for `@ai-hero/sandcastle/v1/testing`. Accepted by the maintainer on 2026-11-16: `fakeSandbox` and `fakeAgent` as shipped, with no failure-injection options. This is a decision for now, not a freeze: v1 is not yet at alpha, and any of it may change or break without notice before then.
 
 ## Context
 
@@ -78,3 +78,4 @@ fakeAgent(script: {
 - **Claude Code's resume, faithfully.** In `claude-code` format it writes the session file where Claude Code would (under the sandbox user's home, keyed by working directory), and a `--resume <id>` that can't find its file fails as the CLI does. `continueSession` therefore works only in the same sandbox and directory, as with the real agent.
 - **Inline lines only; no named fixtures.** Recorded fixtures shipping inside the package is a one-way door with no user asking for it yet. Users pass lines (read from their own recordings).
 - **Not added:** per-line delays, scripted tool effects, different replies per turn. A test that needs them can run two sessions, or use `hang`.
+- **`inputDelaySeconds`**, the one delay option `fakeAgent` has, came later with mid-run input: it delays reading a message sent while a turn hangs. See [ADR 0032](0032-v1-sessions-take-input-mid-run.md).

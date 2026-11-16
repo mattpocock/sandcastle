@@ -1,6 +1,6 @@
 # v1 detach: the deadline, the finish report and its secret
 
-Status: accepted for the v1 pre-release line.
+Status: accepted (pre-alpha; may change without notice). The detach contract below (the finish report's `version: 1` wire format and Standard Webhook signing, the deadline, the retries, `verifyFinishReport`) was accepted as built on 2026-11-16, as a decision for now: v1 is not yet at alpha, and any of it may change or break without notice before then.
 
 ## Context
 
@@ -25,4 +25,5 @@ A remote orchestrator (a serverless function, say) can't stay connected to an ho
 
 - If the vendor kills the sandbox before the report is delivered, nothing is sent: the orchestrator's own wait timeout is the "never heard back" path. The report file is still read by a later `status()`.
 - A finish report has `processes: []` until the handle can spawn processes.
-- `verifyFinishReport` needs `node:crypto`; edge runtimes would need a Web Crypto variant.
+- `verifyFinishReport` needs `node:crypto`; edge runtimes would need a Web Crypto variant, which can follow later as an addition.
+- The sealed-secret format (AES-256-GCM for the secret, RSA-2048 OAEP-SHA256 wrapping the key, all `node:crypto`) stays as built for now (2026-11-16). Both ends ship in the same package version, since `createSandbox` copies the supervisor bundle in, so the format is internal: it can be swapped (for a vetted construction such as a libsodium sealed box) in any release without breaking callers.
