@@ -16,8 +16,24 @@ jobs:
       pull-requests: write
       id-token: write
     steps:
+      # The Version Packages PR is pushed with a GitHub App token, not
+      # GITHUB_TOKEN: pushes made with GITHUB_TOKEN never trigger workflows,
+      # so the PR's required checks would never start. The App (Contents,
+      # Pull requests and Workflows: read and write, installed on this repo
+      # only) is set up by its owner; see docs/agents/releasing.md.
+      - name: Mint release App token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      # checkout persists this token in the git config, so the changesets
+      # action's `git push` of the release branch goes out as the App.
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -40,4 +56,4 @@ jobs:
           publish: npx changeset publish
           title: "Version Packages (run npm run test:local before merging)"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
