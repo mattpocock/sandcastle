@@ -109,6 +109,7 @@ describe("sandcastle init (non-interactive)", () => {
     const initNative = async (
       provider: string,
       agent = "claude-code",
+      home?: string,
     ): Promise<Awaited<ReturnType<typeof runCli>>> =>
       runCli(
         [
@@ -124,7 +125,11 @@ describe("sandcastle init (non-interactive)", () => {
           "--template",
           "blank",
         ],
-        { cwd: repo.dir, path: emptyPath },
+        {
+          cwd: repo.dir,
+          path: emptyPath,
+          ...(home === undefined ? {} : { home }),
+        },
       );
 
     // The install command is read from the distro, so this is Linux only.
@@ -173,6 +178,30 @@ describe("sandcastle init (non-interactive)", () => {
 
         expect(result).toMatchObject({ exitCode: 0 });
         expect(`${result.stdout}${result.stderr}`).not.toContain(
+          "claude.ai/install.sh",
+        );
+      },
+      60_000,
+    );
+
+    it.skipIf(process.platform === "win32").each([
+      ["HOME itself", ""],
+      ["an ancestor of HOME", "dev"],
+    ])(
+      "warns when the agent CLI is only in %s",
+      async (_label, homeSubdir) => {
+        const claude = join(emptyPath, "claude");
+        writeFileSync(claude, "#!/bin/sh\n");
+        chmodSync(claude, 0o755);
+
+        const result = await initNative(
+          "bwrap",
+          "claude-code",
+          join(emptyPath, homeSubdir),
+        );
+
+        expect(result).toMatchObject({ exitCode: 0 });
+        expect(`${result.stdout}${result.stderr}`).toContain(
           "claude.ai/install.sh",
         );
       },
