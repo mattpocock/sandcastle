@@ -259,15 +259,32 @@ const choiceToTriBool = (
 ): Option.Option<boolean> =>
   opt._tag === "Some" ? Option.some(opt.value === "true") : Option.none();
 
-/** The host's `bd version`, or undefined when bd isn't on the PATH. */
-const detectHostBdVersion = (cwd: string): Effect.Effect<string | undefined> =>
+/** The host's `bd version`, or undefined when bd isn't on the PATH, or an error description if bd failed. */
+const detectHostBdVersion = (
+  cwd: string,
+): Effect.Effect<string | { readonly failed: string } | undefined> =>
   Effect.async((resume) => {
     execFile(
       "bd",
       ["version"],
       { cwd, encoding: "utf8", timeout: 15_000 },
-      (_error, stdout, stderr) => {
-        resume(Effect.succeed(parseBdVersion(`${stdout}\n${stderr}`)));
+      (error, stdout, stderr) => {
+        if (error) {
+          if (error.code === "ENOENT") {
+            resume(Effect.succeed(undefined));
+            return;
+          }
+          const detail = (stderr || stdout || error.message).trim();
+          resume(Effect.succeed({ failed: detail }));
+          return;
+        }
+        const version = parseBdVersion(`${stdout}\n${stderr}`);
+        if (version !== undefined) {
+          resume(Effect.succeed(version));
+          return;
+        }
+        const detail = (stderr || stdout).trim();
+        resume(Effect.succeed(detail ? { failed: detail } : undefined));
       },
     );
   });

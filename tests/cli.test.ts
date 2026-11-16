@@ -436,6 +436,53 @@ describe.skipIf(process.platform === "win32")(
       expect(result.output).toContain("Init complete");
       expect(result.output).not.toContain("Your host runs bd");
     });
+
+    const initWithCustomBd = async (scriptContent: string) => {
+      const repo = hostRepo();
+      const binDir = mkdtempSync(path.join(tmpdir(), "e2e-cli-fake-bd-"));
+      onTestFinished(() => {
+        rmSync(binDir, { recursive: true, force: true });
+      });
+      writeFileSync(path.join(binDir, "bd"), scriptContent, { mode: 0o755 });
+      const hostPath = process.env["PATH"] ?? "";
+      const result = await sandcastle(initArgs(INIT_FLAGS), repo, {
+        ...process.env,
+        PATH: `${binDir}${path.delimiter}${hostPath}`,
+      });
+      return { result };
+    };
+
+    const initWithEmptyPath = async () => {
+      const repo = hostRepo();
+      const emptyBinDir = mkdtempSync(
+        path.join(tmpdir(), "e2e-cli-empty-bin-"),
+      );
+      onTestFinished(() => {
+        rmSync(emptyBinDir, { recursive: true, force: true });
+      });
+      const result = await sandcastle(initArgs(INIT_FLAGS), repo, {
+        ...process.env,
+        PATH: emptyBinDir,
+      });
+      return { result };
+    };
+
+    it("reports a failing bd as failing, with its stderr", async () => {
+      const { result } = await initWithCustomBd(
+        "#!/bin/sh\necho 'simulated bd crash' >&2\nexit 1\n",
+      );
+
+      expect(result.output).toContain(
+        "The host's bd failed: simulated bd crash",
+      );
+      expect(result.output).not.toContain("isn't on your PATH");
+    });
+
+    it("reports 'bd isn't on your PATH' only when bd is missing", async () => {
+      const { result } = await initWithEmptyPath();
+
+      expect(result.output).toContain("bd isn't on your PATH");
+    });
   },
 );
 

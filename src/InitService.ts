@@ -706,12 +706,20 @@ const compareVersions = (a: string, b: string): number => {
  * reads an empty database.
  */
 export const beadsVersionWarning = (
-  hostVersion?: string,
+  hostVersion?: string | { readonly failed: string },
 ): string | undefined => {
   if (hostVersion === BEADS_VERSION) {
     return undefined;
   }
   const shared = `the image installs bd ${BEADS_VERSION}, and every sandbox opens your .beads/ with it`;
+  if (
+    typeof hostVersion === "object" &&
+    hostVersion !== null &&
+    "failed" in hostVersion
+  ) {
+    const detail = hostVersion.failed.trim();
+    return `The host's bd failed${detail ? `: ${detail}` : ""}, and ${shared}. Use bd ${BEADS_VERSION} on the host too, or an older host bd can no longer create issues once a sandbox has opened the database.`;
+  }
   if (hostVersion === undefined) {
     return `bd isn't on your PATH, and ${shared}. Use bd ${BEADS_VERSION} on the host too, or an older host bd can no longer create issues once a sandbox has opened the database.`;
   }
