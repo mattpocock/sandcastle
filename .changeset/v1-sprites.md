@@ -1,0 +1,5 @@
+---
+"@ai-hero/sandcastle": minor
+---
+
+v1: `sprites()`, a Fly.io Sprites provider at `@ai-hero/sandcastle/v1/sandboxes/sprites`, with detachable sandboxes. `sprites({ token?, create? })` reads `SPRITES_TOKEN`, then `SPRITE_TOKEN`, and passes `create` (`SpritesCreateOptions`: `@fly/sprites`' own create options, without the name and `environment`) to the SDK. Each sprite is named `sandcastle-<kill time in epoch seconds>-<uuid>`, and the kill time is now plus `timeLimitMinutes`, enforced by the session supervisor, since Sprites have no time limit of their own. `parseSpriteName` reads a name back and `SPRITE_NAME_PREFIX` lists Sandcastle's sprites, for a cleanup sweep. Env reaches each command through a file the command sources and removes, never the exec URL. `close()` deletes the sprite. The session supervisor runs in an exec that outlives the host's connection and holds a Sprites Task while it runs, so the sprite isn't paused mid-run. A host that exits after `create` has handed out the handle no longer deletes the sprite. A guide, `docs/v1/sprites.md`, covers credentials, the default image, the time limit, detach, egress and cleanup.

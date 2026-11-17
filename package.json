@@ -70,6 +70,14 @@
       "import": "./dist/v1/sandboxes/e2b.js",
       "types": "./dist/v1/sandboxes/e2b.d.ts"
     },
+    "./v1/sandboxes/modal": {
+      "import": "./dist/v1/sandboxes/modal.js",
+      "types": "./dist/v1/sandboxes/modal.d.ts"
+    },
+    "./v1/sandboxes/sprites": {
+      "import": "./dist/v1/sandboxes/sprites.js",
+      "types": "./dist/v1/sandboxes/sprites.d.ts"
+    },
     "./v1/sandboxes/vercel": {
       "import": "./dist/v1/sandboxes/vercel.js",
       "types": "./dist/v1/sandboxes/vercel.d.ts"
