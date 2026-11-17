@@ -16,7 +16,8 @@
       "@ai-hero/sandcastle/v1/tasks": ["../src/v1/tasks.ts"],
       "@ai-hero/sandcastle/v1/sandboxes/daytona": [
         "../src/v1/sandboxes/daytona.ts"
-      ]
+      ],
+      "@ai-hero/sandcastle/v1/sandboxes/modal": ["../src/v1/sandboxes/modal.ts"]
     }
   },
   "include": ["**/*.ts"]
