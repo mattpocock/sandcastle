@@ -171,6 +171,43 @@ export interface JevChooserOptions {
 }
 
 // @public
+export const merge: MergeTask;
+
+// @public
+export interface MergeInput extends TaskAgentOptions {
+    readonly from: string | number;
+    readonly githubToken: string;
+    readonly into: string;
+    readonly name?: string;
+    readonly record?: SessionRecordOptions;
+    readonly repo: string;
+    readonly setup?: readonly string[];
+    readonly skillsContext: TaskSkillsContext;
+}
+
+// @public
+export type MergeOutputs<Name extends string = "merge"> = Readonly<Record<Name, OutputObjectDefinition<MergeResult>>>;
+
+// @public
+export interface MergeResult {
+    readonly commit?: string;
+    readonly into: string;
+    readonly status: "merged" | "conflict-unresolved" | "checks-failed" | "blocked";
+    readonly summary: string;
+}
+
+// @public
+export interface MergeTask {
+    readonly limits: TaskLimits;
+    readonly name: "merge";
+    readonly outputs: {
+        (): MergeOutputs;
+        <Name extends string>(name: Name): MergeOutputs<Name>;
+    };
+    readonly start: (sandbox: Sandbox, input: MergeInput) => Promise<SessionProcess<MergeResult>>;
+}
+
+// @public
 export interface NativeSessionFile {
     readonly content: string;
     readonly fileName: string;

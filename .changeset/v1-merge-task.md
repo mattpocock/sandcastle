@@ -1,0 +1,5 @@
+---
+"@ai-hero/sandcastle": minor
+---
+
+v1 (`@ai-hero/sandcastle/v1/tasks`): a fourth bundled task, `merge`. `merge.start(sandbox, { repo, from, into, githubToken, skillsContext, setup?, record?, name?, agent?, completionTimeoutSeconds? })` merges a branch, or a pull request's head when `from` is its number, into `into` with a merge commit, in one agent session (Claude Code on Sonnet by default, no skills). A clean merge is committed before the session; a conflicted one is left to the agent, which resolves it keeping both sides' intent. The agent runs the repo's checks and pushes `into`, never force-pushing. `start` rejects `into` = the repo's default branch before it clones anything. It ends with `mergeResult` (`status`: `merged`, `conflict-unresolved`, `checks-failed` or `blocked`, plus `into`, `commit?` and `summary`), which `merge.outputs(name?)` validates through `verifyFinishReport`. `merge.limits` is `{ timeLimitMinutes: 40, deadlineMinutes: 30 }`. The new types are `MergeInput`, `MergeTask`, `MergeOutputs` and `MergeResult`.

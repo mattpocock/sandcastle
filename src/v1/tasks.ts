@@ -44,6 +44,9 @@ export type {
 export { review } from "./taskReview.js";
 export type { ReviewInput, ReviewTask } from "./taskReview.js";
 export type { ReviewOutputs, ReviewResult } from "./taskReviewResult.js";
+export { merge } from "./taskMerge.js";
+export type { MergeInput, MergeTask } from "./taskMerge.js";
+export type { MergeOutputs, MergeResult } from "./taskMergeResult.js";
 export type {
   TaskAgentOptions,
   TaskLimits,

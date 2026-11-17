@@ -10,10 +10,10 @@ import { resolveInSandbox } from "./sandboxPath.js";
 
 const GITHUB_REPO = /^[\w.-]+\/[\w.-]+$/u;
 
-const CREDENTIAL_HELPER = String.raw`!f() { test "$1" = get || exit 0; echo username=x-access-token; echo "password=$GH_TOKEN"; }; f`;
+export const CREDENTIAL_HELPER = String.raw`!f() { test "$1" = get || exit 0; echo username=x-access-token; echo "password=$GH_TOKEN"; }; f`;
 
 /** `owner/name` is a GitHub repo; anything else is a URL or path git can clone. */
-const cloneUrl = (repo: string): string =>
+export const cloneUrl = (repo: string): string =>
   GITHUB_REPO.test(repo) ? `https://github.com/${repo}.git` : repo;
 
 /** The clone's directory: the repo's name, as `git clone` would pick it. */
