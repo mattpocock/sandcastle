@@ -83,6 +83,14 @@ const bwrapWorks =
   spawnSync("bwrap", ["--ro-bind", "/", "/", "true"]).status === 0;
 const ci = process.env["CI"] !== undefined && process.env["CI"] !== "";
 
+// Each observation reads /proc for every process on the host, so its cost
+// grows with the host's process count: about 0.3s for ~1,500 processes on a
+// quiet machine, and seconds with a full test run or other work alongside.
+// vitest's defaults (1s for waitFor and poll, 5s a test, 10s a hook) are too
+// tight, so the scans get 20s and the hook and tests 30s. The sandboxed `sleep`
+// outlasts them all; the last test and afterAll kill it.
+const SCAN_BUDGET = { timeout: 20_000 };
+
 describe.skipIf(!bwrapWorks && !ci)("a live bwrap of a world", () => {
   let dir: string;
   let child: ChildProcess;
@@ -106,7 +114,7 @@ describe.skipIf(!bwrapWorks && !ci)("a live bwrap of a world", () => {
         "--unshare-all",
         "--die-with-parent",
         "sleep",
-        "30",
+        "600",
       ],
       { env: { ...process.env, CANARY_HOST: "canary-xyz" }, stdio: "ignore" },
     );
@@ -116,8 +124,8 @@ describe.skipIf(!bwrapWorks && !ci)("a live bwrap of a world", () => {
       if (found.length !== 1) {
         throw new Error("the sandboxed command isn't running yet");
       }
-    });
-  });
+    }, SCAN_BUDGET);
+  }, 30_000);
 
   afterAll(async () => {
     child.kill("SIGKILL");
@@ -137,20 +145,20 @@ describe.skipIf(!bwrapWorks && !ci)("a live bwrap of a world", () => {
       new Set(["DECLARED_KEY", "PWD"]),
     );
     expect(obs?.leaks).toStrictEqual([]);
-  });
+  }, 30_000);
 
   it("observes each bwrap once", async () => {
     const seen = new Set<string>();
     await expect(observeWorldBwraps(dir, ctx, seen)).resolves.toHaveLength(1);
     await expect(observeWorldBwraps(dir, ctx, seen)).resolves.toHaveLength(0);
-  });
+  }, 30_000);
 
   it("reports the running bwrap and the private dir as left behind", async () => {
     const { leaks } = await leftoverBwrap(dir, join(dir, "tmp"));
     expect(leaks).toHaveLength(2);
     expect(leaks.join("\n")).toMatch(/bwrap process \d+ still running/u);
     expect(leaks.join("\n")).toMatch(/sandcastle-bwrap-abc/u);
-  });
+  }, 30_000);
 
   it("reports nothing once the bwrap has exited and its dir is gone", async () => {
     child.kill("SIGKILL");
@@ -159,7 +167,7 @@ describe.skipIf(!bwrapWorks && !ci)("a live bwrap of a world", () => {
       .poll(async () => {
         const { leaks } = await leftoverBwrap(dir, join(dir, "tmp"));
         return leaks;
-      })
+      }, SCAN_BUDGET)
       .toStrictEqual([]);
-  });
+  }, 30_000);
 });

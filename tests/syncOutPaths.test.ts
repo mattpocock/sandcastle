@@ -158,7 +158,10 @@ const rejection = async (promise: Promise<unknown>): Promise<string> =>
 /** run() rejected with a SyncOutPathError (wrapped in Effect's FiberFailure). */
 const REFUSAL = /SyncOutPathError: Refusing to sync /u;
 
-// The sandbox side is POSIX shell (symlinks, `sh -c`).
+// The sandbox side is POSIX shell (symlinks, `sh -c`). Each test is a whole
+// run(): a worktree and some 40 git and 15 shell processes, under a second on
+// an idle machine but several times that on a loaded one, so they get the
+// same 30s as the other process-spawning tests rather than vitest's 5s.
 describe.skipIf(process.platform === "win32")(
   "run() refuses sync-out paths that leave the host worktree",
   () => {
@@ -285,4 +288,5 @@ describe.skipIf(process.platform === "win32")(
       ).resolves.toBeUndefined();
     });
   },
+  30_000,
 );
