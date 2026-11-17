@@ -21,9 +21,15 @@ import { fakeSandbox } from "@ai-hero/sandcastle/v1/testing";
 import type {
   GeneralInput,
   ImplementOutputs,
+  MergeOutputs,
   ReviewOutputs,
 } from "@ai-hero/sandcastle/v1/tasks";
-import { general, implement, review } from "@ai-hero/sandcastle/v1/tasks";
+import {
+  general,
+  implement,
+  merge,
+  review,
+} from "@ai-hero/sandcastle/v1/tasks";
 import type { FinishReportReceiver } from "./helpers/finishReportReceiver.js";
 import { finishReportReceiver } from "./helpers/finishReportReceiver.js";
 import { bareRepo, spied, stubClaude } from "./helpers/taskWorld.js";
@@ -105,8 +111,10 @@ describe.skipIf(process.platform === "win32")("bundled tasks (v1)", () => {
   it("gives every bundled task the same outputs shape: a function returning its definitions by session name", () => {
     const implementOutputs: ImplementOutputs = implement.outputs();
     const reviewOutputs: ReviewOutputs = review.outputs();
+    const mergeOutputs: MergeOutputs = merge.outputs();
     expect(Object.keys(implementOutputs)).toStrictEqual(["implement"]);
     expect(Object.keys(reviewOutputs)).toStrictEqual(["review"]);
+    expect(Object.keys(mergeOutputs)).toStrictEqual(["merge"]);
     expect(general.outputs()).toStrictEqual({});
     expect(Object.keys(general.outputs(VERDICT))).toStrictEqual(["general"]);
   });

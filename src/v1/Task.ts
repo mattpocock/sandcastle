@@ -37,12 +37,12 @@ export interface TaskAgentOptions {
    * The agent and model the task's session runs, from a built-in agent
    * factory (`claudeCode()`, `codex()`, `cursor()`, `opencode()`,
    * `copilot()`, `pi()`), or `fakeAgent()` from `/v1/testing` in tests.
-   * Default: Claude Code on the task's own model (Sonnet for `general` and
-   * `review`, Opus for `implement`). Give the agent env of its own, such as
-   * its token, through the factory: `claudeCode("opus", { env })`. The task's
-   * skills are installed where Claude Code reads them, and its prompt is the
-   * same whichever agent runs it. `start` rejects an agent not made by a
-   * built-in factory before it clones anything.
+   * Default: Claude Code on the task's own model (Sonnet for `general`,
+   * `review` and `merge`, Opus for `implement`). Give the agent env of its
+   * own, such as its token, through the factory: `claudeCode("opus", { env })`.
+   * The task's skills are installed where Claude Code reads them, and its
+   * prompt is the same whichever agent runs it. `start` rejects an agent not
+   * made by a built-in factory before it clones anything.
    */
   readonly agent?: AgentProvider;
   /**
