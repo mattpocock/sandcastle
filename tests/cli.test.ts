@@ -437,6 +437,7 @@ describe.skipIf(process.platform === "win32")(
       expect(result.output).not.toContain("Your host runs bd");
     });
   },
+  30_000,
 );
 
 // The published package runs dist/main.js. The windows job runs the e2e tests

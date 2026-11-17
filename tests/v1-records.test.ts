@@ -1,17 +1,29 @@
 import { createHmac, randomBytes } from "node:crypto";
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { RecordRedaction, SessionRecord } from "@ai-hero/sandcastle/v1";
-import { createSandbox, verifyFinishReport } from "@ai-hero/sandcastle/v1";
+import type {
+  RecordRedaction,
+  Sandbox,
+  SessionRecord,
+} from "@ai-hero/sandcastle/v1";
+import {
+  claudeCode,
+  createSandbox,
+  Output,
+  verifyFinishReport,
+} from "@ai-hero/sandcastle/v1";
 import type { FakeSandboxProvider } from "@ai-hero/sandcastle/v1/testing";
 import { fakeAgent, fakeSandbox } from "@ai-hero/sandcastle/v1/testing";
 import type {
   Delivery,
   FinishReportReceiver,
 } from "./helpers/finishReportReceiver.js";
-import { finishReportReceiver } from "./helpers/finishReportReceiver.js";
+import {
+  finishReportReceiver,
+  hostPath,
+} from "./helpers/finishReportReceiver.js";
 
 // Session records, end to end: the real supervisor bundle in a fake sandbox
 // builds each session's record (its native transcript plus its events) when
@@ -119,6 +131,48 @@ describe.skipIf(process.platform === "win32")("session records (v1)", () => {
     return made;
   };
 
+  /**
+   * A stand-in `claude` that prints session `sessionId`'s init line, then
+   * `lines` only once the test releases it, and then hangs. Like Claude Code,
+   * it keeps each line in its session file, so the record has a native
+   * transcript. The clock that ends the session starts when `lines` print,
+   * so it is still running when detach() lands however slow the machine.
+   */
+  const heldClaude = async (
+    sandbox: Sandbox,
+    sessionId: string,
+    lines: readonly string[],
+  ) => {
+    const print = (line: string): string => `out '${line}'`;
+    await sandbox.writeTextFile({
+      path: "bin/claude",
+      content: [
+        "#!/bin/sh",
+        // The prompt: the first stream-json message on stdin.
+        "IFS= read -r _prompt",
+        // Claude Code's project directory: the cwd, each non-alphanumeric a '-'.
+        String.raw`dir="$HOME/.claude/projects/$(pwd | sed 's/[^A-Za-z0-9]/-/g')"`,
+        'mkdir -p "$dir"',
+        String.raw`out() { printf '%s\n' "$1"; printf '%s\n' "$1" >> "$dir/${sessionId}.jsonl"; }`,
+        print(init(sessionId)),
+        'while [ ! -f "$HOME/release" ]; do sleep 0.05; done',
+        ...lines.map((line) => print(line)),
+        "exec sleep 3600",
+      ].join("\n"),
+    });
+    await sandbox.exec("chmod +x bin/claude");
+    return {
+      agent: claudeCode("claude-opus-4-8"),
+      env: { PATH: `${sandbox.workingDirectory}/bin:${hostPath()}` },
+      /** Lets the agent print the rest of its lines. */
+      release: async () =>
+        writeFile(
+          path.join(provider.pathOf(sandbox.sandboxId), "home", "release"),
+          "",
+        ),
+    };
+  };
+
   beforeEach(async () => {
     rootDir = await mkdtemp(path.join(tmpdir(), "sandcastle-v1-records-"));
     provider = fakeSandbox({ rootDir });
@@ -143,19 +197,18 @@ describe.skipIf(process.platform === "win32")("session records (v1)", () => {
       provider,
       env: { API_TOKEN },
     });
+    const held = await heldClaude(sandbox, "s-detached", [
+      toolUse(`echo ${API_TOKEN}`),
+      assistant(`The password is ${PASSWORD}.`),
+      result("<done>Done.</done>"),
+    ]);
     await sandbox.spawnSession({
       name: "implement",
-      agent: fakeAgent({
-        lines: [
-          init("s-detached"),
-          toolUse(`echo ${API_TOKEN}`),
-          assistant(`The password is ${PASSWORD}.`),
-          result("Done."),
-        ],
-        hang: true,
-      }),
-      prompt: "Work.",
-      idleTimeoutSeconds: 1,
+      agent: held.agent,
+      env: held.env,
+      prompt: "Work, then say <done>Done.</done>",
+      output: Output.string({ tag: "done" }),
+      completionTimeoutSeconds: 0.5,
       record: {
         webhook: { url: hook.url, secret: recordSecret },
         upload: { url: `${bucket.url}/runs/r1.json?X-Amz-Signature=abc` },
@@ -167,6 +220,7 @@ describe.skipIf(process.platform === "win32")("session records (v1)", () => {
     const receipt = await sandbox.detach({
       finishReport: { url: reports.url, secret: reportSecret },
     });
+    await held.release();
 
     const [posted, put, finished] = await Promise.all([
       hook.first(),
@@ -188,9 +242,9 @@ describe.skipIf(process.platform === "win32")("session records (v1)", () => {
       detachId: receipt.detachId,
       name: "implement",
       agent: "claude-code",
-      model: "fake",
+      model: "claude-opus-4-8",
       sessionId: "s-detached",
-      exitReason: "idle-timeout",
+      exitReason: "closing-tag",
       labels: { runId: "r1", task: "implement" },
       eventsVersion: 1,
       native: { format: "claude-code-jsonl", fileName: "s-detached.jsonl" },
