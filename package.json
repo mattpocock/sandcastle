@@ -70,9 +70,17 @@
       "import": "./dist/v1/sandboxes/e2b.js",
       "types": "./dist/v1/sandboxes/e2b.d.ts"
     },
+    "./v1/sandboxes/modal": {
+      "import": "./dist/v1/sandboxes/modal.js",
+      "types": "./dist/v1/sandboxes/modal.d.ts"
+    },
     "./v1/sandboxes/sprites": {
       "import": "./dist/v1/sandboxes/sprites.js",
       "types": "./dist/v1/sandboxes/sprites.d.ts"
+    },
+    "./v1/sandboxes/vercel": {
+      "import": "./dist/v1/sandboxes/vercel.js",
+      "types": "./dist/v1/sandboxes/vercel.d.ts"
     }
   },
   "bin": {
@@ -134,6 +142,7 @@
     "@microsoft/api-extractor": "^7.60.1",
     "@types/node": "^25.5.0",
     "@typescript/native": "npm:typescript@7.0.2",
+    "@vercel/sandbox": "^3.9.1",
     "@vitest/coverage-v8": "^3.2.4",
     "dependency-cruiser": "^18.7.0",
     "e2b": "^2.62.0",
@@ -156,7 +165,7 @@
   "peerDependencies": {
     "@daytona/sdk": ">=0.199.0 <1.0.0",
     "@fly/sprites": ">=0.2.4 <1.0.0",
-    "@vercel/sandbox": ">=1.0.0",
+    "@vercel/sandbox": ">=3.8.0 <4.0.0",
     "e2b": ">=2.62.0 <3.0.0",
     "modal": ">=0.11.0 <1.0.0"
   },

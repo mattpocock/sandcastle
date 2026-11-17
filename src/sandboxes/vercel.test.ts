@@ -232,10 +232,7 @@ describe("vercel() sandboxId", () => {
     vi.unstubAllEnvs();
   });
 
-  const identifiedSandbox = (identity: {
-    name?: string;
-    sandboxId?: string;
-  }): FakeSandbox => ({
+  const identifiedSandbox = (identity: { name?: string }): FakeSandbox => ({
     ...identity,
     mkDir: async () => {},
     writeFiles: async () => {},
@@ -254,16 +251,6 @@ describe("vercel() sandboxId", () => {
     const handle = await vercel().create({ env: {} });
 
     expect(handle.sandboxId).toBe("sbx_named");
-  });
-
-  it("is the sandbox's sandboxId (SDK 1)", async () => {
-    sandboxCreate.mockImplementationOnce(async () =>
-      identifiedSandbox({ sandboxId: "sbx_v1" }),
-    );
-
-    const handle = await vercel().create({ env: {} });
-
-    expect(handle.sandboxId).toBe("sbx_v1");
   });
 });
 
