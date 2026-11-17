@@ -27,6 +27,31 @@ export type AgentStreamEvent = {
 };
 
 // @public
+export interface Choice {
+    readonly next: readonly string[];
+    readonly reason?: string;
+    readonly remaining: readonly string[];
+    readonly status: "ok" | "blocked";
+}
+
+// @public
+export type Chooser = (context: ChooserContext) => Promise<Choice>;
+
+// @public
+export interface ChooserContext {
+    readonly githubToken: string;
+    readonly merged: readonly string[];
+    readonly record?: SessionRecordOptions;
+    readonly repo: string;
+    readonly round: number;
+    readonly sandbox: Sandbox;
+    readonly skillsContext: TaskSkillsContext;
+    readonly skipped: readonly string[];
+    readonly spec: string;
+    readonly stuck: readonly string[];
+}
+
+// @public
 export interface ExecOptions {
     readonly abortSignal?: AbortSignal;
     readonly allowFailure?: boolean;
@@ -127,6 +152,17 @@ export type ImplementWork = {
     readonly prompt: string;
     readonly ticket?: never;
 };
+
+// @public
+export const jevChooser: (options?: JevChooserOptions) => Chooser;
+
+// @public
+export interface JevChooserOptions {
+    readonly apiKey?: string;
+    readonly fetch?: typeof globalThis.fetch;
+    readonly model?: string;
+    readonly read?: (context: ChooserContext) => Promise<SpecTickets>;
+}
 
 // @public
 export interface NativeSessionFile {
@@ -248,6 +284,14 @@ export interface Sandbox<Native = unknown> extends AsyncDisposable {
 }
 
 // @public
+export const sessionChooser: (options?: SessionChooserOptions) => Chooser;
+
+// @public
+export interface SessionChooserOptions {
+    readonly agent?: AgentProvider;
+}
+
+// @public
 export interface SessionContextWindow {
     readonly limit?: number;
     readonly tokens: number;
@@ -347,6 +391,25 @@ export interface SessionUsage {
     readonly inputTokens: number;
     // (undocumented)
     readonly outputTokens: number;
+}
+
+// @public
+export interface SpecTicket {
+    readonly body: string;
+    readonly id: string;
+    readonly open: boolean;
+    // (undocumented)
+    readonly title: string;
+}
+
+// @public
+export interface SpecTickets {
+    // (undocumented)
+    readonly body: string;
+    // (undocumented)
+    readonly tickets: readonly SpecTicket[];
+    // (undocumented)
+    readonly title: string;
 }
 
 // @public

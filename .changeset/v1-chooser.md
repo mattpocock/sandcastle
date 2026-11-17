@@ -1,0 +1,5 @@
+---
+"@ai-hero/sandcastle": minor
+---
+
+v1 (`@ai-hero/sandcastle/v1/tasks`): the chooser, a primitive that picks which of a spec's tickets to build next. A `Chooser` is any function from a `ChooserContext` (the spec, its repo, the sandbox, the GitHub token, the tracker, the round, and the tickets merged, stuck and skipped so far) to a `Choice` (`{ status: "ok" | "blocked", next, remaining, reason? }`). Two ship. `sessionChooser({ agent? })` runs one session named `choose-<round>`, Claude Code on Haiku by default, which reads the spec and its tickets through the tracker instructions and ends with a structured `choice`. `jevChooser({ apiKey?, model?, fetch?, read? })` is optional and runs no session: it asks TypeSafe's Jev decision model, from the host, one Choice question at a time with each open ticket as an option, and takes its key from `apiKey` or `TYPESAFE_API_KEY`. By default it reads a GitHub spec and its sub-issues with `gh`; pass `read` for another tracker. Neither chooser ever returns a merged, stuck or skipped ticket, and a spec that can't be read or has no tickets gives `blocked`.
