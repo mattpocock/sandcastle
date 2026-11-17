@@ -1,6 +1,7 @@
 /**
- * Auth for the Vercel sandbox provider (`./vercel.ts`): the token, team and
- * project ids `Sandbox.create()` takes, from options or env vars.
+ * Auth for the Vercel sandbox providers (v1's `./vercel.ts`, and the 0.x
+ * `src/sandboxes/vercel.ts`): the token, team and project ids
+ * `@vercel/sandbox` takes, from options or env vars.
  */
 
 /** The auth options of `VercelOptions`. */
@@ -15,7 +16,7 @@ const setOrUndefined = (value: string | undefined): string | undefined =>
   value === "" ? undefined : value;
 
 /**
- * Resolve the auth params for `Sandbox.create()`.
+ * Resolve the auth params for `Sandbox.create()` and `Sandbox.get()`.
  *
  * `@vercel/sandbox` only accepts a token as an explicit param, together with
  * `teamId` and `projectId` (all three or none); otherwise it falls back to

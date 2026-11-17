@@ -17,9 +17,9 @@ import type {
   IsolatedSandboxHandle,
   IsolatedSandboxProvider,
 } from "../SandboxProvider.js";
-import type { SandboxInstance } from "@vercel/sandbox";
+import type { Sandbox as SandboxInstance } from "@vercel/sandbox";
 import { MAX_TAIL_CHARS } from "../boundedTail.js";
-import { resolveVercelAuth } from "./vercelAuth.js";
+import { resolveVercelAuth } from "../v1/sandboxes/vercelAuth.js";
 import { execBuffered, execStreamed, withStdin } from "./vercelExec.js";
 import type { RunCommandParams } from "./vercelExec.js";
 
@@ -260,8 +260,7 @@ const makeHandle = (
   maxOutputTailChars: number,
 ): IsolatedSandboxHandle => ({
   worktreePath: VERCEL_REPO_PATH,
-  // `@vercel/sandbox` 2 renamed the sandbox's id from `sandboxId` to `name`.
-  sandboxId: sandbox.name ?? sandbox.sandboxId,
+  sandboxId: sandbox.name,
 
   exec: async (command, opts): Promise<ExecResult> => {
     const params: RunCommandParams = {

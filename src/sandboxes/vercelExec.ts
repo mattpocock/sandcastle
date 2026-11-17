@@ -5,7 +5,7 @@
 
 import { randomUUID } from "node:crypto";
 import { Writable } from "node:stream";
-import type { SandboxInstance } from "@vercel/sandbox";
+import type { Sandbox as SandboxInstance } from "@vercel/sandbox";
 import type { ExecResult } from "../SandboxProvider.js";
 import { BoundedTail } from "../boundedTail.js";
 
