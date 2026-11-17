@@ -11,3 +11,8 @@ export type { SpritesOptions } from "./spritesProvider.js";
 export type { SpritesCreateOptions } from "./spritesSandbox.js";
 export { parseSpriteName, SPRITE_NAME_PREFIX } from "./spritesName.js";
 export type { SpriteName } from "./spritesName.js";
+export { sweepSprites } from "./spritesSweep.js";
+export type {
+  SweepSpritesOptions,
+  SweepSpritesResult,
+} from "./spritesSweep.js";

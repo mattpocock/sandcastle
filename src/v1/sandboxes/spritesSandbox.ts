@@ -34,7 +34,8 @@ const contexts = new WeakMap<
   SpritesExecContext & { readonly killTime: Date }
 >();
 
-const isNotFound = (error: unknown): boolean =>
+/** Whether an SDK error says the sprite (or file) isn't there. */
+export const isNotFound = (error: unknown): boolean =>
   typeof error === "object" &&
   error !== null &&
   (("statusCode" in error && error.statusCode === 404) ||

@@ -32,6 +32,24 @@ export interface SpritesOptions {
     readonly token?: string;
 }
 
+// @public
+export const sweepSprites: (options?: SweepSpritesOptions) => Promise<SweepSpritesResult>;
+
+// @public
+export interface SweepSpritesOptions {
+    readonly dryRun?: boolean;
+    readonly graceMinutes?: number;
+    readonly now?: Date;
+    readonly token?: string;
+}
+
+// @public
+export interface SweepSpritesResult {
+    readonly closed: readonly string[];
+    readonly kept: readonly string[];
+    readonly skipped: readonly string[];
+}
+
 // (No @packageDocumentation comment for this package)
 
 ```
