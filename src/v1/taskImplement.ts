@@ -95,8 +95,8 @@ export interface ImplementTask {
     <Name extends string>(name: Name): ImplementOutputs<Name>;
   };
   /**
-   * Rejects a `name` already running on the handle before it clones
-   * anything. Then clones `repo`, creates a branch from `base` or the default branch (or
+   * Rejects a `name` already running on the handle, or a sandbox with no
+   * `gh` on its PATH, before it clones anything. Then clones `repo`, creates a branch from `base` or the default branch (or
    * checks out `branch`), installs the `implement`, `tdd`, `codebase-design`,
    * `code-review` and `pr` skills, runs `setup`, then spawns the session
    * (named `name`, default `"implement"`) and resolves once it runs. The prompt starts with `/implement`
@@ -152,6 +152,7 @@ const start: ImplementTask["start"] = async (sandbox, input) => {
     repo: input.repo,
     branch: { name: branch, create: input.branch === undefined, from: base },
     githubToken: input.githubToken,
+    gh: "the agent opens its pull request with the GitHub CLI",
     skillsContext: input.skillsContext,
     setup: input.setup ?? [],
     record: input.record,

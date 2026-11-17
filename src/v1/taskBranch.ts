@@ -7,8 +7,10 @@ import { cloneRepo } from "./taskRepo.js";
 // The branch a bundled task works on, in its clone. A new branch starts from
 // the commit `git clone` checked out, the repo's default branch, or from a
 // base branch fetched from `origin`; an existing one is checked out from the
-// remote. Commits need an identity, which a fresh
-// sandbox lacks: the clone gets a local one unless git already has one.
+// remote. Fetching a base reaches `origin`, so the GitHub token goes in that
+// command's env, for the clone's credential helper to read. Commits need an
+// identity, which a fresh sandbox lacks: the clone gets a local one unless git
+// already has one.
 
 /** The branch a task's session works on. Internal. */
 export interface TaskBranch {
@@ -49,11 +51,14 @@ const switchCommand = (branch: TaskBranch): string => {
   return `git fetch --quiet origin ${from} && git switch --quiet --create ${name} FETCH_HEAD`;
 };
 
-/** Checks `branch` out in the clone at `directory`. */
+/** Checks `branch` out in the clone at `directory`, fetching with `githubToken`. */
 const checkoutBranch = async (
   sandbox: Sandbox,
-  directory: string,
   branch: TaskBranch,
+  {
+    directory,
+    githubToken,
+  }: { readonly directory: string; readonly githubToken: string | undefined },
 ): Promise<void> => {
   checkName("branch", branch.name);
   if (branch.from !== undefined) {
@@ -62,6 +67,7 @@ const checkoutBranch = async (
   await sandbox.exec({
     command: `${switchCommand(branch)} && ${IDENTITY}`,
     workingDirectory: directory,
+    ...(githubToken === undefined ? {} : { env: { GH_TOKEN: githubToken } }),
   });
 };
 
@@ -87,7 +93,10 @@ export const prepareRepo = async <O extends OutputDefinition | undefined>(
     into,
   });
   if (run.branch !== undefined) {
-    await checkoutBranch(sandbox, directory, run.branch);
+    await checkoutBranch(sandbox, run.branch, {
+      directory,
+      githubToken: run.githubToken,
+    });
   }
   return directory;
 };

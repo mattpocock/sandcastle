@@ -63,7 +63,8 @@ export interface MergeTask {
     <Name extends string>(name: Name): MergeOutputs<Name>;
   };
   /**
-   * Rejects `into` = the repo's default branch before it clones anything.
+   * Rejects `into` = the repo's default branch, or a pull request `from` on
+   * a sandbox with no `gh` on its PATH, before it clones anything.
    * Then clones `repo`, checks out `into`, finds `from` and tries the merge
    * with a merge commit: a clean one stays committed, a conflicted one is
    * aborted and left to the agent. Runs `setup`, spawns the session (Claude
@@ -105,6 +106,10 @@ const start: MergeTask["start"] = async (sandbox, input) => {
     repo: input.repo,
     branch: { name: input.into, create: false, from: undefined },
     githubToken: input.githubToken,
+    gh:
+      typeof from === "number"
+        ? `it reads pull request #${from} with the GitHub CLI`
+        : undefined,
     skillsContext: input.skillsContext,
     setup: input.setup ?? [],
     record: input.record,
