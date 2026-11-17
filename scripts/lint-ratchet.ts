@@ -23,12 +23,14 @@
 // falls below the baseline passes: lowering the baseline is optional in a PR,
 // and .github/workflows/lint-shrink.yml opens a "shrink baseline" PR after
 // each push to main. It also fails if a baseline grew against origin/main
-// (where that ref exists), and if .oxlintrc.json gains an override beyond
+// (where that ref exists; in CI it must, or the run fails), and if .oxlintrc.json gains an override beyond
 // the five reviewed ones in scripts/lint-ratchet-config.ts.
 //
 //   npm run lint          both ratchets
 //   npm run lint:shrink   lower the baselines to what is found (never raises
 //                         them); optional, the shrink workflow does it on main
+//   npm run lint:transfer carry the counts a move-only split moved; no rule's
+//                         total rises (`transfer`, lint-ratchet-core.ts)
 //   npm run lint:report   live totals, worst rules, worst files of each
 //                         ratchet, each beside its baseline (live / baseline);
 //                         builds dist/ first when stale, as `npm run lint` does
@@ -37,7 +39,7 @@
 // See .sandcastle/CODING_STANDARDS.md, "The lint ratchet" and "Where tests
 // live".
 
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import {
@@ -50,14 +52,23 @@ import {
 import type { Counts, Violation } from "./lint-ratchet-core.ts";
 import {
   baselineGrowth,
+  belowBaseline,
   compare,
   countViolations,
   driftReport,
   report,
   shrink,
+  transfer,
 } from "./lint-ratchet-core.ts";
 import {
+  baselineExists,
+  readBaseBaseline,
+  readBaseline,
+  writeBaseline,
+} from "./lint-ratchet-baseline.ts";
+import {
   ROOT,
+  changedFiles,
   collectDepcruise,
   collectDirectives,
   collectEffect,
@@ -67,7 +78,6 @@ import {
   collectRawGitSpawns,
   collectSandcastleTypes,
   collectTestTypeAssertions,
-  run,
 } from "./lint-ratchet-sources.ts";
 
 interface Ratchet {
@@ -90,7 +100,7 @@ const RATCHETS: readonly Ratchet[] = [
       collectRawGitSpawns,
     ],
     grownTitle:
-      "New violations (file: rule baseline -> found). Fix them; never add a disable comment or raise the baseline. `npx oxlint <file>` shows where:",
+      "New violations (file: rule baseline -> found). Fix them; never add a disable comment or raise the baseline. `npx oxlint <file>` shows where. A move-only split that carried counts to a new file: `npm run lint:transfer`.",
   },
   {
     name: "test ratchet",
@@ -109,35 +119,6 @@ const RATCHETS: readonly Ratchet[] = [
 ];
 
 const REPORT_LIMIT = 10;
-
-const Baseline = z.record(z.string(), z.record(z.string(), z.number()));
-
-const readBaseline = async (baselinePath: string): Promise<Counts> => {
-  const source = await readFile(path.join(ROOT, baselinePath), "utf8");
-  return Baseline.parse(JSON.parse(source));
-};
-
-const writeBaseline = async (
-  baselinePath: string,
-  counts: Counts,
-): Promise<void> => {
-  await writeFile(
-    path.join(ROOT, baselinePath),
-    `${JSON.stringify(counts, null, 2)}\n`,
-  );
-};
-
-/** The baseline on origin/main, or undefined where it is not available. */
-const readBaseBaseline = async (
-  baselinePath: string,
-): Promise<Counts | undefined> => {
-  try {
-    const out = await run("git", ["show", `origin/main:${baselinePath}`]);
-    return Baseline.parse(JSON.parse(out));
-  } catch {
-    return undefined;
-  }
-};
 
 const OxlintConfig = z.object({
   overrides: z.array(z.object({ files: z.array(z.string()) })).default([]),
@@ -186,7 +167,11 @@ const check = async (
 ): Promise<string> => {
   const { grown } = compare(found, baseline);
   const base = await readBaseBaseline(ratchet.baselinePath);
-  const growth = base === undefined ? [] : baselineGrowth(baseline, base);
+  const changed = await changedFiles();
+  const growth =
+    base === undefined
+      ? []
+      : baselineGrowth(baseline, base, transfer(found, base, changed));
   return [
     section(ratchet.grownTitle, grown),
     section(
@@ -194,15 +179,6 @@ const check = async (
       growth,
     ),
   ].join("");
-};
-
-const baselineExists = async (baselinePath: string): Promise<boolean> => {
-  try {
-    await readFile(path.join(ROOT, baselinePath), "utf8");
-    return true;
-  } catch {
-    return false;
-  }
 };
 
 /** Writes each missing first baseline. Never touches one that exists: it only shrinks. */
@@ -234,24 +210,19 @@ const printReport = async (): Promise<void> => {
   process.stdout.write(reports.join("\n"));
 };
 
-/** A note on counts below the baseline. They pass; the workflow lowers it. */
-const belowBaseline = (found: Counts, baseline: Counts): string => {
-  const { stale } = compare(found, baseline);
-  return stale.length === 0
-    ? ""
-    : ` ${String(stale.length)} file × rule counts are below the baseline; the lint-shrink workflow lowers it after merge (or run \`npm run lint:shrink\`).`;
-};
+/** Lowers (or, for a transfer, moves) a baseline before the check. */
+type Update = (found: Counts, baseline: Counts) => Promise<Counts>;
 
 /** Runs one ratchet; resolves to its failure text, or "" when it passes. */
 const verifyOne = async (
   ratchet: Ratchet,
-  shrinkFirst: boolean,
+  update?: Update,
 ): Promise<string> => {
   const found = await collect(ratchet);
-  if (shrinkFirst) {
+  if (update !== undefined) {
     await writeBaseline(
       ratchet.baselinePath,
-      shrink(found, await readBaseline(ratchet.baselinePath)),
+      await update(found, await readBaseline(ratchet.baselinePath)),
     );
   }
   const baseline = await readBaseline(ratchet.baselinePath);
@@ -266,9 +237,9 @@ const verifyOne = async (
   return "";
 };
 
-const verify = async (shrinkFirst: boolean): Promise<void> => {
+const verify = async (update?: Update): Promise<void> => {
   const results = await Promise.all(
-    RATCHETS.map(async (r) => verifyOne(r, shrinkFirst)),
+    RATCHETS.map(async (r) => verifyOne(r, update)),
   );
   const config = section("Config:", await checkOverrides());
   const failures = [
@@ -286,7 +257,9 @@ const verify = async (shrinkFirst: boolean): Promise<void> => {
 const MODES: Readonly<Record<string, () => Promise<void>>> = {
   "--init": init,
   "--report": printReport,
-  "--shrink": async () => verify(true),
+  "--shrink": async () => verify(async (found, b) => shrink(found, b)),
+  "--transfer": async () =>
+    verify(async (found, b) => transfer(found, b, await changedFiles())),
 };
 
-await (MODES[process.argv[2] ?? ""] ?? (async () => verify(false)))();
+await (MODES[process.argv[2] ?? ""] ?? (async () => verify()))();

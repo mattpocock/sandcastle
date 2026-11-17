@@ -99,6 +99,7 @@ Instead, create a config layer using Effect for that function, then instantiate 
 - A new violation fails — a count going up, or a file or rule the baseline lacks. Fix it. Never raise the baseline.
 - A fixed violation passes. Lowering the baseline in the same PR is optional: after every push to `main`, the `lint-shrink` workflow runs `npm run lint:shrink` (which lowers counts and drops entries at zero but never raises one) and opens or updates a "chore(lint): shrink baseline" PR. Leave `scripts/lint-baseline.json` alone in fix PRs so they don't conflict with each other.
 - A baseline that grew against `origin/main` fails.
+- A move-only split that carries counts to a new file: run `npm run lint:transfer` and commit the baseline it writes. Per rule, it moves counts only where falls in the files the branch touches cover the rises, so no rule's total rises; never edit the baseline by hand.
 
 No disable comments (`eslint-disable`, `oxlint-disable`, `@ts-ignore`, `@ts-expect-error`, `@effect-diagnostics`) outside the reviewed allowlist in `scripts/lint-ratchet-config.ts`; each one counts as `ratchet/disable-comment`. The same file names the Effect entry points (the only modules that may call `Effect.runPromise` and friends) and the test-only Effect exemptions. `.oxlintrc.json` may not grow a per-file override.
 

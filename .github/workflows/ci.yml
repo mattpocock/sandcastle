@@ -25,7 +25,15 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     steps:
+      # Full history: `npm run lint` checks that no baseline grew against
+      # origin/main and finds the files a branch changed from its merge-base
+      # with origin/main. A default (depth 1) checkout of the PR's merge
+      # commit has no origin/main at all; fetch-depth: 0 fetches every branch,
+      # so origin/main and a real merge-base are there. With CI set, a missing
+      # origin/main fails the lint rather than skipping it.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
