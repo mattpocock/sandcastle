@@ -66,6 +66,10 @@
       "import": "./dist/v1/sandboxes/daytona.js",
       "types": "./dist/v1/sandboxes/daytona.d.ts"
     },
+    "./v1/sandboxes/e2b": {
+      "import": "./dist/v1/sandboxes/e2b.js",
+      "types": "./dist/v1/sandboxes/e2b.d.ts"
+    },
     "./v1/sandboxes/vercel": {
       "import": "./dist/v1/sandboxes/vercel.js",
       "types": "./dist/v1/sandboxes/vercel.d.ts"
