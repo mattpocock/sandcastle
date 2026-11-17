@@ -41,7 +41,7 @@ Env never travels in a URL. Each command gets the sandbox's env, plus its own, f
 
 Sprites have no time limit of their own, and no plan caps how long one lives; plans cap how many run at once. So the kill time is now plus `timeLimitMinutes`, and the session supervisor enforces it: at the detach deadline it ends what's still running and reports. The kill time is in the sprite's name, `sandcastle-<kill time in epoch seconds>-<uuid>`, so `reattachSandbox` reads it back without waking the sprite, and `parseSpriteName` reads it for you.
 
-Nothing deletes the sprite at the kill time. A sprite with nothing running pauses after about 30 seconds, which stops compute billing, but it still exists, and still holds its storage, until `close()` or a cleanup sweep deletes it.
+Nothing deletes the sprite at the kill time. A sprite with nothing running pauses after about 30 seconds, which stops compute billing, but it still exists, and still holds its storage, until `close()` or [`sweepSprites()`](#sweeping-up-expired-sprites) deletes it.
 
 ## Detach
 
@@ -70,7 +70,55 @@ await sandbox.native.updateNetworkPolicy({
 - `close()` deletes the sprite; one that's already gone counts as closed, and a second `close()` does nothing. A detached handle's `close()` does nothing, so the run carries on.
 - A `create` that fails deletes the sprite it made, and so does a process that exits during `create`. Once the handle exists, a process that exits leaves the sprite be, since a detached run may be working in it.
 - A detached sprite is left after its finish report, so a reattached handle can reuse it. Delete it with `close()` on a reattached handle when you're done.
-- A sprite whose run nobody closes (the orchestrator crashed, or never heard back) stays until something deletes it. Run a cleanup sweep on a schedule: list the sprites whose names start with `SPRITE_NAME_PREFIX`, and delete those whose kill time, from `parseSpriteName`, has passed.
+- A sprite whose run nobody closes (the orchestrator crashed, or never heard back) stays until something deletes it. Run `sweepSprites()` on a schedule to delete those.
+
+## Sweeping up expired sprites
+
+Sprites have no time limit of their own, so a sprite that nobody closes is never ended by Sprites: it persists until something deletes it. A paused sprite bills no compute, but its storage stays billed (on 2026-11-17 Fly.io's pricing page billed a sleeping sprite's cold storage at $0.02 per GB-month). `sweepSprites()` deletes the sprites Sandcastle made whose kill time has passed. It runs on the host, with your Sprites token, so call it from a job your scheduler runs, such as a GitHub Actions schedule:
+
+```ts
+// sweep.ts, run every hour by your scheduler
+import { sweepSprites } from "@ai-hero/sandcastle/v1/sandboxes/sprites";
+
+const { closed, kept, skipped } = await sweepSprites();
+console.log({ closed, kept, skipped });
+```
+
+```yaml
+# .github/workflows/sweep-sprites.yml
+on:
+  schedule:
+    - cron: "17 * * * *"
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npx tsx sweep.ts
+        env:
+          SPRITES_TOKEN: ${{ secrets.SPRITES_TOKEN }}
+```
+
+It lists the account's sprites whose names start with `SPRITE_NAME_PREFIX`, page by page, and reads each kill time from the name with `parseSpriteName`. It resolves with every name it listed, sorted three ways:
+
+- **`closed`**: deleted, because its kill time plus `graceMinutes` (default 15) has passed. The grace leaves a run that reports at its deadline time to deliver its finish report. A sprite already gone counts as closed, so two sweeps at once are safe.
+- **`kept`**: a Sandcastle name whose kill time, plus the grace, is still ahead.
+- **`skipped`**: a name that starts with the prefix but carries no kill time it can read. An earlier Sandcastle named sprites `sandcastle-<uuid>`, with no kill time; the sweep can't tell whether one of those is still in use, so it never deletes them. Delete them yourself once you know they're finished.
+
+It never touches a sprite named any other way, or one renamed after Sandcastle made it. It only lists and deletes, so it never runs a command in a sprite or wakes a paused one, and the sprite's reported status plays no part (it doesn't follow pauses). Deletes run one at a time; if any fails, the sweep still tries the rest, then rejects naming the ones it couldn't delete, and the next sweep tries them again.
+
+Options:
+
+- `token`: as for `sprites()`, it defaults to `SPRITES_TOKEN`, then `SPRITE_TOKEN`.
+- `graceMinutes`: how long past its kill time a sprite is left. `0` or more.
+- `dryRun: true` deletes nothing: `closed` lists what a sweep would delete.
+- `now`: the time to sweep at, a `Date`. Default now.
+
+For a policy of your own (say, a longer grace for some labels), the same sweep by hand is a list and a delete:
 
 ```ts
 import { SpritesClient } from "@fly/sprites";

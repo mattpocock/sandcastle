@@ -1,10 +1,10 @@
 // sprites(), the Fly.io Sprites provider. Its entry point is ./sprites.ts.
 
 import type { Sprite, SpritesClient } from "@fly/sprites";
-import { Config, Effect } from "effect";
 import type { SandboxProvider } from "../SandboxProvider.js";
 import { createSandboxProvider } from "../SandboxProvider.js";
 import type { SpritesCreateOptions } from "./spritesSandbox.js";
+import { spritesToken } from "./spritesToken.js";
 import {
   createSprite,
   getSprite,
@@ -18,31 +18,6 @@ export interface SpritesOptions {
   /** Passed to `@fly/sprites`' create: the sprite's `config` (size, region), `labels`, and anything else it takes. */
   readonly create?: SpritesCreateOptions;
 }
-
-/** An option or env var counts as unset when it is missing or empty. */
-const setOrUndefined = (value: string | undefined): string | undefined =>
-  value === "" ? undefined : value;
-
-/** `SPRITES_TOKEN` then `SPRITE_TOKEN` from the environment, "" when unset. */
-const envTokens = Effect.all([
-  Config.string("SPRITES_TOKEN").pipe(Config.withDefault("")),
-  Config.string("SPRITE_TOKEN").pipe(Config.withDefault("")),
-]);
-
-/** The token: the option, then `SPRITES_TOKEN`, then `SPRITE_TOKEN`. */
-const tokenOf = async (options: SpritesOptions): Promise<string> => {
-  const [plural, singular] = await Effect.runPromise(envTokens);
-  const token =
-    setOrUndefined(options.token) ??
-    setOrUndefined(plural) ??
-    setOrUndefined(singular);
-  if (token === undefined) {
-    throw new Error(
-      "sprites(): no Sprites token. Set SPRITES_TOKEN (or SPRITE_TOKEN), or pass the token option.",
-    );
-  }
-  return token;
-};
 
 /**
  * A provider of Fly.io Sprites. Each sandbox is a new sprite named
@@ -75,7 +50,7 @@ export const sprites = (
 ): SandboxProvider<Sprite, true> => {
   let client: Promise<SpritesClient> | undefined;
   const connect = async (): Promise<SpritesClient> => {
-    client ??= tokenOf(options)
+    client ??= spritesToken(options.token, "sprites()")
       .then(async (token) =>
         import("@fly/sprites").then(
           ({ SpritesClient: Client }) => new Client(token),

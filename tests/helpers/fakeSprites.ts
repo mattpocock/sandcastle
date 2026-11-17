@@ -64,6 +64,20 @@ export interface FakeSpritesState {
   failCommands: RegExp | undefined;
   /** While set, every exec connection fails before it opens. */
   connectFails: boolean;
+  /** The pages `listSprites` was asked for: its prefix and continuation token. */
+  lists: {
+    readonly prefix: string | undefined;
+    readonly from: string | undefined;
+  }[];
+  /** How many sprites a page of `listSprites` holds. */
+  pageSize: number;
+  /** Names `listSprites` gives that aren't there: deleted by someone else since. */
+  ghosts: string[];
+  /** Deletes of names matching it fail with a 500. */
+  deleteFails: RegExp | undefined;
+  /** Each `getSprite`, by name, and each `filesystem()` opened. */
+  gets: string[];
+  filesystemOpens: number;
 }
 
 const fresh = (root: string): FakeSpritesState => ({
@@ -77,6 +91,12 @@ const fresh = (root: string): FakeSpritesState => ({
   createError: undefined,
   failCommands: undefined,
   connectFails: false,
+  lists: [],
+  pageSize: 50,
+  ghosts: [],
+  deleteFails: undefined,
+  gets: [],
+  filesystemOpens: 0,
 });
 
 /** The fake's records, shared by the mocked module and the test. */
@@ -306,7 +326,10 @@ const sdkSprite = (sprite: FakeSprite) => ({
   name: sprite.name,
   spawn: (_command: string, args: string[] = [], options: SpawnOptions = {}) =>
     new FakeCommand(sprite, args, options),
-  filesystem: () => fsApi(sprite),
+  filesystem: () => {
+    fakeSprites.filesystemOpens += 1;
+    return fsApi(sprite);
+  },
 });
 
 /** Where a sprite's Task API calls are logged: beside its directory, so they outlive it. */
@@ -373,6 +396,7 @@ export class FakeSpritesClient {
   }
 
   async getSprite(name: string) {
+    fakeSprites.gets.push(name);
     const sprite = fakeSprites.sprites.get(name);
     if (sprite === undefined || sprite.deleted) {
       throw notFound(name);
@@ -380,7 +404,41 @@ export class FakeSpritesClient {
     return sdkSprite(sprite);
   }
 
+  /** A page of the sprites standing (and ghosts), in the order they were made, `pageSize` at a time; the token is the next index. */
+  async listSprites(
+    options: { prefix?: string; continuationToken?: string } = {},
+  ) {
+    const { prefix, continuationToken } = options;
+    fakeSprites.lists.push({ prefix, from: continuationToken });
+    const names = [
+      ...[...fakeSprites.sprites.values()]
+        .filter((sprite) => !sprite.deleted)
+        .map((sprite) => sprite.name),
+      ...fakeSprites.ghosts,
+    ].filter((name) => name.startsWith(prefix ?? ""));
+    const start = Number(continuationToken ?? "0");
+    const end = start + fakeSprites.pageSize;
+    const hasMore = end < names.length;
+    return {
+      sprites: names.slice(start, end).map((name) => ({
+        id: `id-${name}`,
+        name,
+        organization: "fake-org",
+        // The API's status doesn't follow pauses: the sweep mustn't read it.
+        status: "running",
+        createdAt: new Date(0),
+      })),
+      hasMore,
+      nextContinuationToken: hasMore ? String(end) : undefined,
+    };
+  }
+
   async deleteSprite(name: string) {
+    if (fakeSprites.deleteFails?.test(name) === true) {
+      throw Object.assign(new Error(`internal error deleting ${name}`), {
+        statusCode: 500,
+      });
+    }
     const sprite = fakeSprites.sprites.get(name);
     if (sprite === undefined || sprite.deleted) {
       throw notFound(name);
@@ -389,6 +447,20 @@ export class FakeSpritesClient {
     await destroy(sprite);
   }
 }
+
+/** Sprites standing in the fake account, made outside any test sandbox, one at a time so they list in this order. */
+export const addFakeSprites = async (...names: string[]): Promise<void> => {
+  await names.reduce<Promise<unknown>>(
+    async (earlier, name) => earlier.then(async () => makeSprite(name)),
+    Promise.resolve(),
+  );
+};
+
+/** The names of the sprites still standing. */
+export const standingSprites = (): string[] =>
+  [...fakeSprites.sprites.values()]
+    .filter((sprite) => !sprite.deleted)
+    .map((sprite) => sprite.name);
 
 /** Whether a file exists at a path in the sprite. */
 export const spriteFileExists = async (
