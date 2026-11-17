@@ -48,13 +48,22 @@ export type ImplementWork =
 /** A first round on a new branch, or a later round on an existing one. */
 export type ImplementRound =
   | {
-      /** Leave it out to create a new branch from the default branch. */
+      /** Leave it out to create a new branch. */
       readonly branch?: undefined;
+      /**
+       * The branch the new branch starts from, fetched from `origin`, and the
+       * one its PR targets, e.g. a feature branch. Leave it out for the
+       * repo's default branch. A base the remote doesn't have rejects
+       * before the session starts.
+       */
+      readonly base?: string;
       readonly feedback?: never;
     }
   | {
       /** An existing branch to work on, e.g. the one round 1 reported. */
       readonly branch: string;
+      /** An existing branch keeps its PR's base. */
+      readonly base?: never;
       /**
        * The review's comments, for round 2: pass `ReviewResult.comments` as
        * it is, or your own text. The session is a fresh one on `branch`,
@@ -75,12 +84,12 @@ export interface ImplementTask {
   /** The `Output` definitions for `verifyFinishReport`, by session name. */
   readonly outputs: () => ImplementOutputs;
   /**
-   * Clones `repo`, creates a branch from the default branch (or checks out
-   * `branch`), installs the `implement`, `tdd`, `codebase-design`,
+   * Clones `repo`, creates a branch from `base` or the default branch (or
+   * checks out `branch`), installs the `implement`, `tdd`, `codebase-design`,
    * `code-review` and `pr` skills, runs `setup`, then spawns the `implement`
    * session and resolves once it runs. The prompt starts with `/implement`
    * and the ticket (or your prompt), and asks the agent to push and open or
-   * update a PR, never merging it. Rejects when the sandbox's kill time
+   * update a PR against `base` or the default branch, never merging it. Rejects when the sandbox's kill time
    * leaves less room than `limits.deadlineMinutes`.
    */
   readonly start: (
@@ -110,6 +119,7 @@ const newBranchName = (input: ImplementInput): string => {
 
 const start: ImplementTask["start"] = async (sandbox, input) => {
   const branch = input.branch ?? newBranchName(input);
+  const base = input.branch === undefined ? input.base : undefined;
   return startTask(sandbox, {
     name: "implement",
     limits: LIMITS,
@@ -122,11 +132,12 @@ const start: ImplementTask["start"] = async (sandbox, input) => {
           : { ticket: input.ticket },
       branch,
       newBranch: input.branch === undefined,
+      base,
       feedback: input.feedback,
     }),
     output: IMPLEMENT_RESULT,
     repo: input.repo,
-    branch: { name: branch, create: input.branch === undefined },
+    branch: { name: branch, create: input.branch === undefined, from: base },
     githubToken: input.githubToken,
     skillsContext: input.skillsContext,
     setup: input.setup ?? [],

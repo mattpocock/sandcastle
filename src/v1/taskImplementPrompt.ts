@@ -8,6 +8,8 @@ export interface ImplementPromptInput {
   readonly branch: string;
   /** True when the branch was created for this run. */
   readonly newBranch: boolean;
+  /** The branch it was created from and its PR targets; `undefined` is the default branch. */
+  readonly base: string | undefined;
   /** The review's comments, for round 2. */
   readonly feedback: string | readonly string[] | undefined;
 }
@@ -22,17 +24,24 @@ const entry = (work: ImplementPromptInput["work"]): string =>
 
 const branchLine = (input: ImplementPromptInput): string =>
   input.newBranch
-    ? `You're on \`${input.branch}\`, a new branch from the repository's default branch. Commit your work to it.`
+    ? `You're on \`${input.branch}\`, a new branch from ${input.base === undefined ? "the repository's default branch" : `\`${input.base}\``}. Commit your work to it.`
     : `You're on \`${input.branch}\`, an existing branch. Commit your work to it.`;
 
-const STEPS = [
-  "How this run differs from the `implement` skill:",
-  "- Skip its final step that calls the `code-review` skill: a separate review run reviews this work.",
-  '- When the `tdd` skill asks you to confirm seams, use the seams the ticket names. If it names none, pick the highest existing seam yourself, and list it in the PR body under "Agent-chosen seams". Don\'t stop to ask.',
-  '- When you\'re done, push the branch to `origin`. If it has no open PR, open one against the default branch with `gh pr create`; if it has one, update it. Write the PR body by calling the Skill tool with skill "pr". For evidence, use test and console output, never screenshots.',
-  "- Never merge, approve or enable auto-merge on any PR. A human merges.",
-  "- If nothing needed changing, don't open a PR.",
-].join("\n");
+/** Where a new PR goes: the base when there is one, else the default branch. */
+const openPr = (base: string | undefined): string =>
+  base === undefined
+    ? "open one against the default branch with `gh pr create`"
+    : `open one against \`${base}\` with \`gh pr create --base ${base}\``;
+
+const steps = (base: string | undefined): string =>
+  [
+    "How this run differs from the `implement` skill:",
+    "- Skip its final step that calls the `code-review` skill: a separate review run reviews this work.",
+    '- When the `tdd` skill asks you to confirm seams, use the seams the ticket names. If it names none, pick the highest existing seam yourself, and list it in the PR body under "Agent-chosen seams". Don\'t stop to ask.',
+    `- When you're done, push the branch to \`origin\`. If it has no open PR, ${openPr(base)}; if it has one, update it. Write the PR body by calling the Skill tool with skill "pr". For evidence, use test and console output, never screenshots.`,
+    "- Never merge, approve or enable auto-merge on any PR. A human merges.",
+    "- If nothing needed changing, don't open a PR.",
+  ].join("\n");
 
 /** The comments, one bullet each when there are several. */
 const feedbackText = (feedback: string | readonly string[]): string =>
@@ -59,7 +68,7 @@ export const implementPrompt = (input: ImplementPromptInput): string =>
   [
     entry(input.work),
     branchLine(input),
-    STEPS,
+    steps(input.base),
     ...(input.feedback === undefined ? [] : [feedbackBlock(input.feedback)]),
     RESULT,
   ].join("\n\n");
