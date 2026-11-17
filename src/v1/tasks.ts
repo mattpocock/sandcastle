@@ -15,7 +15,8 @@
  * optional), or any function of the `Chooser` type.
  *
  * `implementSpec` composes them: a chooser, `implement` and `merge`, in rounds
- * on one sandbox, building a whole spec onto one integration branch.
+ * on one sandbox, building a whole spec onto one integration branch, then
+ * `review` on that branch's PR and at most one `implement` round 2.
  *
  * @packageDocumentation
  */
@@ -55,7 +56,9 @@ export type {
 } from "./implementSpec.js";
 export type {
   ImplementSpecInput,
+  ImplementSpecPullRequest,
   ImplementSpecResult,
+  ImplementSpecReview,
   ImplementSpecRoundSession,
   ImplementSpecSessions,
   ImplementSpecState,

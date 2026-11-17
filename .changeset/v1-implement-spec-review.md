@@ -1,0 +1,5 @@
+---
+"@ai-hero/sandcastle": minor
+---
+
+v1 (`@ai-hero/sandcastle/v1/tasks`): `implementSpec` now finishes the spec. Once the chooser has nothing left and a ticket has merged, `next` opens the integration branch's PR against the default branch with `gh`. Its body lists the merged, stuck and skipped tickets, with a `Closes #<n>` line for each merged ticket, and the spec's own `Closes` line only when every ticket merged. The PR is never merged. Then one `review` session named `review` reviews it, and after `changes-requested` one `implement` round 2 named `implement-review-fixes` addresses the comments on the integration branch, with no second review. `ImplementSpecResult` gains `pr` and `review` (`{ verdict, fixed }`). No PR is opened when nothing merged (the result is `blocked`), when the chooser said blocked, or when no merged ticket changed anything. `ImplementSpecRoundSession.step` gains `"review"` and `"review-fixes"`, and `ImplementSpecState` gains `pr`, `review` and `reviewProblem`. New types: `ImplementSpecPullRequest` and `ImplementSpecReview`. A new guide, `docs/v1/bundled-tasks.md`, shows a detached round-by-round loop and the held `run` form.

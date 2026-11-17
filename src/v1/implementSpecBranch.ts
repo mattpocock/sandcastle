@@ -13,10 +13,11 @@ const GITHUB_REPO = /^[\w.-]+\/[\w.-]+$/u;
 const HELPER = String.raw`!f() { test "$1" = get || exit 0; echo username=x-access-token; echo "password=$GH_TOKEN"; }; f`;
 
 /** One shell word. */
-const quoted = (value: string): string =>
+export const quoted = (value: string): string =>
   `'${value.replaceAll("'", String.raw`'\''`)}'`;
 
-const credentials = `-c credential.helper= -c credential.helper=${quoted(HELPER)}`;
+/** git's flags that read the token from `$GH_TOKEN`, and from nowhere else. */
+export const credentials = `-c credential.helper= -c credential.helper=${quoted(HELPER)}`;
 
 /** `owner/name` is a GitHub repo; anything else is a URL or path git can clone. */
 const cloneUrl = (repo: string): string =>
@@ -38,6 +39,10 @@ export const integrationBranchName = (spec: string): string => {
     : `sandcastle/implement-spec-${name}-${id}`;
 };
 
+/** The integration branch's own clone: `sandcastle-implement-spec-<spec>-<random>`. */
+export const integrationClone = (sandbox: Sandbox, branch: string): string =>
+  posix.join(sandbox.workingDirectory, branch.replaceAll("/", "-"));
+
 /**
  * Clones `repo` into a directory of its own, then creates `branch` from the
  * default branch it checked out and pushes it to `origin`.
@@ -50,10 +55,7 @@ export const pushIntegrationBranch = async (
     readonly githubToken: string;
   },
 ): Promise<void> => {
-  const directory = posix.join(
-    sandbox.workingDirectory,
-    options.branch.replaceAll("/", "-"),
-  );
+  const directory = integrationClone(sandbox, options.branch);
   const env = { GH_TOKEN: options.githubToken };
   await sandbox.exec({
     command: `git ${credentials} clone --quiet -- ${quoted(cloneUrl(options.repo))} ${quoted(directory)}`,

@@ -9,8 +9,8 @@ import {
   reportOutcomes,
   roundOutputs,
 } from "./implementSpecOutcomes.js";
-import { applyOutcomes } from "./implementSpecProgress.js";
-import { advance, checkRoom, LIMITS } from "./implementSpecRounds.js";
+import { checkRoom, LIMITS } from "./implementSpecCommon.js";
+import { advance, afterRound } from "./implementSpecRounds.js";
 import type {
   ImplementSpecInput,
   ImplementSpecResult,
@@ -19,10 +19,11 @@ import type {
 } from "./implementSpecTypes.js";
 import type { TaskLimits } from "./Task.js";
 import type { MergeResult } from "./taskMergeResult.js";
+import type { ReviewResult } from "./taskReviewResult.js";
 
 // `implementSpec`: a whole spec built ticket by ticket, in rounds on one
 // sandbox. Written only against the public API: the handle, the chooser,
-// `implement`, `merge` and `exec`.
+// `implement`, `merge`, `review` and `exec`.
 
 /** `implementSpec.outputs(state)`: the round's `Output` definitions, by session name. */
 export type ImplementSpecOutputs = Readonly<
@@ -30,6 +31,7 @@ export type ImplementSpecOutputs = Readonly<
     string,
     | OutputObjectDefinition<ImplementResult>
     | OutputObjectDefinition<MergeResult>
+    | OutputObjectDefinition<ReviewResult>
   >
 >;
 
@@ -72,8 +74,15 @@ export interface ImplementSpecTask {
    * merged. A `blocked` ticket, a failed merge or a failed session leaves
    * the ticket stuck, and the chooser skips what it blocks; a session the
    * deadline stopped is retried once, as `<step>-<ticket>-retry`. With no
-   * merge waiting, the chooser runs and the next ticket round spawns. When
-   * it chooses nothing, resolves `done` with the result.
+   * merge waiting, the chooser runs and the next ticket round spawns.
+   *
+   * When it chooses nothing and a ticket merged, opens the integration PR
+   * against the default branch (by `gh`, never merged) and spawns one
+   * `review` session named `review` on it. After `changes-requested`, spawns
+   * one `implement` round 2 named `implement-review-fixes` on the
+   * integration branch, with the review's comments; there's no second
+   * review. Then, or when there's nothing to review, resolves `done` with
+   * the result. Rejects once `state.done`.
    */
   readonly next: (
     sandbox: Sandbox,
@@ -135,8 +144,10 @@ const next: ImplementSpecTask["next"] = async (
       "implementSpec: the spec is done; there's no next round",
     );
   }
-  const outcomes = await reportOutcomes(state, report);
-  return advance(sandbox, input, applyOutcomes(state, outcomes));
+  return afterRound(sandbox, input, {
+    state,
+    outcomes: await reportOutcomes(state, report),
+  });
 };
 
 const run: ImplementSpecTask["run"] = async (sandbox, input) => {
@@ -148,13 +159,17 @@ const run: ImplementSpecTask["run"] = async (sandbox, input) => {
     }
     const outcomes = await heldOutcomes(step.sessions);
     return loop(
-      await advance(sandbox, input, applyOutcomes(step.state, outcomes)),
+      await afterRound(sandbox, input, { state: step.state, outcomes }),
     );
   };
   return loop(await start(sandbox, input));
 };
 
-/** Builds a spec's tickets in rounds on one sandbox and merges each into an integration branch; never into the default branch. */
+/**
+ * Builds a spec's tickets in rounds on one sandbox and merges each into an
+ * integration branch, then opens that branch's PR, reviews it once and fixes
+ * what the review found, at most once. Never merges into the default branch.
+ */
 export const implementSpec: ImplementSpecTask = {
   name: "implementSpec",
   limits: LIMITS,

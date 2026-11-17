@@ -1,9 +1,15 @@
-import { DateTime } from "effect";
 import type { Sandbox, SessionProcess } from "../v1.js";
 import type { Choice } from "./chooser.js";
 import { sessionChooser } from "./chooserSession.js";
 import type { ImplementResult } from "./implementResult.js";
-import { resultOf, ticketsWith } from "./implementSpecProgress.js";
+import { checkRoom, common, messageOf } from "./implementSpecCommon.js";
+import type { RoundEnd } from "./implementSpecProgress.js";
+import { applyOutcomes, ticketsWith } from "./implementSpecProgress.js";
+import {
+  afterReview,
+  integrate,
+  isReviewRound,
+} from "./implementSpecReview.js";
 import type {
   ImplementSpecInput,
   ImplementSpecState,
@@ -14,35 +20,9 @@ import { implement } from "./taskImplement.js";
 import { merge } from "./taskMerge.js";
 
 // What `implementSpec` spawns between rounds: the next merge when a PR waits
-// for one, else the chooser and the next ticket round. Every session is an
+// for one, else the chooser and the next ticket round, and once the chooser
+// has nothing left, the integration PR and its review. Every session is an
 // ordinary bundled task's, started through its public `start`.
-
-/** `implementSpec.limits`: the sandbox's whole life, and one round's deadline. */
-export const LIMITS = { timeLimitMinutes: 480, deadlineMinutes: 90 } as const;
-
-/** The detach margin a handle keeps before the kill time, in minutes. */
-const MARGIN_MINUTES = 5;
-
-/** Rejects before anything spawns when the kill time leaves too little room for a round. */
-export const checkRoom = (sandbox: Sandbox): void => {
-  const now = DateTime.unsafeNow().epochMillis;
-  const room = (sandbox.killTime.getTime() - now) / 60_000 - MARGIN_MINUTES;
-  if (room < LIMITS.deadlineMinutes) {
-    throw new RangeError(
-      `implementSpec: the sandbox leaves ${Math.max(0, room).toFixed(1)} minutes before its detach deadline, but a round needs ${LIMITS.deadlineMinutes}. Create it with timeLimitMinutes: implementSpec.limits.timeLimitMinutes (${LIMITS.timeLimitMinutes}).`,
-    );
-  }
-};
-
-/** What every task start takes from the input. */
-const common = (input: ImplementSpecInput) => ({
-  repo: input.repo,
-  githubToken: input.githubToken,
-  skillsContext: input.skillsContext,
-  ...(input.setup === undefined ? {} : { setup: input.setup }),
-  ...(input.record === undefined ? {} : { record: input.record }),
-  ...(input.agent === undefined ? {} : { agent: input.agent }),
-});
 
 const sessionName = (
   step: "implement" | "merge",
@@ -69,13 +49,8 @@ const stuck = (
     ...state.tickets[ticket],
     status: "stuck",
     retried: state.tickets[ticket]?.retried ?? false,
-    summary: `couldn't start: ${error instanceof Error ? error.message : String(error)}`,
+    summary: `couldn't start: ${messageOf(error)}`,
   });
-
-const finished = (state: ImplementSpecState): ImplementSpecStep => {
-  const done = { ...state, sessions: {}, done: true };
-  return { done: true, state: done, result: resultOf(done) };
-};
 
 /** Starts the merge of the first waiting PR; a start that fails leaves it stuck. */
 const mergeRound = async (
@@ -146,21 +121,19 @@ const open = (state: ImplementSpecState, tickets: readonly string[]) => [
   ),
 ];
 
-/** Marks every remaining ticket skipped and ends. */
+/** The state with every remaining ticket marked skipped. */
 const skipRest = (
   state: ImplementSpecState,
   remaining: readonly string[],
-): ImplementSpecStep =>
-  finished(
-    open(state, remaining).reduce(
-      (current, ticket) =>
-        withTicket(current, ticket, {
-          status: "skipped",
-          retried: false,
-          summary: "a ticket it's blocked by couldn't be finished",
-        }),
-      state,
-    ),
+): ImplementSpecState =>
+  open(state, remaining).reduce(
+    (current, ticket) =>
+      withTicket(current, ticket, {
+        status: "skipped",
+        retried: false,
+        summary: "a ticket it's blocked by couldn't be finished",
+      }),
+    state,
   );
 
 /** The tickets the chooser chose for a round, and the state they were chosen in. */
@@ -243,14 +216,24 @@ export const advance = async (
   const choice = await choose(sandbox, input, state);
   const chosen = { ...state, choices: state.choices + 1 };
   if (choice.status === "blocked") {
-    return finished({
+    return integrate(sandbox, input, {
       ...chosen,
       blocked: choice.reason ?? "the chooser said blocked",
     });
   }
   const next = open(chosen, choice.next).slice(0, input.maxConcurrent ?? 3);
   if (next.length === 0) {
-    return skipRest(chosen, choice.remaining);
+    return integrate(sandbox, input, skipRest(chosen, choice.remaining));
   }
   return ticketRound(sandbox, input, { state: chosen, tickets: next });
 };
+
+/** The next step once the round `ended.state` spawned ended with `ended.outcomes`. */
+export const afterRound = async (
+  sandbox: Sandbox,
+  input: ImplementSpecInput,
+  ended: RoundEnd,
+): Promise<ImplementSpecStep> =>
+  isReviewRound(ended.state)
+    ? afterReview(sandbox, input, ended)
+    : advance(sandbox, input, applyOutcomes(ended.state, ended.outcomes));

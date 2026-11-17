@@ -1,24 +1,34 @@
 import type { FinishReport, OutputObjectDefinition } from "../v1.js";
 import type { ImplementResult } from "./implementResult.js";
-import type { SessionOutcome } from "./implementSpecProgress.js";
+import type { RoundResult, SessionOutcome } from "./implementSpecProgress.js";
 import type {
+  ImplementSpecRoundSession,
   ImplementSpecSessions,
   ImplementSpecState,
 } from "./implementSpecTypes.js";
 import { implement } from "./taskImplement.js";
 import { merge } from "./taskMerge.js";
 import type { MergeResult } from "./taskMergeResult.js";
+import { review } from "./taskReview.js";
+import type { ReviewResult } from "./taskReviewResult.js";
 
 // How a round's sessions ended: read from its finish report after a detach,
 // or from the sessions themselves on a held handle.
 
 type RoundOutput =
   | OutputObjectDefinition<ImplementResult>
-  | OutputObjectDefinition<MergeResult>;
+  | OutputObjectDefinition<MergeResult>
+  | OutputObjectDefinition<ReviewResult>;
 
-/** The two outputs a round's sessions end with, whatever their names. */
-const IMPLEMENT_OUTPUT = implement.outputs().implement;
-const MERGE_OUTPUT = merge.outputs().merge;
+/** The outputs a round's sessions end with, by step, whatever their names. */
+const OUTPUTS: Readonly<
+  Record<ImplementSpecRoundSession["step"], RoundOutput>
+> = {
+  implement: implement.outputs().implement,
+  merge: merge.outputs().merge,
+  review: review.outputs().review,
+  "review-fixes": implement.outputs().implement,
+};
 
 /** The round's `Output` definitions, by session name. */
 export const roundOutputs = (
@@ -26,10 +36,7 @@ export const roundOutputs = (
 ): Readonly<Record<string, RoundOutput>> =>
   Object.fromEntries(
     Object.entries(state.sessions).map(
-      ([name, session]): [string, RoundOutput] => [
-        name,
-        session.step === "implement" ? IMPLEMENT_OUTPUT : MERGE_OUTPUT,
-      ],
+      ([name, session]): [string, RoundOutput] => [name, OUTPUTS[session.step]],
     ),
   );
 
@@ -89,8 +96,7 @@ const settle = async (
   spawned: ImplementSpecSessions[string],
 ): Promise<SessionOutcome> => {
   try {
-    const done: { readonly output: ImplementResult | MergeResult } =
-      await spawned.wait();
+    const done: { readonly output: RoundResult } = await spawned.wait();
     return { ended: true, output: done.output };
   } catch (error) {
     return {
