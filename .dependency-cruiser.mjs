@@ -43,6 +43,34 @@ const config = {
       },
     },
     {
+      name: "implement-spec-public-api",
+      comment:
+        "implementSpec is written only against the public API, as a user could write it: the v1 entry point and the bundled tasks it composes (implement, merge, sessionChooser). Its own files are the one exception.",
+      severity: "error",
+      from: { path: "^src/v1/implementSpec" },
+      to: {
+        dependencyTypesNot: ["npm", "core", "type-only"],
+        pathNot: [
+          "^src/v1[.]ts$",
+          "^src/v1/(taskImplement|taskMerge|chooserSession|implementSpec[A-Za-z]*)[.]ts$",
+        ],
+      },
+    },
+    {
+      name: "implement-spec-public-types",
+      comment:
+        "implementSpec's types come from the public API too: the modules that the v1 and bundled tasks entry points re-export them from.",
+      severity: "error",
+      from: { path: "^src/v1/implementSpec" },
+      to: {
+        dependencyTypes: ["type-only"],
+        pathNot: [
+          "^src/v1[.]ts$",
+          "^src/v1/(taskImplement|taskMerge|taskMergeResult|implementResult|chooser|chooserSession|Task|implementSpec[A-Za-z]*)[.]ts$",
+        ],
+      },
+    },
+    {
       name: "src-not-from-tests",
       comment: "Shipped code never imports from tests/.",
       severity: "error",

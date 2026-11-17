@@ -14,6 +14,9 @@
  * (a short session on Haiku), `jevChooser()` (TypeSafe's Jev decision model,
  * optional), or any function of the `Chooser` type.
  *
+ * `implementSpec` composes them: a chooser, `implement` and `merge`, in rounds
+ * on one sandbox, building a whole spec onto one integration branch.
+ *
  * @packageDocumentation
  */
 
@@ -44,6 +47,22 @@ export type {
 export { review } from "./taskReview.js";
 export type { ReviewInput, ReviewTask } from "./taskReview.js";
 export type { ReviewOutputs, ReviewResult } from "./taskReviewResult.js";
+export { implementSpec } from "./implementSpec.js";
+export type {
+  ImplementSpecNext,
+  ImplementSpecOutputs,
+  ImplementSpecTask,
+} from "./implementSpec.js";
+export type {
+  ImplementSpecInput,
+  ImplementSpecResult,
+  ImplementSpecRoundSession,
+  ImplementSpecSessions,
+  ImplementSpecState,
+  ImplementSpecStep,
+  ImplementSpecTicket,
+  ImplementSpecTicketStatus,
+} from "./implementSpecTypes.js";
 export { merge } from "./taskMerge.js";
 export type { MergeInput, MergeTask } from "./taskMerge.js";
 export type { MergeOutputs, MergeResult } from "./taskMergeResult.js";
