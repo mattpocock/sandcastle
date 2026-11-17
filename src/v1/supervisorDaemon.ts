@@ -16,7 +16,7 @@ import type {
 } from "./supervisorProtocol.js";
 import { RequestJson } from "./supervisorProtocol.js";
 import { SessionRegistry } from "./supervisorRegistry.js";
-import { StatusBoard } from "./supervisorStatus.js";
+import { previousStatus, StatusBoard } from "./supervisorStatus.js";
 
 // The session supervisor's long-running half. It runs in its own directory
 // inside the sandbox and listens on a Unix socket there (a relative path, so
@@ -127,11 +127,17 @@ const handle = (request: Request, socket: Socket, context: Context): void => {
   const send = sender(socket);
   switch (request.type) {
     case "hello": {
-      send({
-        type: "hello",
-        pid: process.pid,
-        publicKey: context.keys.publicKey,
-      });
+      // A supervisor about to exit links no new handle: a reattached one
+      // starts the next supervisor once this one has gone.
+      send(
+        context.registry.finishing()
+          ? { type: "error", message: "the session supervisor is exiting" }
+          : {
+              type: "hello",
+              pid: process.pid,
+              publicKey: context.keys.publicKey,
+            },
+      );
       socket.end();
       return;
     }
@@ -187,7 +193,8 @@ export const runDaemon = async (): Promise<void> => {
   // Made before it listens, so the host learns the public half before any
   // session can run: a session can't swap in its own.
   const keys = await makeSealingKeys();
-  const board = new StatusBoard();
+  // A restarted supervisor carries on from the last one's status.
+  const board = new StatusBoard(await previousStatus());
   // On disk before it answers: a reattach finds the supervisor by this file.
   await board.flushed();
   const registry = new SessionRegistry(board);

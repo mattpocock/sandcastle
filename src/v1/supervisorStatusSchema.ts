@@ -18,7 +18,7 @@ export const STATUS_FILE = "status.json";
 export const eventsFile = (sessionId: string): string =>
   `sessions/${sessionId}.events.jsonl`;
 
-/** How the last detach's finish report is getting on. */
+/** How a detach's finish report is getting on. */
 export const FinishReportDelivery = Schema.Literal(
   "not-finished",
   "delivering",
@@ -28,7 +28,7 @@ export const FinishReportDelivery = Schema.Literal(
   "no-destination",
 );
 
-/** How the last detach's finish report is getting on. */
+/** How a detach's finish report is getting on. */
 export type FinishReportDelivery = typeof FinishReportDelivery.Type;
 
 /** A session: its request id names its files under `sessions/`. */
@@ -38,9 +38,20 @@ const Work = Schema.Struct({
   agent: Schema.String,
 });
 
+/** One detach: its deadline, destination and how its finish report got on. */
+const Detach = Schema.Struct({
+  detachId: Schema.String,
+  /** ISO 8601, by the sandbox's clock. */
+  detachedAt: Schema.String,
+  /** ISO 8601, by the sandbox's clock. */
+  deadline: Schema.String,
+  reportsTo: Schema.Union(Schema.String, Schema.Literal(false)),
+  delivery: FinishReportDelivery,
+});
+
 /** What the supervisor writes to its status file. */
 export const SupervisorStatus = Schema.Struct({
-  /** `exited` once it has stopped: after its detached work was reported, or a shutdown. */
+  /** `exited` once it has stopped: after its detached work was reported, or a shutdown. A reattached handle may start it again. */
   supervisor: Schema.Literal("running", "exited"),
   running: Schema.Array(Work),
   ended: Schema.Array(
@@ -50,17 +61,10 @@ export const SupervisorStatus = Schema.Struct({
       record: Schema.optional(RecordPointer),
     }),
   ),
-  detached: Schema.optional(
-    Schema.Struct({
-      detachId: Schema.String,
-      /** ISO 8601, by the sandbox's clock. */
-      detachedAt: Schema.String,
-      /** ISO 8601, by the sandbox's clock. */
-      deadline: Schema.String,
-      reportsTo: Schema.Union(Schema.String, Schema.Literal(false)),
-      delivery: FinishReportDelivery,
-    }),
-  ),
+  /** The last detach, if there was one. */
+  detached: Schema.optional(Detach),
+  /** The detaches before the last, oldest first: each restart keeps them. */
+  earlier: Schema.optional(Schema.Array(Detach)),
 });
 
 /** What the supervisor writes to its status file. */

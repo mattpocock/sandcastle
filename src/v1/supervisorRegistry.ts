@@ -236,6 +236,14 @@ export class SessionRegistry {
     }));
   }
 
+  /**
+   * Whether the work carried on past a detach has all ended: the supervisor
+   * is only reporting it now, and exits once it has.
+   */
+  finishing(): boolean {
+    return this.detachId !== undefined && this.running.size === 0;
+  }
+
   /** Stops every session and waits for them to end. */
   async shutdown(): Promise<void> {
     await Promise.all(
