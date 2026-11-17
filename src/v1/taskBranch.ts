@@ -65,7 +65,11 @@ const checkoutBranch = async (
   });
 };
 
-/** Clones the task's repo and checks out its branch; resolves with the clone's directory. */
+/**
+ * Clones the task's repo and checks out its branch; resolves with the clone's
+ * directory. A session named other than the task clones into a directory of
+ * its name, so side-by-side starts never share a working tree.
+ */
 export const prepareRepo = async <O extends OutputDefinition | undefined>(
   sandbox: Sandbox,
   run: TaskRun<O>,
@@ -73,7 +77,15 @@ export const prepareRepo = async <O extends OutputDefinition | undefined>(
   if (run.repo === undefined) {
     return undefined;
   }
-  const directory = await cloneRepo(sandbox, run.repo, run.githubToken);
+  const into =
+    run.session === undefined || run.session === run.name
+      ? undefined
+      : run.session;
+  const directory = await cloneRepo(sandbox, {
+    repo: run.repo,
+    githubToken: run.githubToken,
+    into,
+  });
   if (run.branch !== undefined) {
     await checkoutBranch(sandbox, directory, run.branch);
   }

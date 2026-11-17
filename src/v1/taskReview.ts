@@ -32,20 +32,32 @@ export interface ReviewInput extends TaskAgentOptions {
   readonly setup?: readonly string[];
   /** Where the session's record goes when it ends. */
   readonly record?: SessionRecordOptions;
+  /**
+   * The session's name, its record's and its key in the finish report.
+   * Default `"review"`. Give each of several tasks on one handle its own: a
+   * start rejects a name already running before it clones anything. A name
+   * other than `"review"` is also the directory the repo is cloned into, so it
+   * must be letters, digits, `_`, `.` and `-`, not starting with `.` or `-`.
+   */
+  readonly name?: string;
 }
 
 /** The `review` bundled task: reads a pull request cold with `code-review`, comments once, and returns a verdict. */
 export interface ReviewTask {
-  /** The task's name, and the name of its session in the finish report. */
+  /** The task's name, and its session's unless you pass `name`. */
   readonly name: "review";
   /** 30 minutes for the session; a 40-minute sandbox time limit leaves room for setup and the report. */
   readonly limits: TaskLimits;
-  /** The `Output` definitions for `verifyFinishReport`, by session name. */
-  readonly outputs: () => ReviewOutputs;
+  /** The `Output` definitions for `verifyFinishReport`, under the session's name (`"review"` when left out). */
+  readonly outputs: {
+    (): ReviewOutputs;
+    <Name extends string>(name: Name): ReviewOutputs<Name>;
+  };
   /**
-   * Clones `repo`, checks out the pull request's branch, installs the
-   * `code-review` skill, runs `setup`, then spawns the `review` session
-   * (Claude Code on Sonnet unless you pass `agent`) and resolves once it runs. The prompt gives the pull request's
+   * Rejects a `name` already running on the handle before it clones
+   * anything. Then clones `repo`, checks out the pull request's branch, installs the
+   * `code-review` skill, runs `setup`, then spawns the session (named
+   * `name`, default `"review"`; Claude Code on Sonnet unless you pass `agent`) and resolves once it runs. The prompt gives the pull request's
    * base as the fixed point and the tickets it closes as the spec (or says
    * there is none). The session posts one pull request comment and never
    * approves or merges. Rejects when the sandbox's kill time leaves less
@@ -59,14 +71,21 @@ export interface ReviewTask {
 
 const LIMITS: TaskLimits = { timeLimitMinutes: 40, deadlineMinutes: 30 };
 
+function outputs(): ReviewOutputs;
+function outputs<Name extends string>(name: Name): ReviewOutputs<Name>;
+function outputs(name = "review"): ReviewOutputs<string> {
+  return { [name]: REVIEW_RESULT };
+}
+
 /** Reviews a pull request cold and returns `reviewResult`. */
 export const review: ReviewTask = {
   name: "review",
   limits: LIMITS,
-  outputs: () => ({ review: REVIEW_RESULT }),
+  outputs,
   start: async (sandbox, input) =>
     startTask(sandbox, {
       name: "review",
+      session: input.name,
       limits: LIMITS,
       agent: input.agent ?? claudeCode("sonnet"),
       skills: [codeReview],

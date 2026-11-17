@@ -3,7 +3,11 @@
  * Imported as `@ai-hero/sandcastle/v1/tasks`. Each task has `start(sandbox,
  * input)`, which sets the repo up and resolves once its one session runs,
  * `outputs` for `verifyFinishReport`, and `limits`, its own time-limit
- * assumptions. The types they take and return are re-exported here too;
+ * assumptions. Several tasks run side by side on one handle: give each
+ * start its own `name`, which names its session, its record and its key in
+ * the finish report (pass the same name to `outputs`), and each start clones
+ * into a directory of that name. The types they take and return are
+ * re-exported here too;
  * they're the same ones `@ai-hero/sandcastle/v1` exports.
  *
  * A chooser picks which of a spec's tickets to build next: `sessionChooser()`

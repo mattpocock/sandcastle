@@ -74,6 +74,7 @@ export const general: GeneralTask;
 // @public
 export interface GeneralInput<O extends OutputDefinition | undefined = undefined> extends TaskAgentOptions {
     readonly githubToken?: string;
+    readonly name?: string;
     readonly output?: O;
     readonly prompt: string;
     readonly record?: SessionRecordOptions;
@@ -83,7 +84,7 @@ export interface GeneralInput<O extends OutputDefinition | undefined = undefined
 }
 
 // @public
-export type GeneralOutputs<O extends OutputDefinition> = Readonly<Record<"general", O>>;
+export type GeneralOutputs<O extends OutputDefinition, Name extends string = "general"> = Readonly<Record<Name, O>>;
 
 // @public
 export interface GeneralTask {
@@ -92,6 +93,7 @@ export interface GeneralTask {
     readonly outputs: {
         (): OutputMap;
         <const O extends OutputDefinition>(output: O): GeneralOutputs<O>;
+        <const O extends OutputDefinition, Name extends string>(output: O, name: Name): GeneralOutputs<O, Name>;
     };
     readonly start: <const O extends OutputDefinition | undefined = undefined>(sandbox: Sandbox, input: GeneralInput<O>) => Promise<SessionProcess<OutputType<O>>>;
 }
@@ -102,6 +104,7 @@ export const implement: ImplementTask;
 // @public
 export interface ImplementCommon extends TaskAgentOptions {
     readonly githubToken: string;
+    readonly name?: string;
     readonly record?: SessionRecordOptions;
     readonly repo: string;
     readonly setup?: readonly string[];
@@ -112,7 +115,7 @@ export interface ImplementCommon extends TaskAgentOptions {
 export type ImplementInput = ImplementCommon & ImplementWork & ImplementRound;
 
 // @public
-export type ImplementOutputs = Readonly<Record<"implement", OutputObjectDefinition<ImplementResult>>>;
+export type ImplementOutputs<Name extends string = "implement"> = Readonly<Record<Name, OutputObjectDefinition<ImplementResult>>>;
 
 // @public
 export interface ImplementResult {
@@ -140,7 +143,10 @@ export type ImplementRound = {
 export interface ImplementTask {
     readonly limits: TaskLimits;
     readonly name: "implement";
-    readonly outputs: () => ImplementOutputs;
+    readonly outputs: {
+        (): ImplementOutputs;
+        <Name extends string>(name: Name): ImplementOutputs<Name>;
+    };
     readonly start: (sandbox: Sandbox, input: ImplementInput) => Promise<SessionProcess<ImplementResult>>;
 }
 
@@ -229,6 +235,7 @@ export const review: ReviewTask;
 // @public
 export interface ReviewInput extends TaskAgentOptions {
     readonly githubToken: string;
+    readonly name?: string;
     readonly pr: number;
     readonly record?: SessionRecordOptions;
     readonly repo: string;
@@ -237,9 +244,7 @@ export interface ReviewInput extends TaskAgentOptions {
 }
 
 // @public
-export type ReviewOutputs = Readonly<{
-    review: OutputObjectDefinition<ReviewResult>;
-}>;
+export type ReviewOutputs<Name extends string = "review"> = Readonly<Record<Name, OutputObjectDefinition<ReviewResult>>>;
 
 // @public
 export interface ReviewResult {
@@ -252,7 +257,10 @@ export interface ReviewResult {
 export interface ReviewTask {
     readonly limits: TaskLimits;
     readonly name: "review";
-    readonly outputs: () => ReviewOutputs;
+    readonly outputs: {
+        (): ReviewOutputs;
+        <Name extends string>(name: Name): ReviewOutputs<Name>;
+    };
     readonly start: (sandbox: Sandbox, input: ReviewInput) => Promise<SessionProcess<ReviewResult>>;
 }
 

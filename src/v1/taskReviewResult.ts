@@ -12,10 +12,10 @@ export interface ReviewResult {
   readonly summary: string;
 }
 
-/** `review.outputs()`: the `reviewResult` output, under the session's name. */
-export type ReviewOutputs = Readonly<{
-  review: OutputObjectDefinition<ReviewResult>;
-}>;
+/** `review.outputs(name)`: the `reviewResult` output, under the session's name. */
+export type ReviewOutputs<Name extends string = "review"> = Readonly<
+  Record<Name, OutputObjectDefinition<ReviewResult>>
+>;
 
 /** The `reviewResult` output a review session ends with. */
 export const REVIEW_RESULT: OutputObjectDefinition<ReviewResult> =

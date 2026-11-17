@@ -1,5 +1,4 @@
-import { Data, Deferred, Effect, Exit, FiberId, Queue, Stream } from "effect";
-import type { OutputDefinition } from "./Output.js";
+import { Deferred, Effect, Exit, FiberId, Queue } from "effect";
 import type {
   AgentStreamEvent,
   SessionOptions,
@@ -9,12 +8,15 @@ import type {
 import type { SandboxDetachedError } from "./SandboxDetachedError.js";
 import { startHostSinks, whenSunk } from "./recordHostSinks.js";
 import { sessionRequest } from "./sessionRequest.js";
-import { sendTo } from "./sessionSend.js";
+import { abortedBeforeStart } from "./sessionResult.js";
+import type { Ended, Live, Shared } from "./sessionLive.js";
 import {
-  abortedBeforeStart,
-  lostSession,
-  sessionResult,
-} from "./sessionResult.js";
+  END,
+  endLive,
+  RecordSinkFailed,
+  sessionProcess,
+  SupervisorLost,
+} from "./sessionLive.js";
 import type { SupervisorLink } from "./supervisorHost.js";
 import type {
   Reply,
@@ -25,40 +27,6 @@ import type {
 // Host side of `session()` and `spawnSession()`: one supervisor request per
 // session, whose replies say when the agent has started, what it does, and
 // how it ended.
-
-/** The supervisor stopped answering before the session ended. */
-class SupervisorLost extends Data.TaggedError("SupervisorLost")<{
-  readonly cause: unknown;
-}> {}
-
-/** A host sink (directory or function) failed on the session's record. */
-class RecordSinkFailed extends Data.TaggedError("RecordSinkFailed")<{
-  readonly cause: unknown;
-}> {}
-
-type Ended = SupervisorLost | RecordSinkFailed | SandboxDetachedError;
-
-const END = Symbol("end");
-
-/** One session as the host follows it. */
-interface Live {
-  readonly request: SessionRequest;
-  readonly options: SessionOptions;
-  readonly queue: Queue.Queue<AgentStreamEvent | typeof END>;
-  readonly started: Deferred.Deferred<true>;
-  readonly ended: Deferred.Deferred<SessionOutcome, Ended>;
-  /** The host sinks running on the session's record, once it has arrived. */
-  sinking?: Promise<void>;
-}
-
-/** What the host shares across a sandbox's sessions. */
-interface Shared {
-  readonly link: SupervisorLink;
-  /** Aborted at a detach, ending every session's reply stream. */
-  readonly letGo: AbortController;
-  /** Set once the handle has detached. */
-  detached?: SandboxDetachedError;
-}
 
 const onReply =
   (live: Live) =>
@@ -73,8 +41,8 @@ const onReply =
       // The session ends for the host once its host sinks are done.
       const { outcome } = reply;
       whenSunk(live.sinking, (failure) => {
-        Deferred.unsafeDone(
-          live.ended,
+        endLive(
+          live,
           failure === undefined
             ? Exit.succeed(outcome)
             : Exit.fail(new RecordSinkFailed(failure)),
@@ -82,7 +50,7 @@ const onReply =
       });
     } else if (reply.type === "error") {
       const cause = new Error(reply.message);
-      Deferred.unsafeDone(live.ended, Exit.fail(new SupervisorLost({ cause })));
+      endLive(live, Exit.fail(new SupervisorLost({ cause })));
     }
   };
 
@@ -99,7 +67,7 @@ const follow = async (shared: Shared, live: Live): Promise<void> => {
   // The host sinks settle `ended` themselves.
   await live.sinking?.catch(() => undefined);
   // A no-op when the session has already ended.
-  Deferred.unsafeDone(live.ended, Exit.fail(new SupervisorLost({ cause })));
+  endLive(live, Exit.fail(new SupervisorLost({ cause })));
   Queue.unsafeOffer(live.queue, END);
 };
 
@@ -113,6 +81,7 @@ const start = (
     queue,
     started: Deferred.unsafeMake<true>(FiberId.none),
     ended: Deferred.unsafeMake<SessionOutcome, Ended>(FiberId.none),
+    over: false,
   }));
 
 /** Succeeds once the agent has started, or once it ended without starting. */
@@ -121,56 +90,6 @@ const startedOrEnded = (live: Live): Effect.Effect<"started" | "ended"> =>
     Effect.as(Deferred.await(live.started), "started" as const),
     Effect.as(Effect.either(Deferred.await(live.ended)), "ended" as const),
   );
-
-/** The process handle for a session that's following `live`. */
-const sessionProcess = (
-  shared: Shared,
-  live: Live,
-  output: OutputDefinition | undefined,
-): SessionProcess => {
-  let killing: Promise<void> | undefined;
-  let result: Promise<SessionResult> | undefined;
-  const { request } = live;
-  return {
-    name: request.name,
-    events: Stream.fromQueue(live.queue).pipe(
-      Stream.takeWhile((item): item is AgentStreamEvent => item !== END),
-      Stream.toAsyncIterable,
-    ),
-    wait: async () => {
-      result ??= Effect.runPromise(Effect.either(Deferred.await(live.ended)))
-        .then((ended) => {
-          if (ended._tag === "Right") {
-            return ended.right;
-          }
-          const error = ended.left;
-          if (error._tag === "RecordSinkFailed") {
-            throw error.cause;
-          }
-          throw error._tag === "SupervisorLost"
-            ? lostSession(request, error.cause)
-            : error;
-        })
-        .then(async (outcome) => sessionResult(request, outcome, output));
-      return result;
-    },
-    kill: async () => {
-      if (shared.detached !== undefined) {
-        throw shared.detached;
-      }
-      killing ??= shared.link
-        .call({ type: "kill", id: request.id }, () => undefined)
-        .catch(() => undefined);
-      await killing;
-    },
-    send: async (sendOptions) => {
-      if (shared.detached !== undefined) {
-        throw shared.detached;
-      }
-      return sendTo(shared.link, { id: request.id }, sendOptions);
-    },
-  };
-};
 
 /**
  * Lets go of every session after a detach: their `wait()` and `kill()`
@@ -187,7 +106,7 @@ const letGo = (
     if (live === "starting") {
       continue;
     }
-    Deferred.unsafeDone(live.ended, Exit.fail(error));
+    endLive(live, Exit.fail(error));
     Queue.unsafeOffer(live.queue, END);
   }
   shared.letGo.abort();
@@ -290,5 +209,10 @@ export const sessionHost = (link: SupervisorLink, context: SessionContext) => {
     },
     /** How many sessions the host is following. */
     runningCount: () => running.size,
+    /** Whether a session of this name is starting, or hasn't ended for its caller. The host holds a name a little past its `wait()`, until the supervisor's answer is over. */
+    isRunning: (name: string) => {
+      const slot = running.get(name);
+      return slot === "starting" || (slot !== undefined && !slot.over);
+    },
   };
 };
