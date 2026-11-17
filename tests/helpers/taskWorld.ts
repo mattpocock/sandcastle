@@ -1,5 +1,12 @@
 import { execFileSync } from "node:child_process";
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  readdir,
+  readFile,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 import type { ExecOptions, ExecResult, Sandbox } from "@ai-hero/sandcastle/v1";
 import { hostPath } from "./finishReportReceiver.js";
@@ -9,7 +16,8 @@ import { hostPath } from "./finishReportReceiver.js";
 // are recorded. POSIX only.
 
 /**
- * A stub `claude` in `dir/bin`. It writes what it was run with to `dir`
+ * A stub `claude` in `dir/bin`, with a `gh` that always fails beside it
+ * unless one is there already. It writes what it was run with to `dir`
  * (the prompt from its first stream-json message),
  * prints the first of `lines`, waits for `dir/go` when `waitForGo`, runs
  * `script` (shell, in the session's working directory) when given, then
@@ -45,6 +53,17 @@ export const stubClaude = async (
   ].join("\n");
   await writeFile(path.join(bin, "claude"), `${script}\n`);
   await chmod(path.join(bin, "claude"), 0o755);
+  // The tasks that open pull requests check for `gh`; `stubGh` replaces this.
+  await writeFile(path.join(bin, "gh"), "#!/bin/sh\nexit 1\n", {
+    flag: "wx",
+    mode: 0o755,
+  }).catch((error: unknown) => {
+    if (
+      !(error instanceof Error && "code" in error && error.code === "EEXIST")
+    ) {
+      throw error;
+    }
+  });
   return {
     env: { PATH: `${bin}:${hostPath()}` },
     read: async (file: string) => readFile(path.join(dir, file), "utf8"),
@@ -139,4 +158,86 @@ export const stubGh = async (dir: string, view: unknown): Promise<void> => {
   ].join("\n");
   await writeFile(path.join(bin, "gh"), `${script}\n`);
   await chmod(path.join(bin, "gh"), 0o755);
+};
+
+/**
+ * A private remote over the bare repo at `origin`, standing in for a private
+ * GitHub repo: clone `repo` (`private::<origin>`) and every fetch, push and
+ * `ls-remote` after it go through a stub git remote helper in `dir/bin`,
+ * beside `stubClaude`'s. It asks git's configured credential helpers for a
+ * password, as `https://github.com` would, and refuses the operation unless
+ * that password is `token`. Each operation it lets through is appended to
+ * `dir/private-remote.log` as its service (`git-upload-pack` or
+ * `git-receive-pack`); each refusal as `refused <service>`.
+ */
+export const privateRemote = async (
+  dir: string,
+  origin: string,
+  token: string,
+) => {
+  const bin = path.join(dir, "bin");
+  const log = path.join(dir, "private-remote.log");
+  await mkdir(bin, { recursive: true });
+  const script = [
+    "#!/bin/sh",
+    // git runs a remote helper as `git-remote-<scheme> <remote> <url>`.
+    String.raw`password=$(printf 'protocol=https\nhost=github.com\n\n' | GIT_TERMINAL_PROMPT=0 git credential fill 2>/dev/null | sed -n 's/^password=//p')`,
+    "while read -r command service; do",
+    '  case "$command" in',
+    String.raw`    capabilities) printf 'connect\n\n' ;;`,
+    "    connect)",
+    `      if [ "$password" != ${JSON.stringify(token)} ]; then`,
+    `        printf 'refused %s\\n' "$service" >> "${log}"`,
+    `        echo "remote: Invalid username or token." >&2`,
+    "        exit 128",
+    "      fi",
+    `      printf '%s\\n' "$service" >> "${log}"`,
+    String.raw`      printf '\n'`,
+    '      exec "$service" "$2" ;;',
+    "    *) exit 1 ;;",
+    "  esac",
+    "done",
+  ].join("\n");
+  await writeFile(path.join(bin, "git-remote-private"), `${script}\n`);
+  await chmod(path.join(bin, "git-remote-private"), 0o755);
+  return {
+    repo: `private::${origin}`,
+    /** Every operation so far, in order: its service, or `refused <service>`. */
+    operations: async () => {
+      const text = await readFile(log, "utf8").catch(() => "");
+      return text.split("\n").filter((line) => line !== "");
+    },
+  };
+};
+
+/**
+ * `PATH` (the host's by default) with no `tool` on it: each of its
+ * directories that has `tool` is swapped for a copy under `dir` made of
+ * links to everything else in it.
+ */
+export const pathWithout = async (
+  dir: string,
+  tool: string,
+  pathValue: string = hostPath(),
+): Promise<string> => {
+  const entries = pathValue.split(":").filter((entry) => entry !== "");
+  const swapped = await Promise.all(
+    entries.map(async (entry, index) => {
+      const names = await readdir(entry).catch((): string[] => []);
+      if (!names.includes(tool)) {
+        return entry;
+      }
+      const copy = path.join(dir, `without-${tool}-${index}`);
+      await mkdir(copy, { recursive: true });
+      await Promise.all(
+        names
+          .filter((name) => name !== tool)
+          .map(async (name) =>
+            symlink(path.join(entry, name), path.join(copy, name)),
+          ),
+      );
+      return copy;
+    }),
+  );
+  return swapped.join(":");
 };

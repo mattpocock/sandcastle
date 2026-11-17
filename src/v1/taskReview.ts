@@ -54,8 +54,8 @@ export interface ReviewTask {
     <Name extends string>(name: Name): ReviewOutputs<Name>;
   };
   /**
-   * Rejects a `name` already running on the handle before it clones
-   * anything. Then clones `repo`, checks out the pull request's branch, installs the
+   * Rejects a `name` already running on the handle, or a sandbox with no
+   * `gh` on its PATH, before it clones anything. Then clones `repo`, checks out the pull request's branch, installs the
    * `code-review` skill, runs `setup`, then spawns the session (named
    * `name`, default `"review"`; Claude Code on Sonnet unless you pass `agent`) and resolves once it runs. The prompt gives the pull request's
    * base as the fixed point and the tickets it closes as the spec (or says
@@ -102,6 +102,7 @@ export const review: ReviewTask = {
       repo: input.repo,
       branch: undefined,
       githubToken: input.githubToken,
+      gh: "it reads the pull request, and the agent posts the review, with the GitHub CLI",
       skillsContext: input.skillsContext,
       setup: input.setup ?? [],
       record: input.record,

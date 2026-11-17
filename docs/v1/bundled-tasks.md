@@ -4,6 +4,8 @@
 
 Bundled tasks are ready-made jobs you start on a sandbox handle: `implement` turns a ticket into a PR, `review` reviews a PR, `merge` merges one branch into another, and `general` runs a prompt. Each has `start(sandbox, input)`, `outputs` for `verifyFinishReport`, and `limits`, the time it assumes it has.
 
+The sandbox needs `node` (for the session supervisor), `git`, the agent's CLI, and the GitHub CLI `gh`: `implement`, `review`, `implementSpec`, and `merge` from a pull request read or open pull requests with it. Not every image has `gh` (Daytona's default doesn't), so those tasks reject before they clone anything when it's missing. Bake it into your image or snapshot. `githubToken` reaches every git command that talks to the remote, so a private repo works the same as a public one.
+
 ## implementSpec
 
 `implementSpec` builds a whole spec: a tracker issue whose tickets are the work, with blocking edges between them. It's written only against the public API, composing the other bundled tasks on one sandbox:

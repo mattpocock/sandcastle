@@ -44,6 +44,23 @@ export const integrationClone = (sandbox: Sandbox, branch: string): string =>
   posix.join(sandbox.workingDirectory, branch.replaceAll("/", "-"));
 
 /**
+ * Rejects when the sandbox has no `gh` on its PATH: the PR step, the chooser
+ * and the bundled tasks all use the GitHub CLI, and not every image has it
+ * (Daytona's default doesn't).
+ */
+export const requireGh = async (sandbox: Sandbox): Promise<void> => {
+  const probe = await sandbox.exec({
+    command: "command -v gh",
+    allowFailure: true,
+  });
+  if (probe.exitCode !== 0) {
+    throw new Error(
+      "implementSpec: the sandbox has no `gh` on its PATH: its tasks open, read and review pull requests with the GitHub CLI. Install the GitHub CLI in the sandbox's image or snapshot.",
+    );
+  }
+};
+
+/**
  * Clones `repo` into a directory of its own, then creates `branch` from the
  * default branch it checked out and pushes it to `origin`.
  */

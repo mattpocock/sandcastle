@@ -3,6 +3,7 @@ import type { ImplementResult } from "./implementResult.js";
 import {
   integrationBranchName,
   pushIntegrationBranch,
+  requireGh,
 } from "./implementSpecBranch.js";
 import {
   heldOutcomes,
@@ -55,7 +56,8 @@ export interface ImplementSpecTask {
    */
   readonly limits: TaskLimits;
   /**
-   * Clones `repo`, then creates and pushes the integration branch
+   * Rejects a sandbox with no `gh` on its PATH before anything runs. Then
+   * clones `repo`, creates and pushes the integration branch
    * `sandcastle/implement-spec-<spec>-<random>` from the default branch. Runs
    * the chooser and spawns the first round: one `implement` session named
    * `implement-<ticket>` per chosen ticket (at most `maxConcurrent`), each in
@@ -116,6 +118,7 @@ const checkInput = (input: ImplementSpecInput): void => {
 const start: ImplementSpecTask["start"] = async (sandbox, input) => {
   checkInput(input);
   checkRoom(sandbox);
+  await requireGh(sandbox);
   const branch = integrationBranchName(input.spec);
   await pushIntegrationBranch(sandbox, {
     repo: input.repo,

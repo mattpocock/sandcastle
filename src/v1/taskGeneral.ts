@@ -115,6 +115,7 @@ export const general: GeneralTask = {
       repo: input.repo,
       branch: undefined,
       githubToken: input.githubToken,
+      gh: undefined,
       skillsContext: input.skillsContext,
       setup: input.setup ?? [],
       record: input.record,

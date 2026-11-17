@@ -35,7 +35,8 @@ process.stdout.write(JSON.stringify({ type: "result", is_error: false, result: "
 /**
  * A stub `gh`, beside the stub `claude`: `pr create` points
  * `refs/pull/<n>/head` at its `--head` branch on the clone's origin (numbered
- * from 100) and prints the PR's URL; `pr view <n>` prints the PR as the
+ * from 100; for a `privateRemote`, on its bare repo) and prints the PR's
+ * URL; `pr view <n>` prints the PR as the
  * `review` task reads it. Every call is appended to `gh-calls.jsonl` beside
  * `bin`. Anything else fails.
  */
@@ -50,7 +51,7 @@ const prs = path.join(dir, "prs");
 fs.mkdirSync(prs, { recursive: true });
 if (args[0] === "pr" && args[1] === "create") {
   const number = 100 + fs.readdirSync(prs).length;
-  const origin = execFileSync("git", ["remote", "get-url", "origin"], { encoding: "utf8" }).trim();
+  const origin = execFileSync("git", ["remote", "get-url", "origin"], { encoding: "utf8" }).trim().replace(/^private::/, "");
   execFileSync("git", ["-C", origin, "update-ref", "refs/pull/" + number + "/head", "refs/heads/" + flag("--head")]);
   fs.writeFileSync(path.join(prs, number + ".json"), JSON.stringify({ baseRefName: flag("--base"), headRefName: flag("--head"), closingIssuesReferences: [] }));
   process.stdout.write("https://github.com/o/widgets/pull/" + number + "\n");

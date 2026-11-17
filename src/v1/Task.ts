@@ -79,6 +79,11 @@ export interface TaskRun<O extends OutputDefinition | undefined> {
   /** The branch to work on in the clone; `undefined` keeps the one cloned. */
   readonly branch: TaskBranch | undefined;
   readonly githubToken: string | undefined;
+  /**
+   * What the task needs the GitHub CLI for, in its error when the sandbox has
+   * no `gh`; `undefined` when it doesn't need it.
+   */
+  readonly gh: string | undefined;
   readonly skillsContext: TaskSkillsContext;
   readonly setup: readonly string[];
   readonly record: SessionRecordOptions | undefined;

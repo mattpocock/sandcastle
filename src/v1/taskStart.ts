@@ -63,6 +63,28 @@ const runSetup = async (
     )
     .then(() => undefined);
 
+/**
+ * Rejects when the task needs the GitHub CLI and the sandbox has no `gh` on
+ * its PATH. Not every image has it (Daytona's default doesn't).
+ */
+const requireGh = async (
+  sandbox: Sandbox,
+  run: Pick<TaskRun<undefined>, "name" | "gh">,
+): Promise<void> => {
+  if (run.gh === undefined) {
+    return;
+  }
+  const probe = await sandbox.exec({
+    command: "command -v gh",
+    allowFailure: true,
+  });
+  if (probe.exitCode !== 0) {
+    throw new Error(
+      `${run.name}: the sandbox has no \`gh\` on its PATH: ${run.gh}. Install the GitHub CLI in the sandbox's image or snapshot.`,
+    );
+  }
+};
+
 /** The task's own prompt, prepared in the clone when it's a function. */
 const taskBody = async (
   prompt: TaskRun<OutputDefinition | undefined>["prompt"],
@@ -83,6 +105,7 @@ const spawnTask = async <O extends OutputDefinition | undefined>(
   run: TaskRun<O>,
   claim: TaskClaim,
 ): Promise<SessionProcess<OutputType<O>>> => {
+  await requireGh(sandbox, run);
   const directory = await prepareRepo(sandbox, run);
   const body = await taskBody(run.prompt, directory);
   await install(sandbox, run.skills, run.skillsContext);
@@ -110,8 +133,9 @@ const spawnTask = async <O extends OutputDefinition | undefined>(
 
 /**
  * Starts a bundled task: takes its session name on the handle (rejecting one
- * already running), clones its repo with the token in that command's env
- * only, checks out its branch, prepares the clone and the prompt, installs
+ * already running), checks the sandbox has `gh` if the task needs it, clones
+ * its repo with the token in that command's env only, checks out its branch
+ * (fetching with the token too), prepares the clone and the prompt, installs
  * its skills, runs the setup commands in the clone, then spawns one session
  * of that name and resolves once it runs. The handle's default detach
  * deadline becomes the task's.
