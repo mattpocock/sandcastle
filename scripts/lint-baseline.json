@@ -9,11 +9,7 @@
     "eslint(no-await-in-loop)": 3,
     "promise(avoid-new)": 1
   },
-  ".sandcastle/verify/ledger.ts": {
-    "eslint(max-lines)": 1
-  },
   ".sandcastle/verify/world.ts": {
-    "eslint(max-lines)": 1,
     "promise(avoid-new)": 1,
     "unicorn(no-array-sort)": 1
   },
@@ -67,13 +63,6 @@
     "typescript(method-signature-style)": 4,
     "typescript(no-unsafe-type-assertion)": 2
   },
-  "src/createWorktree-windowsMounts.test.ts": {
-    "eslint(max-params)": 1,
-    "typescript(no-unsafe-type-assertion)": 1,
-    "unicorn(filename-case)": 1,
-    "unicorn(no-immediate-mutation)": 1,
-    "vitest(require-mock-type-parameters)": 1
-  },
   "src/createWorktree.test.ts": {
     "eslint(max-params)": 1,
     "import(max-dependencies)": 1,
@@ -114,7 +103,6 @@
   },
   "src/mountUtils.ts": {
     "effect/asyncFunction": 2,
-    "eslint(max-lines)": 1,
     "eslint(max-params)": 1,
     "node(no-sync)": 1,
     "typescript(method-signature-style)": 1
@@ -174,7 +162,6 @@
   },
   "src/sandboxes/daytona.ts": {
     "effect/globalTimers": 1,
-    "eslint(max-lines)": 1,
     "promise(avoid-new)": 1
   },
   "src/sandboxes/docker.ts": {
@@ -246,7 +233,6 @@
   },
   "src/syncOut.ts": {
     "effect/asyncFunction": 2,
-    "eslint(max-lines)": 1,
     "eslint(no-await-in-loop)": 3
   },
   "src/syncOutSave.ts": {

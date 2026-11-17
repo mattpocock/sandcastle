@@ -77,9 +77,97 @@ export const shrink = (found: Counts, baseline: Counts): Counts =>
     ),
   );
 
-/** Entries in `next` that `base` lacks or has lower: a grown baseline. */
-export const baselineGrowth = (next: Counts, base: Counts): readonly string[] =>
-  compare(next, base).grown;
+const above = (
+  counts: Counts,
+  limit: Counts,
+): (readonly [string, string, number])[] =>
+  pairs(counts).filter(([file, rule, n]) => n > countOf(limit, file, rule));
+
+const sumOf = (
+  entries: readonly (readonly [string, string, number])[],
+  from: Counts,
+): number =>
+  entries.reduce(
+    (sum, [file, rule, n]) => sum + n - countOf(from, file, rule),
+    0,
+  );
+
+/**
+ * The baseline with counts carried to where a move-only split put them. For
+ * each rule found above the baseline somewhere, the rises are offset by the
+ * falls in `changed` files (the ones the branch touches); where the falls
+ * cover the rises, every risen and fallen entry of that rule takes its found
+ * count, so the rule's total never rises. A rule the falls don't cover, and
+ * every other rule, keeps its baseline counts and still fails.
+ */
+export const transfer = (
+  found: Counts,
+  baseline: Counts,
+  changed: ReadonlySet<string>,
+): Counts => {
+  const rises = above(found, baseline);
+  const falls = above(baseline, found).filter(([file]) => changed.has(file));
+  const carried = new Set(
+    [...new Set(rises.map(([, rule]) => rule))].filter(
+      (rule) =>
+        sumOf(
+          rises.filter(([, r]) => r === rule),
+          baseline,
+        ) <=
+        sumOf(
+          falls.filter(([, r]) => r === rule),
+          found,
+        ),
+    ),
+  );
+  const carry = (file: string, rule: string): number => {
+    const now = countOf(found, file, rule);
+    const was = countOf(baseline, file, rule);
+    if (!carried.has(rule)) {
+      return was;
+    }
+    return changed.has(file) ? now : Math.max(now, was);
+  };
+  const entries = new Map(
+    [...pairs(baseline), ...pairs(found)].map(([file, rule]) => [
+      `${file} ${rule}`,
+      { file, rule },
+    ]),
+  );
+  return countViolations(
+    [...entries.values()].flatMap(({ file, rule }) =>
+      Array.from({ length: carry(file, rule) }, () => ({ file, rule })),
+    ),
+  );
+};
+
+/**
+ * Entries in `next` that `base` lacks or has lower: a grown baseline. A rule
+ * whose every count in `next` is within `allowed`, the `transfer` of the
+ * found counts onto `base`, carried its counts in a move-only split and
+ * passes.
+ */
+export const baselineGrowth = (
+  next: Counts,
+  base: Counts,
+  allowed: Counts = base,
+): readonly string[] => {
+  const over = new Set(above(next, allowed).map(([, rule]) => rule));
+  return above(next, base)
+    .filter(([, rule]) => over.has(rule))
+    .map(
+      ([file, rule, n]) =>
+        `${file}: ${rule} ${String(countOf(base, file, rule))} -> ${String(n)}`,
+    );
+};
+
+/** A note on counts below the baseline. They pass; the workflow lowers it. */
+export const belowBaseline = (found: Counts, baseline: Counts): string => {
+  const { stale } = compare(found, baseline);
+  return stale.length === 0
+    ? ""
+    : ` ${String(stale.length)} file × rule counts are below the baseline; the lint-shrink workflow lowers it after merge (or run \`npm run lint:shrink\`).`;
+};
 
 interface Totals {
   readonly total: number;

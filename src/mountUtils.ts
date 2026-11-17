@@ -5,15 +5,31 @@
  * validation, image naming, and Windows path normalization.
  */
 
-import { existsSync, rm as rmCallback, statSync } from "node:fs";
-import { tmpdir, homedir } from "node:os";
-import { isAbsolute, resolve, join, dirname } from "node:path";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { existsSync, statSync } from "node:fs";
+import { join, dirname } from "node:path";
 import { Effect } from "effect";
 import type { MountConfig } from "./MountConfig.js";
-import { SANDBOX_REPO_DIR } from "./sandboxService.js";
 import type { MountEntry } from "./sandboxService.js";
-import { WorktreeError } from "./errors.js";
+import type { WorktreeError } from "./errors.js";
+import {
+  PARENT_GIT_SANDBOX_DIR,
+  overlayGitMounts,
+  parseGitdirPath,
+  readWorktreeGitdir,
+  writeGitOverride,
+} from "./gitMountOverride.js";
+import { resolveHostPath, resolveSandboxPath } from "./mountPaths.js";
+
+export {
+  PARENT_GIT_SANDBOX_DIR,
+  parseGitdirPath,
+  removeMountTempDirs,
+} from "./gitMountOverride.js";
+export {
+  expandTilde,
+  resolveHostPath,
+  resolveSandboxPath,
+} from "./mountPaths.js";
 
 /**
  * SELinux volume label suffix applied to bind mounts.
@@ -23,12 +39,6 @@ import { WorktreeError } from "./errors.js";
  * - `false` — disable labeling entirely.
  */
 export type SelinuxLabel = "z" | "Z" | false;
-
-/**
- * Deterministic mount point inside the sandbox for the parent repo's .git
- * directory when the workspace is a git worktree. See ADR-0006.
- */
-export const PARENT_GIT_SANDBOX_DIR = "/.sandcastle-parent-git";
 
 /**
  * Derive the default image name from the repo directory.
@@ -49,54 +59,6 @@ export const defaultImageName = (repoDir: string): string => {
     .toLowerCase()
     .replaceAll(/[^a-z0-9_.-]/gu, (char) => "-".repeat(char.length));
   return `sandcastle:${sanitized || "local"}`;
-};
-
-/**
- * Expand tilde (`~`) to the given home directory (or `os.homedir()` if omitted).
- * Handles both `~/path` (POSIX) and `~\path` (Windows).
- */
-export const expandTilde = (p: string, homeDirPath?: string): string => {
-  const home = homeDirPath ?? homedir();
-  if (p === "~") {
-    return home;
-  }
-  if (p.startsWith("~/") || p.startsWith("~\\")) {
-    return `${home}/${p.slice(2)}`;
-  }
-  return p;
-};
-
-/**
- * Resolve a host path: expand tilde, then resolve relative paths from `process.cwd()`.
- */
-export const resolveHostPath = (hostPath: string): string => {
-  const expanded = expandTilde(hostPath);
-  return isAbsolute(expanded) ? expanded : resolve(process.cwd(), expanded);
-};
-
-/**
- * Resolve a sandbox path: expands tilde using `sandboxHomedir`, then resolves
- * relative paths from `SANDBOX_REPO_DIR`.
- *
- * Throws if `sandboxPath` starts with `~` but `sandboxHomedir` is `undefined`.
- */
-export const resolveSandboxPath = (
-  sandboxPath: string,
-  sandboxHomedir?: string,
-): string => {
-  const hasTilde =
-    sandboxPath === "~" ||
-    sandboxPath.startsWith("~/") ||
-    sandboxPath.startsWith("~\\");
-  if (hasTilde && sandboxHomedir === undefined) {
-    throw new Error(
-      `sandboxPath "${sandboxPath}" contains a tilde but the provider has no sandboxHomedir set`,
-    );
-  }
-  const expanded = hasTilde
-    ? expandTilde(sandboxPath, sandboxHomedir)
-    : sandboxPath;
-  return isAbsolute(expanded) ? expanded : resolve(SANDBOX_REPO_DIR, expanded);
 };
 
 /**
@@ -189,24 +151,6 @@ export const normalizeMounts = <
 };
 
 /**
- * Parse a `gitdir:` path into its parent .git directory and worktree name.
- *
- * The gitdir path is like `/path/to/repo/.git/worktrees/<name>` or
- * `C:\Users\project\.git\worktrees\<name>`. We split on both `/` and `\`
- * so this works regardless of the host platform or which platform runs tests.
- */
-export const parseGitdirPath = (
-  gitdirPath: string,
-): { parentGitDir: string; worktreeName: string } => {
-  const normalized = gitdirPath.replaceAll("\\", "/").replace(/\/+$/u, "");
-  const segments = normalized.split("/");
-  const worktreeName = segments.pop() ?? ""; // <name>
-  segments.pop(); // "worktrees"
-  const parentGitDir = segments.join("/");
-  return { worktreeName, parentGitDir };
-};
-
-/**
  * On Windows, patch git mounts so that worktree `.git` files resolve inside
  * the Linux sandbox. See ADR-0006 for the full rationale.
  *
@@ -274,140 +218,6 @@ const defaultStatFile = async (p: string): Promise<"file" | "directory"> => {
   const s = await stat(p);
   return s.isDirectory() ? ("directory" as const) : ("file" as const);
 };
-
-/**
- * The `gitdir:` path a worktree's `.git` file points at, or `undefined` when
- * `.git` is missing, unreadable, a directory, or not a `gitdir:` pointer.
- */
-const readWorktreeGitdir = (
-  gitEntryPath: string,
-  fileAccess: {
-    readonly readFile: (path: string) => Promise<string>;
-    readonly statFile: (path: string) => Promise<"file" | "directory">;
-  },
-): Effect.Effect<string | undefined> =>
-  Effect.gen(function* () {
-    const { readFile, statFile } = fileAccess;
-
-    const gitEntryType = yield* Effect.tryPromise({
-      try: () => statFile(gitEntryPath),
-      catch: () => null,
-    }).pipe(Effect.catchAll(() => Effect.succeed(null)));
-    // .git is a directory (normal clone): no gitdir indirection to fix.
-    // `normalizeMounts` already remaps the .git mount to `${sandboxRepoDir}/.git`
-    // because the host .git sits under `worktreeHostPath`. Removing this short-
-    // circuit would break head mode against a normal clone.
-    if (gitEntryType === null || gitEntryType === "directory") {
-      return undefined;
-    }
-
-    const content = yield* Effect.tryPromise({
-      try: () => readFile(gitEntryPath),
-      catch: () => null,
-    }).pipe(
-      Effect.map((s) => s.trim()),
-      Effect.catchAll(() => Effect.succeed(null)),
-    );
-    if (content === null) {
-      return undefined;
-    }
-    return /^gitdir:\s*(?<gitdir>.+)$/u.exec(content)?.groups?.gitdir;
-  });
-
-/**
- * Writes a `.git` override file pointing at `correctedGitdir` into a fresh
- * temp dir. Returns the file and its temp dir.
- */
-const writeGitOverride = (
-  correctedGitdir: string,
-): Effect.Effect<
-  { readonly hostPath: string; readonly tempDir: string },
-  WorktreeError
-> =>
-  Effect.gen(function* () {
-    const tempDir = yield* Effect.tryPromise({
-      try: () => mkdtemp(join(tmpdir(), "sandcastle-git-")),
-      catch: (e) =>
-        new WorktreeError({
-          message: `Failed to create temp dir for git override: ${e instanceof Error ? e.message : String(e)}`,
-        }),
-    });
-    const tempGitFile = join(tempDir, "git-override");
-    yield* Effect.tryPromise({
-      try: () => writeFile(tempGitFile, `gitdir: ${correctedGitdir}\n`),
-      catch: (e) =>
-        new WorktreeError({
-          message: `Failed to write git override file: ${e instanceof Error ? e.message : String(e)}`,
-        }),
-    }).pipe(
-      Effect.tapError(() =>
-        removeMountTempDirs([
-          { hostPath: tempGitFile, sandboxPath: "", tempDir },
-        ]),
-      ),
-    );
-    return { hostPath: tempGitFile, tempDir };
-  });
-
-/**
- * Remaps the parent `.git` dir mount to `PARENT_GIT_SANDBOX_DIR` and puts
- * `overrideMount` in place of the worktree's `.git` file mount, or adds it
- * when there is none (a Sandcastle-created worktree).
- */
-const overlayGitMounts = (
-  gitMounts: MountEntry[],
-  paths: {
-    readonly parentGitDir: string;
-    readonly gitEntryPath: string;
-    readonly overrideMount: MountEntry;
-  },
-): MountEntry[] => {
-  const normalizedParentGitDir = paths.parentGitDir.replaceAll("\\", "/");
-  const gitFileHostPath = paths.gitEntryPath.replaceAll("\\", "/");
-
-  const correctedMounts: MountEntry[] = [];
-  let replacedGitFile = false;
-
-  for (const m of gitMounts) {
-    const normalizedHostPath = m.hostPath.replaceAll("\\", "/");
-    if (normalizedHostPath === normalizedParentGitDir) {
-      // Remap parent .git dir to deterministic sandbox path
-      correctedMounts.push({ ...m, sandboxPath: PARENT_GIT_SANDBOX_DIR });
-    } else if (normalizedHostPath === gitFileHostPath) {
-      // Replace .git file mount with corrected version (host repo is a worktree)
-      correctedMounts.push({ ...m, ...paths.overrideMount });
-      replacedGitFile = true;
-    } else {
-      correctedMounts.push(m);
-    }
-  }
-
-  if (!replacedGitFile) {
-    correctedMounts.push(paths.overrideMount);
-  }
-
-  return correctedMounts;
-};
-
-/**
- * Removes the temp dirs `patchGitMountsForWindows` created for `mounts`
- * (none off Windows). Run it once the sandbox using the mounts has closed, or
- * failed to start.
- */
-export const removeMountTempDirs = (
-  mounts: readonly MountEntry[],
-): Effect.Effect<void> =>
-  Effect.forEach(
-    mounts.flatMap((m) => (m.tempDir === undefined ? [] : [m.tempDir])),
-    (dir) =>
-      // A dir that can't be removed is left behind; nothing depends on it.
-      Effect.async<NodeJS.ErrnoException | null>((resume) => {
-        rmCallback(dir, { recursive: true, force: true }, (error) => {
-          resume(Effect.succeed(error));
-        });
-      }),
-    { discard: true },
-  );
 
 /**
  * Format a bind mount into a `-v` style string for container runtimes.

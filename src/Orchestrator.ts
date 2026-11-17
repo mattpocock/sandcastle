@@ -475,11 +475,23 @@ export const orchestrate = (
 
                   yield* display.status(label("Agent started"), "success");
 
+                  // Every display write and stream event the agent's output
+                  // forks is tracked, so the iteration can wait for them to
+                  // land before it returns: a run() that has settled (even by
+                  // abort) must not still be appending to its log file.
+                  const pendingOutput = new Set<Fiber.RuntimeFiber<void>>();
+                  const forkOutput = (effect: Effect.Effect<void>) => {
+                    const fiber = runFork(effect);
+                    pendingOutput.add(fiber);
+                    fiber.addObserver(() => {
+                      pendingOutput.delete(fiber);
+                    });
+                  };
                   // Invoke the agent — buffer text deltas so Pi's single-token
                   // chunks are displayed as readable multi-word lines.
                   const textBuffer = new TextDeltaBuffer((chunk) => {
-                    runFork(display.textChunk(chunk));
-                    runFork(
+                    forkOutput(display.textChunk(chunk));
+                    forkOutput(
                       streamEmitter.emit({
                         type: "text",
                         message: chunk,
@@ -493,8 +505,8 @@ export const orchestrate = (
                   };
                   const onToolCall = (name: string, formattedArgs: string) => {
                     textBuffer.flush();
-                    runFork(display.toolCall(name, formattedArgs));
-                    runFork(
+                    forkOutput(display.toolCall(name, formattedArgs));
+                    forkOutput(
                       streamEmitter.emit({
                         type: "toolCall",
                         name,
@@ -505,7 +517,7 @@ export const orchestrate = (
                     );
                   };
                   const onRawLine = (line: string) => {
-                    runFork(
+                    forkOutput(
                       streamEmitter.emit({
                         type: "raw",
                         line,
@@ -519,10 +531,10 @@ export const orchestrate = (
                       minutes === 1
                         ? "Agent idle for 1 minute"
                         : `Agent idle for ${minutes} minutes`;
-                    runFork(display.status(label(msg), "warn"));
+                    forkOutput(display.status(label(msg), "warn"));
                   };
                   const onCompletionTimeout = (timeoutMs: number) => {
-                    runFork(
+                    forkOutput(
                       display.status(
                         label(
                           `Completion signal seen but agent process is hanging — force-completing after ${timeoutMs / 1000}s grace window.`,
@@ -559,10 +571,16 @@ export const orchestrate = (
                     iterationResumeSession,
                     iterationForkSession,
                     options.signal,
+                  ).pipe(
+                    // On every exit, abort included: flush the buffered text
+                    // deltas, then wait for the output forked so far.
+                    Effect.ensuring(
+                      Effect.suspend(() => {
+                        textBuffer.dispose();
+                        return Fiber.awaitAll([...pendingOutput]);
+                      }),
+                    ),
                   );
-
-                  // Flush any remaining buffered text deltas
-                  textBuffer.dispose();
 
                   yield* display.status(label("Agent stopped"), "info");
 
