@@ -73,6 +73,10 @@
     "./v1/sandboxes/modal": {
       "import": "./dist/v1/sandboxes/modal.js",
       "types": "./dist/v1/sandboxes/modal.d.ts"
+    },
+    "./v1/sandboxes/sprites": {
+      "import": "./dist/v1/sandboxes/sprites.js",
+      "types": "./dist/v1/sandboxes/sprites.d.ts"
     }
   },
   "bin": {
