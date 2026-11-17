@@ -1,0 +1,5 @@
+---
+"@ai-hero/sandcastle": patch
+---
+
+v1 (`@ai-hero/sandcastle/v1/tasks`): `implementSpec` no longer spends a ticket on a failure that isn't the ticket's. When a round's session can't start because a clone, fetch, setup command, skill install or spawn fails, `start` and `next` reject with that error, so the caller can retry with the same `state` and report; in a ticket round, the tickets that did start run and the rest are chosen again later. A ticket is still stuck when its `implement` session reported a branch that isn't on the remote, or the chooser named it with a reference that can't name a session. A bundled task's `start` that fails after cloning now removes its clone, so the same session name can start again. The integration PR's body gives each merged ticket's `implement` summary instead of its merge session's, and `ImplementSpecTicket` gains `merge` (`{ summary, commit? }`). `docs/v1/bundled-tasks.md` now says which branches are left on the remote, and shows how an orchestrator the sandbox can't reach polls `status().detaches[].finishReport` for each round's report, which is unsigned.

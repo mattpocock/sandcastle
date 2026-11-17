@@ -291,15 +291,31 @@ interface Driven {
   readonly result: ImplementSpecResult;
 }
 
-/** Detaches from the round, verifies its report and reattaches; resolves with the next step. */
-const detachRound = async (
-  drive: Drive,
-  step: ImplementSpecStep & { done: false },
-) => {
+/** What `detachAndReattach` resolves with: what `next` takes, and the handle to pass it. */
+interface Reattached {
+  readonly sandbox: DetachableSandbox;
+  readonly state: ImplementSpecState;
+  readonly report: FinishReport;
+  readonly stored: string;
+}
+
+/**
+ * Detaches from the round with a finish report, stores the state as JSON,
+ * verifies the report with `outputs(state)` and reattaches from a fresh
+ * provider (env passed again): everything before `next`.
+ */
+export const detachAndReattach = async (
+  drive: Pick<Drive, "agents" | "sandbox" | "rootDir" | "receivers"> &
+    Partial<Pick<Drive, "deadlines" | "rounds">>,
+  step: ImplementSpecStep,
+): Promise<Reattached> => {
+  if (step.done) {
+    throw new Error("the step spawned no round to detach from");
+  }
   const round = drive.rounds?.length ?? 0;
   const hook = await finishReportReceiver();
   drive.receivers.push(hook);
-  const deadlineMinutes = drive.deadlines[round];
+  const deadlineMinutes = drive.deadlines?.[round];
   await drive.sandbox.detach({
     finishReport: { url: hook.url, secret: SECRET },
     ...(deadlineMinutes === undefined ? {} : { deadlineMinutes }),
@@ -325,6 +341,18 @@ const detachRound = async (
   if (sandbox === undefined) {
     throw new Error("the sandbox should still be there");
   }
+  return { sandbox, state, report, stored };
+};
+
+/** Detaches from the round, verifies its report and reattaches; resolves with the next step. */
+const detachRound = async (
+  drive: Drive,
+  step: ImplementSpecStep & { done: false },
+) => {
+  const { sandbox, state, report, stored } = await detachAndReattach(
+    drive,
+    step,
+  );
   const next = await implementSpec.next(sandbox, {
     input: drive.input,
     state,

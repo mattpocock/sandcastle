@@ -191,10 +191,18 @@ describe.skipIf(process.platform === "win32")(
         expect(state).not.toContain(TOKEN);
       }
       expect(restored(stored.at(-1)).tickets).toMatchObject({
-        A: { status: "merged", pr: { number: 1 } },
+        A: {
+          status: "merged",
+          pr: { number: 1 },
+          summary: "Added A.",
+          merge: { summary: "Merged." },
+        },
         B: { status: "merged" },
         C: { status: "merged" },
       });
+      expect(restored(stored.at(-1)).tickets["A"]?.merge?.commit).toMatch(
+        /^[0-9a-f]{40}$/u,
+      );
       await expect(agents.envOf("implement-B")).resolves.toContain(
         `GH_TOKEN=${TOKEN}`,
       );

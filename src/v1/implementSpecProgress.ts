@@ -62,18 +62,29 @@ const implemented = (output: ImplementResult): ImplementSpecTicket => {
   }
 };
 
-/** A ticket after its `merge` session ended with `output`. */
+/**
+ * A ticket after its `merge` session ended with `output`. A landed merge
+ * keeps the implement summary, which says what the ticket built, and records
+ * its own beside it; a failed one says why in `summary`.
+ */
 const merged = (
   ticket: ImplementSpecTicket,
   output: MergeResult,
-): ImplementSpecTicket => ({
-  ...ticket,
-  status: output.status === "merged" ? "merged" : "stuck",
-  summary:
-    output.status === "merged"
-      ? output.summary
-      : `the merge ended ${output.status}: ${output.summary}`,
-});
+): ImplementSpecTicket =>
+  output.status === "merged"
+    ? {
+        ...ticket,
+        status: "merged",
+        merge: {
+          summary: output.summary,
+          ...(output.commit === undefined ? {} : { commit: output.commit }),
+        },
+      }
+    : {
+        ...ticket,
+        status: "stuck",
+        summary: `the merge ended ${output.status}: ${output.summary}`,
+      };
 
 /** A ticket whose session failed: retried once after a deadline, else stuck. */
 const failed = (

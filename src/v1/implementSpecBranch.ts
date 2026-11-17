@@ -84,3 +84,29 @@ export const pushIntegrationBranch = async (
     env,
   });
 };
+
+/**
+ * Whether `branch` is on `repo`'s remote, read with `git ls-remote`. Rejects
+ * when the remote can't be read at all, which isn't the branch's doing.
+ */
+export const remoteHasBranch = async (
+  sandbox: Sandbox,
+  options: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly githubToken: string;
+  },
+): Promise<boolean> => {
+  const listed = await sandbox.exec({
+    command: `git ${credentials} ls-remote --exit-code --heads -- ${quoted(cloneUrl(options.repo))} ${quoted(`refs/heads/${options.branch}`)}`,
+    env: { GH_TOKEN: options.githubToken },
+    allowFailure: true,
+  });
+  // `--exit-code`: 2 is "no such ref"; anything else non-zero is git failing.
+  if (listed.exitCode === 0 || listed.exitCode === 2) {
+    return listed.exitCode === 0;
+  }
+  throw new Error(
+    `implementSpec: couldn't read ${options.repo}'s branches: ${listed.stderr.trim()}`,
+  );
+};

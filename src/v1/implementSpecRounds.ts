@@ -1,8 +1,8 @@
-import type { Sandbox, SessionProcess } from "../v1.js";
+import type { Sandbox } from "../v1.js";
 import type { Choice } from "./chooser.js";
 import { sessionChooser } from "./chooserSession.js";
-import type { ImplementResult } from "./implementResult.js";
-import { checkRoom, common, messageOf } from "./implementSpecCommon.js";
+import { mergeProblem, ticketProblem } from "./implementSpecChecks.js";
+import { checkRoom, common } from "./implementSpecCommon.js";
 import type { RoundEnd } from "./implementSpecProgress.js";
 import { applyOutcomes, ticketsWith } from "./implementSpecProgress.js";
 import {
@@ -22,7 +22,9 @@ import { merge } from "./taskMerge.js";
 // What `implementSpec` spawns between rounds: the next merge when a PR waits
 // for one, else the chooser and the next ticket round, and once the chooser
 // has nothing left, the integration PR and its review. Every session is an
-// ordinary bundled task's, started through its public `start`.
+// ordinary bundled task's, started through its public `start`. A start that
+// rejects isn't the ticket's doing (implementSpecChecks.ts draws the line), so
+// it rejects the step instead of leaving the ticket stuck.
 
 const sessionName = (
   step: "implement" | "merge",
@@ -43,16 +45,19 @@ const withTicket = (
 const stuck = (
   state: ImplementSpecState,
   ticket: string,
-  error: unknown,
+  problem: string,
 ): ImplementSpecState =>
   withTicket(state, ticket, {
     ...state.tickets[ticket],
     status: "stuck",
     retried: state.tickets[ticket]?.retried ?? false,
-    summary: `couldn't start: ${messageOf(error)}`,
+    summary: `couldn't start: ${problem}`,
   });
 
-/** Starts the merge of the first waiting PR; a start that fails leaves it stuck. */
+/**
+ * Starts the merge of the first waiting PR. A branch its implement session
+ * got wrong leaves the ticket stuck; a start that rejects rejects.
+ */
 const mergeRound = async (
   sandbox: Sandbox,
   input: ImplementSpecInput,
@@ -62,29 +67,29 @@ const mergeRound = async (
   const progress = state.tickets[ticket];
   const name = sessionName("merge", ticket, progress);
   const rest = { ...state, merges };
-  try {
-    const spawned = await merge.start(sandbox, {
-      ...common(input),
-      name,
-      from: progress?.branch ?? "",
-      into: state.branch,
-    });
-    return {
-      done: false,
-      state: {
-        ...withTicket(rest, ticket, {
-          ...progress,
-          status: "merging",
-          retried: progress?.retried ?? false,
-        }),
-        round: state.round + 1,
-        sessions: { [name]: { step: "merge", ticket } },
-      },
-      sessions: { [name]: spawned },
-    };
-  } catch (error) {
-    return advance(sandbox, input, stuck(rest, ticket, error));
+  const problem = await mergeProblem(sandbox, input, { state, ticket });
+  if (problem !== undefined) {
+    return advance(sandbox, input, stuck(rest, ticket, problem));
   }
+  const spawned = await merge.start(sandbox, {
+    ...common(input),
+    name,
+    from: progress?.branch ?? "",
+    into: state.branch,
+  });
+  return {
+    done: false,
+    state: {
+      ...withTicket(rest, ticket, {
+        ...progress,
+        status: "merging",
+        retried: progress?.retried ?? false,
+      }),
+      round: state.round + 1,
+      sessions: { [name]: { step: "merge", ticket } },
+    },
+    sessions: { [name]: spawned },
+  };
 };
 
 /** Runs the chooser, as round `state.choices + 1`. */
@@ -142,9 +147,15 @@ interface ChosenRound {
   readonly tickets: readonly string[];
 }
 
-type Started = PromiseSettledResult<SessionProcess<ImplementResult>>;
+type Started = PromiseSettledResult<
+  Awaited<ReturnType<typeof implement.start>>
+>;
 
-/** The round's state once its starts settled: each started ticket implementing, the rest stuck. */
+/**
+ * The round's state once its starts settled: each started ticket
+ * implementing. A ticket whose start rejected is left as it was, for the
+ * chooser to choose again.
+ */
 const startedState = (
   round: ChosenRound,
   started: readonly Started[],
@@ -152,29 +163,48 @@ const startedState = (
   let next: ImplementSpecState = { ...round.state, sessions: {} };
   for (const [index, outcome] of started.entries()) {
     const ticket = round.tickets[index] ?? "";
-    next =
-      outcome.status === "rejected"
-        ? stuck(next, ticket, outcome.reason)
-        : {
-            ...withTicket(next, ticket, {
-              status: "implementing",
-              retried: round.state.tickets[ticket]?.retried ?? false,
-            }),
-            sessions: {
-              ...next.sessions,
-              [outcome.value.name]: { step: "implement", ticket },
-            },
-          };
+    if (outcome.status === "fulfilled") {
+      next = {
+        ...withTicket(next, ticket, {
+          status: "implementing",
+          retried: round.state.tickets[ticket]?.retried ?? false,
+        }),
+        sessions: {
+          ...next.sessions,
+          [outcome.value.name]: { step: "implement", ticket },
+        },
+      };
+    }
   }
   return next;
 };
 
-/** Starts one `implement` session per chosen ticket; a start that fails leaves its ticket stuck. */
+/** The chosen tickets that can start, with the state where the rest are stuck. */
+const checked = (round: ChosenRound): ChosenRound => {
+  let { state } = round;
+  const tickets: string[] = [];
+  for (const ticket of round.tickets) {
+    const problem = ticketProblem(ticket);
+    if (problem === undefined) {
+      tickets.push(ticket);
+    } else {
+      state = stuck(state, ticket, problem);
+    }
+  }
+  return { state, tickets };
+};
+
+/**
+ * Starts one `implement` session per chosen ticket. A ticket the chooser
+ * named badly is stuck. The round runs the sessions that started; when none
+ * did, the first start's rejection rejects.
+ */
 const ticketRound = async (
   sandbox: Sandbox,
   input: ImplementSpecInput,
-  round: ChosenRound,
+  chosen: ChosenRound,
 ): Promise<ImplementSpecStep> => {
+  const round = checked(chosen);
   const { state, tickets } = round;
   const started = await Promise.allSettled(
     tickets.map(async (ticket) =>
@@ -194,10 +224,18 @@ const ticketRound = async (
         : [],
     ),
   );
-  if (Object.keys(sessions).length === 0) {
-    return advance(sandbox, input, next);
+  if (Object.keys(sessions).length > 0) {
+    return {
+      done: false,
+      state: { ...next, round: chosen.state.round + 1 },
+      sessions,
+    };
   }
-  return { done: false, state: { ...next, round: state.round + 1 }, sessions };
+  const rejected = started.find((outcome) => outcome.status === "rejected");
+  if (rejected !== undefined) {
+    throw rejected.reason;
+  }
+  return advance(sandbox, input, next);
 };
 
 /**

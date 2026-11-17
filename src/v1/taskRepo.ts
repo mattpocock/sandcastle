@@ -60,3 +60,20 @@ export const cloneRepo = async (
   }
   return directory;
 };
+
+/**
+ * Removes a clone a task's start made before it failed, so a later start of
+ * the same session name can clone there again. Best effort: the start's own
+ * error is the one worth reporting.
+ */
+export const removeClone = async (
+  sandbox: Sandbox,
+  directory: string,
+): Promise<void> => {
+  await sandbox
+    .exec({
+      command: `rm -rf -- ${shellEscape(directory)}`,
+      allowFailure: true,
+    })
+    .catch(() => undefined);
+};
