@@ -16,7 +16,12 @@ import {
 } from "@ai-hero/sandcastle/v1";
 import type { FakeSandboxProvider } from "@ai-hero/sandcastle/v1/testing";
 import { fakeSandbox } from "@ai-hero/sandcastle/v1/testing";
-import { general, implement, review } from "@ai-hero/sandcastle/v1/tasks";
+import {
+  general,
+  implement,
+  merge,
+  review,
+} from "@ai-hero/sandcastle/v1/tasks";
 import { finishReportReceiver } from "./helpers/finishReportReceiver.js";
 import {
   bareRepo,
@@ -259,6 +264,61 @@ describe.skipIf(process.platform === "win32")(
       ]);
       expect(Object.keys(review.outputs())).toStrictEqual(["review"]);
       expect(Object.keys(implement.outputs())).toStrictEqual(["implement"]);
+    });
+
+    describe("merge", () => {
+      const mergeInput = async (name: string) => {
+        execFileSync("git", ["-C", origin, "branch", "integration", "main"]);
+        await pullRequest(rootDir, origin, {
+          number: 3,
+          branch: "a",
+          file: "A.md",
+        });
+        return {
+          name,
+          repo: origin,
+          from: "a",
+          into: "integration",
+          githubToken: TOKEN,
+          skillsContext: GITHUB,
+        } as const;
+      };
+
+      it("clones a named merge into a directory of its name", async () => {
+        const merged = { status: "merged", into: "integration", summary: "ok" };
+        const { claude, sandbox } = await world([
+          init("s-merge"),
+          result(`<mergeResult>${JSON.stringify(merged)}</mergeResult>`),
+        ]);
+
+        const spawned = await merge.start(sandbox, await mergeInput("merge-3"));
+        await claude.go();
+        await spawned.wait();
+
+        expect(spawned.name).toBe("merge-3");
+        await expect(readdir(workOf(sandbox))).resolves.toStrictEqual([
+          "merge-3",
+        ]);
+        expect(
+          git(workOf(sandbox, "merge-3"), "branch", "--show-current"),
+        ).toBe("integration");
+      });
+
+      it("rejects a merge whose name is already running before it clones", async () => {
+        const { sandbox } = await world([init("s-merge-taken"), result("ok")]);
+        await general.start(sandbox, {
+          name: "merge-3",
+          prompt: "Hold on.",
+          skillsContext: GITHUB,
+        });
+
+        await expect(
+          merge.start(sandbox, await mergeInput("merge-3")),
+        ).rejects.toThrow(
+          /merge: a session named "merge-3" is already running/u,
+        );
+        await expect(readdir(workOf(sandbox))).resolves.toStrictEqual([]);
+      });
     });
   },
 );
