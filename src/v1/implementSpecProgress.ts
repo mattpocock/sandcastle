@@ -1,18 +1,23 @@
 import type { ImplementResult } from "./implementResult.js";
 import type {
   ImplementSpecResult,
+  ImplementSpecReview,
   ImplementSpecRoundSession,
   ImplementSpecState,
   ImplementSpecTicket,
 } from "./implementSpecTypes.js";
 import type { MergeResult } from "./taskMergeResult.js";
+import type { ReviewResult } from "./taskReviewResult.js";
 
 // What a round's results do to `implementSpec`'s state, and the result read
 // from it at the end. Pure: no sandbox, no I/O.
 
+/** What one of the round's sessions can end with. */
+export type RoundResult = ImplementResult | MergeResult | ReviewResult;
+
 /** How one of the round's sessions ended. */
 export type SessionOutcome =
-  | { readonly ended: true; readonly output: ImplementResult | MergeResult }
+  | { readonly ended: true; readonly output: RoundResult }
   | {
       readonly ended: false;
       readonly reason: string;
@@ -20,11 +25,20 @@ export type SessionOutcome =
       readonly timeLimit: boolean;
     };
 
+/** A round that ended: the state that spawned it, and how each session ended, by name. */
+export interface RoundEnd {
+  readonly state: ImplementSpecState;
+  readonly outcomes: Readonly<Record<string, SessionOutcome>>;
+}
+
 type Tickets = Record<string, ImplementSpecTicket>;
 
-const isImplementResult = (
-  output: ImplementResult | MergeResult,
+export const isImplementResult = (
+  output: RoundResult,
 ): output is ImplementResult => "branch" in output;
+
+const isMergeResult = (output: RoundResult): output is MergeResult =>
+  "into" in output;
 
 /** A ticket after its `implement` session ended with `output`; its merge gets a retry of its own. */
 const implemented = (output: ImplementResult): ImplementSpecTicket => {
@@ -101,7 +115,7 @@ const afterSession = (
   if (session.step === "implement" && isImplementResult(output)) {
     return implemented(output);
   }
-  if (session.step === "merge" && !isImplementResult(output)) {
+  if (session.step === "merge" && isMergeResult(output)) {
     return merged(ticket, output);
   }
   return failed(ticket, session, {
@@ -161,6 +175,29 @@ const statusOf = (
   return left > 0 ? "partial" : "complete";
 };
 
+/** The review's outcome, in a sentence. */
+const reviewLine = (review: ImplementSpecReview | undefined): string => {
+  if (review === undefined) {
+    return "";
+  }
+  if (review.verdict === "approve") {
+    return " Its review approved it.";
+  }
+  return review.fixed
+    ? " Its review requested changes, and implement-review-fixes pushed them."
+    : " Its review requested changes, which weren't fixed.";
+};
+
+/** What happened after the merges, in a sentence or two: the PR, its review and the fix. */
+const endOf = (state: ImplementSpecState): string => {
+  if (state.pr === undefined) {
+    return "";
+  }
+  const problem =
+    state.reviewProblem === undefined ? "" : ` ${state.reviewProblem}`;
+  return ` Opened PR #${state.pr.number} (${state.pr.url}), left for a human to merge.${reviewLine(state.review)}${problem}`;
+};
+
 /** What the spec came to, read from its final state. */
 export const resultOf = (state: ImplementSpecState): ImplementSpecResult => {
   const mergedTickets = ticketsWith(state, "merged");
@@ -175,12 +212,14 @@ export const resultOf = (state: ImplementSpecState): ImplementSpecResult => {
   return {
     status,
     branch: state.branch,
+    ...(state.pr === undefined ? {} : { pr: state.pr }),
+    ...(state.review === undefined ? {} : { review: state.review }),
     merged: mergedTickets,
     stuck,
     skipped,
     summary:
       state.blocked === undefined
-        ? `Spec ${state.spec}: ${counts}.`
+        ? `Spec ${state.spec}: ${counts}.${endOf(state)}`
         : `Spec ${state.spec} is blocked: ${state.blocked} (${counts}).`,
   };
 };

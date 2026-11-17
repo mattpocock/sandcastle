@@ -45,14 +45,14 @@ const config = {
     {
       name: "implement-spec-public-api",
       comment:
-        "implementSpec is written only against the public API, as a user could write it: the v1 entry point and the bundled tasks it composes (implement, merge, sessionChooser). Its own files are the one exception.",
+        "implementSpec is written only against the public API, as a user could write it: the v1 entry point and the bundled tasks it composes (implement, merge, review, sessionChooser). Its own files are the one exception.",
       severity: "error",
       from: { path: "^src/v1/implementSpec" },
       to: {
         dependencyTypesNot: ["npm", "core", "type-only"],
         pathNot: [
           "^src/v1[.]ts$",
-          "^src/v1/(taskImplement|taskMerge|chooserSession|implementSpec[A-Za-z]*)[.]ts$",
+          "^src/v1/(taskImplement|taskMerge|taskReview|chooserSession|implementSpec[A-Za-z]*)[.]ts$",
         ],
       },
     },
@@ -66,7 +66,7 @@ const config = {
         dependencyTypes: ["type-only"],
         pathNot: [
           "^src/v1[.]ts$",
-          "^src/v1/(taskImplement|taskMerge|taskMergeResult|implementResult|chooser|chooserSession|Task|implementSpec[A-Za-z]*)[.]ts$",
+          "^src/v1/(taskImplement|taskMerge|taskMergeResult|taskReview|taskReviewResult|implementResult|chooser|chooserSession|Task|implementSpec[A-Za-z]*)[.]ts$",
         ],
       },
     },

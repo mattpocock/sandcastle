@@ -7,6 +7,7 @@ import type { Chooser } from "./chooser.js";
 import type { ImplementResult } from "./implementResult.js";
 import type { TaskSkillsContext } from "./Task.js";
 import type { MergeResult } from "./taskMergeResult.js";
+import type { ReviewResult } from "./taskReviewResult.js";
 
 // The types `implementSpec` takes and returns. Its state is plain JSON, with
 // no secrets: the caller stores it between rounds and passes it back.
@@ -69,10 +70,27 @@ export interface ImplementSpecTicket {
   readonly retried: boolean;
 }
 
-/** One session of the round just spawned: which step of which ticket. */
+/**
+ * One session of the round just spawned: which step of which ticket. The
+ * `review` of the integration PR and its `review-fixes` round work on the
+ * whole spec, so their `ticket` is the spec.
+ */
 export interface ImplementSpecRoundSession {
-  readonly step: "implement" | "merge";
+  readonly step: "implement" | "merge" | "review" | "review-fixes";
   readonly ticket: string;
+}
+
+/** The integration PR, from the integration branch to the default branch. */
+export interface ImplementSpecPullRequest {
+  readonly number: number;
+  readonly url: string;
+}
+
+/** The review of the integration PR, and whether its comments were addressed. */
+export interface ImplementSpecReview {
+  readonly verdict: ReviewResult["verdict"];
+  /** Whether the `implement-review-fixes` round pushed fixes; always `false` on `approve`. */
+  readonly fixed: boolean;
 }
 
 /** `implementSpec`'s progress: plain JSON, with no token. Store it between steps. */
@@ -93,6 +111,12 @@ export interface ImplementSpecState {
   readonly merges: readonly string[];
   /** Set once the chooser said the spec is blocked. */
   readonly blocked?: string;
+  /** The integration PR, once opened. */
+  readonly pr?: ImplementSpecPullRequest;
+  /** The review's verdict, once it ended. */
+  readonly review?: ImplementSpecReview;
+  /** Why the review or its fix round didn't finish, when one didn't. */
+  readonly reviewProblem?: string;
   /** Whether the work is over; `next` rejects then. */
   readonly done: boolean;
 }
@@ -106,6 +130,14 @@ export interface ImplementSpecResult {
   readonly status: "complete" | "partial" | "blocked";
   /** The integration branch. */
   readonly branch: string;
+  /**
+   * The integration branch's PR against the default branch, left open for a
+   * human to merge. Absent when nothing merged, the chooser said blocked, or
+   * no merged ticket changed anything.
+   */
+  readonly pr?: ImplementSpecPullRequest;
+  /** The `review` of that PR, when it ended with a verdict. */
+  readonly review?: ImplementSpecReview;
   /** The tickets merged into it, or that needed no changes. */
   readonly merged: readonly string[];
   /** The tickets that couldn't be finished, and why. */
@@ -119,9 +151,14 @@ export interface ImplementSpecResult {
   readonly summary: string;
 }
 
-/** A round's sessions, by name: `implement-<ticket>` or `merge-<ticket>`. */
+/** A round's sessions, by name: `implement-<ticket>`, `merge-<ticket>`, `review` or `implement-review-fixes`. */
 export type ImplementSpecSessions = Readonly<
-  Record<string, SessionProcess<ImplementResult> | SessionProcess<MergeResult>>
+  Record<
+    string,
+    | SessionProcess<ImplementResult>
+    | SessionProcess<MergeResult>
+    | SessionProcess<ReviewResult>
+  >
 >;
 
 /** What `start` and `next` resolve with: the round they spawned, or the end. */

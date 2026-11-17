@@ -21,6 +21,8 @@ import {
   pushesMerge,
   reportsOnly,
   restored,
+  REVIEW_AGENT,
+  approves,
   stubAgents,
 } from "./helpers/specWorld.js";
 import { bareRepo } from "./helpers/taskWorld.js";
@@ -98,8 +100,9 @@ describe.skipIf(process.platform === "win32")(
         receivers,
       });
 
-    /** Scripts every session of the A, C, B spec to open a PR and merge it. */
+    /** Scripts every session of the A, C, B spec to open a PR and merge it, and the review to approve. */
     const scriptAll = async (agents: StubAgents) => {
+      await agents.script(REVIEW_AGENT, approves());
       await agents.script("implement-A", opensPr("A", 1));
       await agents.script("implement-B", opensPr("B", 2));
       await agents.script("implement-C", opensPr("C", 3));
@@ -143,6 +146,7 @@ describe.skipIf(process.platform === "win32")(
         "merge-C",
         "implement-B",
         "merge-B",
+        REVIEW_AGENT,
       ]);
       expect(new Set(order.slice(0, 2))).toStrictEqual(
         new Set(["implement-A", "implement-C"]),
@@ -169,8 +173,10 @@ describe.skipIf(process.platform === "win32")(
         ["merge-C"],
         ["implement-B"],
         ["merge-B"],
+        ["review"],
       ]);
       expect(reports.map((report) => report.data.status)).toStrictEqual([
+        "succeeded",
         "succeeded",
         "succeeded",
         "succeeded",
@@ -221,6 +227,7 @@ describe.skipIf(process.platform === "win32")(
         ["merge-C"],
         ["implement-B"],
         ["merge-B"],
+        ["review"],
       ]);
       expect(result.status).toBe("complete");
     });

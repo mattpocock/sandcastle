@@ -164,12 +164,22 @@ export interface ImplementSpecNext {
 }
 
 // @public
-export type ImplementSpecOutputs = Readonly<Record<string, OutputObjectDefinition<ImplementResult> | OutputObjectDefinition<MergeResult>>>;
+export type ImplementSpecOutputs = Readonly<Record<string, OutputObjectDefinition<ImplementResult> | OutputObjectDefinition<MergeResult> | OutputObjectDefinition<ReviewResult>>>;
+
+// @public
+export interface ImplementSpecPullRequest {
+    // (undocumented)
+    readonly number: number;
+    // (undocumented)
+    readonly url: string;
+}
 
 // @public
 export interface ImplementSpecResult {
     readonly branch: string;
     readonly merged: readonly string[];
+    readonly pr?: ImplementSpecPullRequest;
+    readonly review?: ImplementSpecReview;
     readonly skipped: readonly string[];
     readonly status: "complete" | "partial" | "blocked";
     readonly stuck: readonly {
@@ -180,15 +190,22 @@ export interface ImplementSpecResult {
 }
 
 // @public
+export interface ImplementSpecReview {
+    readonly fixed: boolean;
+    // (undocumented)
+    readonly verdict: ReviewResult["verdict"];
+}
+
+// @public
 export interface ImplementSpecRoundSession {
     // (undocumented)
-    readonly step: "implement" | "merge";
+    readonly step: "implement" | "merge" | "review" | "review-fixes";
     // (undocumented)
     readonly ticket: string;
 }
 
 // @public
-export type ImplementSpecSessions = Readonly<Record<string, SessionProcess<ImplementResult> | SessionProcess<MergeResult>>>;
+export type ImplementSpecSessions = Readonly<Record<string, SessionProcess<ImplementResult> | SessionProcess<MergeResult> | SessionProcess<ReviewResult>>>;
 
 // @public
 export interface ImplementSpecState {
@@ -197,6 +214,9 @@ export interface ImplementSpecState {
     readonly choices: number;
     readonly done: boolean;
     readonly merges: readonly string[];
+    readonly pr?: ImplementSpecPullRequest;
+    readonly review?: ImplementSpecReview;
+    readonly reviewProblem?: string;
     readonly round: number;
     readonly sessions: Readonly<Record<string, ImplementSpecRoundSession>>;
     readonly spec: string;
