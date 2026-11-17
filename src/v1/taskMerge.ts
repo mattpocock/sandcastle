@@ -96,7 +96,7 @@ const start: MergeTask["start"] = async (sandbox, input) => {
       }),
     output: MERGE_RESULT,
     repo: input.repo,
-    branch: { name: input.into, create: false },
+    branch: { name: input.into, create: false, from: undefined },
     githubToken: input.githubToken,
     skillsContext: input.skillsContext,
     setup: input.setup ?? [],
