@@ -140,6 +140,108 @@ export type ImplementRound = {
 };
 
 // @public
+export const implementSpec: ImplementSpecTask;
+
+// @public
+export interface ImplementSpecInput {
+    readonly agent?: AgentProvider;
+    readonly chooser?: Chooser;
+    readonly githubToken: string;
+    readonly maxConcurrent?: number;
+    readonly record?: SessionRecordOptions;
+    readonly repo: string;
+    readonly setup?: readonly string[];
+    readonly skillsContext: TaskSkillsContext;
+    readonly spec: string;
+}
+
+// @public
+export interface ImplementSpecNext {
+    readonly input: ImplementSpecInput;
+    // Warning: (ae-forgotten-export) The symbol "FinishReport" needs to be exported by the entry point tasks.d.ts
+    readonly report: FinishReport;
+    readonly state: ImplementSpecState;
+}
+
+// @public
+export type ImplementSpecOutputs = Readonly<Record<string, OutputObjectDefinition<ImplementResult> | OutputObjectDefinition<MergeResult>>>;
+
+// @public
+export interface ImplementSpecResult {
+    readonly branch: string;
+    readonly merged: readonly string[];
+    readonly skipped: readonly string[];
+    readonly status: "complete" | "partial" | "blocked";
+    readonly stuck: readonly {
+        readonly ticket: string;
+        readonly reason: string;
+    }[];
+    readonly summary: string;
+}
+
+// @public
+export interface ImplementSpecRoundSession {
+    // (undocumented)
+    readonly step: "implement" | "merge";
+    // (undocumented)
+    readonly ticket: string;
+}
+
+// @public
+export type ImplementSpecSessions = Readonly<Record<string, SessionProcess<ImplementResult> | SessionProcess<MergeResult>>>;
+
+// @public
+export interface ImplementSpecState {
+    readonly blocked?: string;
+    readonly branch: string;
+    readonly choices: number;
+    readonly done: boolean;
+    readonly merges: readonly string[];
+    readonly round: number;
+    readonly sessions: Readonly<Record<string, ImplementSpecRoundSession>>;
+    readonly spec: string;
+    readonly tickets: Readonly<Record<string, ImplementSpecTicket>>;
+}
+
+// @public
+export type ImplementSpecStep = {
+    readonly done: false;
+    readonly state: ImplementSpecState;
+    readonly sessions: ImplementSpecSessions;
+} | {
+    readonly done: true;
+    readonly state: ImplementSpecState;
+    readonly result: ImplementSpecResult;
+};
+
+// @public
+export interface ImplementSpecTask {
+    readonly limits: TaskLimits;
+    // (undocumented)
+    readonly name: "implementSpec";
+    readonly next: (sandbox: Sandbox, options: ImplementSpecNext) => Promise<ImplementSpecStep>;
+    readonly outputs: (state: ImplementSpecState) => ImplementSpecOutputs;
+    readonly run: (sandbox: Sandbox, input: ImplementSpecInput) => Promise<ImplementSpecResult>;
+    readonly start: (sandbox: Sandbox, input: ImplementSpecInput) => Promise<ImplementSpecStep>;
+}
+
+// @public
+export interface ImplementSpecTicket {
+    readonly branch?: string;
+    readonly pr?: {
+        readonly number: number;
+        readonly url: string;
+    };
+    readonly retried: boolean;
+    // (undocumented)
+    readonly status: ImplementSpecTicketStatus;
+    readonly summary?: string;
+}
+
+// @public
+export type ImplementSpecTicketStatus = "implementing" | "to-merge" | "merging" | "retrying" | "merged" | "stuck" | "skipped";
+
+// @public
 export interface ImplementTask {
     readonly limits: TaskLimits;
     readonly name: "implement";
