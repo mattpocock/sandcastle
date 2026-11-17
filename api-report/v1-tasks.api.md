@@ -103,9 +103,11 @@ export interface ImplementResult {
 // @public
 export type ImplementRound = {
     readonly branch?: undefined;
+    readonly base?: string;
     readonly feedback?: never;
 } | {
     readonly branch: string;
+    readonly base?: never;
     readonly feedback?: string | readonly string[];
 };
 
