@@ -25,6 +25,7 @@ export default defineConfig({
     "v1/tasks": "src/v1/tasks.ts",
     "v1/sandboxes/daytona": "src/v1/sandboxes/daytona.ts",
     "v1/sandboxes/e2b": "src/v1/sandboxes/e2b.ts",
+    "v1/sandboxes/sprites": "src/v1/sandboxes/sprites.ts",
   },
   format: ["esm"],
   outDir: "dist",
