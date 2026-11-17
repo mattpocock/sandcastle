@@ -41,7 +41,13 @@ export interface MergeInput extends TaskAgentOptions {
   readonly setup?: readonly string[];
   /** Where the session's record goes when it ends. */
   readonly record?: SessionRecordOptions;
-  /** The session's name, and its key in the finish report. Default `"merge"`. */
+  /**
+   * The session's name, its record's and its key in the finish report.
+   * Default `"merge"`. Give each of several tasks on one handle its own: a
+   * start rejects a name already running before it clones anything. A name
+   * other than `"merge"` is also the directory the repo is cloned into, so it
+   * must be letters, digits, `_`, `.` and `-`, not starting with `.` or `-`.
+   */
   readonly name?: string;
 }
 
@@ -79,7 +85,8 @@ const start: MergeTask["start"] = async (sandbox, input) => {
   checkMergeBranches(from, input.into);
   await refuseDefaultBranch(sandbox, input);
   return startTask(sandbox, {
-    name: input.name ?? "merge",
+    name: "merge",
+    session: input.name,
     limits: LIMITS,
     agent: input.agent ?? claudeCode("sonnet"),
     skills: [],

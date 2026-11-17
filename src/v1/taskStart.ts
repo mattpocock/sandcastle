@@ -1,10 +1,11 @@
-import { DateTime, Effect, Either } from "effect";
+import { Effect, Either } from "effect";
 import type { OutputDefinition } from "./Output.js";
 import type { Sandbox } from "./Sandbox.js";
 import type { OutputType, SessionProcess } from "./Session.js";
 import { installSkills } from "./skills/installSkills.js";
-import type { TaskLimits, TaskRun, TaskSkillsContext } from "./Task.js";
-import { latestDeadlineMs, setTaskDeadline } from "./detachDeadline.js";
+import type { TaskRun, TaskSkillsContext } from "./Task.js";
+import type { TaskClaim } from "./taskClaim.js";
+import { claimTask } from "./taskClaim.js";
 import { checkAgentOptions } from "./sessionRequest.js";
 import { prepareRepo } from "./taskBranch.js";
 import { taskPrompt } from "./taskPrompt.js";
@@ -21,20 +22,6 @@ const checkTracker = (name: string, context: unknown): void => {
   ) {
     throw new TypeError(`${name}: skillsContext.tracker is required`);
   }
-};
-
-/** The task's deadline, from now; rejects when the kill time is too close. */
-const taskDeadline = (sandbox: Sandbox, name: string, limits: TaskLimits) => {
-  const now = DateTime.unsafeNow().epochMillis;
-  const deadline = now + limits.deadlineMinutes * 60_000;
-  const latest = latestDeadlineMs(sandbox);
-  if (deadline > latest) {
-    const room = Math.max(0, (latest - now) / 60_000).toFixed(1);
-    throw new RangeError(
-      `${name}: the sandbox leaves ${room} minutes before its detach deadline, but the task needs ${limits.deadlineMinutes}. Create it with timeLimitMinutes: ${name}.limits.timeLimitMinutes (${limits.timeLimitMinutes}).`,
-    );
-  }
-  return deadline;
 };
 
 const install = async (
@@ -90,27 +77,19 @@ const taskBody = async (
   return prompt(directory);
 };
 
-/**
- * Starts a bundled task: clones its repo with the token in that command's env
- * only, checks out its branch, prepares the clone and the prompt, installs its
- * skills, runs the setup commands in the clone, then spawns one session named
- * after the task and resolves once it runs. The handle's default detach
- * deadline becomes the task's.
- */
-export const startTask = async <O extends OutputDefinition | undefined>(
+/** The rest of `startTask`, once the session's name is taken. */
+const spawnTask = async <O extends OutputDefinition | undefined>(
   sandbox: Sandbox,
   run: TaskRun<O>,
+  claim: TaskClaim,
 ): Promise<SessionProcess<OutputType<O>>> => {
-  checkTracker(run.name, run.skillsContext);
-  checkAgentOptions(run);
-  const deadline = taskDeadline(sandbox, run.name, run.limits);
   const directory = await prepareRepo(sandbox, run);
   const body = await taskBody(run.prompt, directory);
   await install(sandbox, run.skills, run.skillsContext);
   await runSetup(sandbox, run.setup, directory);
-  setTaskDeadline(sandbox, deadline);
+  claim.setDeadline();
   return sandbox.spawnSession({
-    name: run.name,
+    name: claim.session,
     agent: run.agent,
     prompt: taskPrompt({
       body,
@@ -127,4 +106,26 @@ export const startTask = async <O extends OutputDefinition | undefined>(
       ? {}
       : { completionTimeoutSeconds: run.completionTimeoutSeconds }),
   });
+};
+
+/**
+ * Starts a bundled task: takes its session name on the handle (rejecting one
+ * already running), clones its repo with the token in that command's env
+ * only, checks out its branch, prepares the clone and the prompt, installs
+ * its skills, runs the setup commands in the clone, then spawns one session
+ * of that name and resolves once it runs. The handle's default detach
+ * deadline becomes the task's.
+ */
+export const startTask = async <O extends OutputDefinition | undefined>(
+  sandbox: Sandbox,
+  run: TaskRun<O>,
+): Promise<SessionProcess<OutputType<O>>> => {
+  checkTracker(run.name, run.skillsContext);
+  checkAgentOptions(run);
+  const claim = claimTask(sandbox, run);
+  try {
+    return await spawnTask(sandbox, run, claim);
+  } finally {
+    claim.release();
+  }
 };

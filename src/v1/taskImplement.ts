@@ -30,6 +30,14 @@ export interface ImplementCommon extends TaskAgentOptions {
   readonly setup?: readonly string[];
   /** Where the session's record goes when it ends. */
   readonly record?: SessionRecordOptions;
+  /**
+   * The session's name, its record's and its key in the finish report.
+   * Default `"implement"`. Give each of several tasks on one handle its own: a
+   * start rejects a name already running before it clones anything. A name
+   * other than `"implement"` is also the directory the repo is cloned into, so it
+   * must be letters, digits, `_`, `.` and `-`, not starting with `.` or `-`.
+   */
+  readonly name?: string;
 }
 
 /** The work: a ticket reference, or a prompt in your words. Exactly one. */
@@ -77,17 +85,21 @@ export type ImplementInput = ImplementCommon & ImplementWork & ImplementRound;
 
 /** The `implement` bundled task: a ticket in, a PR out, never merged. Claude Code on Opus unless you pass `agent`. */
 export interface ImplementTask {
-  /** The task's name, and the name of its session in the finish report. */
+  /** The task's name, and its session's unless you pass `name`. */
   readonly name: "implement";
   /** 90 minutes for the session; a 100-minute sandbox time limit leaves room for setup and the report. */
   readonly limits: TaskLimits;
-  /** The `Output` definitions for `verifyFinishReport`, by session name. */
-  readonly outputs: () => ImplementOutputs;
+  /** The `Output` definitions for `verifyFinishReport`, under the session's name (`"implement"` when left out). */
+  readonly outputs: {
+    (): ImplementOutputs;
+    <Name extends string>(name: Name): ImplementOutputs<Name>;
+  };
   /**
-   * Clones `repo`, creates a branch from `base` or the default branch (or
+   * Rejects a `name` already running on the handle before it clones
+   * anything. Then clones `repo`, creates a branch from `base` or the default branch (or
    * checks out `branch`), installs the `implement`, `tdd`, `codebase-design`,
-   * `code-review` and `pr` skills, runs `setup`, then spawns the `implement`
-   * session and resolves once it runs. The prompt starts with `/implement`
+   * `code-review` and `pr` skills, runs `setup`, then spawns the session
+   * (named `name`, default `"implement"`) and resolves once it runs. The prompt starts with `/implement`
    * and the ticket (or your prompt), and asks the agent to push and open or
    * update a PR against `base` or the default branch, never merging it. Rejects when the sandbox's kill time
    * leaves less room than `limits.deadlineMinutes`.
@@ -122,6 +134,7 @@ const start: ImplementTask["start"] = async (sandbox, input) => {
   const base = input.branch === undefined ? input.base : undefined;
   return startTask(sandbox, {
     name: "implement",
+    session: input.name,
     limits: LIMITS,
     agent: input.agent ?? claudeCode("opus"),
     skills: SKILLS,
@@ -146,10 +159,16 @@ const start: ImplementTask["start"] = async (sandbox, input) => {
   });
 };
 
+function outputs(): ImplementOutputs;
+function outputs<Name extends string>(name: Name): ImplementOutputs<Name>;
+function outputs(name = "implement"): ImplementOutputs<string> {
+  return { [name]: IMPLEMENT_RESULT };
+}
+
 /** Implements a ticket on a branch and opens or updates its PR; never merges. */
 export const implement: ImplementTask = {
   name: "implement",
   limits: LIMITS,
-  outputs: () => ({ implement: IMPLEMENT_RESULT }),
+  outputs,
   start,
 };

@@ -56,8 +56,14 @@ export interface TaskAgentOptions {
 
 /** What a task hands the bundled task contract (`startTask`) to start it. Internal. */
 export interface TaskRun<O extends OutputDefinition | undefined> {
-  /** The task's name, and its session's. */
+  /** The task's name, in its errors. */
   readonly name: string;
+  /**
+   * The session's name, its record's and its key in the finish report, from
+   * the input's `name`; `undefined` is the task's name. A name other than
+   * the task's is also the clone's directory.
+   */
+  readonly session: string | undefined;
   readonly limits: TaskLimits;
   readonly agent: AgentProvider;
   readonly skills: readonly Skill[];

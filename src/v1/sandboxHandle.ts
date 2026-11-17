@@ -8,14 +8,9 @@ import type {
   Sandbox,
 } from "./Sandbox.js";
 import type { ProviderSandbox } from "./SandboxProvider.js";
-import type { OutputDefinition } from "./Output.js";
-import type {
-  OutputType,
-  SessionOptions,
-  SessionProcess,
-  SessionResult,
-} from "./Session.js";
-import { sessionHost } from "./sessionHost.js";
+import type { Guard, Sessions } from "./handleSessions.js";
+import { sessionOn, sessionsOn, spawnSessionOn } from "./handleSessions.js";
+import { trackSessionNames } from "./sessionNames.js";
 import { supervisorFiles } from "./supervisorFiles.js";
 import type { SupervisorLink } from "./supervisorHost.js";
 
@@ -43,9 +38,6 @@ const exec = async (
   return result;
 };
 
-/** Runs one awaited call on the handle, or rejects once it has detached. */
-type Guard = <R>(call: () => Promise<R>) => Promise<R>;
-
 const execOn = (
   sandbox: ProviderSandbox,
   env: SandboxEnv,
@@ -59,33 +51,6 @@ const execOn = (
   ): Promise<ExecResult>;
   function run(input: string | ExecOptions): Promise<ExecResult> {
     return guard(async () => exec(sandbox, env, input));
-  }
-  return run;
-};
-
-type Sessions = ReturnType<typeof sessionHost>;
-
-// The overloads type a session's output from its definition; underneath, the
-// host handles any definition and the schema validates the value.
-const sessionOn = (sessions: Sessions, guard: Guard): Sandbox["session"] => {
-  function run<const O extends OutputDefinition | undefined = undefined>(
-    options: SessionOptions<O>,
-  ): Promise<SessionResult<OutputType<O>>>;
-  function run(options: SessionOptions): Promise<SessionResult> {
-    return guard(async () => sessions.session(options));
-  }
-  return run;
-};
-
-const spawnSessionOn = (
-  sessions: Sessions,
-  guard: Guard,
-): Sandbox["spawnSession"] => {
-  function run<const O extends OutputDefinition | undefined = undefined>(
-    options: SessionOptions<O>,
-  ): Promise<SessionProcess<OutputType<O>>>;
-  function run(options: SessionOptions): Promise<SessionProcess> {
-    return guard(async () => sessions.spawnSession(options));
   }
   return run;
 };
@@ -166,19 +131,6 @@ const withDetach = <Native>(
   });
 };
 
-/** Runs the sandbox's sessions, and their records, through its supervisor. */
-const sessionsOn = (
-  sandbox: ProviderSandbox,
-  supervisor: SupervisorLink,
-): Sessions =>
-  sessionHost(supervisor, {
-    workingDirectory: sandbox.workingDirectory,
-    record: {
-      sandboxId: sandbox.sandboxId,
-      killTime: sandbox.killTime,
-    },
-  });
-
 /** Wraps a provider's sandbox in the handle users hold. */
 export const sandboxHandle = <Native>({
   sandbox,
@@ -218,6 +170,7 @@ export const sandboxHandle = <Native>({
     [Symbol.asyncDispose]: close,
   };
   trackDeadline(handle, sandbox.killTime, timeLimitMinutes);
+  trackSessionNames(handle, sessions.isRunning);
   return canDetach
     ? withDetach(handle, {
         parts: { sandbox, supervisor, timeLimitMinutes },

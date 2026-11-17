@@ -37,7 +37,7 @@ export const IMPLEMENT_RESULT: OutputObjectDefinition<ImplementResult> = {
   schema,
 };
 
-/** `implement.outputs()`: the `implementResult` output, under the session's name. */
-export type ImplementOutputs = Readonly<
-  Record<"implement", OutputObjectDefinition<ImplementResult>>
+/** `implement.outputs(name)`: the `implementResult` output, under the session's name. */
+export type ImplementOutputs<Name extends string = "implement"> = Readonly<
+  Record<Name, OutputObjectDefinition<ImplementResult>>
 >;

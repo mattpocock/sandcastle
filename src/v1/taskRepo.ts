@@ -22,16 +22,26 @@ const cloneDirectory = (url: string): string => {
   return name === "" || name === "." || name === ".." ? "repo" : name;
 };
 
-/** Clones `repo` into the working directory; resolves with the clone's absolute directory. */
+/**
+ * Clones `repo` into the working directory, in `into` or the repo-named
+ * directory; resolves with the clone's absolute directory.
+ */
 export const cloneRepo = async (
   sandbox: Sandbox,
-  repo: string,
-  githubToken: string | undefined,
+  {
+    repo,
+    githubToken,
+    into,
+  }: {
+    readonly repo: string;
+    readonly githubToken: string | undefined;
+    readonly into: string | undefined;
+  },
 ): Promise<string> => {
   const url = cloneUrl(repo);
   const directory = resolveInSandbox(
     sandbox.workingDirectory,
-    cloneDirectory(url),
+    into ?? cloneDirectory(url),
   );
   const helper = shellEscape(CREDENTIAL_HELPER);
   const credentials =
