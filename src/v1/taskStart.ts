@@ -7,7 +7,7 @@ import type { TaskRun, TaskSkillsContext } from "./Task.js";
 import type { TaskClaim } from "./taskClaim.js";
 import { claimTask } from "./taskClaim.js";
 import { checkAgentOptions } from "./sessionRequest.js";
-import { prepareRepo } from "./taskBranch.js";
+import { withClone } from "./taskBranch.js";
 import { taskPrompt } from "./taskPrompt.js";
 
 // The bundled task contract: what every task's `start` does, in order.
@@ -99,14 +99,15 @@ const taskBody = async (
   return prompt(directory);
 };
 
-/** The rest of `startTask`, once the session's name is taken. */
-const spawnTask = async <O extends OutputDefinition | undefined>(
+/** From the prepared clone on: the prompt, skills, setup and the session. */
+const spawnInClone = async <O extends OutputDefinition | undefined>(
   sandbox: Sandbox,
   run: TaskRun<O>,
-  claim: TaskClaim,
+  {
+    claim,
+    directory,
+  }: { readonly claim: TaskClaim; readonly directory: string | undefined },
 ): Promise<SessionProcess<OutputType<O>>> => {
-  await requireGh(sandbox, run);
-  const directory = await prepareRepo(sandbox, run);
   const body = await taskBody(run.prompt, directory);
   await install(sandbox, run.skills, run.skillsContext);
   await runSetup(sandbox, run.setup, directory);
@@ -131,6 +132,18 @@ const spawnTask = async <O extends OutputDefinition | undefined>(
   });
 };
 
+/** The rest of `startTask`, once the session's name is taken. */
+const spawnTask = async <O extends OutputDefinition | undefined>(
+  sandbox: Sandbox,
+  run: TaskRun<O>,
+  claim: TaskClaim,
+): Promise<SessionProcess<OutputType<O>>> => {
+  await requireGh(sandbox, run);
+  return withClone(sandbox, run, async (directory) =>
+    spawnInClone(sandbox, run, { claim, directory }),
+  );
+};
+
 /**
  * Starts a bundled task: takes its session name on the handle (rejecting one
  * already running), checks the sandbox has `gh` if the task needs it, clones
@@ -138,7 +151,8 @@ const spawnTask = async <O extends OutputDefinition | undefined>(
  * (fetching with the token too), prepares the clone and the prompt, installs
  * its skills, runs the setup commands in the clone, then spawns one session
  * of that name and resolves once it runs. The handle's default detach
- * deadline becomes the task's.
+ * deadline becomes the task's. A start that fails after cloning removes its
+ * clone, so the same name can start again.
  */
 export const startTask = async <O extends OutputDefinition | undefined>(
   sandbox: Sandbox,

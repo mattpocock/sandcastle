@@ -10,14 +10,15 @@ const root = path.resolve(import.meta.dirname, "..");
 const page = readFileSync(path.join(root, "docs/v1/bundled-tasks.md"), "utf8");
 
 describe("docs/v1/bundled-tasks.md: the implementSpec examples", () => {
-  it.each(["implementSpecDetached.ts", "implementSpecHeld.ts"])(
-    "shows tests/examples/%s as it is",
-    (file) => {
-      const example = readFileSync(
-        path.join(root, "tests/examples", file),
-        "utf8",
-      );
-      expect(page).toContain(`\`\`\`ts\n${example}\`\`\``);
-    },
-  );
+  it.each([
+    "implementSpecDetached.ts",
+    "implementSpecPolled.ts",
+    "implementSpecHeld.ts",
+  ])("shows tests/examples/%s as it is", (file) => {
+    const example = readFileSync(
+      path.join(root, "tests/examples", file),
+      "utf8",
+    );
+    expect(page).toContain(`\`\`\`ts\n${example}\`\`\``);
+  });
 });

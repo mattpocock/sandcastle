@@ -64,8 +64,14 @@ export interface ImplementSpecTicket {
   readonly branch?: string;
   /** The ticket's PR into the integration branch, once opened. */
   readonly pr?: { readonly number: number; readonly url: string };
-  /** What happened, or why it's stuck, in a few sentences. */
+  /**
+   * What its `implement` session built, or why it's stuck, in a few
+   * sentences. A merge that lands keeps it; one that fails replaces it with
+   * why.
+   */
   readonly summary?: string;
+  /** How its merge into the integration branch went, once its `merge` session reported `merged`. */
+  readonly merge?: { readonly commit?: string; readonly summary: string };
   /** Whether its current step (`implement`, then `merge`) has used up its one retry after a deadline. */
   readonly retried: boolean;
 }

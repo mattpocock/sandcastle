@@ -63,7 +63,9 @@ export interface ImplementSpecTask {
    * `implement-<ticket>` per chosen ticket (at most `maxConcurrent`), each in
    * its own clone, on a new branch from the integration branch, opening its
    * PR against it. Resolves with the round's sessions and the `state`, or
-   * `done` when the chooser chose nothing.
+   * `done` when the chooser chose nothing. Rejects when no ticket of the
+   * round could start: a clone, setup command or spawn that fails isn't a
+   * ticket's doing, so it spends none.
    */
   readonly start: (
     sandbox: Sandbox,
@@ -77,6 +79,14 @@ export interface ImplementSpecTask {
    * the ticket stuck, and the chooser skips what it blocks; a session the
    * deadline stopped is retried once, as `<step>-<ticket>-retry`. With no
    * merge waiting, the chooser runs and the next ticket round spawns.
+   *
+   * A ticket is stuck too when its implement session reported a branch that
+   * isn't on the remote, or the chooser named it with a reference that can't
+   * name a session. Any other failure to start the round's sessions (a
+   * clone, fetch, setup command or spawn) rejects, leaving no ticket spent:
+   * call `next` again with the same `state` and report once it's fixed. In a
+   * ticket round, the tickets that started run, and one that didn't is left
+   * for the chooser to choose again.
    *
    * When it chooses nothing and a ticket merged, opens the integration PR
    * against the default branch (by `gh`, never merged) and spawns one

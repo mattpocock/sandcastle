@@ -127,6 +127,11 @@ describe.skipIf(process.platform === "win32")(
       for (const line of ["Closes #A", "Closes #B", "Closes #C", "Closes #7"]) {
         expect(body).toContain(line);
       }
+      // Each ticket reads as what its implement session built, not its merge.
+      for (const ticket of ["A", "B", "C"]) {
+        expect(body).toContain(`- #${ticket}: Added ${ticket}.`);
+      }
+      expect(body).not.toContain("Merged.");
       const sessions = await agents.sessions();
       expect(sessions.at(-1)).toBe(REVIEW_AGENT);
       expect(sessions).not.toContain("implement-review-fixes");

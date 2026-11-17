@@ -248,6 +248,10 @@ export interface ImplementSpecTask {
 // @public
 export interface ImplementSpecTicket {
     readonly branch?: string;
+    readonly merge?: {
+        readonly commit?: string;
+        readonly summary: string;
+    };
     readonly pr?: {
         readonly number: number;
         readonly url: string;

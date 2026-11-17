@@ -2,7 +2,7 @@ import { shellEscape } from "../AgentProvider.js";
 import type { OutputDefinition } from "./Output.js";
 import type { Sandbox } from "./Sandbox.js";
 import type { TaskRun } from "./Task.js";
-import { cloneRepo } from "./taskRepo.js";
+import { cloneRepo, removeClone } from "./taskRepo.js";
 
 // The branch a bundled task works on, in its clone. A new branch starts from
 // the commit `git clone` checked out, the repo's default branch, or from a
@@ -73,7 +73,7 @@ const checkoutBranch = async (
 
 /**
  * Clones the task's repo and checks out its branch; resolves with the clone's
- * directory. A session named other than the task clones into a directory of
+ * directory. A checkout that fails removes the clone. A session named other than the task clones into a directory of
  * its name, so side-by-side starts never share a working tree.
  */
 export const prepareRepo = async <O extends OutputDefinition | undefined>(
@@ -93,10 +93,36 @@ export const prepareRepo = async <O extends OutputDefinition | undefined>(
     into,
   });
   if (run.branch !== undefined) {
-    await checkoutBranch(sandbox, run.branch, {
-      directory,
-      githubToken: run.githubToken,
-    });
+    try {
+      await checkoutBranch(sandbox, run.branch, {
+        directory,
+        githubToken: run.githubToken,
+      });
+    } catch (error) {
+      await removeClone(sandbox, directory);
+      throw error;
+    }
   }
   return directory;
+};
+
+/**
+ * Prepares the task's clone (`undefined` with no repo) and hands it to
+ * `use`. When either fails after the clone was made, the clone is removed,
+ * so a later start of the same session name can clone there again.
+ */
+export const withClone = async <O extends OutputDefinition | undefined, T>(
+  sandbox: Sandbox,
+  run: TaskRun<O>,
+  use: (directory: string | undefined) => Promise<T>,
+): Promise<T> => {
+  const directory = await prepareRepo(sandbox, run);
+  try {
+    return await use(directory);
+  } catch (error) {
+    if (directory !== undefined) {
+      await removeClone(sandbox, directory);
+    }
+    throw error;
+  }
 };

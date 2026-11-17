@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -157,6 +157,29 @@ describe.skipIf(process.platform === "win32")(
         }),
       ).rejects.toThrow(/no-such-base/u);
       await expect(claude.read("agent-prompt.txt")).rejects.toThrow(/ENOENT/u);
+    });
+
+    it("removes its clone when the start fails after cloning, so the same name can start again", async () => {
+      const claude = await stubClaude(path.join(rootDir, "agent"), [
+        init("s-again"),
+        result(REPORTED),
+      ]);
+      await using sandbox = await createSandbox({
+        provider,
+        env: claude.env,
+        timeLimitMinutes: implement.limits.timeLimitMinutes,
+      });
+      const input = { ...common(), ticket: "42", base: "feature" };
+
+      await expect(implement.start(sandbox, input)).rejects.toThrow(/feature/u);
+      await expect(stat(clone(sandbox))).rejects.toThrow(/ENOENT/u);
+
+      await pushFeature();
+      const spawned = await implement.start(sandbox, input);
+      await spawned.wait();
+      expect(git(clone(sandbox), "branch", "--show-current")).toMatch(
+        /^sandcastle\/implement-42-/u,
+      );
     });
 
     it("refuses a base that reads as an option", async () => {
