@@ -1,5 +1,5 @@
-import { rename, writeFile } from "node:fs/promises";
-import { DateTime } from "effect";
+import { readFile, rename, writeFile } from "node:fs/promises";
+import { DateTime, Either, Schema } from "effect";
 import type {
   DetachRequest,
   SessionOutcome,
@@ -7,7 +7,7 @@ import type {
 } from "./supervisorProtocol.js";
 import type { WorkBoard } from "./supervisorRegistry.js";
 import type { SupervisorStatus } from "./supervisorStatusSchema.js";
-import { STATUS_FILE } from "./supervisorStatusSchema.js";
+import { STATUS_FILE, SupervisorStatusJson } from "./supervisorStatusSchema.js";
 
 type Detached = NonNullable<SupervisorStatus["detached"]>;
 
@@ -23,6 +23,22 @@ const replaceFile = async (body: string): Promise<void> => {
   await rename(`${STATUS_FILE}.tmp`, STATUS_FILE);
 };
 
+const decodeStatus = Schema.decodeUnknownEither(SupervisorStatusJson);
+
+/**
+ * The status an earlier supervisor in this directory left, if any: a
+ * restarted one carries on from it.
+ */
+export const previousStatus = async (): Promise<
+  SupervisorStatus | undefined
+> => {
+  const text = await readFile(STATUS_FILE, "utf8").catch(() => undefined);
+  const decoded = text === undefined ? undefined : decodeStatus(text);
+  return decoded !== undefined && Either.isRight(decoded)
+    ? decoded.right
+    : undefined;
+};
+
 /**
  * Inside the sandbox: keeps the supervisor's status file up to date. Writes
  * go one after another, each to a temp file renamed over the last, so a
@@ -30,10 +46,21 @@ const replaceFile = async (body: string): Promise<void> => {
  */
 export class StatusBoard implements WorkBoard {
   private readonly running = new Map<string, SessionRequest>();
-  private readonly ended: SupervisorStatus["ended"][number][] = [];
+  private readonly ended: SupervisorStatus["ended"][number][];
+  private readonly earlier: Detached[];
   private detachedAs: Detached | undefined;
   private supervisor: SupervisorStatus["supervisor"] = "running";
   private writing: Promise<void> = Promise.resolve();
+
+  /**
+   * `previous` is what an earlier supervisor in this directory left: its
+   * ended sessions and detaches are kept. Its running ones ended with it.
+   */
+  constructor(previous: SupervisorStatus | undefined) {
+    this.ended = [...(previous?.ended ?? [])];
+    this.earlier = [...(previous?.earlier ?? [])];
+    this.detachedAs = previous?.detached;
+  }
 
   // Each change resolves once it is on disk, so a reply sent after it never
   // runs ahead of what `status()` reads.
@@ -68,6 +95,9 @@ export class StatusBoard implements WorkBoard {
   /** The running sessions have been carried on past a detach. */
   async detached(request: DetachRequest): Promise<void> {
     const now = DateTime.unsafeNow();
+    if (this.detachedAs !== undefined) {
+      this.earlier.push(this.detachedAs);
+    }
     this.detachedAs = {
       detachId: request.detachId,
       detachedAt: DateTime.formatIso(now),
@@ -105,6 +135,7 @@ export class StatusBoard implements WorkBoard {
       running: [...this.running.values()].map((request) => workOf(request)),
       ended: [...this.ended],
       ...(this.detachedAs === undefined ? {} : { detached: this.detachedAs }),
+      ...(this.earlier.length === 0 ? {} : { earlier: [...this.earlier] }),
     };
     const body = JSON.stringify(status);
     this.writing = this.writing

@@ -8,7 +8,8 @@ import { ReplyJson } from "./supervisorProtocol.js";
 import { outputTail } from "./execFailure.js";
 import type { DetachCapability, ProviderSandbox } from "./SandboxProvider.js";
 
-type SpawnDetached = (
+/** Starts the supervisor so it outlives the host's hold on the sandbox. */
+export type SpawnDetached = (
   sandbox: ProviderSandbox,
   options: Parameters<DetachCapability["spawnDetached"]>[1],
 ) => Promise<void>;
@@ -114,51 +115,6 @@ export const linkTo = async (
           call({ type: "shutdown" }, () => undefined),
         ).pipe(Effect.timeout(SHUTDOWN_TIMEOUT), Effect.ignore),
       ),
-  };
-};
-
-/** A link to a supervisor that has exited: its files can be read, nothing more. */
-export const exitedLink = (directory: string): SupervisorLink => ({
-  call: async () => {
-    throw new Error(
-      "the session supervisor has exited: its detached work has been reported",
-    );
-  },
-  publicKey: async () => "",
-  directory,
-  shutdown: async () => undefined,
-});
-
-/**
- * A link to the supervisor running in `directory` that says hello only when
- * something first needs the supervisor: a session, a detach, a close.
- * `status()` and `follow()` read its files and never do, which matters on a
- * busy sandbox, where starting the supervisor's client can take tens of
- * seconds. A supervisor that doesn't answer then is taken as exited.
- */
-export const lazyLinkTo = (
-  sandbox: ProviderSandbox,
-  directory: string,
-): SupervisorLink => {
-  let linked: Promise<SupervisorLink> | undefined;
-  const link = async (): Promise<SupervisorLink> => {
-    linked ??= linkTo(sandbox, directory).catch(() => exitedLink(directory));
-    return linked;
-  };
-  return {
-    call: async (request, onReply, abortSignal) => {
-      const { call } = await link();
-      return call(request, onReply, abortSignal);
-    },
-    publicKey: async () => {
-      const { publicKey } = await link();
-      return publicKey();
-    },
-    directory,
-    shutdown: async () => {
-      const { shutdown } = await link();
-      return shutdown();
-    },
   };
 };
 
