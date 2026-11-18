@@ -3,9 +3,14 @@ import pkg from "./package.json" with { type: "json" };
 
 // The session supervisor: one self-contained file the host copies into each
 // sandbox (src/v1/supervisorBundle.ts finds it), so every dependency is
-// inlined. Built after tsup.config.ts, whose `clean` would remove it.
+// inlined. Beside it, the local sandboxes' keeper, a host program run as
+// `node keeper.js <folder>` (src/v1/sandboxes/localKeeperProgram.ts finds
+// it). Built after tsup.config.ts, whose `clean` would remove them.
 export default defineConfig({
-  entry: { supervisor: "src/v1/supervisorMain.ts" },
+  entry: {
+    supervisor: "src/v1/supervisorMain.ts",
+    keeper: "src/v1/sandboxes/localKeeperMain.ts",
+  },
   format: ["esm"],
   outDir: "dist",
   target: "node18",

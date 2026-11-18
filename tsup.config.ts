@@ -23,6 +23,7 @@ export default defineConfig({
     v1: "src/v1.ts",
     "v1/testing": "src/v1/testing.ts",
     "v1/tasks": "src/v1/tasks.ts",
+    "v1/sandboxes/bwrap": "src/v1/sandboxes/bwrap.ts",
     "v1/sandboxes/daytona": "src/v1/sandboxes/daytona.ts",
     "v1/sandboxes/docker": "src/v1/sandboxes/docker.ts",
     "v1/sandboxes/e2b": "src/v1/sandboxes/e2b.ts",

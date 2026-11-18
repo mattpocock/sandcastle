@@ -34,6 +34,7 @@ const OUTPUTS = [
   "dist/index.js",
   "dist/index.d.ts",
   "dist/supervisor.js",
+  "dist/keeper.js",
 ];
 
 /** Newest mtime under `p` (a file or a directory), or 0 if absent. */
