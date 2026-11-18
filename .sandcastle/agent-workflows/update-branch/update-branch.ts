@@ -1,19 +1,27 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { execFileSync } from "node:child_process";
-import * as sandcastle from "@ai-hero/sandcastle";
-import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
+import type { Sandbox } from "@ai-hero/sandcastle/v1";
+import { Output } from "@ai-hero/sandcastle/v1";
 import {
   asRecord,
   asString,
   claudeAgent,
   fail,
   required,
-  sh,
   standardSchema,
   writeText,
 } from "../shared/common";
+import { renderPrompt } from "../shared/prompt";
 import { runWithExtraction } from "../shared/run-with-extraction";
+import {
+  cloneRepo,
+  headSha,
+  openSandbox,
+  pushBranch,
+  quote,
+  run,
+  runTrimmed,
+} from "../shared/sandbox";
 
 interface UpdateBranchOutput {
   readonly comment: string;
@@ -27,49 +35,68 @@ const updateBranchOutputSchema = standardSchema<UpdateBranchOutput>((value) => {
 const PR_NUMBER = required("PR_NUMBER");
 const BRANCH = required("BRANCH");
 const BASE_REF = required("BASE_REF");
+const BRANCH_HEAD_SHA = required("BRANCH_HEAD_SHA");
+
+const BASE = quote(`origin/${BASE_REF}`);
 
 type MergeResult =
   | { status: "clean" }
   | { status: "conflict"; conflicts: string[] };
 
-const tryMerge = (): MergeResult => {
-  try {
-    execFileSync("git", ["merge", `origin/${BASE_REF}`, "--no-edit"], {
-      stdio: "inherit",
-    });
-    return { status: "clean" };
-  } catch {
-    const conflicts = sh("git diff --name-only --diff-filter=U")
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean);
-    if (conflicts.length === 0) {
-      fail("git merge failed but no conflicts reported — aborting.");
-    }
-    return { status: "conflict", conflicts };
-  }
+const unmergedFiles = async (sandbox: Sandbox): Promise<string[]> => {
+  const listed = await run(sandbox, "git diff --name-only --diff-filter=U");
+  return listed
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
 };
 
+const tryMerge = async (sandbox: Sandbox): Promise<MergeResult> => {
+  const merged = await sandbox.exec({
+    command: `git merge ${BASE} --no-edit`,
+    allowFailure: true,
+  });
+  console.log(merged.stdout);
+  if (merged.exitCode === 0) {
+    return { status: "clean" };
+  }
+  const conflicts = await unmergedFiles(sandbox);
+  if (conflicts.length === 0) {
+    console.error(merged.stderr);
+    fail("git merge failed but no conflicts reported — aborting.");
+  }
+  return { status: "conflict", conflicts };
+};
+
+const push = async (sandbox: Sandbox): Promise<void> =>
+  pushBranch(sandbox, {
+    branch: BRANCH,
+    leaseSha: BRANCH_HEAD_SHA,
+    advanced: "Branch advanced during update-branch run.",
+  });
+
 try {
-  execFileSync("git", ["fetch", "origin", BASE_REF], { stdio: "inherit" });
+  await using sandbox = await openSandbox();
+  await cloneRepo(sandbox, { branch: BRANCH });
+  await run(sandbox, `git fetch origin ${quote(BASE_REF)}`);
 
-  const preMergeSha = sh("git rev-parse HEAD").trim();
-  const baseSha = sh(`git rev-parse origin/${BASE_REF}`).trim();
+  const preMergeSha = await headSha(sandbox);
+  const baseSha = await runTrimmed(sandbox, `git rev-parse ${BASE}`);
 
-  const mergeBase = sh(`git merge-base HEAD origin/${BASE_REF}`).trim();
+  const mergeBase = await runTrimmed(sandbox, `git merge-base HEAD ${BASE}`);
   if (mergeBase === baseSha) {
     writeText(
       "comment.md",
       `\`agent:update-branch\`: branch is already up to date with \`origin/${BASE_REF}\`. No merge needed.`,
     );
-    writeText("should_push.txt", "false");
     console.log("Already up to date — nothing to do.");
     process.exit(0);
   }
 
-  const mergeResult = tryMerge();
+  const mergeResult = await tryMerge(sandbox);
 
   if (mergeResult.status === "clean") {
+    await push(sandbox);
     writeText(
       "comment.md",
       `\`agent:update-branch\`: merged \`origin/${BASE_REF}\` (\`${baseSha.slice(
@@ -77,8 +104,7 @@ try {
         7,
       )}\`) into \`${BRANCH}\` cleanly — no conflicts.`,
     );
-    writeText("should_push.txt", "true");
-    console.log("Clean merge — wrapper will push.");
+    console.log("Clean merge — pushed.");
     process.exit(0);
   }
 
@@ -87,39 +113,34 @@ try {
   );
 
   const result = await runWithExtraction({
+    sandbox,
     name: `update-branch-pr-${PR_NUMBER}`,
     agent: claudeAgent(),
-    sandbox: noSandbox(),
-    logging: { type: "stdout" },
-    promptFile: path.join(import.meta.dirname, "prompt.md"),
-    promptArgs: {
-      PR_NUMBER,
-      BRANCH,
-      BASE_REF,
-    },
-    output: sandcastle.Output.object({
-      tag: "output",
-      schema: updateBranchOutputSchema,
-    }),
+    prompt: await renderPrompt(
+      path.join(import.meta.dirname, "prompt.md"),
+      { PR_NUMBER, BRANCH, BASE_REF },
+      sandbox,
+    ),
+    output: Output.object({ tag: "output", schema: updateBranchOutputSchema }),
     extractionPrompt: fs.readFileSync(
       path.join(import.meta.dirname, "extraction.md"),
       "utf8",
     ),
   });
 
-  const postSha = sh("git rev-parse HEAD").trim();
+  const postSha = await headSha(sandbox);
   if (postSha === preMergeSha) {
     fail("Agent produced no commits — branch still at pre-merge HEAD.");
   }
 
-  const unresolved = sh("git diff --name-only --diff-filter=U").trim();
-  if (unresolved) {
-    fail(`Agent left unresolved conflicts in:\n${unresolved}`);
+  const unresolved = await unmergedFiles(sandbox);
+  if (unresolved.length > 0) {
+    fail(`Agent left unresolved conflicts in:\n${unresolved.join("\n")}`);
   }
 
+  await push(sandbox);
   writeText("comment.md", result.output.comment);
-  writeText("should_push.txt", "true");
-  console.log(`Agent resolved conflicts. Wrapper will push ${postSha}.`);
+  console.log(`Agent resolved conflicts. Pushed ${postSha}.`);
 } catch (error) {
   fail(error instanceof Error ? error.message : String(error));
 }

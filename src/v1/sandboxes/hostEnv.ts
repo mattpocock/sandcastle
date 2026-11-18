@@ -1,4 +1,5 @@
 import path from "node:path";
+import { Config, Effect, Option } from "effect";
 
 // The env a host() command runs with. Nothing comes from the caller's own
 // `process.env` but the host's PATH and, on Windows, the few system
@@ -17,20 +18,30 @@ const WINDOWS_SYSTEM = [
   "SystemDrive",
 ] as const;
 
-/** The host's own variables a command starts from: its PATH, and on Windows the system variables. */
-export const hostBaseEnv = (): Readonly<Record<string, string>> => {
-  // Windows' process.env is case-insensitive, so this also finds `Path`.
-  const base: Record<string, string> = { PATH: process.env["PATH"] ?? "" };
-  if (!isWindows) {
-    return base;
-  }
-  for (const name of WINDOWS_SYSTEM) {
-    const value = process.env[name];
-    if (value !== undefined) {
-      base[name] = value;
-    }
-  }
-  return base;
+/**
+ * The host's own variables a command starts from: its PATH, and on Windows
+ * the system variables. Windows' env is case-insensitive, so `PATH` also
+ * finds `Path`.
+ */
+export const hostBaseEnv = async (): Promise<
+  Readonly<Record<string, string>>
+> => {
+  const names = ["PATH", ...(isWindows ? WINDOWS_SYSTEM : [])];
+  const found = await Effect.runPromise(
+    Effect.all(
+      names.map((name) =>
+        Config.option(Config.string(name)).pipe(
+          Effect.map((value) => [name, value] as const),
+        ),
+      ),
+    ),
+  );
+  return Object.fromEntries([
+    ["PATH", ""],
+    ...found.flatMap(([name, value]) =>
+      Option.isSome(value) ? [[name, value.value] as const] : [],
+    ),
+  ]);
 };
 
 /** HOME and the temp dirs, inside the sandbox's folder: on Windows, every variable a program reads them from. */
@@ -58,12 +69,13 @@ export const folderEnv = (
 
 /** A command's whole env: the host's base, then the sandbox's env, then its own, then the folder's. */
 export const commandEnv = (options: {
+  readonly baseEnv: Readonly<Record<string, string>>;
   readonly folder: string;
   readonly cwd: string;
   readonly sandboxEnv: Readonly<Record<string, string>>;
   readonly env: Readonly<Record<string, string>> | undefined;
 }): Readonly<Record<string, string>> => ({
-  ...hostBaseEnv(),
+  ...options.baseEnv,
   ...options.sandboxEnv,
   ...options.env,
   ...folderEnv(options.folder, options.cwd),

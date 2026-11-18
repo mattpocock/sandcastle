@@ -41,13 +41,6 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
-      - name: Prepare branch
-        run: |
-          git fetch origin main:main || git fetch origin main
-          git checkout "$BRANCH" 2>/dev/null || git checkout -B "$BRANCH"
-          git config user.name "sandcastle-agent[bot]"
-          git config user.email "sandcastle-agent[bot]@users.noreply.github.com"
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -67,23 +60,6 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           OUTPUT_DIR: ${{ runner.temp }}
         run: npx tsx .sandcastle/agent-workflows/review/review.ts
-
-      - name: Push branch
-        if: success()
-        run: |
-          set +e
-          git push --force-with-lease="refs/heads/$BRANCH:$BRANCH_HEAD_SHA" origin "$BRANCH" 2> push_err.txt
-          status=$?
-          set -e
-          if [ $status -ne 0 ]; then
-            if grep -qiE "non-fast-forward|rejected|fetch first|stale info" push_err.txt; then
-              echo "Branch advanced during review run." > "${RUNNER_TEMP}/failure_reason.txt"
-              cat push_err.txt
-              exit 1
-            fi
-            cat push_err.txt
-            exit $status
-          fi
 
       - name: Post PR review
         if: success()

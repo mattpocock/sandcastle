@@ -23,7 +23,9 @@
     "plugins": [],
     "paths": {
       "@ai-hero/sandcastle": ["../src/index.ts"],
-      "@ai-hero/sandcastle/sandboxes/*": ["../src/sandboxes/*.ts"]
+      "@ai-hero/sandcastle/sandboxes/*": ["../src/sandboxes/*.ts"],
+      "@ai-hero/sandcastle/v1": ["../src/v1.ts"],
+      "@ai-hero/sandcastle/v1/sandboxes/*": ["../src/v1/sandboxes/*.ts"]
     }
   },
   "include": ["**/*.ts", "../src/vercel-sandbox.d.ts"],

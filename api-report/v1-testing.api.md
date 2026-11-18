@@ -52,6 +52,7 @@ export interface FakeSandboxProvider extends SandboxProvider<FakeSandboxNative, 
 export interface HostCommand {
     readonly exited: Promise<HostCommandExit>;
     readonly kill: () => Promise<void>;
+    readonly pid: number | undefined;
     readonly stderr: Readable;
     readonly stdin: Writable | null;
     readonly stdout: Readable;

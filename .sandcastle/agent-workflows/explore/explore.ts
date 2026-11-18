@@ -1,9 +1,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import * as sandcastle from "@ai-hero/sandcastle";
-import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
+import { Output } from "@ai-hero/sandcastle/v1";
 import { claudeAgent, fail, required, writeJson } from "../shared/common";
+import { renderPrompt } from "../shared/prompt";
 import { runWithExtraction } from "../shared/run-with-extraction";
+import { cloneRepo, openSandbox } from "../shared/sandbox";
 import { parseBatch, planSchema, renderIssues } from "./batch";
 
 /**
@@ -31,22 +32,21 @@ try {
     `Batch: ${batch.length} issue(s): ${batch.map((i) => `#${i.number}`).join(", ")}`,
   );
 
+  await using sandbox = await openSandbox();
+  await cloneRepo(sandbox, { branch: "main" });
+
   // The schema enforces the whole-batch rules, so an invalid plan earns one
   // repair attempt.
   const plan = await runWithExtraction({
+    sandbox,
     name: "explore-batch",
     agent: claudeAgent(),
-    sandbox: noSandbox(),
-    logging: { type: "stdout" },
-    promptFile: promptPath("prompt.md"),
-    promptArgs: {
-      ISSUE_COUNT: String(batch.length),
-      ISSUES: renderIssues(batch),
-    },
-    output: sandcastle.Output.object({
-      tag: "output",
-      schema: planSchema(batch),
-    }),
+    prompt: await renderPrompt(
+      promptPath("prompt.md"),
+      { ISSUE_COUNT: String(batch.length), ISSUES: renderIssues(batch) },
+      sandbox,
+    ),
+    output: Output.object({ tag: "output", schema: planSchema(batch) }),
     extractionPrompt: fs.readFileSync(promptPath("extraction.md"), "utf8"),
     maxRetries: MAX_RETRIES,
   });

@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline";
+import { setTimeout as sleep } from "node:timers/promises";
+import { DateTime } from "effect";
 import { registerShutdown } from "../../shutdownRegistry.js";
 import type { HostCommand } from "../hostCommand.js";
 import { startHostCommand, taskkill } from "../hostCommand.js";
@@ -22,7 +24,7 @@ import { commandEnv, hostBaseEnv } from "./hostEnv.js";
 
 const isWindows = process.platform === "win32";
 
-/** A `setTimeout` delay can't be longer than this; a later kill time is waited for in steps. */
+/** A timer can't wait longer than this; a later kill time is waited for in steps. */
 const MAX_TIMER_MS = 2_147_483_647;
 
 /** What a host() sandbox exposes as `native`. */
@@ -46,7 +48,11 @@ require("node:fs").rmSync(folder, { recursive: true, force: true, maxRetries: 50
 `;
 
 /** Ends a sandbox from a shutdown teardown, synchronously: what `close()` does, without awaiting. */
-const tearDownNow = (folder: string, running: ReadonlySet<HostCommand>) => {
+const tearDownNow = (
+  folder: string,
+  running: ReadonlySet<HostCommand>,
+  baseEnv: Readonly<Record<string, string>>,
+) => {
   const pids = [...running].flatMap((command) =>
     command.pid === undefined ? [] : [command.pid],
   );
@@ -64,7 +70,7 @@ const tearDownNow = (folder: string, running: ReadonlySet<HostCommand>) => {
     [
       "-e",
       CLEANUP_SCRIPT,
-      taskkill(hostBaseEnv()),
+      taskkill(baseEnv),
       folder,
       ...(isWindows ? pids.map(String) : []),
     ],
@@ -98,6 +104,8 @@ interface HostFolder {
   readonly folder: string;
   readonly workingDirectory: string;
   readonly env: Readonly<Record<string, string>>;
+  /** The host's own variables each command starts from. */
+  readonly baseEnv: Readonly<Record<string, string>>;
   readonly running: Set<HostCommand>;
   readonly isClosed: () => boolean;
 }
@@ -121,6 +129,7 @@ const execIn = async (
     command: options.command,
     cwd,
     env: commandEnv({
+      baseEnv: sandbox.baseEnv,
       folder: sandbox.folder,
       cwd,
       sandboxEnv: sandbox.env,
@@ -163,22 +172,29 @@ const readOrNull = async (file: string): Promise<string | null> =>
     throw error;
   });
 
-/** Calls `end` at `killTime`, without keeping the process alive for it. */
-const timerUntil = (killTime: Date, end: () => void) => {
-  let timer: NodeJS.Timeout | undefined;
-  const arm = (): void => {
-    const left = killTime.getTime() - Date.now();
+/** Milliseconds since the epoch, now. */
+const nowMillis = (): number => DateTime.toEpochMillis(DateTime.unsafeNow());
+
+/** Calls `end` at `killTime` unless `cancel` aborts first, without keeping the process alive for it. */
+const timerUntil = (
+  killTime: Date,
+  cancel: AbortSignal,
+  end: () => void,
+): void => {
+  const wait = async (): Promise<void> => {
+    const left = killTime.getTime() - nowMillis();
     if (left <= 0) {
       end();
       return;
     }
-    timer = setTimeout(arm, Math.min(left, MAX_TIMER_MS));
-    timer.unref();
+    await sleep(Math.min(left, MAX_TIMER_MS), undefined, {
+      ref: false,
+      signal: cancel,
+    });
+    await wait();
   };
-  arm();
-  return () => {
-    clearTimeout(timer);
-  };
+  // Cancelling rejects the sleep: nothing more to do.
+  wait().catch(() => undefined);
 };
 
 /** Removes a folder; on Windows it can't go until its last process has. */
@@ -206,6 +222,12 @@ const makeFolder = async (
   return folder;
 };
 
+/** Now plus `minutes`. */
+const killTimeIn = (minutes: number): Date =>
+  DateTime.toDateUtc(
+    DateTime.add(DateTime.unsafeNow(), { millis: minutes * 60_000 }),
+  );
+
 /** A new host() sandbox, a folder in `rootDir`. */
 export const createHostSandbox = async (
   rootDir: string,
@@ -213,30 +235,32 @@ export const createHostSandbox = async (
 ): Promise<ProviderSandbox<HostNative>> => {
   options.abortSignal?.throwIfAborted();
   const folder = await makeFolder(rootDir, options.abortSignal);
-  const killTime = new Date(Date.now() + options.timeLimitMinutes * 60_000);
+  const killTime = killTimeIn(options.timeLimitMinutes);
+  const baseEnv = await hostBaseEnv();
   const running = new Set<HostCommand>();
   let closing: Promise<void> | undefined;
-  let stopTimer: () => void = () => undefined;
+  const timer = new AbortController();
   const sandbox: HostFolder = {
     folder,
     workingDirectory: path.join(folder, "workspace"),
     env: options.env,
+    baseEnv,
     running,
     isClosed: () => closing !== undefined,
   };
   const unregister = registerShutdown(() => {
-    tearDownNow(folder, running);
+    tearDownNow(folder, running, baseEnv);
   });
   const close = async (): Promise<void> => {
     closing ??= (async () => {
-      stopTimer();
+      timer.abort();
       unregister();
       await Promise.all([...running].map(async (command) => command.kill()));
       await removeFolder(folder);
     })();
     return closing;
   };
-  stopTimer = timerUntil(killTime, () => {
+  timerUntil(killTime, timer.signal, () => {
     void close();
   });
   return {

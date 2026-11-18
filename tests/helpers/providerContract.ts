@@ -104,7 +104,7 @@ export const providerContract = (open: OpenSandbox): void => {
     const error = await failureOf(
       sandbox.exec({
         command: node(
-          'process.stderr.write("fatal: no such ref, token " + process.env.CONTRACT_TOKEN + " " + process.env.STEP_TOKEN + "\\n"); process.exit(4)',
+          String.raw`process.stderr.write("fatal: no such ref, token " + process.env.CONTRACT_TOKEN + " " + process.env.STEP_TOKEN + "\n"); process.exitCode = 4`,
         ),
         env: { STEP_TOKEN: "step-secret-9876543210" },
       }),
@@ -125,7 +125,7 @@ export const providerContract = (open: OpenSandbox): void => {
     const error = await failureOf(
       sandbox.exec(
         node(
-          'for (let i = 0; i < 500; i++) process.stderr.write("noise line " + i + "\\n"); process.stderr.write("the real " + (40 + 2) + " cause\\n"); process.exit(2)',
+          String.raw`for (let i = 0; i < 500; i++) process.stderr.write("noise line " + i + "\n"); process.stderr.write("the real " + (40 + 2) + " cause\n"); process.exitCode = 2`,
         ),
       ),
     );

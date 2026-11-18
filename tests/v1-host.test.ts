@@ -1,19 +1,18 @@
-import { spawn } from "node:child_process";
-import { once } from "node:events";
 import { mkdtemp, readdir, readFile, realpath, rm } from "node:fs/promises";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Sandbox } from "@ai-hero/sandcastle/v1";
 import {
   CreateSandboxError,
   createSandbox,
   reattachSandbox,
+  SandboxUnavailableError,
 } from "@ai-hero/sandcastle/v1";
 import type { HostNative } from "@ai-hero/sandcastle/v1/sandboxes/host";
 import { host } from "@ai-hero/sandcastle/v1/sandboxes/host";
+import type { HolderEnding } from "./helpers/hostHolder.js";
+import { holdThenEnd } from "./helpers/hostHolder.js";
 import {
   eventually,
   isGone,
@@ -61,12 +60,14 @@ const pidIn = async (file: string): Promise<number> => {
   return pid;
 };
 
-const TSX_LOADER = pathToFileURL(
-  createRequire(import.meta.url).resolve("tsx"),
-).href;
-const TESTS_TSCONFIG = path.join(import.meta.dirname, "tsconfig.json");
-/** A script handed to a subprocess, not an import. */
-const HOLDER = path.join(import.meta.dirname, "helpers", "holdHostSandbox.ts");
+/** Off Windows, the processes whose command line holds `text`; on Windows, which has no `ps`, none. */
+const commandLinesHolding = async (text: string): Promise<string[]> =>
+  isWindows ? [] : processesMentioning(text);
+
+/** How a holding process can end: Windows has no `SIGTERM` handler to run. */
+const ENDINGS: readonly HolderEnding[] = isWindows
+  ? ["exit"]
+  : ["exit", "SIGTERM"];
 
 describe("host() (v1)", () => {
   let rootDir = "";
@@ -149,7 +150,7 @@ describe("host() (v1)", () => {
     await expect(
       // @ts-expect-error at runtime too
       reattachSandbox({ provider: host(), sandboxId: sandbox.sandboxId }),
-    ).rejects.toThrow();
+    ).rejects.toThrow(SandboxUnavailableError);
   });
 
   it("starts in an empty working directory, <rootDir>/<sandboxId>/workspace", async () => {
@@ -204,12 +205,11 @@ describe("host() (v1)", () => {
       allowFailure: true,
     });
     await pidIn(pidFile);
-    // Off Windows, the process list: no process's command line holds it.
-    const mentioning = isWindows ? [] : await processesMentioning(secret);
+    const mentioning = await commandLinesHolding(secret);
     await sandbox.close();
     await running;
 
-    const folder = sandbox.native.folder;
+    const { folder } = sandbox.native;
     expect(result.stdout).toBe(
       [
         secret,
@@ -311,37 +311,17 @@ describe("host() (v1)", () => {
       abortSignal: AbortSignal.abort(),
     });
 
-    await expect(created).rejects.toThrow();
+    await expect(created).rejects.toThrow(CreateSandboxError);
     await expect(readdir(rootDir)).resolves.toStrictEqual([]);
   });
 
-  it.each(isWindows ? ["exit"] : ["exit", "SIGTERM"])(
+  it.each(ENDINGS)(
     "kills the commands and removes the folder when the holding process ends (%s) with work still running",
     async (ending) => {
       const pidFile = path.join(scratch, "pid");
-      const child = spawn(
-        process.execPath,
-        [
-          "--import",
-          TSX_LOADER,
-          HOLDER,
-          rootDir,
-          pidFile,
-          ending === "exit" ? "exit" : "wait",
-        ],
-        {
-          env: { ...process.env, TSX_TSCONFIG_PATH: TESTS_TSCONFIG },
-          stdio: ["ignore", "pipe", "inherit"],
-        },
-      );
-      const exited = once(child, "exit");
-      const [line] = (await once(child.stdout, "data")) as [Buffer];
-      const { folder } = JSON.parse(line.toString()) as { folder: string };
+
+      const folder = await holdThenEnd(rootDir, pidFile, ending);
       const pid = await pidIn(pidFile);
-      if (ending === "SIGTERM") {
-        child.kill("SIGTERM");
-      }
-      await exited;
 
       await eventually(async () => isGone(folder), 15_000);
       await eventually(async () => !isAlive(pid), 5000);

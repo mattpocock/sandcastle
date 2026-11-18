@@ -1,0 +1,5 @@
+---
+"@ai-hero/sandcastle": minor
+---
+
+v1: `host()`, a provider at `@ai-hero/sandcastle/v1/sandboxes/host` whose sandboxes run on the host itself, as the calling user, with no isolation: for CI runners and for local runs where you trust the agent. It isn't a sandbox, and v1 agents keep their default permission bypass on it unless you set `permissionMode`. Each sandbox is a private folder, `<rootDir>/<sandboxId>/` (`host({ create: { rootDir } })`, default `<os.tmpdir()>/sandcastle-host`), whose working directory starts empty for you to clone into. Each command gets the host's `PATH`, the sandbox's env and its own, with `HOME` and the temp dirs inside the folder and nothing else of the caller's env. It runs on Linux, macOS and Windows, where it needs no `sh`: simple commands are spawned from their argv and the rest go to `cmd.exe`. It can't detach: the sandbox is closed at its kill time, on `close()`, or when the process exits, killing every command's whole tree and removing the folder. `sudo: true` rejects. See `docs/v1/host.md`.

@@ -1,3 +1,5 @@
+import { access } from "node:fs/promises";
+import { setTimeout as sleep } from "node:timers/promises";
 import { createSandbox } from "@ai-hero/sandcastle/v1";
 import { host } from "@ai-hero/sandcastle/v1/sandboxes/host";
 
@@ -20,14 +22,13 @@ void sandbox.exec({
   command: `node -e 'require("node:fs").writeFileSync(process.env.PID_FILE, String(process.pid)); setInterval(() => {}, 1000)'`,
   allowFailure: true,
 });
-const { access } = await import("node:fs/promises");
 const waitForPid = async (): Promise<void> => {
   const there = await access(pidFile).then(
     () => true,
     () => false,
   );
   if (!there) {
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await sleep(50);
     await waitForPid();
   }
 };
@@ -36,4 +37,4 @@ process.stdout.write(`${JSON.stringify({ folder: sandbox.native.folder })}\n`);
 if (mode === "exit") {
   process.exit(0);
 }
-setInterval(() => undefined, 1000);
+await sleep(60_000);

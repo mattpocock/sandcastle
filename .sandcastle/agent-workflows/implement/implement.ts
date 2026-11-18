@@ -1,7 +1,13 @@
 import * as path from "node:path";
-import * as sandcastle from "@ai-hero/sandcastle";
-import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
-import { claudeAgent, fail, required, safeSh, sh } from "../shared/common";
+import { claudeAgent, fail, required, tryGh } from "../shared/common";
+import { renderPrompt } from "../shared/prompt";
+import { runSession } from "../shared/run-with-extraction";
+import {
+  cloneRepo,
+  commitsSince,
+  openSandbox,
+  pushBranch,
+} from "../shared/sandbox";
 
 const ISSUE_NUMBER = required("ISSUE_NUMBER");
 const ISSUE_TITLE = required("ISSUE_TITLE");
@@ -9,30 +15,29 @@ const BRANCH = required("BRANCH");
 
 try {
   const issueContext =
-    safeSh(`gh issue view ${ISSUE_NUMBER} --comments`) ||
+    tryGh(["issue", "view", ISSUE_NUMBER, "--comments"]) ||
     `Issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}`;
 
-  const result = await sandcastle.run({
-    name: `implement-#${ISSUE_NUMBER}`,
+  await using sandbox = await openSandbox();
+  await cloneRepo(sandbox, { newBranch: BRANCH });
+
+  await runSession(sandbox, {
+    name: `implement-${ISSUE_NUMBER}`,
     agent: claudeAgent(),
-    sandbox: noSandbox(),
-    logging: { type: "stdout" },
-    promptFile: path.join(import.meta.dirname, "prompt.md"),
-    promptArgs: {
-      ISSUE_NUMBER,
-      ISSUE_TITLE,
-      BRANCH,
-      ISSUE_CONTEXT: issueContext,
-    },
+    prompt: await renderPrompt(
+      path.join(import.meta.dirname, "prompt.md"),
+      { ISSUE_NUMBER, ISSUE_TITLE, BRANCH, ISSUE_CONTEXT: issueContext },
+      sandbox,
+    ),
   });
 
-  const commitsAhead = Number(sh("git rev-list --count main..HEAD").trim());
+  const commitsAhead = await commitsSince(sandbox, "origin/main");
   if (!Number.isFinite(commitsAhead) || commitsAhead === 0) {
     fail("Agent finished but no commits were made on the branch.");
   }
+  await pushBranch(sandbox, { branch: BRANCH });
 
   console.log(`Implementation produced ${commitsAhead} commit(s).`);
-  console.log(`Commits this run: ${result.commits.length}.`);
 } catch (error) {
   fail(error instanceof Error ? error.message : String(error));
 }
