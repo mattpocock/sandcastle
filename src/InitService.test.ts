@@ -918,7 +918,7 @@ describe("InitService scaffold", () => {
       "utf8",
     );
     expect(dockerfile).toContain("FROM node:22-bookworm");
-    expect(dockerfile).toContain("@earendil-works/pi-coding-agent");
+    expect(dockerfile).toContain("@earendil-works/pi-coding-agent@1.5.2");
     expect(dockerfile).not.toContain("@mariozechner/pi-coding-agent");
     expect(dockerfile).not.toContain("{{ISSUE_TRACKER_TOOLS}}");
   });
@@ -1462,7 +1462,9 @@ describe("InitService scaffold", () => {
       expect(manager.templateArgs.CLOSE_TASK_COMMAND).toContain("bd close");
       expect(manager.templateArgs.CLOSE_TASK_COMMAND).toContain("--reason=");
       expect(manager.templateArgs.ISSUE_TRACKER_TOOLS).toContain("beads");
-      expect(manager.templateArgs.ISSUE_TRACKER_TOOLS).toContain("libicu72");
+      expect(manager.templateArgs.ISSUE_TRACKER_TOOLS).not.toContain(
+        "libicu72",
+      );
       expect(manager.templateArgs.ISSUE_TRACKER_TOOLS).toContain(
         "corepack enable",
       );
@@ -1471,7 +1473,7 @@ describe("InitService scaffold", () => {
         "x86_64-linux-gnu",
       );
       expect(manager.templateArgs.ISSUE_TRACKER_TOOLS).toContain(
-        "dpkg-architecture -qDEB_HOST_MULTIARCH",
+        "ARG BEADS_VERSION=1.3.4",
       );
     });
 
@@ -2217,12 +2219,12 @@ describe("InitService scaffold", () => {
         "utf8",
       );
       expect(dockerfile).toContain("beads");
-      expect(dockerfile).toContain("libicu72");
+      expect(dockerfile).not.toContain("libicu72");
       expect(dockerfile).toContain("corepack enable");
       expect(dockerfile).not.toContain("GitHub CLI");
       expect(dockerfile).not.toContain("{{ISSUE_TRACKER_TOOLS}}");
       expect(dockerfile).not.toContain("x86_64-linux-gnu");
-      expect(dockerfile).toContain("dpkg-architecture -qDEB_HOST_MULTIARCH");
+      expect(dockerfile).toContain("ARG BEADS_VERSION=1.3.4");
     });
 
     it("scaffold with beads + podman produces Containerfile with beads install", async () => {
@@ -2238,11 +2240,11 @@ describe("InitService scaffold", () => {
         "utf8",
       );
       expect(containerfile).toContain("beads");
-      expect(containerfile).toContain("libicu72");
+      expect(containerfile).not.toContain("libicu72");
       expect(containerfile).not.toContain("GitHub CLI");
       expect(containerfile).not.toContain("{{ISSUE_TRACKER_TOOLS}}");
       expect(containerfile).not.toContain("x86_64-linux-gnu");
-      expect(containerfile).toContain("dpkg-architecture -qDEB_HOST_MULTIARCH");
+      expect(containerfile).toContain("ARG BEADS_VERSION=1.3.4");
     });
 
     it("scaffold with beads + pi agent produces Dockerfile with beads install and pi agent", async () => {
@@ -2258,7 +2260,7 @@ describe("InitService scaffold", () => {
         "utf8",
       );
       expect(dockerfile).toContain("beads");
-      expect(dockerfile).toContain("@earendil-works/pi-coding-agent");
+      expect(dockerfile).toContain("@earendil-works/pi-coding-agent@1.5.2");
       expect(dockerfile).not.toContain("@mariozechner/pi-coding-agent");
       expect(dockerfile).not.toContain("GitHub CLI");
     });
@@ -2758,8 +2760,8 @@ describe("parseBdVersion", () => {
 
   it("finds the version line after bd's first-run notice", () => {
     expect(
-      parseBdVersion("Thanks for using bd! …\nbd version 1.3.2 (abc)\n"),
-    ).toBe("1.3.2");
+      parseBdVersion("Thanks for using bd! …\nbd version 1.3.4 (abc)\n"),
+    ).toBe("1.3.4");
   });
 
   it("returns undefined for output with no version", () => {
@@ -2769,14 +2771,14 @@ describe("parseBdVersion", () => {
 
 describe("beadsVersionWarning", () => {
   it("says nothing when the host runs the image's bd", () => {
-    expect(beadsVersionWarning("1.3.2")).toBeUndefined();
+    expect(beadsVersionWarning("1.3.4")).toBeUndefined();
   });
 
   it("warns that an older host bd will lose writes, and to upgrade it", () => {
     const warning = beadsVersionWarning("1.0.0");
     expect(warning).toContain("bd 1.0.0");
     expect(warning).toContain("can no longer create issues");
-    expect(warning).toContain("Upgrade the host's bd to 1.3.2");
+    expect(warning).toContain("Upgrade the host's bd to 1.3.4");
   });
 
   it("compares versions numerically, not as strings", () => {
