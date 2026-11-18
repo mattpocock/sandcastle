@@ -8,6 +8,9 @@ import { seatbelt } from "@ai-hero/sandcastle/v1/sandboxes/seatbelt";
 // v1's seatbelt() off macOS, and its option checks, which hold on every OS.
 // The macOS-only suite is tests/v1-seatbelt.test.ts.
 
+/** The home folder, or `/` where it isn't a POSIX path: a Windows home is refused as not absolute. */
+const POSIX_HOME = homedir().startsWith("/") ? homedir() : "/";
+
 describe("seatbelt() (v1) off macOS, and its options", () => {
   let state = "";
   const originalState = process.env["XDG_STATE_HOME"];
@@ -36,11 +39,9 @@ describe("seatbelt() (v1) off macOS, and its options", () => {
   );
 
   it("refuses a toolchain path that would show the home folder, or isn't absolute", () => {
-    // A Windows home (C:\\Users\\…) is refused as not absolute, below.
-    const home = homedir().startsWith("/") ? homedir() : "/";
-    expect(() => seatbelt({ create: { toolchainPaths: [home] } })).toThrow(
-      /home folder/u,
-    );
+    expect(() =>
+      seatbelt({ create: { toolchainPaths: [POSIX_HOME] } }),
+    ).toThrow(/home folder/u);
     expect(() => seatbelt({ create: { toolchainPaths: ["/"] } })).toThrow(
       /home folder/u,
     );
