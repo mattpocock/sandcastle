@@ -3,6 +3,10 @@ import { createSandbox } from "@ai-hero/sandcastle/v1";
 import { host } from "@ai-hero/sandcastle/v1/sandboxes/host";
 import { fail, required } from "./common";
 
+/** Single-quotes `value` for `sh`. */
+export const quote = (value: string): string =>
+  `'${value.replaceAll("'", String.raw`'\''`)}'`;
+
 // The sandbox every agent workflow runs in: a host() sandbox on the Actions
 // runner, its working directory an empty folder of its own that the repo is
 // cloned into. host() is not isolation: the agent runs as the runner's user.
@@ -16,22 +20,48 @@ const GIT_NAME = "sandcastle-agent[bot]";
 const GIT_EMAIL = "sandcastle-agent[bot]@users.noreply.github.com";
 
 /**
- * A host() sandbox whose commands, the agent's included, get the GitHub
- * token and repo (for `git` and `gh`) and the Claude Code token, all through
- * their env. Its home is fresh, so nothing of the runner's `gh` login or
- * `~/.gitconfig` is seen.
+ * A host() sandbox whose commands, the agent's included, get the repo's
+ * name and the Claude Code token through their env. Never the GitHub token:
+ * the agent runs with its permission bypass on untrusted issue and PR text,
+ * so only the git commands that reach GitHub get it (`withGitHubToken`).
+ * Its home is fresh, so nothing of the runner's `gh` login or `~/.gitconfig`
+ * is seen.
  */
-export const openSandbox = async (): Promise<Sandbox> => {
-  const token = process.env.GH_TOKEN;
-  return createSandbox({
+export const openSandbox = async (): Promise<Sandbox> =>
+  createSandbox({
     provider: host(),
     env: {
       GH_REPO: required("GH_REPO"),
       CLAUDE_CODE_OAUTH_TOKEN: required("CLAUDE_CODE_OAUTH_TOKEN"),
-      ...(token === undefined || token === "" ? {} : { GH_TOKEN: token }),
     },
     timeLimitMinutes: TIME_LIMIT_MINUTES,
   });
+
+/**
+ * A credential helper for one git command, given with `-c`, so it's never
+ * stored: it answers with `$GH_TOKEN` from that command's env. The command
+ * line holds the variable's name, never its value. The empty helper first
+ * drops any helper git would otherwise ask.
+ */
+const CREDENTIAL_HELPER = `-c credential.helper= -c credential.helper=${quote(
+  '!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f',
+)}`;
+
+/**
+ * `git <args>` run with the GitHub token from this process's `GH_TOKEN`,
+ * through a one-command credential helper and that one command's env. With
+ * no token (a public repo, read only) it runs without one.
+ */
+export const withGitHubToken = (
+  gitArgs: string,
+): { readonly command: string; readonly env: Record<string, string> } => {
+  const token = process.env.GH_TOKEN;
+  return token === undefined || token === ""
+    ? { command: `git ${gitArgs}`, env: {} }
+    : {
+        command: `git ${CREDENTIAL_HELPER} ${gitArgs}`,
+        env: { GH_TOKEN: token },
+      };
 };
 
 /** Runs `command` in the sandbox and returns its stdout; rejects when it fails. */
@@ -61,23 +91,19 @@ export const tryRun = async (
   return result.exitCode === 0 ? result.stdout : "";
 };
 
-/** Single-quotes `value` for `sh`. */
-export const quote = (value: string): string =>
-  `'${value.replaceAll("'", String.raw`'\''`)}'`;
-
 /**
- * Clones the repo into the sandbox's working directory over git, with `gh`
- * as git's credential helper (it reads `GH_TOKEN` from the env, so the
- * token is on no command line), sets the bot's git identity, checks out
- * `branch` (or makes `newBranch` from the default branch), and installs
- * dependencies, so the agent can typecheck and test.
+ * Clones the repo into the sandbox's working directory over git (the token
+ * only in the clone's own env, so the clone's config keeps no credential),
+ * sets the bot's git identity, and checks out `branch` (or makes
+ * `newBranch` from the default branch).
  */
 export const cloneRepo = async (
   sandbox: Sandbox,
   target: { readonly branch: string } | { readonly newBranch: string },
 ): Promise<void> => {
-  await run(sandbox, '[ -z "$GH_TOKEN" ] || gh auth setup-git');
-  await run(sandbox, 'git clone "https://github.com/$GH_REPO.git" .');
+  await sandbox.exec(
+    withGitHubToken('clone "https://github.com/$GH_REPO.git" .'),
+  );
   await run(sandbox, `git config user.name ${quote(GIT_NAME)}`);
   await run(sandbox, `git config user.email ${quote(GIT_EMAIL)}`);
   await run(
@@ -86,7 +112,19 @@ export const cloneRepo = async (
       ? `git checkout ${quote(target.branch)}`
       : `git checkout -b ${quote(target.newBranch)}`,
   );
+};
+
+/** Installs the clone's dependencies, so the agent can typecheck and test. */
+export const installDependencies = async (sandbox: Sandbox): Promise<void> => {
   await run(sandbox, "npm ci --no-audit --no-fund");
+};
+
+/** Fetches `ref` from origin, with the token for that one command. */
+export const fetchRef = async (
+  sandbox: Sandbox,
+  ref: string,
+): Promise<void> => {
+  await sandbox.exec(withGitHubToken(`fetch origin ${quote(ref)}`));
 };
 
 /** The commits on HEAD since `since`. */
@@ -124,7 +162,7 @@ export const pushBranch = async (
       ? "--force"
       : `--force-with-lease=${quote(`refs/heads/${options.branch}:${options.leaseSha}`)}`;
   const pushed = await sandbox.exec({
-    command: `git push ${lease} origin ${ref}`,
+    ...withGitHubToken(`push ${lease} origin ${ref}`),
     allowFailure: true,
   });
   if (pushed.exitCode === 0) {

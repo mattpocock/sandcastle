@@ -105,9 +105,11 @@ jobs:
         if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true'
         uses: actions/checkout@v4
         with:
+          # The agent runs on this runner as the same user: leave no token in
+          # the checkout. The scripts clone and push from their own sandbox.
+          persist-credentials: false
           ref: main
           fetch-depth: 0
-          token: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Compute branch name
         if: steps.shape.outputs.proceed == 'true' && steps.preflight.outputs.refused != 'true'

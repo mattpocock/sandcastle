@@ -15,6 +15,8 @@ import { renderPrompt } from "../shared/prompt";
 import { runWithExtraction } from "../shared/run-with-extraction";
 import {
   cloneRepo,
+  fetchRef,
+  installDependencies,
   headSha,
   openSandbox,
   pushBranch,
@@ -78,7 +80,8 @@ const push = async (sandbox: Sandbox): Promise<void> =>
 try {
   await using sandbox = await openSandbox();
   await cloneRepo(sandbox, { branch: BRANCH });
-  await run(sandbox, `git fetch origin ${quote(BASE_REF)}`);
+  await installDependencies(sandbox);
+  await fetchRef(sandbox, BASE_REF);
 
   const preMergeSha = await headSha(sandbox);
   const baseSha = await runTrimmed(sandbox, `git rev-parse ${BASE}`);
@@ -119,7 +122,11 @@ try {
     prompt: await renderPrompt(
       path.join(import.meta.dirname, "prompt.md"),
       { PR_NUMBER, BRANCH, BASE_REF },
-      sandbox,
+      {
+        sandbox,
+        // Its `gh pr view` line, run before the session, from the template.
+        commandEnv: { GH_TOKEN: process.env.GH_TOKEN ?? "" },
+      },
     ),
     output: Output.object({ tag: "output", schema: updateBranchOutputSchema }),
     extractionPrompt: fs.readFileSync(

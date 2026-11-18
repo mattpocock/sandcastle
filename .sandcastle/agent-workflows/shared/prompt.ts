@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import type { Sandbox } from "@ai-hero/sandcastle/v1";
-import { quote, run } from "./sandbox";
+import { quote } from "./sandbox";
 
 // A v1 session's prompt is used exactly as written, so the workflows render
 // their own: `{{KEY}}` placeholders become the args, and a line that is only
@@ -30,7 +30,14 @@ const substitute = (
 export const renderPrompt = async (
   file: string,
   args: Readonly<Record<string, string>>,
-  sandbox: Sandbox,
+  {
+    sandbox,
+    commandEnv = {},
+  }: {
+    readonly sandbox: Sandbox;
+    /** Env for the template's !`command` lines only, never the session's. */
+    readonly commandEnv?: Readonly<Record<string, string>>;
+  },
 ): Promise<string> => {
   const lines = fs.readFileSync(file, "utf8").split("\n");
   // One at a time, in the order the prompt reads.
@@ -40,7 +47,10 @@ export const renderPrompt = async (
     if (command === undefined) {
       return [...before, substitute(line, args)];
     }
-    const output = await run(sandbox, substitute(command, args, quote));
+    const { stdout: output } = await sandbox.exec({
+      command: substitute(command, args, quote),
+      env: commandEnv,
+    });
     return [...before, output.trimEnd()];
   }, Promise.resolve([]));
   return rendered.join("\n");

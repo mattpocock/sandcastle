@@ -4,7 +4,7 @@ import { Output } from "@ai-hero/sandcastle/v1";
 import { claudeAgent, fail, required, writeJson } from "../shared/common";
 import { renderPrompt } from "../shared/prompt";
 import { runWithExtraction } from "../shared/run-with-extraction";
-import { cloneRepo, openSandbox } from "../shared/sandbox";
+import { cloneRepo, installDependencies, openSandbox } from "../shared/sandbox";
 import { parseBatch, planSchema, renderIssues } from "./batch";
 
 /**
@@ -34,6 +34,7 @@ try {
 
   await using sandbox = await openSandbox();
   await cloneRepo(sandbox, { branch: "main" });
+  await installDependencies(sandbox);
 
   // The schema enforces the whole-batch rules, so an invalid plan earns one
   // repair attempt.
@@ -44,7 +45,7 @@ try {
     prompt: await renderPrompt(
       promptPath("prompt.md"),
       { ISSUE_COUNT: String(batch.length), ISSUES: renderIssues(batch) },
-      sandbox,
+      { sandbox },
     ),
     output: Output.object({ tag: "output", schema: planSchema(batch) }),
     extractionPrompt: fs.readFileSync(promptPath("extraction.md"), "utf8"),

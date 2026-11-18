@@ -46,6 +46,9 @@ jobs:
         if: github.event.pull_request.state == 'open'
         uses: actions/checkout@v4
         with:
+          # The agent runs on this runner as the same user: leave no token in
+          # the checkout. The scripts clone and push from their own sandbox.
+          persist-credentials: false
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 

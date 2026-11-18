@@ -4,6 +4,7 @@ import { renderPrompt } from "../shared/prompt";
 import { runSession } from "../shared/run-with-extraction";
 import {
   cloneRepo,
+  installDependencies,
   commitsSince,
   openSandbox,
   pushBranch,
@@ -20,6 +21,7 @@ try {
 
   await using sandbox = await openSandbox();
   await cloneRepo(sandbox, { newBranch: BRANCH });
+  await installDependencies(sandbox);
 
   await runSession(sandbox, {
     name: `implement-${ISSUE_NUMBER}`,
@@ -27,7 +29,7 @@ try {
     prompt: await renderPrompt(
       path.join(import.meta.dirname, "prompt.md"),
       { ISSUE_NUMBER, ISSUE_TITLE, BRANCH, ISSUE_CONTEXT: issueContext },
-      sandbox,
+      { sandbox },
     ),
   });
 

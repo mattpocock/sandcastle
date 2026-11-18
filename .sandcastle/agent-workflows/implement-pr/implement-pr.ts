@@ -18,6 +18,7 @@ import {
 import { runWithExtraction } from "../shared/run-with-extraction";
 import {
   cloneRepo,
+  installDependencies,
   commitsSince,
   headSha,
   openSandbox,
@@ -31,6 +32,7 @@ const BRANCH_HEAD_SHA = required("BRANCH_HEAD_SHA");
 try {
   await using sandbox = await openSandbox();
   await cloneRepo(sandbox, { branch: BRANCH });
+  await installDependencies(sandbox);
   const context = await fetchPullRequestContext(PR_NUMBER, sandbox);
   const before = await headSha(sandbox);
 
@@ -50,7 +52,7 @@ try {
         DIFF_TO_MAIN: context.diff,
         PR_COMMENTS_JSON: context.prCommentsJson,
       },
-      sandbox,
+      { sandbox },
     ),
     output: Output.object({ tag: "output", schema: implementPrOutputSchema }),
     extractionPrompt: fs.readFileSync(

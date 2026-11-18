@@ -30,7 +30,7 @@ Always resolve. Do not abort the merge. Do not leave the branch in a half-finish
 
 For each conflicting hunk:
 
-1. **Investigate intent on both sides** before choosing a resolution. Use `git log -p --follow -- <path>` on both `origin/{{BASE_REF}}` and `{{BRANCH}}` to see how each side reached this state. Read the commit messages. If a commit references an issue, pull it with `gh issue view <n>`.
+1. **Investigate intent on both sides** before choosing a resolution. Use `git log -p --follow -- <path>` on both `origin/{{BASE_REF}}` and `{{BRANCH}}` to see how each side reached this state. Read the commit messages. You have no GitHub access in this session: work from the git history and the PR view above.
 2. **Pick the resolution that preserves both intents** wherever possible. Where the intents are incompatible, pick the one that best matches the PR's stated goal (in `<pr-view>` above) and note the trade-off in your comment.
 3. **Do not invent new behaviour.** Your job is reconciliation, not feature work. If a sensible resolution requires writing new logic that wasn't on either side, that's a signal to flag uncertainty rather than to be creative.
 
