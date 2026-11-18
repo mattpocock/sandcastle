@@ -1,5 +1,4 @@
-import { once } from "node:events";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import type { Server, Socket } from "node:net";
 import { createServer } from "node:net";
 import { createInterface } from "node:readline";
@@ -15,17 +14,14 @@ import type {
   SessionRequest,
 } from "./supervisorProtocol.js";
 import { RequestJson } from "./supervisorProtocol.js";
+import { serveHere } from "./supervisorAddress.js";
 import { SessionRegistry } from "./supervisorRegistry.js";
 import { previousStatus, StatusBoard } from "./supervisorStatus.js";
 
 // The session supervisor's long-running half. It runs in its own directory
-// inside the sandbox and listens on a Unix socket there (a relative path, so
-// a deep sandbox home can't push it past the socket path limit). Each
-// connection carries one request from the host's short-lived client and the
-// replies to it.
-
-/** The supervisor's socket, relative to its directory. */
-export const SOCKET = "control.sock";
+// inside the sandbox and listens there (supervisorAddress.ts: a Unix socket,
+// or on Windows a named pipe). Each connection carries one request from the
+// host's short-lived client and the replies to it.
 
 const decodeRequest = Schema.decodeUnknownEither(RequestJson);
 const decodeSecrets = Schema.decodeUnknownEither(RecordSecretsJson);
@@ -189,7 +185,6 @@ export const runDaemon = async (): Promise<void> => {
   await Promise.all(
     ["sessions", "replays"].map(async (dir) => mkdir(dir, { recursive: true })),
   );
-  await rm(SOCKET, { force: true });
   // Made before it listens, so the host learns the public half before any
   // session can run: a session can't swap in its own.
   const keys = await makeSealingKeys();
@@ -200,8 +195,6 @@ export const runDaemon = async (): Promise<void> => {
   const registry = new SessionRegistry(board);
   const server = createServer();
   server.on("connection", onConnection({ registry, server, keys }));
-  const closed = once(server, "close");
-  server.listen(SOCKET);
-  await closed;
+  await serveHere(server);
   await board.exited();
 };

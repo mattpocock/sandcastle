@@ -85,6 +85,10 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
+      # The session supervisor's bundle (dist/supervisor.js), which v1
+      # sessions copy into the sandbox. Only it: the rest of the build isn't
+      # needed to run tests/ from src.
+      - run: npx tsup --config tsup.supervisor.config.ts
       # Coverage for scripts/coverage-gate.ts: code that runs only on win32
       # can count toward deleting a legacy test. The gate merges this artifact
       # with `--coverage-from <dir>` (see the comment at the top of the gate).
@@ -95,6 +99,19 @@ jobs:
           path: coverage/e2e-windows/coverage-final.json
           retention-days: 14
       - run: npx vitest run --project legacy src/sandboxes/no-sandbox.test.ts
+      # v1 sessions on a Windows host with no `sh` anywhere: every PATH
+      # directory holding an sh.exe (Git for Windows' bin and usr\bin) is
+      # dropped for the whole run, and the step fails if `sh` still resolves.
+      # The test's own provider drops them too, so its sessions have no `sh`
+      # in the e2e run above as well.
+      - name: v1 sessions without sh
+        shell: pwsh
+        run: |
+          $env:PATH = ($env:PATH -split ';' | Where-Object { $_ -ne '' -and -not (Test-Path (Join-Path $_ 'sh.exe')) }) -join ';'
+          if (Get-Command sh -ErrorAction SilentlyContinue) { throw "sh is still on PATH" }
+          where.exe sh
+          if ($LASTEXITCODE -eq 0) { throw "where sh found one" }
+          npx vitest run --project e2e tests/v1-windows-sessions.test.ts
 
   # The end-to-end tests on a real macOS host. This is the only place
   # seatbelt() can be proven (#1272), so it runs on every PR. The e2e tests

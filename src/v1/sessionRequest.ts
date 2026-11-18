@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { posix } from "node:path";
+import { resolveInSandbox } from "./sandboxPath.js";
 import { agentDescriptor } from "./agents.js";
 import type { RecordTarget } from "./recordRequest.js";
 import { recordRequest } from "./recordRequest.js";
@@ -36,7 +36,7 @@ const placement = (
   const asked =
     options.workingDirectory === undefined
       ? undefined
-      : posix.resolve(sandboxDirectory, options.workingDirectory);
+      : resolveInSandbox(sandboxDirectory, options.workingDirectory);
   const earlier = options.continueSession;
   if (earlier === undefined) {
     return { workingDirectory: asked ?? sandboxDirectory };

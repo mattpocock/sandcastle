@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { posix } from "node:path";
 import { Effect, Either, Schema } from "effect";
 import { shellEscape } from "../AgentProvider.js";
+import { joinInSandbox } from "./sandboxPath.js";
 import { supervisorBundle } from "./supervisorBundle.js";
 import type { Reply, Request } from "./supervisorProtocol.js";
 import { ReplyJson } from "./supervisorProtocol.js";
@@ -39,12 +39,16 @@ export interface SupervisorLink {
 const decodeReply = Schema.decodeUnknownEither(ReplyJson);
 const SHUTDOWN_TIMEOUT = "10 seconds";
 
+/**
+ * Prints the sandbox user's home with Node, so a sandbox with no `node`
+ * fails it. A simple command, so it runs unchanged where there's no `sh`.
+ */
+export const HOME_PROBE = `node -p 'require("node:os").homedir()'`;
+
 /** The sandbox user's home, checking Node is there to run the supervisor. */
 const sandboxHome = async (sandbox: ProviderSandbox): Promise<string> => {
-  const probe = await sandbox.exec({
-    command: String.raw`printf "%s\n" "$HOME" && command -v node`,
-  });
-  const home = probe.stdout.split("\n")[0] ?? "";
+  const probe = await sandbox.exec({ command: HOME_PROBE });
+  const home = probe.stdout.trim();
   if (probe.exitCode !== 0 || home === "") {
     throw new Error(
       "the sandbox has no `node` on its PATH: the session supervisor needs Node.js",
@@ -58,7 +62,7 @@ const callOn =
   async (request, onReply, abortSignal) => {
     const file = `requests/${randomUUID()}.json`;
     await sandbox.writeTextFile({
-      path: posix.join(directory, file),
+      path: joinInSandbox(directory, file),
       content: JSON.stringify(request),
     });
     const result = await sandbox.exec({
@@ -83,7 +87,7 @@ const callOn =
 export const supervisorDirectory = async (
   sandbox: ProviderSandbox,
 ): Promise<string> =>
-  posix.join(
+  joinInSandbox(
     await sandboxHome(sandbox),
     ".sandcastle",
     "supervisor",
@@ -125,16 +129,20 @@ export const startSupervisor = async (
 ): Promise<SupervisorLink> => {
   const directory = await supervisorDirectory(sandbox);
   await sandbox.writeTextFile({
-    path: posix.join(directory, "supervisor.mjs"),
+    path: joinInSandbox(directory, "supervisor.mjs"),
     content: await supervisorBundle(),
   });
-  const command = `cd ${shellEscape(directory)} && exec node supervisor.mjs daemon >> supervisor.log 2>&1`;
+  // A simple command, run in its directory: it opens supervisor.log itself.
+  const start = {
+    command: "node supervisor.mjs daemon",
+    workingDirectory: directory,
+  };
   if (spawnDetached === undefined) {
     // Held for the sandbox's life; closing the sandbox ends it.
-    void sandbox.exec({ command }).catch(() => undefined);
+    void sandbox.exec(start).catch(() => undefined);
   } else {
     // Detached from the start, so letting go of the handle never drops it.
-    await spawnDetached(sandbox, { command });
+    await spawnDetached(sandbox, start);
   }
   return linkTo(sandbox, directory);
 };

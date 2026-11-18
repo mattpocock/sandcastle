@@ -3,12 +3,12 @@ import { readFile, rm } from "node:fs/promises";
 import type { Socket } from "node:net";
 import { connect } from "node:net";
 import { Data, Effect, Either, Schedule, Schema } from "effect";
-import { SOCKET } from "./supervisorDaemon.js";
+import { controlAddress } from "./supervisorAddress.js";
 import { STATUS_FILE, SupervisorStatusJson } from "./supervisorStatusSchema.js";
 
 // The short-lived half of the session supervisor: the host runs it with
 // exec for each request. It hands the request file the host wrote to the
-// supervisor over its socket, deletes the file, and prints the replies on
+// supervisor over its socket (or named pipe), deletes the file, and prints the replies on
 // stdout, where the host reads them through the exec stream.
 
 /** The supervisor's socket refused the connection, or isn't there yet. */
@@ -34,7 +34,7 @@ const notExited = Effect.promise(async () =>
 );
 
 const connectOnce = Effect.async<Socket, SupervisorUnreachable>((resume) => {
-  const socket = connect(SOCKET);
+  const socket = connect(controlAddress());
   socket.once("connect", () => {
     socket.removeAllListeners("error");
     resume(Effect.succeed(socket));
