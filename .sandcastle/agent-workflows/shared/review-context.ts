@@ -1,5 +1,7 @@
-import { gh, isRecord, safeSh, sh, textOr } from "./common";
+import type { Sandbox } from "@ai-hero/sandcastle/v1";
+import { gh, isRecord, textOr, tryGh } from "./common";
 import { parseDiffLines } from "./diff-lines";
+import { quote, run, tryRun } from "./sandbox";
 
 export interface ReviewThreadComment {
   readonly commentId: string;
@@ -126,10 +128,18 @@ const fetchLinkedIssue = (
 ): Pick<PullRequestContext, "issueNumber" | "issueTitle" | "linkedIssue"> => {
   const issueNumber = linkedIssueNumber(prBody);
   const issueTitle = issueNumber
-    ? safeSh(`gh issue view ${issueNumber} --json title --jq .title`).trim()
+    ? tryGh([
+        "issue",
+        "view",
+        issueNumber,
+        "--json",
+        "title",
+        "--jq",
+        ".title",
+      ]).trim()
     : "";
   const linkedIssue = issueNumber
-    ? safeSh(`gh issue view ${issueNumber} --comments`)
+    ? tryGh(["issue", "view", issueNumber, "--comments"])
     : "(no linked issue found)";
   return { issueNumber, issueTitle, linkedIssue };
 };
@@ -161,18 +171,27 @@ const summarisePrComments = (
   };
 };
 
-export const fetchPullRequestContext = (
+/**
+ * The PR's title, body, linked issue, comments and diff to its base branch.
+ * GitHub's side comes from `gh` on the runner; the diff from the clone in
+ * `sandbox`, which has the PR's branch checked out.
+ */
+export const fetchPullRequestContext = async (
   prNumber: string,
-): PullRequestContext => {
+  sandbox: Sandbox,
+): Promise<PullRequestContext> => {
   const prView: unknown = JSON.parse(
-    gh(["pr", "view", prNumber, "--json", "title,body,comments"]),
+    gh(["pr", "view", prNumber, "--json", "title,body,comments,baseRefName"]),
   );
   const prTitle = textOr(field(prView, "title"), "");
   const prBody = textOr(field(prView, "body"), "");
   const linked = fetchLinkedIssue(prBody);
   const reviewThreads = fetchUnresolvedThreadComments(prNumber);
   const prComments = summarisePrComments(prView, prNumber, reviewThreads);
-  const diff = safeSh("git diff main...HEAD") || sh("git diff main..HEAD");
+  const base = quote(`origin/${textOr(field(prView, "baseRefName"), "main")}`);
+  const diff =
+    (await tryRun(sandbox, `git diff ${base}...HEAD`)) ||
+    (await run(sandbox, `git diff ${base}..HEAD`));
 
   return {
     prTitle,

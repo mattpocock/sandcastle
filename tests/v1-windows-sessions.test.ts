@@ -1,20 +1,53 @@
-import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { claudeCode, createSandbox, Output } from "@ai-hero/sandcastle/v1";
 import { fakeAgent } from "@ai-hero/sandcastle/v1/testing";
-import { hostProcessProvider } from "./helpers/hostProcessProvider.js";
+import { host } from "@ai-hero/sandcastle/v1/sandboxes/host";
 
-// v1 sessions on the machine the tests run on, through a test-only provider
-// whose commands run with Sandcastle's own host command runner. It's here
-// for Windows: there, nothing in the sandbox has an `sh` (the provider leaves
-// every directory holding one off PATH), so the session supervisor's start,
-// its control channel (a named pipe), its agents and their kill must all run
-// without one. The same tests run on Linux and macOS, through `sh -c`.
+// v1 sessions on the machine the tests run on, through host(), whose
+// commands run with Sandcastle's own host command runner. It's here for
+// Windows: there, nothing in the sandbox has an `sh` (each sandbox's PATH
+// leaves out every directory holding one), so the session supervisor's
+// start, its control channel (a named pipe), its agents and their kill must
+// all run without one. The same tests run on Linux and macOS, through
+// `sh -c`.
 
 const isWindows = process.platform === "win32";
+
+const exists = async (file: string): Promise<boolean> =>
+  stat(file).then(
+    () => true,
+    () => false,
+  );
+
+/**
+ * The host's PATH with `extra` ahead of it, less every directory holding an
+ * `sh.exe` on Windows (Git for Windows puts two on it), so nothing in the
+ * sandbox can fall back on one.
+ */
+const pathWithoutSh = async (
+  extra: readonly string[] = [],
+): Promise<string> => {
+  const dirs = [...extra, ...(process.env["PATH"] ?? "").split(path.delimiter)];
+  const kept = await Promise.all(
+    dirs.map(async (dir) =>
+      dir === "" || (isWindows && (await exists(path.join(dir, "sh.exe"))))
+        ? []
+        : [dir],
+    ),
+  );
+  return kept.flat().join(path.delimiter);
+};
+
+/** A host() sandbox in `rootDir`, its PATH without `sh` on Windows. */
+const openIn = async (rootDir: string, extraPath: readonly string[] = []) =>
+  createSandbox({
+    provider: host({ create: { rootDir } }),
+    env: { PATH: await pathWithoutSh(extraPath) },
+  });
 
 const ANSWER = Output.object({
   tag: "answer",
@@ -95,9 +128,7 @@ describe("v1 sessions on this host, with no sh on Windows", () => {
   it.runIf(isWindows)(
     "has no sh: nothing in the sandbox can find one",
     async () => {
-      const sandbox = await createSandbox({
-        provider: hostProcessProvider({ rootDir }),
-      });
+      const sandbox = await openIn(rootDir);
 
       const where = await sandbox.exec({
         command: "where sh",
@@ -110,9 +141,7 @@ describe("v1 sessions on this host, with no sh on Windows", () => {
   );
 
   it("starts the supervisor, runs a session with structured output, continues it, and closes, leaving nothing behind", async () => {
-    const sandbox = await createSandbox({
-      provider: hostProcessProvider({ rootDir }),
-    });
+    const sandbox = await openIn(rootDir);
     const first = await sandbox.session({
       agent: fakeAgent({
         lines: [init("s-win"), result('<answer>{"answer": 42}</answer>')],
@@ -143,9 +172,7 @@ describe("v1 sessions on this host, with no sh on Windows", () => {
   it("runs a real agent CLI installed as npm installs it (a .cmd shim on Windows), its prompt on stdin and its argv intact", async () => {
     const bin = await mkdtemp(path.join(tmpdir(), "b-"));
     await installStubClaude(bin);
-    const sandbox = await createSandbox({
-      provider: hostProcessProvider({ rootDir, extraPath: [bin] }),
-    });
+    const sandbox = await openIn(rootDir, [bin]);
     // cmd.exe's own syntax in the model, and a prompt it could never carry.
     const model = 'm&x|y^z %PATH% "q"';
     const prompt = `Answer in <answer> tags, 100% sure.\nLine "two" & ${"long ".repeat(2000)}`;
@@ -166,11 +193,7 @@ describe("v1 sessions on this host, with no sh on Windows", () => {
   });
 
   it("runs sessions in two sandboxes at once, each with its own supervisor", async () => {
-    const provider = hostProcessProvider({ rootDir });
-    const sandboxes = await Promise.all([
-      createSandbox({ provider }),
-      createSandbox({ provider }),
-    ]);
+    const sandboxes = await Promise.all([openIn(rootDir), openIn(rootDir)]);
 
     const done = await Promise.all(
       sandboxes.map(async (sandbox, index) =>
@@ -193,9 +216,7 @@ describe("v1 sessions on this host, with no sh on Windows", () => {
   it("an abort kills the agent's whole tree: its .cmd shim, the CLI and the CLI's own child", async () => {
     const bin = await mkdtemp(path.join(tmpdir(), "b-"));
     await installStubClaude(bin);
-    const sandbox = await createSandbox({
-      provider: hostProcessProvider({ rootDir, extraPath: [bin] }),
-    });
+    const sandbox = await openIn(rootDir, [bin]);
     const controller = new AbortController();
 
     const spawned = await sandbox.spawnSession({

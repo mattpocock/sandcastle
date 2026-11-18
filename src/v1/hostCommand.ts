@@ -36,6 +36,8 @@ export interface HostCommandExit {
 
 /** A running host command. */
 export interface HostCommand {
+  /** Its process id, once started: the root of the tree `kill` takes. */
+  readonly pid: number | undefined;
   /** Its stdin, when piped. */
   readonly stdin: Writable | null;
   /** Its stdout. */
@@ -59,7 +61,7 @@ const exitCodeOf = (code: number | null, signal: string | null): number => {
 };
 
 /** `taskkill`, by absolute path where Windows says where it is. */
-const taskkill = (env: HostCommandOptions["env"]): string => {
+export const taskkill = (env: HostCommandOptions["env"]): string => {
   const root = env["SystemRoot"];
   return root === undefined
     ? "taskkill"
@@ -67,7 +69,7 @@ const taskkill = (env: HostCommandOptions["env"]): string => {
 };
 
 /** Kills `pid` and its whole tree: by process group off Windows, `taskkill /T` on it. */
-const killTree = async (
+const killHostTree = async (
   pid: number | undefined,
   env: HostCommandOptions["env"],
 ): Promise<void> => {
@@ -144,10 +146,11 @@ export const startHostCommand = async (
     throw new TypeError("a host command's stdout and stderr are piped");
   }
   return {
+    pid: child.pid,
     stdin: child.stdin,
     stdout,
     stderr,
     exited,
-    kill: async () => killTree(child.pid, options.env),
+    kill: async () => killHostTree(child.pid, options.env),
   };
 };
