@@ -29,6 +29,7 @@ export default defineConfig({
     "v1/sandboxes/podman": "src/v1/sandboxes/podman.ts",
     "v1/sandboxes/e2b": "src/v1/sandboxes/e2b.ts",
     "v1/sandboxes/modal": "src/v1/sandboxes/modal.ts",
+    "v1/sandboxes/seatbelt": "src/v1/sandboxes/seatbelt.ts",
     "v1/sandboxes/sprites": "src/v1/sandboxes/sprites.ts",
     "v1/sandboxes/vercel": "src/v1/sandboxes/vercel.ts",
   },

@@ -6,6 +6,11 @@ import { Schema } from "effect";
 // never knows which tool (bwrap, sandbox-exec…) makes the sandbox.
 
 const Env = Schema.Record({ key: Schema.String, value: Schema.String });
+/**
+ * Kill the command's process group as soon as it exits, so nothing it
+ * started outlives it: for a provider with no PID namespace to do that.
+ */
+const EndGroupOnExit = Schema.optional(Schema.Boolean);
 
 /** A request to the keeper. */
 export const KeeperRequest = Schema.Union(
@@ -21,12 +26,14 @@ export const KeeperRequest = Schema.Union(
     argv: Schema.NonEmptyArray(Schema.String),
     env: Env,
     stdin: Schema.String,
+    endGroupOnExit: EndGroupOnExit,
   }),
   /** Starts `argv` with exactly `env`, owned by the keeper alone. Replies `spawned` once it's running. */
   Schema.Struct({
     type: Schema.Literal("spawn"),
     argv: Schema.NonEmptyArray(Schema.String),
     env: Env,
+    endGroupOnExit: EndGroupOnExit,
   }),
   /** Kills everything and removes the folder. Replies `closed` once it's gone. */
   Schema.Struct({ type: Schema.Literal("close") }),
@@ -59,3 +66,65 @@ export const decodeKeeperReply = Schema.decodeUnknownEither(
 
 /** The line the keeper prints on stdout once its socket is listening. */
 export const KEEPER_READY = "ready";
+
+// A command's output as the keeper's replies stream it in.
+
+/** Splits streamed text into lines as they complete. */
+export const lineSplitter = (onLine: ((line: string) => void) | undefined) => {
+  let partial = "";
+  return {
+    push: (data: string): void => {
+      const lines = `${partial}${data}`.split("\n");
+      partial = lines.pop() ?? "";
+      for (const line of lines) {
+        onLine?.(line);
+      }
+    },
+    end: (): void => {
+      if (partial !== "") {
+        onLine?.(partial);
+      }
+    },
+  };
+};
+
+/** A command's output so far, as its replies arrive. */
+export interface Collected {
+  stdout: string;
+  stderr: string;
+  exitCode?: number;
+}
+
+/** No output yet. */
+export const emptyOutput = (): Collected => ({ stdout: "", stderr: "" });
+
+/** Adds one reply to `output`, handing each finished stdout line to `lines`. */
+export const collect = (
+  output: Collected,
+  lines: ReturnType<typeof lineSplitter>,
+  reply: KeeperReply,
+): void => {
+  switch (reply.type) {
+    case "pong":
+    case "spawned":
+    case "closed": {
+      return;
+    }
+    case "stdout": {
+      output.stdout += reply.data;
+      lines.push(reply.data);
+      return;
+    }
+    case "stderr": {
+      output.stderr += reply.data;
+      return;
+    }
+    case "exit": {
+      output.exitCode = reply.code;
+      return;
+    }
+    case "error": {
+      output.stderr += reply.message;
+    }
+  }
+};
