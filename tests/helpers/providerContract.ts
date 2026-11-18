@@ -1,4 +1,4 @@
-import { posix } from "node:path";
+import { posix, win32 } from "node:path";
 import { expect, test } from "vitest";
 import type { Sandbox } from "@ai-hero/sandcastle/v1";
 import { ExecFailedError } from "@ai-hero/sandcastle/v1";
@@ -8,6 +8,10 @@ import { ExecFailedError } from "@ai-hero/sandcastle/v1";
 // `open` makes a fresh sandbox (the suite's afterEach closes it) whose
 // commands get `env`. Each check runs through `createSandbox`, so it holds
 // whether the provider or Sandcastle does the work.
+//
+// Its commands are `node -e` scripts in single quotes, a simple command
+// every provider runs unchanged: through `sh` on a POSIX sandbox, and
+// spawned from its argv by host() on Windows, which has no `sh`.
 
 /** The value the redaction check puts in the sandbox's env. */
 export const CONTRACT_SECRET = "contract-secret-0123456789";
@@ -16,6 +20,27 @@ export const CONTRACT_SECRET = "contract-secret-0123456789";
 export type OpenSandbox = (
   env: Readonly<Record<string, string>>,
 ) => Promise<Sandbox>;
+
+/** `node -e` running `script`, which must not hold a single quote. */
+const node = (script: string): string => `node -e '${script}'`;
+
+/** Writes `content` to `file`, making its folder: `mkdir -p` and `printf`, portably. */
+const writeFileCommand = (file: string, content: string): string =>
+  node(
+    `const fs = require("node:fs"); fs.mkdirSync(require("node:path").dirname("${file}"), { recursive: true }); fs.writeFileSync("${file}", "${content}")`,
+  );
+
+/** Prints `file`: `cat`, portably. */
+const catCommand = (file: string): string =>
+  node(
+    `process.stdout.write(require("node:fs").readFileSync("${file}", "utf8"))`,
+  );
+
+/** `child` joined onto the absolute `directory`, in that path's flavour. */
+const joinTo = (directory: string, child: string): string =>
+  win32.isAbsolute(directory) && !posix.isAbsolute(directory)
+    ? win32.join(directory, child)
+    : posix.join(directory, child);
 
 /** The error `exec` rejected with; fails the test if it resolved. */
 const failureOf = async (pending: Promise<unknown>): Promise<Error> => {
@@ -32,16 +57,14 @@ const failureOf = async (pending: Promise<unknown>): Promise<Error> => {
 export const providerContract = (open: OpenSandbox): void => {
   test("contract: a relative workingDirectory on exec resolves against the sandbox's working directory", async () => {
     const sandbox = await open({});
-    await sandbox.exec(
-      "mkdir -p clone/nested && printf here > clone/nested/marker",
-    );
+    await sandbox.exec(writeFileCommand("clone/nested/marker", "here"));
 
     const relative = await sandbox.exec({
-      command: "cat marker",
+      command: catCommand("marker"),
       workingDirectory: "clone/nested",
     });
     const dotted = await sandbox.exec({
-      command: "cat nested/marker",
+      command: catCommand("nested/marker"),
       workingDirectory: "./clone",
     });
 
@@ -51,11 +74,11 @@ export const providerContract = (open: OpenSandbox): void => {
 
   test("contract: an absolute workingDirectory on exec is used as it is", async () => {
     const sandbox = await open({});
-    await sandbox.exec("mkdir -p clone && printf here > clone/marker");
+    await sandbox.exec(writeFileCommand("clone/marker", "here"));
 
     const result = await sandbox.exec({
-      command: "cat marker",
-      workingDirectory: posix.join(sandbox.workingDirectory, "clone"),
+      command: catCommand("marker"),
+      workingDirectory: joinTo(sandbox.workingDirectory, "clone"),
     });
 
     expect(result.stdout).toBe("here");
@@ -63,11 +86,11 @@ export const providerContract = (open: OpenSandbox): void => {
 
   test("contract: relative file paths resolve against the sandbox's working directory", async () => {
     const sandbox = await open({});
-    await sandbox.exec("mkdir -p notes");
-
     await sandbox.writeTextFile({ path: "notes/a.txt", content: "written" });
 
-    await expect(sandbox.exec("cat notes/a.txt")).resolves.toMatchObject({
+    await expect(
+      sandbox.exec(catCommand("notes/a.txt")),
+    ).resolves.toMatchObject({
       stdout: "written",
     });
     await expect(sandbox.readTextFile({ path: "./notes/a.txt" })).resolves.toBe(
@@ -80,8 +103,9 @@ export const providerContract = (open: OpenSandbox): void => {
 
     const error = await failureOf(
       sandbox.exec({
-        command:
-          'echo "fatal: no such ref, token $CONTRACT_TOKEN $STEP_TOKEN" >&2; exit 4',
+        command: node(
+          'process.stderr.write("fatal: no such ref, token " + process.env.CONTRACT_TOKEN + " " + process.env.STEP_TOKEN + "\\n"); process.exit(4)',
+        ),
         env: { STEP_TOKEN: "step-secret-9876543210" },
       }),
     );
@@ -100,7 +124,9 @@ export const providerContract = (open: OpenSandbox): void => {
 
     const error = await failureOf(
       sandbox.exec(
-        'i=0; while [ $i -lt 500 ]; do echo "noise line $i" >&2; i=$((i+1)); done; echo "the real $((40+2)) cause" >&2; exit 2',
+        node(
+          'for (let i = 0; i < 500; i++) process.stderr.write("noise line " + i + "\\n"); process.stderr.write("the real " + (40 + 2) + " cause\\n"); process.exit(2)',
+        ),
       ),
     );
     expect(error.message).toContain("the real 42 cause");

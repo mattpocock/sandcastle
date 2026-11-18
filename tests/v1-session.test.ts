@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import type {
   AgentStreamEvent,
+  Sandbox,
   ClaudeCodeAgentOptions,
   OutputObjectDefinition,
   OutputStringDefinition,
@@ -16,14 +17,14 @@ import {
   SessionFailedError,
   StructuredOutputError,
 } from "@ai-hero/sandcastle/v1";
-import type { FakeSandboxProvider } from "@ai-hero/sandcastle/v1/testing";
+import { host } from "@ai-hero/sandcastle/v1/sandboxes/host";
 import { fakeAgent, fakeSandbox } from "@ai-hero/sandcastle/v1/testing";
 
-// Sessions run by the session supervisor: the real bundle, copied into a fake
+// Sessions run by the session supervisor: the real bundle, copied into a
 // sandbox and run there with Node, with a fake agent replaying Claude Code
-// stream-json through the real claudeCode parser. The fake sandbox needs `sh`
-// and POSIX process groups, and the supervisor bundle comes from the build
-// (the Windows job runs from src without one), so these skip on Windows.
+// stream-json through the real claudeCode parser. The same held-session cases
+// run twice: in fakeSandbox(), which needs `sh` and POSIX process groups and
+// so skips on Windows, and in host(), on every OS (on Windows with no `sh`).
 
 const RECORDED = path.resolve(
   import.meta.dirname,
@@ -69,38 +70,79 @@ const claudeProjects = (home: string): string =>
 const listRecursive = async (dir: string): Promise<string[]> =>
   readdir(dir, { recursive: true }).catch((): string[] => []);
 
-describe.skipIf(process.platform === "win32")("sessions (v1)", () => {
+const isWindows = process.platform === "win32";
+
+/** A PATH with nothing on it. */
+const NOWHERE = isWindows ? String.raw`C:\nowhere` : "/nowhere";
+
+/** Where a suite's sandboxes come from, and how it finds a sandbox's home. */
+interface SessionWorld {
+  readonly open: () => Promise<Sandbox>;
+  readonly homeOf: (sandbox: Sandbox) => string;
+  readonly closeAll: () => Promise<void>;
+}
+
+const fakeWorld = (rootDir: string): SessionWorld => {
+  const provider = fakeSandbox({ rootDir });
+  return {
+    open: async () => createSandbox({ provider }),
+    homeOf: (sandbox) => path.join(provider.pathOf(sandbox.sandboxId), "home"),
+    closeAll: async () => provider.closeAll(),
+  };
+};
+
+const hostWorld = (rootDir: string): SessionWorld => {
+  const opened: Sandbox[] = [];
+  return {
+    open: async () => {
+      const sandbox = await createSandbox({
+        provider: host({ create: { rootDir } }),
+      });
+      opened.push(sandbox);
+      return sandbox;
+    },
+    homeOf: (sandbox) => path.join(rootDir, sandbox.sandboxId, "home"),
+    closeAll: async () => {
+      await Promise.all(opened.splice(0).map(async (made) => made.close()));
+    },
+  };
+};
+
+const sessionCases = (makeWorld: (rootDir: string) => SessionWorld): void => {
   let rootDir = "";
-  let provider: FakeSandboxProvider = fakeSandbox();
+  let world = makeWorld(tmpdir());
 
   beforeEach(async () => {
     rootDir = await mkdtemp(path.join(tmpdir(), "sandcastle-v1-session-"));
-    provider = fakeSandbox({ rootDir });
+    world = makeWorld(rootDir);
   });
 
   afterEach(async () => {
-    await provider.closeAll();
-    await rm(rootDir, { recursive: true, force: true });
+    await world.closeAll();
+    await rm(rootDir, { recursive: true, force: true, maxRetries: 20 });
   });
 
   it("copies the supervisor in at createSandbox and starts it", async () => {
-    const sandbox = await createSandbox({ provider });
-    const home = path.join(provider.pathOf(sandbox.sandboxId), "home");
+    const sandbox = await world.open();
+    const home = world.homeOf(sandbox);
 
     const files = await listRecursive(path.join(home, ".sandcastle"));
 
     expect(files).toContain(
       path.join("supervisor", sandbox.sandboxId, "supervisor.mjs"),
     );
-    expect(files).toContain(
-      path.join("supervisor", sandbox.sandboxId, "control.sock"),
-    );
+    // On Windows its channel is a named pipe, not a socket file.
+    if (!isWindows) {
+      expect(files).toContain(
+        path.join("supervisor", sandbox.sandboxId, "control.sock"),
+      );
+    }
   });
 
   it("replays a recorded claudeCode stream end to end: final message, session id, usage, context window and events", async () => {
     const recorded = await readFile(RECORDED, "utf8");
     const lines = recorded.trim().split("\n");
-    const sandbox = await createSandbox({ provider });
+    const sandbox = await world.open();
 
     const spawned = await sandbox.spawnSession({
       agent: fakeAgent({ lines }),
@@ -128,7 +170,7 @@ describe.skipIf(process.platform === "win32")("sessions (v1)", () => {
   });
 
   it("returns typed structured output validated on the host", async () => {
-    const sandbox = await createSandbox({ provider });
+    const sandbox = await world.open();
 
     const done = await sandbox.session({
       agent: fakeAgent({
@@ -161,7 +203,7 @@ describe.skipIf(process.platform === "win32")("sessions (v1)", () => {
   });
 
   it("rejects with StructuredOutputError when the output is missing or fails the schema", async () => {
-    const sandbox = await createSandbox({ provider });
+    const sandbox = await world.open();
 
     await expect(
       sandbox.session({
@@ -186,8 +228,8 @@ describe.skipIf(process.platform === "win32")("sessions (v1)", () => {
   });
 
   it("fails before starting when the prompt lacks the output's opening tag (ADR 0020)", async () => {
-    const sandbox = await createSandbox({ provider });
-    const home = path.join(provider.pathOf(sandbox.sandboxId), "home");
+    const sandbox = await world.open();
+    const home = world.homeOf(sandbox);
 
     await expect(
       sandbox.session({
@@ -204,8 +246,8 @@ describe.skipIf(process.platform === "win32")("sessions (v1)", () => {
   });
 
   it("spawnSession() resolves once the agent is running", async () => {
-    const sandbox = await createSandbox({ provider });
-    const home = path.join(provider.pathOf(sandbox.sandboxId), "home");
+    const sandbox = await world.open();
+    const home = world.homeOf(sandbox);
 
     const spawned = await sandbox.spawnSession({
       agent: fakeAgent({ lines: [init("s-running")], hang: true }),
@@ -225,7 +267,7 @@ describe.skipIf(process.platform === "win32")("sessions (v1)", () => {
   });
 
   it("two sessions spawned at once with one name: one runs, the other is refused", async () => {
-    const sandbox = await createSandbox({ provider });
+    const sandbox = await world.open();
     const spawn = async (sessionId: string) =>
       sandbox.spawnSession({
         name: "twin",
@@ -256,14 +298,14 @@ describe.skipIf(process.platform === "win32")("sessions (v1)", () => {
   });
 
   it("a session name is free again once spawning it failed", async () => {
-    const sandbox = await createSandbox({ provider });
+    const sandbox = await world.open();
 
     await expect(
       sandbox.spawnSession({
         name: "retry",
         agent: claudeCode("claude-opus-4-8"),
         prompt: "Hello",
-        env: { PATH: "/nowhere" },
+        env: { PATH: NOWHERE },
       }),
     ).rejects.toBeInstanceOf(SessionFailedError);
     await expect(
@@ -276,25 +318,26 @@ describe.skipIf(process.platform === "win32")("sessions (v1)", () => {
   });
 
   it("spawnSession() rejects when the agent can't start", async () => {
-    const sandbox = await createSandbox({ provider });
+    const sandbox = await world.open();
 
     // No `claude` on this session's PATH.
     const spawning = sandbox.spawnSession({
       agent: claudeCode("claude-opus-4-8"),
       prompt: "Hello",
-      env: { PATH: "/nowhere" },
+      env: { PATH: NOWHERE },
     });
 
     await expect(spawning).rejects.toBeInstanceOf(SessionFailedError);
     await expect(spawning).rejects.toMatchObject({
       exitReason: "failed",
       started: false,
-      exitCode: 127,
+      // On Windows, cmd.exe says it can't find the program, with its own code.
+      ...(isWindows ? {} : { exitCode: 127 }),
     });
   });
 
   it("the idle timeout fails a silent session", async () => {
-    const sandbox = await createSandbox({ provider });
+    const sandbox = await world.open();
 
     await expect(
       sandbox.session({
@@ -310,7 +353,7 @@ describe.skipIf(process.platform === "win32")("sessions (v1)", () => {
 
   // The closing-tag grace window, ported from 0.x run()'s tests (ADR 0021).
   it("force-completes on the closing tag when the agent hangs", async () => {
-    const sandbox = await createSandbox({ provider });
+    const sandbox = await world.open();
 
     const done = await sandbox.session({
       agent: fakeAgent({
@@ -329,7 +372,7 @@ describe.skipIf(process.platform === "win32")("sessions (v1)", () => {
   });
 
   it("does NOT start the grace window on the opening tag alone", async () => {
-    const sandbox = await createSandbox({ provider });
+    const sandbox = await world.open();
 
     await expect(
       sandbox.session({
@@ -346,7 +389,7 @@ describe.skipIf(process.platform === "win32")("sessions (v1)", () => {
   });
 
   it("WITHOUT output has no completion trigger: a hang rides the idle timeout", async () => {
-    const sandbox = await createSandbox({ provider });
+    const sandbox = await world.open();
 
     await expect(
       sandbox.session({
@@ -362,7 +405,7 @@ describe.skipIf(process.platform === "win32")("sessions (v1)", () => {
   });
 
   it("fails a session whose agent exits non-zero", async () => {
-    const sandbox = await createSandbox({ provider });
+    const sandbox = await world.open();
 
     await expect(
       sandbox.session({
@@ -378,8 +421,8 @@ describe.skipIf(process.platform === "win32")("sessions (v1)", () => {
   });
 
   it("continueSession continues the conversation in the same sandbox, writing nothing to the host's agent directories", async () => {
-    const sandbox = await createSandbox({ provider });
-    const home = path.join(provider.pathOf(sandbox.sandboxId), "home");
+    const sandbox = await world.open();
+    const home = world.homeOf(sandbox);
     const before = await listRecursive(claudeProjects(homedir()));
 
     const first = await sandbox.session({
@@ -411,8 +454,8 @@ describe.skipIf(process.platform === "win32")("sessions (v1)", () => {
   });
 
   it("a continued session fails when its conversation isn't in this sandbox", async () => {
-    const other = await createSandbox({ provider });
-    const sandbox = await createSandbox({ provider });
+    const other = await world.open();
+    const sandbox = await world.open();
     const first = await other.session({
       agent: fakeAgent({ lines: replying("s-elsewhere", "Planned.") }),
       prompt: "Plan it.",
@@ -429,7 +472,7 @@ describe.skipIf(process.platform === "win32")("sessions (v1)", () => {
   });
 
   it("runs two sessions at once in one sandbox", async () => {
-    const sandbox = await createSandbox({ provider });
+    const sandbox = await world.open();
 
     const [left, right] = await Promise.all([
       sandbox.session({
@@ -450,7 +493,7 @@ describe.skipIf(process.platform === "win32")("sessions (v1)", () => {
   });
 
   it("an abortSignal stops the session", async () => {
-    const sandbox = await createSandbox({ provider });
+    const sandbox = await world.open();
     const controller = new AbortController();
 
     const spawned = await sandbox.spawnSession({
@@ -466,7 +509,7 @@ describe.skipIf(process.platform === "win32")("sessions (v1)", () => {
   });
 
   it("rejects an agent that isn't a built-in one", async () => {
-    const sandbox = await createSandbox({ provider });
+    const sandbox = await world.open();
 
     await expect(
       sandbox.session({
@@ -475,4 +518,12 @@ describe.skipIf(process.platform === "win32")("sessions (v1)", () => {
       }),
     ).rejects.toThrow(/built-in agent factory/u);
   });
+};
+
+describe.skipIf(isWindows)("sessions (v1) in fakeSandbox()", () => {
+  sessionCases(fakeWorld);
+});
+
+describe("sessions (v1) in host()", () => {
+  sessionCases(hostWorld);
 });
