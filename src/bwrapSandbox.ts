@@ -1,7 +1,9 @@
 /**
  * The pieces of the `bwrap()` provider (src/sandboxes/bwrap.ts) that don't
  * run processes: the Bubblewrap arguments for a sandbox, its private dirs,
- * and the in-sandbox to host path mapping. Used only by `bwrap()`.
+ * and the in-sandbox to host path mapping. Used by `bwrap()`, and the system
+ * dir, toolchain and watcher pieces by v1's `bwrap()` too
+ * (src/v1/sandboxes/bwrapArgs.ts).
  */
 
 import { join, posix } from "node:path";
@@ -34,7 +36,7 @@ export const SANDBOX_HOME = "/home/agent";
 const SANDBOX_TMP = "/tmp";
 
 /** Host dirs every sandbox sees read-only: the system toolchain. */
-const SYSTEM_DIRS = [
+export const SYSTEM_DIRS = [
   "/usr",
   "/etc",
   "/bin",
@@ -50,46 +52,52 @@ const SYSTEM_DIRS = [
  * Host dirs that stay hidden even when the host PATH names them: WSL2's
  * Windows drives and interop, so a planted `.exe` can't run.
  */
-const DENIED_ROOTS = ["/mnt", "/run/WSL"];
-const FALLBACK_PATH = "/usr/local/bin:/usr/bin:/bin";
+export const DENIED_ROOTS = ["/mnt", "/run/WSL"];
+export const FALLBACK_PATH = "/usr/local/bin:/usr/bin:/bin";
 
 const isWithin = (path: string, root: string): boolean =>
   path === root || path.startsWith(`${root}/`);
 
 /** `--ro-bind` each system dir, or recreate it as a symlink (merged-/usr layouts). */
-const systemDirArgs: Effect.Effect<string[], never, FileSystem.FileSystem> =
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const args = yield* Effect.all(
-      SYSTEM_DIRS.map((dir) =>
-        Effect.gen(function* () {
-          const link = yield* Effect.option(fs.readLink(dir));
-          if (Option.isSome(link)) {
-            return ["--symlink", link.value, dir];
-          }
-          const exists = yield* fs
-            .exists(dir)
-            .pipe(Effect.orElseSucceed(() => false));
-          return exists ? ["--ro-bind", dir, dir] : [];
-        }),
-      ),
-    );
-    return args.flat();
-  });
+export const systemDirArgs: Effect.Effect<
+  string[],
+  never,
+  FileSystem.FileSystem
+> = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const args = yield* Effect.all(
+    SYSTEM_DIRS.map((dir) =>
+      Effect.gen(function* () {
+        const link = yield* Effect.option(fs.readLink(dir));
+        if (Option.isSome(link)) {
+          return ["--symlink", link.value, dir];
+        }
+        const exists = yield* fs
+          .exists(dir)
+          .pipe(Effect.orElseSucceed(() => false));
+        return exists ? ["--ro-bind", dir, dir] : [];
+      }),
+    ),
+  );
+  return args.flat();
+});
 
 /**
  * `/etc/resolv.conf` may point outside the system dirs (WSL2 links it into
  * `/mnt/wsl`). Mount just that file, read-only, so DNS works.
  */
-const resolvConfArgs: Effect.Effect<string[], never, FileSystem.FileSystem> =
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const target = yield* Effect.option(fs.realPath("/etc/resolv.conf"));
-    return Option.isNone(target) ||
-      SYSTEM_DIRS.some((d) => isWithin(target.value, d))
-      ? []
-      : ["--ro-bind", target.value, target.value];
-  });
+export const resolvConfArgs: Effect.Effect<
+  string[],
+  never,
+  FileSystem.FileSystem
+> = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const target = yield* Effect.option(fs.realPath("/etc/resolv.conf"));
+  return Option.isNone(target) ||
+    SYSTEM_DIRS.some((d) => isWithin(target.value, d))
+    ? []
+    : ["--ro-bind", target.value, target.value];
+});
 
 /** Every mount at its host path, in order, so read-only overlays land on their writable parents. */
 const mountArgs = (
@@ -137,7 +145,7 @@ export const bwrapMounts = (mounts: readonly MountConfig[]): IdentityMount[] =>
   resolveIdentityMounts("bwrap", mounts, SANDBOX_HOME);
 
 /** The host PATH toolchain: each readable dir `--ro-bind`, each symlinked PATH dir recreated. */
-const toolchainArgs = (toolchain: HostPathToolchain): string[] => [
+export const toolchainArgs = (toolchain: HostPathToolchain): string[] => [
   ...toolchain.readableDirs.flatMap((dir) => ["--ro-bind", dir, dir]),
   ...toolchain.symlinks.flatMap((link) => [
     "--symlink",
