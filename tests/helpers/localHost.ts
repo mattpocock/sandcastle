@@ -1,18 +1,18 @@
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { access, readdir, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { createServer } from "node:net";
+import type { Server } from "node:net";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
-import { promisify } from "node:util";
 import { z } from "zod";
 
 // What the local providers' (bwrap(), seatbelt()) tests look at from the
 // host (its processes and files), and a separate Node process that creates
-// a sandbox and detaches from it. Linux (it reads /proc) and macOS (`ps`).
-
-const run = promisify(execFile);
+// a sandbox and detaches from it, and what seatbelt()'s run in a sandbox to
+// see what it can reach. Linux (it reads /proc) and macOS (`ps`).
 
 export const exists = async (file: string): Promise<boolean> =>
   access(file).then(
@@ -22,7 +22,14 @@ export const exists = async (file: string): Promise<boolean> =>
 
 /** On macOS, the host processes whose command line holds `text`, from `ps`. */
 const psMentioning = async (text: string): Promise<string[]> => {
-  const { stdout } = await run("/bin/ps", ["-A", "-ww", "-o", "pid=,command="]);
+  const ps = spawn("/bin/ps", ["-A", "-ww", "-o", "pid=,command="], {
+    stdio: ["ignore", "pipe", "inherit"],
+  });
+  let stdout = "";
+  ps.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+    stdout += chunk;
+  });
+  await once(ps, "close");
   return stdout.split("\n").flatMap((line) => {
     const row = /^\s*(?<pid>\d+)\s+(?<command>.*)$/u.exec(line)?.groups;
     return row?.["command"]?.includes(text) === true ? [row["pid"] ?? ""] : [];
@@ -116,4 +123,34 @@ export const someProcessMentions = async (text: string): Promise<boolean> => {
 export const isGone = async (file: string): Promise<boolean> => {
   const there = await exists(file);
   return !there;
+};
+
+/** `node -e` that connects to `target` (a port on 127.0.0.1, or a socket path): exit 0 if it can, 3 if not. */
+export const connectCommand = (target: number | string): string => {
+  const to =
+    typeof target === "number"
+      ? `${String(target)}, "127.0.0.1"`
+      : JSON.stringify(target);
+  return `node -e 'require("net").connect(${to}).on("connect", () => process.exit(0)).on("error", () => process.exit(3))'`;
+};
+
+/** `node -e` that looks up a public name: exit 0 if it resolves, 3 if not. */
+export const LOOKUP =
+  'node -e \'require("dns").lookup("github.com", (error) => process.exit(error ? 3 : 0))\'';
+
+/** A TCP server on the host's loopback, to reach from a sandbox, and its port. */
+export const hostListener = async (): Promise<{
+  readonly server: Server;
+  readonly port: number;
+}> => {
+  const server = createServer((socket) => {
+    socket.end();
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    throw new TypeError("the listener has no port");
+  }
+  return { server, port: address.port };
 };

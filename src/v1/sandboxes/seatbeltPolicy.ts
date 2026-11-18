@@ -2,6 +2,9 @@ import { posix } from "node:path";
 import type { SeatbeltPolicy } from "../../seatbeltProfile.js";
 import { buildSeatbeltPolicy } from "../../seatbeltProfile.js";
 
+export type { SeatbeltPolicy } from "../../seatbeltProfile.js";
+export { SYSTEM_READ_ROOTS } from "../../seatbeltProfile.js";
+
 // The Seatbelt profile of a v1 seatbelt() sandbox: 0.x's deny-by-default
 // profile (seatbeltProfile.ts), re-scoped from a worktree to the sandbox's
 // own folder, with the rules a sandbox that holds nothing of the caller's
@@ -49,6 +52,34 @@ const ancestorsWithin = (path: string, root: string): string[] => {
   return dirs;
 };
 
+/** Hides metadata under `hidden`, but for `shown`. */
+const metadataRules = (
+  hidden: readonly string[],
+  shown: readonly string[],
+): string[] =>
+  hidden.length === 0
+    ? []
+    : [
+        "; v1: the caller's folders show nothing, not even metadata, beyond the way to a root.",
+        `(deny file-read-metadata\n${hidden.join("\n")})`,
+        `(allow file-read-metadata\n${shown.join("\n")})`,
+      ];
+
+/** Unix sockets only at `dns` and in `own`. */
+const socketRules = (dns: string, own: readonly string[]): string[] => [
+  "; v1: Unix sockets only in the sandbox's own folders, and the DNS resolver's.",
+  '(deny network-outbound (subpath "/"))',
+  `(allow network-outbound\n  (literal ${dns})\n${own.join("\n")})`,
+];
+
+/** `network: "none"`. */
+const NO_IP = [
+  '; v1: network "none": no IP traffic, the host loopback included.',
+  '(deny network-outbound (remote ip "*:*"))',
+  '(deny network-inbound (local ip "*:*"))',
+  '(deny network-bind (local ip "*:*"))',
+];
+
 /** Appends v1's rules, and their `-D` parameters, to 0.x's policy. */
 const appendRules = (
   policy: SeatbeltPolicy,
@@ -80,24 +111,9 @@ const appendRules = (
     (path) => `  (subpath ${ref("SOCKETS", path)})`,
   );
   const rules = [
-    "; v1: the caller's folders show nothing, not even metadata, beyond the way to a root.",
-    ...(hidden.length === 0
-      ? []
-      : [
-          `(deny file-read-metadata\n${hidden.join("\n")})`,
-          `(allow file-read-metadata\n${[...literals, ...subpaths].join("\n")})`,
-        ]),
-    "; v1: Unix sockets only in the sandbox's own folders, and the DNS resolver's.",
-    '(deny network-outbound (subpath "/"))',
-    `(allow network-outbound\n  (literal ${ref("DNS", DNS_SOCKET)})\n${ownSockets.join("\n")})`,
-    ...(input.network === "none"
-      ? [
-          '; v1: network "none": no IP traffic, the host loopback included.',
-          '(deny network-outbound (remote ip "*:*"))',
-          '(deny network-inbound (local ip "*:*"))',
-          '(deny network-bind (local ip "*:*"))',
-        ]
-      : []),
+    ...metadataRules(hidden, [...literals, ...subpaths]),
+    ...socketRules(ref("DNS", DNS_SOCKET), ownSockets),
+    ...(input.network === "none" ? NO_IP : []),
     "",
   ];
   return { profile: `${policy.profile}${rules.join("\n")}`, params };

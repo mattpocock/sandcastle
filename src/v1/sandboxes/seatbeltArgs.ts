@@ -1,14 +1,14 @@
 import { realpath } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { SYSTEM_READ_ROOTS } from "../../seatbeltProfile.js";
 import { SANDBOX_EXEC, sandboxExecArgs } from "../../seatbeltSandbox.js";
 import { LIFELINE_FD } from "./localKeeperServer.js";
 import type { LocalSetup } from "./localProviderSandbox.js";
 import type { LocalSandboxFolder } from "./localSandboxState.js";
 import type { LocalSettings } from "./localToolchain.js";
 import { hostPathDirs, hostToolchain, requireTools } from "./localToolchain.js";
-import { sandboxPolicy } from "./seatbeltPolicy.js";
+import type { SeatbeltPolicy } from "./seatbeltPolicy.js";
+import { SYSTEM_READ_ROOTS, sandboxPolicy } from "./seatbeltPolicy.js";
 
 // The argv and env of each seatbelt() command: `sandbox-exec` with the
 // sandbox's profile, run by its keeper. Seatbelt can't remap paths, so the
@@ -50,6 +50,42 @@ const WATCHED = `{ read -r _ || :; kill -9 0; } <&${LIFELINE_FD} >/dev/null 2>&1
 exec ${LIFELINE_FD}<&-
 exec /bin/sh -c "$1"`;
 
+/** The sandbox's profile: its own home and tmp, and the host toolchain read-only. */
+const policyFor = async ({
+  home,
+  tmp,
+  toolchain,
+  settings,
+}: {
+  readonly home: string;
+  readonly tmp: string;
+  readonly toolchain: Awaited<ReturnType<typeof hostToolchain>>;
+  readonly settings: SeatbeltSettings;
+}): Promise<SeatbeltPolicy> => {
+  const extra = settings.toolchainPaths;
+  const hidden = await Promise.all(
+    [homedir(), tmpdir(), ...HIDDEN_ROOTS].map(async (dir) =>
+      realOrNothing(dir),
+    ),
+  );
+  const extraReal = await Promise.all(
+    extra.map(async (dir) => realOrNothing(dir)),
+  );
+  return sandboxPolicy({
+    readableRoots: [
+      ...SYSTEM_READ_ROOTS,
+      ...(await realOrNothing(XCODE_SELECT_LINK)),
+      ...toolchain.readableDirs,
+      ...extraReal.flat(),
+    ],
+    writableRoots: [home, tmp],
+    lookupPaths: [...toolchain.pathEntries, ...extra],
+    hiddenRoots: hidden.flat(),
+    network: settings.network,
+    hostHome: homedir(),
+  });
+};
+
 /**
  * How to run commands in the sandbox in `folder`. Rejects, before anything
  * runs, when a required tool isn't on the host PATH.
@@ -70,27 +106,7 @@ export const seatbeltSetup = async (
   const found = [...toolchain.pathEntries, ...extra];
   const path = found.length > 0 ? found : FALLBACK_PATH;
   await requireTools("seatbelt", path);
-  const hidden = await Promise.all(
-    [homedir(), tmpdir(), ...HIDDEN_ROOTS].map(async (dir) =>
-      realOrNothing(dir),
-    ),
-  );
-  const extraReal = await Promise.all(
-    extra.map(async (dir) => realOrNothing(dir)),
-  );
-  const policy = sandboxPolicy({
-    readableRoots: [
-      ...SYSTEM_READ_ROOTS,
-      ...(await realOrNothing(XCODE_SELECT_LINK)),
-      ...toolchain.readableDirs,
-      ...extraReal.flat(),
-    ],
-    writableRoots: [home, tmp],
-    lookupPaths: [...toolchain.pathEntries, ...extra],
-    hiddenRoots: hidden.flat(),
-    network: settings.network,
-    hostHome: homedir(),
-  });
+  const policy = await policyFor({ home, tmp, toolchain, settings });
   return {
     workingDirectory: join(home, "workspace"),
     launch: ({ command, workingDirectory, sudo, env }) => {

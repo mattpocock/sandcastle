@@ -1,4 +1,3 @@
-import { once } from "node:events";
 import {
   mkdtemp,
   readdir,
@@ -7,8 +6,6 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { createServer } from "node:net";
-import type { AddressInfo, Server } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -28,10 +25,13 @@ import {
   seatbeltSkipsHere,
 } from "./helpers/localAgents.js";
 import {
+  connectCommand,
   detachFromNewProcess,
   eventually,
   exists,
+  hostListener,
   isGone,
+  LOOKUP,
   processesMentioning,
   someProcessMentions,
 } from "./helpers/localHost.js";
@@ -48,17 +48,6 @@ import { providerContract } from "./helpers/providerContract.js";
 
 const SECRET = "whsec_c2FuZGNhc3RsZS1zZWF0YmVsdC10ZXN0LXNlY3JldA==";
 
-/** `node -e` that connects to `target` (a port on 127.0.0.1, or a socket path): exit 0 if it can, 3 if not. */
-const connectCommand = (target: number | string): string => {
-  const to =
-    typeof target === "number"
-      ? `${String(target)}, "127.0.0.1"`
-      : JSON.stringify(target);
-  return `node -e 'require("net").connect(${to}).on("connect", () => process.exit(0)).on("error", () => process.exit(3))'`;
-};
-const LOOKUP =
-  'node -e \'require("dns").lookup("github.com", (error) => process.exit(error ? 3 : 0))\'';
-
 /** A seatbelt() sandbox reattached by id, failing the test when its supervisor isn't there. */
 const reattachOrFail = async (
   sandboxId: string,
@@ -68,14 +57,6 @@ const reattachOrFail = async (
     throw new Error("the supervisor should be there");
   }
   return handle;
-};
-
-/** A TCP server on the host's loopback, to reach from a sandbox. */
-const hostListener = async (): Promise<Server> => {
-  const server = createServer((socket) => socket.end());
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  return server;
 };
 
 describe.skipIf(seatbeltSkipsHere())("seatbelt() (v1)", () => {
@@ -151,8 +132,7 @@ describe.skipIf(seatbeltSkipsHere())("seatbelt() (v1)", () => {
   });
 
   it('shares the host network by default, and `network: "none"` allows no IP traffic, not even to the host loopback', async () => {
-    const server = await hostListener();
-    const { port } = server.address() as AddressInfo;
+    const { server, port } = await hostListener();
     await using shared = await createSandbox({ provider: seatbelt() });
     await using none = await createSandbox({
       provider: seatbelt({ create: { network: "none" } }),
@@ -319,12 +299,13 @@ describe.skipIf(seatbeltSkipsHere())("seatbelt() (v1)", () => {
   it("kills what a command left behind in its process group as the command exits", async () => {
     await using sandbox = await createSandbox({ provider: seatbelt() });
 
-    await sandbox.exec("sleep 31411 > /dev/null 2>&1 &");
+    const started = await sandbox.exec("sleep 31411 > /dev/null 2>&1 &");
 
     await eventually(async () => {
       const running = await someProcessMentions("31411");
       return !running;
     }, 10_000);
+    expect(started.exitCode).toBe(0);
   });
 
   it("kills the commands, even what left their process group, and removes the sandbox's folder on close(), and a second close() does nothing", async () => {

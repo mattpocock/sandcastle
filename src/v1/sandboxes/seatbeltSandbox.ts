@@ -4,11 +4,7 @@ import type {
   ProviderCreateOptions,
   ProviderSandbox,
 } from "../SandboxProvider.js";
-import {
-  createLocalSandbox,
-  getLocalSandbox,
-  spawnInLocalSandbox,
-} from "./localProviderSandbox.js";
+import { createLocalSandbox, getLocalSandbox } from "./localProviderSandbox.js";
 import type { SeatbeltSettings } from "./seatbeltArgs.js";
 import { seatbeltSetup } from "./seatbeltArgs.js";
 
@@ -64,4 +60,4 @@ export const getSeatbeltSandbox = async (
   });
 
 /** Starts work under the sandbox's keeper, so it outlives this process. */
-export const spawnInSeatbeltSandbox = spawnInLocalSandbox;
+export { spawnInLocalSandbox as spawnInSeatbeltSandbox } from "./localProviderSandbox.js";

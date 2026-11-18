@@ -6,11 +6,7 @@ import type {
 } from "../SandboxProvider.js";
 import type { BwrapSettings } from "./bwrapArgs.js";
 import { BWRAP_WORKSPACE, bwrapLaunch } from "./bwrapArgs.js";
-import {
-  createLocalSandbox,
-  getLocalSandbox,
-  spawnInLocalSandbox,
-} from "./localProviderSandbox.js";
+import { createLocalSandbox, getLocalSandbox } from "./localProviderSandbox.js";
 
 // Making, finding and starting work in bwrap() sandboxes. Each sandbox is a
 // folder on the host, owned by its keeper (localProviderSandbox.ts); each
@@ -69,4 +65,4 @@ export const getBwrapSandbox = async (
   });
 
 /** Starts work under the sandbox's keeper, so it outlives this process. */
-export const spawnInBwrapSandbox = spawnInLocalSandbox;
+export { spawnInLocalSandbox as spawnInBwrapSandbox } from "./localProviderSandbox.js";

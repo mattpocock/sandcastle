@@ -8,12 +8,13 @@ import { Either } from "effect";
 import type { ProviderExecResult } from "../SandboxProvider.js";
 import type { KeeperReply, KeeperRequest } from "./localKeeperProtocol.js";
 import {
+  collect,
   decodeKeeperReply,
+  emptyOutput,
   encodeKeeperLine,
   KEEPER_READY,
+  lineSplitter,
 } from "./localKeeperProtocol.js";
-import { collect, lineSplitter } from "./localKeeperOutput.js";
-import type { Collected } from "./localKeeperOutput.js";
 import { keeperProgram } from "./localKeeperProgram.js";
 import type { LocalSandboxFolder } from "./localSandboxState.js";
 import {
@@ -52,6 +53,16 @@ const requestOf = ({ argv, env, endGroupOnExit }: KeeperCommand) => ({
 const keeperFailed = (detail: string): Error =>
   new Error(`the sandbox's keeper ${detail}`);
 
+/** Throws when the keeper's socket path is too long for this OS to listen at. */
+const assertSocketFits = (folder: LocalSandboxFolder): void => {
+  const socket = keeperSocket(folder);
+  if (Buffer.byteLength(socket) >= SOCKET_PATH_LIMIT) {
+    throw keeperFailed(
+      `can't listen at ${socket}: the path is longer than this OS allows a socket's. Set XDG_STATE_HOME to a shorter folder.`,
+    );
+  }
+};
+
 /**
  * Starts the keeper of the sandbox in `folder`, detached in its own session
  * so it outlives this process, and resolves once it's listening.
@@ -59,12 +70,7 @@ const keeperFailed = (detail: string): Error =>
 export const startKeeper = async (
   folder: LocalSandboxFolder,
 ): Promise<void> => {
-  const socket = keeperSocket(folder);
-  if (Buffer.byteLength(socket) >= SOCKET_PATH_LIMIT) {
-    throw keeperFailed(
-      `can't listen at ${socket}: the path is longer than this OS allows a socket's. Set XDG_STATE_HOME to a shorter folder.`,
-    );
-  }
+  assertSocketFits(folder);
   const log = await open(keeperLog(folder), "a", 0o600);
   const keeper = spawn(process.execPath, [await keeperProgram(), folder.path], {
     detached: true,
@@ -186,7 +192,7 @@ export const keeperExec = async (
     readonly abortSignal?: AbortSignal;
   },
 ): Promise<ProviderExecResult> => {
-  const output: Collected = { stdout: "", stderr: "" };
+  const output = emptyOutput();
   const lines = lineSplitter(command.onLine);
   const { stdin, abortSignal } = command;
   const reached = await ask(

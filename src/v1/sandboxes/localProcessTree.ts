@@ -1,6 +1,6 @@
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { access } from "node:fs/promises";
-import { promisify } from "node:util";
 
 // Killing everything a local sandbox's keeper started, by process group
 // only: never `kill -1`, which on a host with no PID namespace (macOS) is
@@ -10,7 +10,26 @@ import { promisify } from "node:util";
 // A process whose parent has already exited has left the tree, so a group
 // kill is all that reaches it.
 
-const run = promisify(execFile);
+/** `file`'s stdout, or "" when it fails. */
+const stdoutOf = async (
+  file: string,
+  args: readonly string[],
+): Promise<string> => {
+  const child = spawn(file, args, {
+    env: {},
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  let stdout = "";
+  child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+    stdout += chunk;
+  });
+  // `once` rejects on an "error" event: a `ps` that couldn't start.
+  const ok = await once(child, "close").then(
+    ([code]: unknown[]) => code === 0,
+    () => false,
+  );
+  return ok ? stdout : "";
+};
 
 /** `ps` by absolute path: the keeper runs with no `PATH`. */
 const PS_CANDIDATES = ["/bin/ps", "/usr/bin/ps"];
@@ -41,13 +60,7 @@ const processTable = async (): Promise<Row[]> => {
   if (ps === undefined) {
     return [];
   }
-  const output = await run(ps, ["-A", "-o", "pid=,ppid=,pgid="], {
-    env: {},
-    maxBuffer: 16 * 1024 * 1024,
-  }).then(
-    ({ stdout }) => stdout,
-    () => "",
-  );
+  const output = await stdoutOf(ps, ["-A", "-o", "pid=,ppid=,pgid="]);
   return output.split("\n").flatMap((line) => {
     const [pid, ppid, pgid] = line.trim().split(/\s+/u).map(Number);
     return pid !== undefined &&
