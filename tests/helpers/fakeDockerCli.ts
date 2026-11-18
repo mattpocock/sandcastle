@@ -13,7 +13,7 @@
 // `calls.jsonl`, and `faults.json` asks for failures (see FakeDockerFaults).
 // POSIX only.
 
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { once } from "node:events";
 import {
@@ -70,18 +70,33 @@ const find = async (ref: string): Promise<Meta | undefined> => {
 
 const dirOf = (meta: Meta): string => path.join(containers, meta.id);
 
-/** Kills every process group the container started, then removes it. */
-const remove = async (meta: Meta): Promise<void> => {
-  const groups = await readFile(path.join(dirOf(meta), "groups"), "utf8").catch(
-    () => "",
-  );
-  for (const pgid of groups.split("\n").filter((line) => line !== "")) {
+// Kills the recorded groups and their descendants' (agents get their own).
+const killTree = (recorded: readonly string[]): void => {
+  const rows = execFileSync("ps", ["-A", "-o", "pid=,ppid=,pgid="], {
+    encoding: "utf8",
+  })
+    .trim()
+    .split("\n")
+    .map((line) => line.trim().split(/\s+/u));
+  const inside = new Set(rows.filter((row) => recorded.includes(row[2] ?? "")));
+  for (const parent of inside) {
+    for (const row of rows) if (row[1] === parent[0]) inside.add(row);
+  }
+  for (const row of inside) {
     try {
-      process.kill(-Number(pgid), "SIGKILL");
+      process.kill(-Number(row[2]), "SIGKILL");
     } catch {
       // Already gone.
     }
   }
+};
+
+/** Kills every process the container started, and theirs, then removes it. */
+const remove = async (meta: Meta): Promise<void> => {
+  const groups = await readFile(path.join(dirOf(meta), "groups"), "utf8").catch(
+    () => "",
+  );
+  killTree(groups.split("\n").filter((line) => line !== ""));
   await rm(dirOf(meta), { recursive: true, force: true });
 };
 
