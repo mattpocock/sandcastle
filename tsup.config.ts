@@ -24,6 +24,7 @@ export default defineConfig({
     "v1/testing": "src/v1/testing.ts",
     "v1/tasks": "src/v1/tasks.ts",
     "v1/sandboxes/daytona": "src/v1/sandboxes/daytona.ts",
+    "v1/sandboxes/docker": "src/v1/sandboxes/docker.ts",
     "v1/sandboxes/e2b": "src/v1/sandboxes/e2b.ts",
     "v1/sandboxes/modal": "src/v1/sandboxes/modal.ts",
     "v1/sandboxes/sprites": "src/v1/sandboxes/sprites.ts",
