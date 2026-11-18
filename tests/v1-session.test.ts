@@ -532,6 +532,7 @@ describe.skipIf(isWindows)("sessions (v1) in fakeSandbox()", () => {
   sessionCases(fakeWorld);
 });
 
-describe("sessions (v1) in host()", () => {
+// A Windows runner starts a session supervisor in seconds, not milliseconds.
+describe("sessions (v1) in host()", { timeout: 30_000 }, () => {
   sessionCases(hostWorld);
 });
