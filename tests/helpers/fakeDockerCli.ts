@@ -180,10 +180,10 @@ const keep = async ([id = "", ...command]: readonly string[]) => {
     return;
   }
   const [file = "sh", ...args] = command;
-  const child = spawn(file, args, { detached: true, stdio: "ignore" });
-  const closed = once(child, "close");
-  await record(meta, child.pid);
-  await closed;
+  // In the keeper's own group, which `run` recorded: one kill takes both, with
+  // no moment where the entrypoint runs in a group nobody has recorded yet.
+  const child = spawn(file, args, { stdio: "ignore" });
+  await once(child, "close");
   await remove(meta);
 };
 
