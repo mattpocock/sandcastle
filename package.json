@@ -62,6 +62,10 @@
       "import": "./dist/v1/tasks.js",
       "types": "./dist/v1/tasks.d.ts"
     },
+    "./v1/sandboxes/bwrap": {
+      "import": "./dist/v1/sandboxes/bwrap.js",
+      "types": "./dist/v1/sandboxes/bwrap.d.ts"
+    },
     "./v1/sandboxes/daytona": {
       "import": "./dist/v1/sandboxes/daytona.js",
       "types": "./dist/v1/sandboxes/daytona.d.ts"
