@@ -1,0 +1,5 @@
+---
+"@ai-hero/sandcastle": minor
+---
+
+v1 (`@ai-hero/sandcastle/v1/sandboxes/podman`): `podman()`, a v1 provider factory for Podman containers (rootless by default), a drop-in for the remote providers built on the same container engine code as `docker()`. `podman({ image, create })` takes a required image (with Node.js, git and `sh`) and, under `create`, the `podman run` settings Sandcastle doesn't control: docker's (`network`, `cpus`, `memory`, `pidsLimit`, `user`, `labels`, `capAdd`, `capDrop`) plus `userns` (typed `PodmanCreateOptions`). There is no `--userns=keep-id` default: nothing of the host is mounted, so there's no file ownership to map. Each sandbox starts with an empty working directory you clone into, ends at its kill time through a keep-alive entrypoint and `--rm`, and is detachable (`podman exec -d`, then `reattachSandbox` by id). Detached rootless runs need lingering on (`loginctl enable-linger`) to outlive logout. Needs only the `podman` CLI on PATH. See `docs/v1/podman.md`.

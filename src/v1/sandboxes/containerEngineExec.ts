@@ -33,8 +33,9 @@ const ABORTED_EXIT_CODE = 143;
 const MISSING_EXIT_CODE = 44;
 
 /**
- * The command's shell first says its pid, the leader of the process group
- * the engine starts each exec in, so an abort can kill the whole group. The
+ * The command's shell first says its pid, so an abort can kill it and what
+ * it started: the process group it leads under Docker, its process tree
+ * under Podman. The
  * command runs in a subshell (an `exit` ends only that), and its status is
  * printed as a last stderr line: the engine CLI's own exit code can't be
  * trusted, since a CLI killed mid-command exits 0. The command arrives as
@@ -96,7 +97,25 @@ const unwrap = (
   };
 };
 
-/** Kills an exec's process group in the container, as root. Never rejects. */
+/**
+ * Kills the process group led by `$1`. Docker starts each exec as a group
+ * leader; Podman doesn't, so there it kills `$1` and its descendants. It
+ * lists each process's parent from `/proc/<pid>/stat` (the field after
+ * `comm`, which can hold spaces, so the line is cut after its last `)`),
+ * then grows the set from `$1` until no process joins.
+ */
+const KILL_TREE = [
+  'kill -TERM -"$1" 2>/dev/null && exit',
+  `l=$(for f in /proc/[0-9]*/stat; do read -r s 2>/dev/null <"$f" || continue; r=\${s##*) }; r=\${r#* }; p=\${f#/proc/}; echo "\${p%/stat} \${r%% *}"; done)`,
+  't=" $1 "; n=',
+  'while [ "$n" != "$t" ]; do n=$t; while read -r p pp; do case "$t" in *" $p "*) ;; *" $pp "*) t="$t$p ";; esac; done <<E',
+  "$l",
+  "E",
+  "done",
+  "kill -TERM $t",
+].join("\n");
+
+/** Kills an exec's process group (or tree) in the container, as root. Never rejects. */
 const killGroup = async (context: ContainerContext, pid: string) =>
   runCli(context.engine, [
     "exec",
@@ -105,7 +124,7 @@ const killGroup = async (context: ContainerContext, pid: string) =>
     context.id,
     "sh",
     "-c",
-    'kill -TERM -"$1" 2>/dev/null || kill -TERM "$1"',
+    KILL_TREE,
     "sh",
     pid,
   ]).catch(() => undefined);

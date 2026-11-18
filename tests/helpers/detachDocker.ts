@@ -1,24 +1,32 @@
 /**
- * A host process that creates a docker() sandbox, starts a session in it,
+ * A host process that creates a docker() (or podman()) sandbox, starts a session in it,
  * detaches with a finish report, prints `{ sandboxId, detachId }` and exits.
  * Run as a separate Node process (see {@link detachDockerFromChild}), so the
  * detached work outlives the process that started it.
  *
- *   node --import tsx tests/helpers/detachDocker.ts <image> <report url> <secret>
+ *   node --import tsx tests/helpers/detachDocker.ts <docker|podman> <image> <report url> <secret>
  */
 
 import { createSandbox, Output } from "@ai-hero/sandcastle/v1";
 import { docker } from "@ai-hero/sandcastle/v1/sandboxes/docker";
+import { podman } from "@ai-hero/sandcastle/v1/sandboxes/podman";
 import { fakeAgent } from "@ai-hero/sandcastle/v1/testing";
 import { z } from "zod";
 
-const [image, url, secret] = process.argv.slice(2);
-if (image === undefined || url === undefined || secret === undefined) {
-  throw new Error("usage: detachDocker.ts <image> <report url> <secret>");
+const [engine, image, url, secret] = process.argv.slice(2);
+if (
+  (engine !== "docker" && engine !== "podman") ||
+  image === undefined ||
+  url === undefined ||
+  secret === undefined
+) {
+  throw new Error(
+    "usage: detachDocker.ts <docker|podman> <image> <report url> <secret>",
+  );
 }
 
 const sandbox = await createSandbox({
-  provider: docker({ image }),
+  provider: engine === "docker" ? docker({ image }) : podman({ image }),
   env: { SANDBOX_TOKEN: "for-sessions" },
 });
 await sandbox.spawnSession({
