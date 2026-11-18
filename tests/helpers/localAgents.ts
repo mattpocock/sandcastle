@@ -3,7 +3,8 @@ import { fakeAgent } from "@ai-hero/sandcastle/v1/testing";
 import { z } from "zod";
 import { NATIVE_PROVIDERS, skipsHere } from "./nativeProviders.js";
 
-// The bwrap() suites' fake agents, and whether they run here.
+// The local providers' (bwrap(), seatbelt()) suites' fake agents, and
+// whether they run here.
 
 /** The structured output the detach tests' fake agent gives. */
 export const ANSWER = Output.object({
@@ -42,4 +43,14 @@ export const bwrapSkipsHere = (): boolean => {
     throw new Error("NATIVE_PROVIDERS has no bwrap() entry");
   }
   return skipsHere(BWRAP);
+};
+
+const SEATBELT = NATIVE_PROVIDERS.find((p) => p.name === "seatbelt()");
+
+/** Whether the seatbelt() suites skip here: off macOS, or without a working sandbox-exec outside CI. */
+export const seatbeltSkipsHere = (): boolean => {
+  if (SEATBELT === undefined) {
+    throw new Error("NATIVE_PROVIDERS has no seatbelt() entry");
+  }
+  return skipsHere(SEATBELT);
 };

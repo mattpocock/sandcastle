@@ -1,11 +1,9 @@
 // bwrap(), the Bubblewrap provider factory. Its entry point is ./bwrap.ts.
 
-import { homedir } from "node:os";
-import { isAbsolute, posix } from "node:path";
 import type { SandboxProvider } from "../SandboxProvider.js";
 import { createSandboxProvider } from "../SandboxProvider.js";
-import type { BwrapSettings } from "./bwrapArgs.js";
 import type { BwrapNative } from "./bwrapSandbox.js";
+import { localSettings } from "./localToolchain.js";
 import {
   createBwrapSandbox,
   getBwrapSandbox,
@@ -39,29 +37,6 @@ export interface BwrapOptions {
   /** What each sandbox is made of. Ignored by `reattachSandbox`, which reads it back from the sandbox. */
   readonly create?: BwrapCreateOptions;
 }
-
-const isWithin = (path: string, root: string): boolean =>
-  root === "/" || path === root || path.startsWith(`${root}/`);
-
-/** The create options as kept in the sandbox's folder, checked. */
-const settingsOf = (create: BwrapCreateOptions | undefined): BwrapSettings => {
-  const home = homedir();
-  const toolchainPaths = (create?.toolchainPaths ?? []).map((path) => {
-    if (!isAbsolute(path)) {
-      throw new TypeError(
-        `bwrap(): create.toolchainPaths must be absolute, got "${path}"`,
-      );
-    }
-    const normalized = posix.normalize(path).replace(/(?<=.)\/$/u, "");
-    if (isWithin(home, normalized)) {
-      throw new TypeError(
-        `bwrap(): create.toolchainPaths can't show "${path}": it is your home folder, or holds it`,
-      );
-    }
-    return normalized;
-  });
-  return { network: create?.network ?? "host", toolchainPaths };
-};
 
 /**
  * A provider of Bubblewrap sandboxes, on this Linux (or WSL2) machine. A
@@ -99,7 +74,7 @@ const settingsOf = (create: BwrapCreateOptions | undefined): BwrapSettings => {
 export const bwrap = (
   options: BwrapOptions = {},
 ): SandboxProvider<BwrapNative, true> => {
-  const settings = settingsOf(options.create);
+  const settings = localSettings("bwrap", options.create);
   return createSandboxProvider({
     name: "bwrap",
     create: async (createOptions) =>
