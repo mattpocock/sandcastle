@@ -26,6 +26,7 @@ export default defineConfig({
     "v1/sandboxes/bwrap": "src/v1/sandboxes/bwrap.ts",
     "v1/sandboxes/daytona": "src/v1/sandboxes/daytona.ts",
     "v1/sandboxes/docker": "src/v1/sandboxes/docker.ts",
+    "v1/sandboxes/podman": "src/v1/sandboxes/podman.ts",
     "v1/sandboxes/e2b": "src/v1/sandboxes/e2b.ts",
     "v1/sandboxes/modal": "src/v1/sandboxes/modal.ts",
     "v1/sandboxes/seatbelt": "src/v1/sandboxes/seatbelt.ts",
