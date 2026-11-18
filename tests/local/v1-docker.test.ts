@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { Sandbox } from "@ai-hero/sandcastle/v1";
+import type { DetachableSandbox } from "@ai-hero/sandcastle/v1";
 import {
   createSandbox,
   reattachSandbox,
@@ -37,8 +37,8 @@ describe.skipIf(imagesFor("docker") === undefined)(
       image: IMAGE,
       create: { labels: { "sandcastle-local-test": run } },
     });
-    const made: Sandbox[] = [];
-    const open = async (timeLimitMinutes = 10): Promise<Sandbox> => {
+    const made: DetachableSandbox[] = [];
+    const open = async (timeLimitMinutes = 10): Promise<DetachableSandbox> => {
       const sandbox = await createSandbox({
         provider,
         env: { SANDBOX_TOKEN: "tok-real" },
