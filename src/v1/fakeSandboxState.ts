@@ -62,9 +62,12 @@ export const killGroup = (pid: number): void => {
 // leaves that child running, orphaned. It takes one `ps` snapshot before any
 // kill, while each child still has its parent. It spares its own group, so
 // the reaper lives to remove the directory.
+//
+// The recorded groups reach awk through its environment: macOS's awk refuses
+// a newline in a `-v` value.
 const KILL_SANDBOX = String.raw`recorded=$(ls "$SANDCASTLE_FAKE_DIR/.fake/groups" 2>/dev/null)
-ps -A -o pid= -o ppid= -o pgid= | awk -v recorded="$recorded" -v self="$$" '
-  BEGIN { n = split(recorded, r, "\n"); for (i = 1; i <= n; i++) if (r[i] != "") want[r[i]] = 1 }
+ps -A -o pid= -o ppid= -o pgid= | SANDCASTLE_FAKE_GROUPS="$recorded" awk -v self="$$" '
+  BEGIN { n = split(ENVIRON["SANDCASTLE_FAKE_GROUPS"], r); for (i = 1; i <= n; i++) want[r[i]] = 1 }
   { parent[$1] = $2; group[$1] = $3; if ($3 in want) inside[$1] = 1 }
   END {
     do {

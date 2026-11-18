@@ -70,19 +70,19 @@ const find = async (ref: string): Promise<Meta | undefined> => {
 
 const dirOf = (meta: Meta): string => path.join(containers, meta.id);
 
-// Kills the recorded groups and their descendants' (agents get their own).
+// Kills the recorded groups (the keeper's from `run` on) and their descendants'
+// (agents get their own), but not its caller's: the keeper removes it after.
 const killTree = (recorded: readonly string[]): void => {
   const rows = execFileSync("ps", ["-A", "-o", "pid=,ppid=,pgid="], {
     encoding: "utf8",
   })
-    .trim()
     .split("\n")
     .map((line) => line.trim().split(/\s+/u));
   const inside = new Set(rows.filter((row) => recorded.includes(row[2] ?? "")));
   for (const parent of inside) {
     for (const row of rows) if (row[1] === parent[0]) inside.add(row);
   }
-  for (const row of inside) {
+  for (const row of [...inside].filter((r) => r[2] !== String(process.pid))) {
     try {
       process.kill(-Number(row[2]), "SIGKILL");
     } catch {
@@ -91,7 +91,6 @@ const killTree = (recorded: readonly string[]): void => {
   }
 };
 
-/** Kills every process the container started, and theirs, then removes it. */
 const remove = async (meta: Meta): Promise<void> => {
   const groups = await readFile(path.join(dirOf(meta), "groups"), "utf8").catch(
     () => "",
@@ -162,6 +161,7 @@ const run = async (args: readonly string[]): Promise<void> => {
     ],
     { detached: true, stdio: "ignore" },
   );
+  await record(meta, keeper.pid);
   keeper.unref();
   const { execFails } = await faults();
   if (execFails === "run") {
