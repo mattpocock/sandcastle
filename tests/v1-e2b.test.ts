@@ -296,7 +296,7 @@ describe.skipIf(process.platform === "win32")("e2b() (v1)", () => {
   });
 
   it("kills the sandbox when the session supervisor can't start in it", async () => {
-    fakeE2B.failCommand = /command -v node/u;
+    fakeE2B.failCommand = /homedir\(\)/u;
 
     await expect(createSandbox({ provider: e2b() })).rejects.toThrow(
       CreateSandboxError,
