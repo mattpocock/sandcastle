@@ -1,0 +1,3 @@
+# npm test skips tests/local/ and only strips types, so a type error in a
+# test file would otherwise first surface in CI.
+npm run typecheck
