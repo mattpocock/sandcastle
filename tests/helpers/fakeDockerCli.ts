@@ -17,6 +17,7 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { once } from "node:events";
+import { existsSync } from "node:fs";
 import {
   appendFile,
   mkdir,
@@ -199,6 +200,16 @@ const execEnv = async (meta: Meta, flags: Map<string, string[]>) => {
   return { cwd: flags.get("-w")?.[0] ?? home, env };
 };
 
+/**
+ * Podman starts a foreground exec in no process group of its own, so an
+ * abort falls back to killing the process tree it reads from `/proc`. The
+ * fake's commands run on the host, so it mimics that only where the host has
+ * a `/proc` (Linux, not macOS); real containers always do.
+ */
+const noOwnGroup =
+  process.env["FAKE_DOCKER_ENGINE"] === "podman" &&
+  existsSync("/proc/self/stat");
+
 const exec = async (args: readonly string[]): Promise<void> => {
   const { flags, rest } = parse(args);
   const [ref = "", file = "sh", ...argv] = rest;
@@ -216,8 +227,7 @@ const exec = async (args: readonly string[]): Promise<void> => {
   const child = spawn(file, argv, {
     cwd,
     env,
-    // Podman starts a foreground exec in no process group of its own.
-    detached: detached || process.env["FAKE_DOCKER_ENGINE"] !== "podman",
+    detached: detached || !noOwnGroup,
     stdio: detached
       ? "ignore"
       : [flags.has("-i") ? "inherit" : "ignore", "inherit", "inherit"],
