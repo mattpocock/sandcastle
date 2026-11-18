@@ -3,7 +3,9 @@ import { DateTime, Either, Option, Schema } from "effect";
 import type {
   ProviderCreateOptions,
   ProviderSandbox,
+  SandboxProvider,
 } from "../SandboxProvider.js";
+import { createSandboxProvider } from "../SandboxProvider.js";
 import type { ContainerEngine } from "./containerEngineCli.js";
 import { cliError, runCli, runCliOrFail } from "./containerEngineCli.js";
 import type { ContainerContext } from "./containerEngineExec.js";
@@ -241,4 +243,28 @@ export const spawnInContainer = async (
     );
   }
   await containerSpawnDetached(context, options);
+};
+
+/**
+ * The detachable provider for `engine`, named after its CLI: what `docker()`
+ * and `podman()` return once they've mapped their options to `run`.
+ */
+export const containerProvider = (
+  engine: ContainerEngine,
+  run: ContainerRun,
+): SandboxProvider<EngineContainer, true> => {
+  if (typeof run.image !== "string" || run.image === "") {
+    throw new TypeError(
+      `${engine.cli}: \`image\` is required: an image with Node.js, git and \`sh\``,
+    );
+  }
+  return createSandboxProvider({
+    name: engine.cli,
+    create: async (createOptions) =>
+      createContainerSandbox(engine, run, createOptions),
+    detach: {
+      spawnDetached: spawnInContainer,
+      get: async (sandboxId) => getContainerSandbox(engine, sandboxId),
+    },
+  });
 };

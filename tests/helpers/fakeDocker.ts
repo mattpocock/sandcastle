@@ -13,7 +13,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 // The fake `docker` CLI (tests/helpers/fakeDockerCli.ts) first on PATH, for
-// tests of the v1 docker() provider that run no real engine. POSIX only.
+// tests of the v1 docker() and podman() providers that run no real engine:
+// installed as `docker` or as `podman`, which take the same verbs. POSIX only.
 
 /** Failures the fake can be asked for. */
 export interface FakeDockerFaults {
@@ -58,15 +59,20 @@ const removeContainer = async (wrapper: string, id: string): Promise<void> => {
   });
 };
 
-/** Puts a fresh fake `docker` first on this process's PATH (inherited by its children). */
-export const installFakeDocker = async (): Promise<FakeDocker> => {
-  const root = await mkdtemp(path.join(tmpdir(), "sandcastle-fake-docker-"));
+/** The CLI the fake stands in for. */
+export type FakeEngine = "docker" | "podman";
+
+/** Puts a fresh fake `docker` (or `podman`) first on this process's PATH (inherited by its children). */
+export const installFakeDocker = async (
+  engine: FakeEngine = "docker",
+): Promise<FakeDocker> => {
+  const root = await mkdtemp(path.join(tmpdir(), `sandcastle-fake-${engine}-`));
   const bin = path.join(root, "bin");
   await mkdir(bin);
-  const wrapper = path.join(bin, "docker");
+  const wrapper = path.join(bin, engine);
   await writeFile(
     wrapper,
-    `#!/bin/sh\nFAKE_DOCKER_ROOT='${root}' exec '${process.execPath}' --no-warnings '${CLI}' "$@"\n`,
+    `#!/bin/sh\nFAKE_DOCKER_ROOT='${root}' FAKE_DOCKER_ENGINE='${engine}' exec '${process.execPath}' --no-warnings '${CLI}' "$@"\n`,
   );
   await chmod(wrapper, 0o755);
   const originalPath = process.env["PATH"];
@@ -112,7 +118,7 @@ export const installFakeDocker = async (): Promise<FakeDocker> => {
       const runs = await callsOf("run");
       const last = runs.at(-1);
       if (last === undefined) {
-        throw new Error("docker run was not called");
+        throw new Error(`${engine} run was not called`);
       }
       return last;
     },

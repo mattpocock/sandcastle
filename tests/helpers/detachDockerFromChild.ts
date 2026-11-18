@@ -5,7 +5,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 // Runs tests/helpers/detachDocker.ts in a separate Node process: it creates a
-// docker() sandbox, starts a session, detaches with a finish report and
+// docker() (or podman()) sandbox, starts a session, detaches with a finish report and
 // exits. What it made then has only the container to keep it going.
 
 const TSX_LOADER = pathToFileURL(
@@ -30,11 +30,12 @@ const isDetached = (value: unknown): value is DetachedInChild =>
   typeof value.detachId === "string";
 
 /**
- * Creates and detaches from a docker() sandbox in a child process (with this
- * process's env, so the same `docker` on PATH), and resolves once that
- * process has exited.
+ * Creates and detaches from a docker() sandbox (or a podman() one, with
+ * `engine: "podman"`) in a child process (with this process's env, so the
+ * same CLI on PATH), and resolves once that process has exited.
  */
 export const detachDockerFromChild = async (options: {
+  readonly engine?: "docker" | "podman";
   readonly image: string;
   readonly url: string;
   readonly secret: string;
@@ -45,6 +46,7 @@ export const detachDockerFromChild = async (options: {
       "--import",
       TSX_LOADER,
       SCRIPT,
+      options.engine ?? "docker",
       options.image,
       options.url,
       options.secret,

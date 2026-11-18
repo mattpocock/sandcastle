@@ -2,13 +2,9 @@
 
 import type { LinuxCapability } from "../../LinuxCapability.js";
 import type { SandboxProvider } from "../SandboxProvider.js";
-import { createSandboxProvider } from "../SandboxProvider.js";
 import type { ContainerEngine, EngineContainer } from "./containerEngine.js";
-import {
-  createContainerSandbox,
-  getContainerSandbox,
-  spawnInContainer,
-} from "./containerEngine.js";
+import { containerProvider } from "./containerEngine.js";
+import { sharedRunFlags } from "./containerEngineFlags.js";
 
 /**
  * The `docker run` settings Sandcastle leaves to you, each mapped to its
@@ -63,33 +59,6 @@ const DOCKER: ContainerEngine = {
   startHint: "Start Docker Desktop (or the Docker daemon)",
 };
 
-const each = (flag: string, values: readonly string[] | undefined) =>
-  (values ?? []).flatMap((value) => [flag, value]);
-
-const one = (flag: string, value: string | number | undefined) =>
-  value === undefined ? [] : [flag, String(value)];
-
-/** `create` as `docker run` flags. */
-const runFlags = (create: DockerCreateOptions = {}): string[] => {
-  const { network } = create;
-  return [
-    ...each("--network", typeof network === "string" ? [network] : network),
-    ...one("--cpus", create.cpus),
-    ...one("--memory", create.memory),
-    ...one("--memory-swap", create.memory),
-    ...one("--pids-limit", create.pidsLimit),
-    ...one("--user", create.user),
-    ...each(
-      "--label",
-      Object.entries(create.labels ?? {}).map(
-        ([key, value]) => `${key}=${value}`,
-      ),
-    ),
-    ...each("--cap-add", create.capAdd),
-    ...each("--cap-drop", create.capDrop),
-  ];
-};
-
 /**
  * A provider of Docker containers, run by the `docker` CLI on the host's
  * PATH. Nothing of the host is mounted: each sandbox starts with an empty
@@ -120,20 +89,8 @@ const runFlags = (create: DockerCreateOptions = {}): string[] => {
  */
 export const docker = (
   options: DockerOptions,
-): SandboxProvider<EngineContainer, true> => {
-  if (typeof options.image !== "string" || options.image === "") {
-    throw new TypeError(
-      "docker: `image` is required: an image with Node.js, git and `sh`",
-    );
-  }
-  const run = { image: options.image, runFlags: runFlags(options.create) };
-  return createSandboxProvider({
-    name: "docker",
-    create: async (createOptions) =>
-      createContainerSandbox(DOCKER, run, createOptions),
-    detach: {
-      spawnDetached: spawnInContainer,
-      get: async (sandboxId) => getContainerSandbox(DOCKER, sandboxId),
-    },
+): SandboxProvider<EngineContainer, true> =>
+  containerProvider(DOCKER, {
+    image: options.image,
+    runFlags: sharedRunFlags(options.create),
   });
-};

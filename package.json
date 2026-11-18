@@ -74,6 +74,10 @@
       "import": "./dist/v1/sandboxes/docker.js",
       "types": "./dist/v1/sandboxes/docker.d.ts"
     },
+    "./v1/sandboxes/podman": {
+      "import": "./dist/v1/sandboxes/podman.js",
+      "types": "./dist/v1/sandboxes/podman.d.ts"
+    },
     "./v1/sandboxes/e2b": {
       "import": "./dist/v1/sandboxes/e2b.js",
       "types": "./dist/v1/sandboxes/e2b.d.ts"

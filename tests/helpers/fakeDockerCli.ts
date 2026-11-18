@@ -1,9 +1,10 @@
 // A fake `docker` CLI, run as a script (`node fakeDockerCli.ts <args>`, Node
 // strips the types) by the `docker` wrapper tests/helpers/fakeDocker.ts puts
-// first on PATH. A container is a host directory under
+// first on PATH (named `docker` or `podman`). A container is a host directory under
 // `$FAKE_DOCKER_ROOT/containers/<id>`, and its commands are real `sh`
 // processes on the host, each in its own process group, as `docker exec`'s
-// are. Paths in the container are host paths, so `$HOME` is
+// are. As `podman`, a foreground exec gets no process group of its own, as
+// Podman's don't. Paths in the container are host paths, so `$HOME` is
 // `<container>/home` (or `<container>/root` with `--user root`).
 //
 // It knows `run -d`, `exec` (with `-i`, `-d`, `--user`, `-w`, `--env-file`),
@@ -101,6 +102,7 @@ const VALUE_FLAGS = new Set([
   "--memory-swap",
   "--pids-limit",
   "--user",
+  "--userns",
   "--cap-add",
   "--cap-drop",
   "-w",
@@ -214,7 +216,8 @@ const exec = async (args: readonly string[]): Promise<void> => {
   const child = spawn(file, argv, {
     cwd,
     env,
-    detached: true,
+    // Podman starts a foreground exec in no process group of its own.
+    detached: detached || process.env["FAKE_DOCKER_ENGINE"] !== "podman",
     stdio: detached
       ? "ignore"
       : [flags.has("-i") ? "inherit" : "ignore", "inherit", "inherit"],
@@ -270,7 +273,9 @@ const main = async (): Promise<void> => {
   const { daemonDown } = await faults();
   if (daemonDown === true) {
     fail(
-      "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?",
+      process.env["FAKE_DOCKER_ENGINE"] === "podman"
+        ? "Cannot connect to Podman. Please verify your connection to the Linux system using `podman system connection list`, or try `podman machine init` and `podman machine start` to manage a new Linux VM"
+        : "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?",
     );
   }
   const verbs: Record<string, (rest: readonly string[]) => Promise<void>> = {
