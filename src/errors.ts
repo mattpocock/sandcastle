@@ -116,6 +116,17 @@ export class AgentError extends Data.TaggedError("AgentError")<{
   readonly message: string;
   /** Host path to the preserved worktree, set when the worktree was kept after failure. */
   readonly preservedWorktreePath?: string;
+  /**
+   * Commits the agent made before it failed, when the failure came after the
+   * agent had already committed. Empty or absent when it made none.
+   *
+   * A long streaming turn can be dropped by the provider *after* the agent has
+   * committed — pi then reports only a connection error and exits 0. Without
+   * this, the work exists on the branch but the run reports failure with no
+   * trace of it, so callers cannot tell `nothing happened` from `it finished
+   * the work and died on the way out`.
+   */
+  readonly commits?: readonly { readonly sha: string }[];
 }> {}
 
 /** .sandcastle/ config directory missing */

@@ -1,11 +1,12 @@
 import { Effect } from "effect";
 import { Display } from "./Display.js";
-import type {
-  ExecError,
-  HookTimeoutError,
-  SandboxError,
-  SyncError,
-  SyncOutPathError,
+import {
+  AgentError,
+  type ExecError,
+  type HookTimeoutError,
+  type SandboxError,
+  type SyncError,
+  type SyncOutPathError,
 } from "./errors.js";
 import { hostGit } from "./hostGit.js";
 import {
@@ -249,6 +250,57 @@ const mergeBack = (
     );
   });
 
+/**
+ * Collects the commits a failed agent left behind and attaches them to its
+ * AgentError, so a caller can tell "the agent produced nothing" from "the
+ * agent finished the work and then died on the way out".
+ *
+ * A long streaming turn can be dropped by the provider after the agent has
+ * already committed: pi reports only a connection error and exits 0, and the
+ * orchestrator fails the iteration before it collects commits. The work is on
+ * the branch and the worktree is preserved, but nothing in the result points
+ * at it.
+ *
+ * Only commits are reported; the merge is not attempted, because a failed run
+ * must leave HEAD untouched (ADR 0003).
+ */
+const recordCommitsAfterFailure = (
+  run: LifecycleRun,
+  target: {
+    readonly baseHead: string;
+    readonly targetBranch: string;
+    readonly hostCurrentBranch: string | null;
+    readonly error: SandboxError;
+  },
+): Effect.Effect<SandboxError, never, Display> =>
+  Effect.gen(function* () {
+    if (!(target.error instanceof AgentError)) {
+      return target.error;
+    }
+    // Pull the agent's commits back for isolated providers, as the success
+    // path does; a no-op for bind-mount ones.
+    yield* syncToHost(run, target.baseHead).pipe(
+      Effect.catchAll(() => Effect.void),
+    );
+    // The agent's commits always sit on the target branch, whichever strategy
+    // put it there: the host branch in head mode, the temp branch in
+    // merge-to-head, the named one in branch mode. HEAD is only correct in
+    // head mode, where the two coincide.
+    const commits = yield* collectCommitsLogged(
+      `${target.baseHead}..refs/heads/${target.targetBranch}`,
+      run.options.hostRepoDir,
+      run.commitCollectionTimeoutMs,
+    ).pipe(Effect.catchAll(() => Effect.succeed([] as { sha: string }[])));
+    if (commits.length === 0) {
+      return target.error;
+    }
+    return new AgentError({
+      message: target.error.message,
+      preservedWorktreePath: target.error.preservedWorktreePath,
+      commits,
+    });
+  });
+
 export const withSandboxLifecycle = <A>(
   options: SandboxLifecycleOptions,
   sandbox: SandboxService,
@@ -277,7 +329,16 @@ export const withSandboxLifecycle = <A>(
     );
 
     // Run the caller's work
-    const result = yield* work({ sandbox, sandboxRepoDir, baseHead });
+    const result = yield* work({ sandbox, sandboxRepoDir, baseHead }).pipe(
+      Effect.catchAll((error) =>
+        recordCommitsAfterFailure(run, {
+          baseHead,
+          targetBranch,
+          hostCurrentBranch,
+          error,
+        }).pipe(Effect.flatMap((e) => Effect.fail(e))),
+      ),
+    );
     yield* syncToHost(run, baseHead);
 
     if (hostCurrentBranch === null) {
