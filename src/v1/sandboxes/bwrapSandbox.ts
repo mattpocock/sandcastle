@@ -168,7 +168,7 @@ export const createBwrapSandbox = async (
 export const getBwrapSandbox = async (
   sandboxId: string,
 ): Promise<BwrapProviderSandbox | undefined> => {
-  const folder = await findSandboxFolder(sandboxId);
+  const folder = await findSandboxFolder("bwrap", sandboxId);
   if (folder === undefined || !(await keeperAlive(folder))) {
     return undefined;
   }

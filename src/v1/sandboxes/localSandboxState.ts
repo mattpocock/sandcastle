@@ -29,6 +29,8 @@ import { Config, DateTime, Effect, Either, Option, Schema } from "effect";
 export interface LocalSandboxFolder {
   /** The sandbox's id: also the folder's name. */
   readonly sandboxId: string;
+  /** The provider that made it, e.g. `"bwrap"`: the id's prefix. */
+  readonly provider: string;
   /** The folder itself. */
   readonly path: string;
   /** The host folder behind the sandbox's home. */
@@ -68,11 +70,13 @@ const folderAt = (
   path: string,
   {
     sandboxId,
+    provider,
     killTime,
     settings,
   }: Omit<LocalSandboxFolder, "path" | "home" | "tmp">,
 ): LocalSandboxFolder => ({
   sandboxId,
+  provider,
   path,
   home: join(path, "home"),
   tmp: join(path, "tmp"),
@@ -104,6 +108,7 @@ export const makeSandboxFolder = async (options: {
   await mkdir(path, { mode: 0o700 });
   const folder = folderAt(path, {
     sandboxId,
+    provider: options.provider,
     killTime: options.killTime,
     settings: options.settings,
   });
@@ -135,28 +140,32 @@ export const readSandboxFolder = async (
   if (metadata === undefined || Either.isLeft(metadata)) {
     return undefined;
   }
-  const { sandboxId, killTime, settings } = metadata.right;
+  const { sandboxId, provider, killTime, settings } = metadata.right;
   const time = DateTime.make(killTime);
   return Option.isNone(time)
     ? undefined
     : folderAt(path, {
         sandboxId,
+        provider,
         killTime: DateTime.toDateUtc(time.value),
         settings,
       });
 };
 
-/** A sandbox's folder by its id, or `undefined` when there's none. */
+/** A sandbox's folder by its id, or `undefined` when `provider` made none by that id. */
 export const findSandboxFolder = async (
+  provider: string,
   sandboxId: string,
 ): Promise<LocalSandboxFolder | undefined> => {
-  if (!SANDBOX_ID.test(sandboxId)) {
+  if (!SANDBOX_ID.test(sandboxId) || !sandboxId.startsWith(`${provider}-`)) {
     return undefined;
   }
   const folder = await readSandboxFolder(
     join(await sandboxesRoot(), sandboxId),
   );
-  return folder?.sandboxId === sandboxId ? folder : undefined;
+  return folder?.sandboxId === sandboxId && folder.provider === provider
+    ? folder
+    : undefined;
 };
 
 /** Gives this user write access to every folder under `path`, so it can be removed. */

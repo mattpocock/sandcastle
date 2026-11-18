@@ -490,5 +490,9 @@ describe.skipIf(bwrapSkipsHere())("bwrap() (v1)", () => {
       _tag: "SandboxUnavailableError",
       sandboxId: "bwrap-0000000000000000",
     });
+    // Another provider's id, or a path, never reaches a folder.
+    await expect(
+      reattachSandbox({ provider: bwrap(), sandboxId: "../../etc" }),
+    ).rejects.toBeInstanceOf(SandboxUnavailableError);
   }, 30_000);
 });
