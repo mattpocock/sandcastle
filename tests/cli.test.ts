@@ -388,9 +388,9 @@ describe("sandcastle init without a TTY", () => {
   });
 }, 30_000);
 
-// Every beads sandbox opens the host's .beads/ with the image's bd 1.3.2. A
+// Every beads sandbox opens the host's .beads/ with the image's bd 1.3.4. A
 // different host bd breaks one side (an older one can't create issues once
-// 1.3.2 has migrated the database), so init warns. The fake bd is a POSIX
+// 1.3.4 has migrated the database), so init warns. The fake bd is a POSIX
 // shell script, so these don't run on Windows.
 describe.skipIf(process.platform === "win32")(
   "sandcastle init --issue-tracker beads and the host's bd version",
@@ -423,14 +423,14 @@ describe.skipIf(process.platform === "win32")(
       );
 
       expect(result).toMatchObject({ exitCode: 0 });
-      expect(dockerfile).toContain("ARG BEADS_VERSION=1.3.2");
+      expect(dockerfile).toContain("ARG BEADS_VERSION=1.3.4");
       expect(result.output).toContain("bd 1.0.0");
       expect(result.output).toContain("can no longer create issues");
     });
 
     it("says nothing when the host bd matches the image's", async () => {
       const { result } = await initWithHostBd(
-        "bd version 1.3.2 (0123abcd: HEAD@0123abcd)",
+        "bd version 1.3.4 (0123abcd: HEAD@0123abcd)",
       );
 
       expect(result.output).toContain("Init complete");
