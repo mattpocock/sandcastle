@@ -74,6 +74,9 @@ export const startKeeper = async (
   const log = await open(keeperLog(folder), "a", 0o600);
   const keeper = spawn(process.execPath, [await keeperProgram(), folder.path], {
     detached: true,
+    // Not the caller's folder: the keeper's commands start where it runs,
+    // and a sandbox that can't see that folder fails to start a shell in it.
+    cwd: "/",
     // None of the host's env: the keeper needs none, and passes none on.
     env: {},
     stdio: ["ignore", "pipe", log.fd],
