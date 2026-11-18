@@ -1,24 +1,29 @@
 /**
- * A host process that creates a bwrap() sandbox, starts a session in it,
+ * A host process that creates a local (bwrap() or seatbelt()) sandbox, starts a session in it,
  * detaches with a finish report, prints the receipt as one JSON line and
  * exits. Run as a separate Node process (see {@link detachFromNewProcess}),
  * so a test can show the detached run reports after the process that made
  * the sandbox has gone.
  *
- *   node --import tsx tests/helpers/detachBwrapSandbox.ts <report url> <secret>
+ *   node --import tsx tests/helpers/detachLocalSandbox.ts <bwrap|seatbelt> <report url> <secret>
  */
 
 import { createSandbox, Output } from "@ai-hero/sandcastle/v1";
 import { bwrap } from "@ai-hero/sandcastle/v1/sandboxes/bwrap";
+import { seatbelt } from "@ai-hero/sandcastle/v1/sandboxes/seatbelt";
 import { fakeAgent } from "@ai-hero/sandcastle/v1/testing";
 import { z } from "zod";
 
-const [url, secret] = process.argv.slice(2);
+const [provider, url, secret] = process.argv.slice(2);
 if (url === undefined || secret === undefined) {
-  throw new Error("usage: detachBwrapSandbox.ts <report url> <secret>");
+  throw new Error(
+    "usage: detachLocalSandbox.ts <bwrap|seatbelt> <report url> <secret>",
+  );
 }
 
-const sandbox = await createSandbox({ provider: bwrap() });
+const sandbox = await createSandbox({
+  provider: provider === "seatbelt" ? seatbelt() : bwrap(),
+});
 await sandbox.spawnSession({
   name: "implement",
   // Prints its answer, then hangs until the completion timeout ends it.

@@ -10,13 +10,16 @@ import {
   decodeKeeperRequest,
   encodeKeeperLine,
 } from "./localKeeperProtocol.js";
+import { killGroup, killProcessTree } from "./localProcessTree.js";
 
 // The keeper's side of its socket: it runs each command it's asked to as its
 // own child, so it can kill every one of them at the kill time or on close,
 // whoever asked. Each child gets its own process group, and a lifeline on
 // LIFELINE_FD whose other end only the keeper holds: the child reads
 // end-of-file once the keeper closes it or dies, however it dies, and a
-// provider's argv can watch that fd to end its sandbox.
+// provider's argv can watch that fd to end its sandbox. Every kill is by
+// process group, never `kill -1`: with no PID namespace (seatbelt() on
+// macOS), that's every process the user has.
 
 /** The fd each child's lifeline is on. */
 export const LIFELINE_FD = 4;
@@ -30,19 +33,20 @@ export interface KeeperContext {
   readonly shutdown: () => Promise<void>;
 }
 
-/** SIGKILLs a child's process group and closes its lifeline. */
-export const killChild = (child: ChildProcess): void => {
-  child.stdio[LIFELINE_FD]?.destroy();
+/**
+ * SIGKILLs a child's process group, and those of every process below it,
+ * and closes its lifeline. The tree is walked first: once the child is
+ * killed, what it started is no longer below it.
+ */
+export const killChild = async (child: ChildProcess): Promise<void> => {
   if (child.pid !== undefined) {
-    try {
-      process.kill(-child.pid, "SIGKILL");
-    } catch {
-      // Already gone.
-    }
+    await killProcessTree([child.pid]);
   }
+  child.stdio[LIFELINE_FD]?.destroy();
+  killGroup(child.pid);
 };
 
-/** Kills every child, waiting (a while) for each to exit. */
+/** Kills every child and all they started, waiting (a while) for each to exit. */
 export const killChildren = async (
   children: ReadonlySet<ChildProcess>,
 ): Promise<void> => {
@@ -52,9 +56,10 @@ export const killChildren = async (
       ? once(child, "close").then(() => undefined)
       : undefined,
   );
-  for (const child of running) {
-    killChild(child);
-  }
+  // Everything below the keeper, even what a command moved out of its
+  // child's group (a detached spawn), while it's still in the tree.
+  await killProcessTree([process.pid]);
+  await Promise.all(running.map(async (child) => killChild(child)));
   await Promise.race([Promise.allSettled(exits), sleep(EXIT_WAIT_MS)]);
 };
 
@@ -67,7 +72,11 @@ const send = (socket: Socket, reply: KeeperReply): void => {
 /** Starts a child the keeper owns, tracked until it exits. */
 const startChild = (
   context: KeeperContext,
-  request: { readonly argv: readonly string[]; readonly env: object },
+  request: {
+    readonly argv: readonly string[];
+    readonly env: object;
+    readonly endGroupOnExit?: boolean | undefined;
+  },
   stdio: "pipe" | "ignore",
 ): ChildProcess => {
   const [file = "", ...args] = request.argv;
@@ -82,6 +91,13 @@ const startChild = (
   };
   child.once("close", forget);
   child.on("error", forget);
+  if (request.endGroupOnExit === true) {
+    // Nothing it started outlives it, as with a PID namespace: its group
+    // is killed as it exits.
+    child.once("exit", () => {
+      killGroup(child.pid);
+    });
+  }
   child.stdio[LIFELINE_FD]?.on("error", () => undefined);
   return child;
 };
@@ -94,7 +110,7 @@ const runExec = (
   const child = startChild(context, request, "pipe");
   socket.once("close", () => {
     if (child.exitCode === null && child.signalCode === null) {
-      killChild(child);
+      void killChild(child);
     }
   });
   child.on("error", (error) => {

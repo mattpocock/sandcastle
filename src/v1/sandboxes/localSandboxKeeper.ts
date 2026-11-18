@@ -8,9 +8,12 @@ import { Either } from "effect";
 import type { ProviderExecResult } from "../SandboxProvider.js";
 import type { KeeperReply, KeeperRequest } from "./localKeeperProtocol.js";
 import {
+  collect,
   decodeKeeperReply,
+  emptyOutput,
   encodeKeeperLine,
   KEEPER_READY,
+  lineSplitter,
 } from "./localKeeperProtocol.js";
 import { keeperProgram } from "./localKeeperProgram.js";
 import type { LocalSandboxFolder } from "./localSandboxState.js";
@@ -33,10 +36,32 @@ const ABORTED_EXIT_CODE = 143;
 export interface KeeperCommand {
   readonly argv: readonly [string, ...string[]];
   readonly env: Readonly<Record<string, string>>;
+  /** Kill its process group as it exits, where there's no PID namespace to. */
+  readonly endGroupOnExit?: boolean;
 }
+
+/** The longest Unix socket path, in bytes, with its NUL: macOS's is the shorter. */
+const SOCKET_PATH_LIMIT = process.platform === "darwin" ? 104 : 108;
+
+/** A command as the keeper's request carries it. */
+const requestOf = ({ argv, env, endGroupOnExit }: KeeperCommand) => ({
+  argv,
+  env,
+  ...(endGroupOnExit === true ? { endGroupOnExit } : {}),
+});
 
 const keeperFailed = (detail: string): Error =>
   new Error(`the sandbox's keeper ${detail}`);
+
+/** Throws when the keeper's socket path is too long for this OS to listen at. */
+const assertSocketFits = (folder: LocalSandboxFolder): void => {
+  const socket = keeperSocket(folder);
+  if (Buffer.byteLength(socket) >= SOCKET_PATH_LIMIT) {
+    throw keeperFailed(
+      `can't listen at ${socket}: the path is longer than this OS allows a socket's. Set XDG_STATE_HOME to a shorter folder.`,
+    );
+  }
+};
 
 /**
  * Starts the keeper of the sandbox in `folder`, detached in its own session
@@ -45,9 +70,13 @@ const keeperFailed = (detail: string): Error =>
 export const startKeeper = async (
   folder: LocalSandboxFolder,
 ): Promise<void> => {
+  assertSocketFits(folder);
   const log = await open(keeperLog(folder), "a", 0o600);
   const keeper = spawn(process.execPath, [await keeperProgram(), folder.path], {
     detached: true,
+    // Not the caller's folder: the keeper's commands start where it runs,
+    // and a sandbox that can't see that folder fails to start a shell in it.
+    cwd: "/",
     // None of the host's env: the keeper needs none, and passes none on.
     env: {},
     stdio: ["ignore", "pipe", log.fd],
@@ -157,63 +186,6 @@ const ended = (folder: LocalSandboxFolder): Error =>
     `sandbox ${folder.sandboxId} has ended: it was closed, or reached its kill time`,
   );
 
-/** Splits streamed text into lines as they complete. */
-const lineSplitter = (onLine: ((line: string) => void) | undefined) => {
-  let partial = "";
-  return {
-    push: (data: string): void => {
-      const lines = `${partial}${data}`.split("\n");
-      partial = lines.pop() ?? "";
-      for (const line of lines) {
-        onLine?.(line);
-      }
-    },
-    end: (): void => {
-      if (partial !== "") {
-        onLine?.(partial);
-      }
-    },
-  };
-};
-
-/** A command's output so far, as its replies arrive. */
-interface Collected {
-  stdout: string;
-  stderr: string;
-  exitCode?: number;
-}
-
-/** Adds one reply to `output`, handing each finished stdout line to `lines`. */
-const collect = (
-  output: Collected,
-  lines: ReturnType<typeof lineSplitter>,
-  reply: KeeperReply,
-): void => {
-  switch (reply.type) {
-    case "pong":
-    case "spawned":
-    case "closed": {
-      return;
-    }
-    case "stdout": {
-      output.stdout += reply.data;
-      lines.push(reply.data);
-      return;
-    }
-    case "stderr": {
-      output.stderr += reply.data;
-      return;
-    }
-    case "exit": {
-      output.exitCode = reply.code;
-      return;
-    }
-    case "error": {
-      output.stderr += reply.message;
-    }
-  }
-};
-
 /** Has the keeper run a command, streaming its stdout to `onLine` line by line. */
 export const keeperExec = async (
   folder: LocalSandboxFolder,
@@ -223,12 +195,12 @@ export const keeperExec = async (
     readonly abortSignal?: AbortSignal;
   },
 ): Promise<ProviderExecResult> => {
-  const output: Collected = { stdout: "", stderr: "" };
+  const output = emptyOutput();
   const lines = lineSplitter(command.onLine);
-  const { argv, env, stdin, abortSignal } = command;
+  const { stdin, abortSignal } = command;
   const reached = await ask(
     folder,
-    { type: "exec", argv, env, stdin },
+    { type: "exec", ...requestOf(command), stdin },
     {
       onReply: (reply) => {
         collect(output, lines, reply);
@@ -258,7 +230,7 @@ export const keeperSpawn = async (
   let outcome: KeeperReply | undefined;
   const reached = await ask(
     folder,
-    { type: "spawn", argv: command.argv, env: command.env },
+    { type: "spawn", ...requestOf(command) },
     {
       onReply: (reply) => {
         outcome = reply;
