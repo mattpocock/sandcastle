@@ -1,4 +1,4 @@
-import { posix } from "node:path";
+import { joinInSandbox } from "./sandboxPath.js";
 import {
   Array as Arr,
   Chunk,
@@ -117,7 +117,7 @@ const step = ({ sandbox, directory, options }: Followed, cursor: Cursor) =>
       status.ended.some((work) => work.id === session.id);
     const text = yield* Effect.promise(async () =>
       sandbox.readTextFile({
-        path: posix.join(directory, eventsFile(session.id)),
+        path: joinInSandbox(directory, eventsFile(session.id)),
       }),
     );
     const read = newEvents(text ?? "", cursor.offset);

@@ -21,8 +21,8 @@ import type {
   ExecResult,
 } from "../SandboxProvider.js";
 import { BoundedTail, MAX_TAIL_CHARS } from "../boundedTail.js";
-import { planWindowsExec } from "./windowsCommand.js";
-import type { SpawnPlan } from "./windowsCommand.js";
+import { planWindowsExec } from "../v1/windowsCommand.js";
+import type { SpawnPlan } from "../v1/windowsCommand.js";
 
 export interface NoSandboxOptions {
   /** Environment variables injected by this provider. Merged at launch time. */

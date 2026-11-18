@@ -1,4 +1,4 @@
-import { posix } from "node:path";
+import { joinInSandbox } from "./sandboxPath.js";
 import { DateTime, Either, Schema } from "effect";
 import type { FinishReport } from "./FinishReport.js";
 import { FinishReportJson } from "./finishReportSchema.js";
@@ -31,7 +31,7 @@ export const readSupervisorStatus = async (
   directory: string,
 ): Promise<SupervisorStatus | undefined> => {
   const text = await sandbox.readTextFile({
-    path: posix.join(directory, STATUS_FILE),
+    path: joinInSandbox(directory, STATUS_FILE),
   });
   if (text === null) {
     return undefined;
@@ -51,7 +51,7 @@ const readReport = async (
   detachId: string,
 ): Promise<FinishReport | undefined> => {
   const text = await sandbox.readTextFile({
-    path: posix.join(directory, REPORTS_DIRECTORY, `${detachId}.json`),
+    path: joinInSandbox(directory, REPORTS_DIRECTORY, `${detachId}.json`),
   });
   const decoded = text === null ? undefined : decodeReport(text);
   if (decoded === undefined || Either.isLeft(decoded)) {
@@ -82,7 +82,7 @@ const logTail = async (
     return [];
   }
   const text = await sandbox.readTextFile({
-    path: posix.join(directory, "supervisor.log"),
+    path: joinInSandbox(directory, "supervisor.log"),
   });
   return (text ?? "")
     .split("\n")

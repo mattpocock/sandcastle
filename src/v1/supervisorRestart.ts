@@ -1,4 +1,4 @@
-import { posix } from "node:path";
+import { joinInSandbox } from "./sandboxPath.js";
 import { setTimeout as delay } from "node:timers/promises";
 import type { ProviderSandbox } from "./SandboxProvider.js";
 import { readSupervisorStatus } from "./sandboxStatus.js";
@@ -54,7 +54,7 @@ const restart = async (options: Restart): Promise<SupervisorLink> => {
     throw new Error("the session supervisor didn't answer, and hasn't exited");
   }
   await sandbox.writeTextFile({
-    path: posix.join(directory, STATUS_FILE),
+    path: joinInSandbox(directory, STATUS_FILE),
     content: JSON.stringify({ ...status, supervisor: "running" }),
   });
   return startSupervisor(sandbox, spawnDetached);

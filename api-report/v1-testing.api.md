@@ -4,6 +4,9 @@
 
 ```ts
 
+import { Readable } from 'node:stream';
+import { Writable } from 'node:stream';
+
 // @public
 export type AgentName = "claude-code" | "codex" | "cursor" | "opencode" | "copilot" | "pi";
 
@@ -46,11 +49,37 @@ export interface FakeSandboxProvider extends SandboxProvider<FakeSandboxNative, 
 }
 
 // @public
+export interface HostCommand {
+    readonly exited: Promise<HostCommandExit>;
+    readonly kill: () => Promise<void>;
+    readonly stderr: Readable;
+    readonly stdin: Writable | null;
+    readonly stdout: Readable;
+}
+
+// @public
+export interface HostCommandExit {
+    readonly error?: string;
+    readonly exitCode: number;
+}
+
+// @public
+export interface HostCommandOptions {
+    readonly command: string;
+    readonly cwd: string;
+    readonly env: Readonly<Record<string, string | undefined>>;
+    readonly stdin: "pipe" | "ignore";
+}
+
+// @public
 export interface SandboxProvider<Native = unknown, CanDetach extends boolean = boolean> {
     readonly [nativeType]?: Native;
     readonly canDetach: CanDetach;
     readonly name: string;
 }
+
+// @public
+export const startHostCommand: (options: HostCommandOptions) => Promise<HostCommand>;
 
 // (No @packageDocumentation comment for this package)
 

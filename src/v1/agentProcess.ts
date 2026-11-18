@@ -1,15 +1,15 @@
-import { spawn } from "node:child_process";
 import type { WriteStream } from "node:fs";
-import { constants } from "node:os";
 import { createInterface } from "node:readline";
 import type { Writable } from "node:stream";
 import { Effect, Queue } from "effect";
 import { BoundedTail } from "../boundedTail.js";
+import type { HostCommand } from "./hostCommand.js";
+import { startHostCommand } from "./hostCommand.js";
 
 // An agent CLI running inside the sandbox, as the supervisor sees it: a queue
-// of stdout lines, then its exit. The process gets its own process group so
-// a kill takes its children too: a child holding stdout open is exactly the
-// hang the closing-tag grace window exists for.
+// of stdout lines, then its exit. A kill takes everything it started too (its
+// process group, or on Windows its process tree): a child holding stdout open
+// is exactly the hang the closing-tag grace window exists for.
 
 /** Something that happened to the agent process, or a request to stop it. */
 export type AgentItem =
@@ -33,33 +33,17 @@ export interface AgentProcess {
   readonly endInput: () => void;
 }
 
-const exitCodeOf = (code: number | null, signal: string | null): number => {
-  if (code !== null) {
-    return code;
-  }
-  const signals: Readonly<Record<string, number>> = constants.signals;
-  return 128 + (signal === null ? 0 : (signals[signal] ?? 0));
-};
-
-const killProcessGroup = (pid: number | undefined): void => {
-  if (pid === undefined) {
-    return;
-  }
-  try {
-    process.kill(-pid, "SIGKILL");
-  } catch {
-    // It has already exited.
-  }
-};
-
 /** Writes the prompt to the agent's stdin, and closes it unless it's kept open for more. */
 const stdinOf = (
-  stdin: Writable,
+  stdin: Writable | null,
   options: {
     readonly stdin: string | undefined;
     readonly keepInputOpen: boolean;
   },
 ): Pick<AgentProcess, "write" | "endInput"> => {
+  if (stdin === null) {
+    return { write: () => undefined, endInput: () => undefined };
+  }
   // An agent that exits without reading its prompt closes the pipe early.
   stdin.on("error", () => undefined);
   if (options.keepInputOpen) {
@@ -79,7 +63,51 @@ const stdinOf = (
   };
 };
 
-/** Starts `sh -c command` in its own process group, writing each stdout line to `log`. */
+/** An agent that couldn't be started: it has already exited. */
+const notStarted = (
+  items: Queue.Queue<AgentItem>,
+  error: string,
+): AgentProcess => {
+  Queue.unsafeOffer(items, { _tag: "exit", code: 127, error });
+  return {
+    items,
+    killGroup: Effect.void,
+    tail: () => error,
+    write: () => undefined,
+    endInput: () => undefined,
+  };
+};
+
+/** Each stdout line logged and queued, and the output kept in `tail`. */
+const watch = (
+  command: HostCommand,
+  options: { readonly log: WriteStream; readonly tail: BoundedTail },
+  offer: (item: AgentItem) => void,
+): void => {
+  const exited = async (): Promise<void> => {
+    const { exitCode, error } = await command.exited;
+    offer({
+      _tag: "exit",
+      code: exitCode,
+      ...(error === undefined ? {} : { error }),
+    });
+  };
+  void exited();
+  command.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+    options.tail.push(chunk);
+  });
+  createInterface({ input: command.stdout }).on("line", (line) => {
+    options.tail.push(`${line}\n`);
+    options.log.write(`${line}\n`);
+    offer({ _tag: "line", line });
+  });
+};
+
+/**
+ * Starts the agent's command (`sh -c` in its own process group, or on
+ * Windows the command's own argv, with no `sh`), writing each stdout line to
+ * `log`.
+ */
 export const startAgentProcess = (options: {
   readonly command: string;
   readonly workingDirectory: string;
@@ -90,35 +118,32 @@ export const startAgentProcess = (options: {
 }): Effect.Effect<AgentProcess> =>
   Effect.gen(function* () {
     const items = yield* Queue.unbounded<AgentItem>();
+    const started = yield* Effect.either(
+      Effect.tryPromise(async () =>
+        startHostCommand({
+          command: options.command,
+          cwd: options.workingDirectory,
+          env: process.env,
+          stdin: "pipe",
+        }),
+      ),
+    );
+    if (started._tag === "Left") {
+      const { error } = started.left;
+      return notStarted(
+        items,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    const command = started.right;
     const tail = new BoundedTail(16 * 1024);
-    const offer = (item: AgentItem): void => {
+    watch(command, { log: options.log, tail }, (item) => {
       Queue.unsafeOffer(items, item);
-    };
-    const child = spawn("sh", ["-c", options.command], {
-      cwd: options.workingDirectory,
-      detached: true,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    child.on("error", (error) => {
-      offer({ _tag: "exit", code: 127, error: error.message });
-    });
-    child.on("close", (code, signal) => {
-      offer({ _tag: "exit", code: exitCodeOf(code, signal) });
-    });
-    child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
-      tail.push(chunk);
-    });
-    createInterface({ input: child.stdout }).on("line", (line) => {
-      tail.push(`${line}\n`);
-      options.log.write(`${line}\n`);
-      offer({ _tag: "line", line });
     });
     return {
       items,
-      killGroup: Effect.sync(() => {
-        killProcessGroup(child.pid);
-      }),
+      killGroup: Effect.promise(command.kill),
       tail: () => tail.toString(),
-      ...stdinOf(child.stdin, options),
+      ...stdinOf(command.stdin, options),
     };
   });
