@@ -36,7 +36,9 @@ describe("seatbelt() (v1) off macOS, and its options", () => {
   );
 
   it("refuses a toolchain path that would show the home folder, or isn't absolute", () => {
-    expect(() => seatbelt({ create: { toolchainPaths: [homedir()] } })).toThrow(
+    // A Windows home (C:\\Users\\…) is refused as not absolute, below.
+    const home = homedir().startsWith("/") ? homedir() : "/";
+    expect(() => seatbelt({ create: { toolchainPaths: [home] } })).toThrow(
       /home folder/u,
     );
     expect(() => seatbelt({ create: { toolchainPaths: ["/"] } })).toThrow(
