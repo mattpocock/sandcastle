@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Writable } from "node:stream";
+import { killProcessTrees } from "./processTree.js";
 
 // A stand-in for `@vercel/sandbox`, for `vi.mock`: just the `Sandbox` calls
 // vercel() makes, backed by real `sh` processes and a host directory per
@@ -77,16 +78,6 @@ export const resetFakeVercel = async (): Promise<void> => {
 /** An error shaped like the SDK's `APIError`. */
 const apiError = (status: number, message: string) =>
   Object.assign(new Error(message), { response: { status } });
-
-const killGroup = (child: ChildProcess): void => {
-  try {
-    if (child.pid !== undefined) {
-      process.kill(-child.pid, "SIGKILL");
-    }
-  } catch {
-    // Already gone.
-  }
-};
 
 /** A process's exit code, as a shell reports one killed by a signal. */
 const exitCodeOf = (code: unknown, signal: unknown): number => {
@@ -209,9 +200,7 @@ const sdkSandbox = (sandbox: FakeSdkSandbox) => ({
     }
     sandbox.status = "stopped";
     sandbox.expiresAt = undefined;
-    for (const child of sandbox.running) {
-      killGroup(child);
-    }
+    killProcessTrees([...sandbox.running].map((child) => child.pid));
     return {};
   },
 });
@@ -266,10 +255,10 @@ export const extendFakeVercel = (name: string, expiresAt: Date): void => {
 
 /** Stops every fake sandbox still standing and removes the temp dir, for `afterEach`. */
 export const destroyAllFakeVercel = async (): Promise<void> => {
-  for (const sandbox of fakeVercel.sandboxes.values()) {
-    for (const child of sandbox.running) {
-      killGroup(child);
-    }
-  }
+  killProcessTrees(
+    [...fakeVercel.sandboxes.values()].flatMap((sandbox) =>
+      [...sandbox.running].map((child) => child.pid),
+    ),
+  );
   await rm(fakeVercel.root, { recursive: true, force: true });
 };

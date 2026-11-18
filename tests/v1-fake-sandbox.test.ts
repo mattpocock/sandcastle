@@ -35,6 +35,31 @@ const startSleeper = async (sandbox: DetachableSandbox): Promise<number> => {
 };
 
 /**
+ * Starts a background process in the sandbox that starts a child in its own
+ * process group and stays running, the way the session supervisor starts an
+ * agent, and returns the child's pid.
+ */
+const startGroupLeader = async (
+  sandbox: DetachableSandbox,
+): Promise<number> => {
+  const script = [
+    "const { spawn } = require('node:child_process');",
+    "const child = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });",
+    "console.log(child.pid);",
+    "setInterval(() => undefined, 1000);",
+  ].join(" ");
+  await sandbox.exec(
+    `node -e "${script}" > leader.pid 2> /dev/null < /dev/null &`,
+  );
+  let pid = "";
+  await vi.waitFor(async () => {
+    pid = (await sandbox.readTextFile({ path: "leader.pid" })) ?? "";
+    expect(pid).toMatch(/^\d+\n$/u);
+  }, WAIT);
+  return Number(pid.trim());
+};
+
+/**
  * Parses `env` output into variable names, minus the ones `sh` sets itself
  * and NODE_V8_COVERAGE, which Node adds to every child's env while coverage
  * is being collected.
@@ -239,6 +264,18 @@ describe.skipIf(process.platform === "win32")("fakeSandbox()", () => {
     await expect(exists(dir)).resolves.toBe(false);
   });
 
+  it("close() kills a process the sandbox's processes started in a process group of its own", async () => {
+    const sandbox = await createSandbox({ provider });
+    const pid = await startGroupLeader(sandbox);
+    expect(alive(pid)).toBe(true);
+
+    await sandbox.close();
+
+    await vi.waitFor(() => {
+      expect(alive(pid)).toBe(false);
+    }, WAIT);
+  }, 15_000);
+
   it("close() is safe to call twice", async () => {
     const sandbox = await createSandbox({ provider });
 
@@ -269,6 +306,16 @@ describe.skipIf(process.platform === "win32")("fakeSandbox()", () => {
 
     expect(sandbox.killTime.getTime()).toBeLessThanOrEqual(Date.now());
   });
+
+  it("at its kill time, also kills a process started in a process group of its own", async () => {
+    const sandbox = await createSandbox({ provider, timeLimitMinutes: 2 / 60 });
+    const pid = await startGroupLeader(sandbox);
+    expect(alive(pid)).toBe(true);
+
+    await vi.waitFor(() => {
+      expect(alive(pid)).toBe(false);
+    }, WAIT);
+  }, 15_000);
 
   it("closeAll() and `await using` on the provider close every sandbox it made", async () => {
     let dirs: string[] = [];

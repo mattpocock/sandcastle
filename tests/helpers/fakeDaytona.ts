@@ -11,6 +11,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { killProcessTrees } from "./processTree.js";
 
 // A stand-in for `@daytona/sdk`, for `vi.mock`: just the calls daytona()
 // makes, backed by real `sh` processes and a host directory per sandbox
@@ -263,11 +264,11 @@ const sdkSandbox = (sandbox: FakeSdkSandbox) => ({
 
 const destroy = async (sandbox: FakeSdkSandbox): Promise<void> => {
   sandbox.state = "destroyed";
-  for (const session of sandbox.sessions.values()) {
-    for (const running of session.values()) {
-      killGroup(running);
-    }
-  }
+  killProcessTrees(
+    [...sandbox.sessions.values()].flatMap((session) =>
+      [...session.values()].map((running) => running.child.pid),
+    ),
+  );
   await rm(path.dirname(sandbox.home), { recursive: true, force: true });
 };
 

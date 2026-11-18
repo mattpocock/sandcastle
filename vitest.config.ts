@@ -72,7 +72,8 @@ export default defineConfig({
           name: "e2e",
           include: [...E2E_TESTS],
           exclude: [...configDefaults.exclude, ...LOCAL_TESTS],
-          setupFiles,
+          // Each file gets its own TMPDIR, and fails if it leaves processes.
+          setupFiles: [...setupFiles, "tests/helpers/processGuard.ts"],
         },
       },
       {

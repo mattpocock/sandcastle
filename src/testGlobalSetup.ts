@@ -17,15 +17,27 @@ import { join } from "node:path";
 /** The prefixes Sandcastle itself uses — keep in sync with the ledger. */
 export const SANDCASTLE_TMP_ENTRY = /^sandcastle-(?:bundle|git|copyin)-/u;
 
+/**
+ * The Sandcastle temp entries in `dir`, and in the directory each e2e test
+ * file has inside it (see tests/helpers/processGuard.ts).
+ */
+const sandcastleEntriesIn = (dir: string, under = ""): string[] =>
+  readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    if (under === "" && entry.isDirectory() && entry.name.startsWith("file-")) {
+      return sandcastleEntriesIn(join(dir, entry.name), entry.name);
+    }
+    return SANDCASTLE_TMP_ENTRY.test(entry.name)
+      ? [join(under, entry.name)]
+      : [];
+  });
+
 export default function setup(): () => void {
   const originalTmpdir = process.env.TMPDIR;
   const runTmpdir = mkdtempSync(join(tmpdir(), "sandcastle-vitest-"));
   process.env.TMPDIR = runTmpdir;
 
   return () => {
-    const leaked = readdirSync(runTmpdir).filter((name) =>
-      SANDCASTLE_TMP_ENTRY.test(name),
-    );
+    const leaked = sandcastleEntriesIn(runTmpdir);
     if (originalTmpdir === undefined) {
       delete process.env.TMPDIR;
     } else {

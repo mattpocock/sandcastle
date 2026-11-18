@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { once } from "node:events";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Schema } from "effect";
 
@@ -54,21 +55,51 @@ export const killGroup = (pid: number): void => {
   }
 };
 
+// Kills every process group the sandbox's processes are in or started: the
+// groups it recorded, and the group of each process descended from those. A
+// process in the sandbox may put a child in a group of its own (the session
+// supervisor does, for each agent), and killing only the recorded groups
+// leaves that child running, orphaned. It takes one `ps` snapshot before any
+// kill, while each child still has its parent. It spares its own group, so
+// the reaper lives to remove the directory.
+const KILL_SANDBOX = String.raw`recorded=$(ls "$SANDCASTLE_FAKE_DIR/.fake/groups" 2>/dev/null)
+ps -A -o pid= -o ppid= -o pgid= | awk -v recorded="$recorded" -v self="$$" '
+  BEGIN { n = split(recorded, r, "\n"); for (i = 1; i <= n; i++) if (r[i] != "") want[r[i]] = 1 }
+  { parent[$1] = $2; group[$1] = $3; if ($3 in want) inside[$1] = 1 }
+  END {
+    do {
+      grew = 0
+      for (p in parent) if (!(p in inside) && (parent[p] in inside)) { inside[p] = 1; grew = 1 }
+    } while (grew)
+    for (p in inside) doomed[group[p]] = 1
+    for (g in doomed) if (g != self) print g
+  }' | while read -r group; do kill -KILL "-$group" 2>/dev/null; done`;
+
+const SCRIPT_PATH = "/usr/bin:/bin";
+
+/** Kills every process the sandbox started, and every process those started. */
+const killSandbox = async (dir: string) => {
+  const killer = spawn("sh", ["-c", KILL_SANDBOX], {
+    stdio: "ignore",
+    env: { PATH: SCRIPT_PATH, SANDCASTLE_FAKE_DIR: dir },
+  });
+  try {
+    await once(killer, "close");
+  } catch {
+    // No `sh`: nothing this fake started could have run either.
+  }
+};
+
 /** Kills every process the sandbox started and removes its directory. */
 export const destroy = async (dir: string) => {
-  const groups = await readdir(groupsDir(dir)).catch((): string[] => []);
-  for (const group of groups) {
-    killGroup(Number(group));
-  }
+  await killSandbox(dir);
   await rm(dir, { recursive: true, force: true, maxRetries: 5 });
 };
 
-// Kills every recorded process group but its own, then removes the sandbox.
+// Kills the sandbox's processes but itself, then removes the sandbox.
 const REAPER = [
   'sleep "$SANDCASTLE_FAKE_LIFE_SECONDS"',
-  'for group in $(ls "$SANDCASTLE_FAKE_DIR/.fake/groups"); do',
-  '  [ "$group" = "$$" ] || kill -KILL "-$group"',
-  "done 2>/dev/null",
+  KILL_SANDBOX,
   'rm -rf "$SANDCASTLE_FAKE_DIR"',
 ].join("\n");
 
@@ -82,7 +113,7 @@ export const startReaper = async (dir: string, lifeSeconds: number) => {
     detached: true,
     stdio: "ignore",
     env: {
-      PATH: "/usr/bin:/bin",
+      PATH: SCRIPT_PATH,
       SANDCASTLE_FAKE_DIR: dir,
       SANDCASTLE_FAKE_LIFE_SECONDS: lifeSeconds.toFixed(3),
     },
