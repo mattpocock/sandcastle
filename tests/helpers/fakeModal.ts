@@ -11,6 +11,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { killProcessTrees } from "./processTree.js";
 
 // A stand-in for the `modal` SDK, for `vi.mock`: just the calls modal()
 // makes, backed by real processes and a host directory per sandbox, so the
@@ -227,15 +228,7 @@ const startProcess = (
 };
 
 const killAll = (sandbox: FakeSandbox): void => {
-  for (const child of sandbox.running) {
-    try {
-      if (child.pid !== undefined) {
-        process.kill(-child.pid, "SIGKILL");
-      }
-    } catch {
-      // Already gone.
-    }
-  }
+  killProcessTrees([...sandbox.running].map((child) => child.pid));
 };
 
 const ensureRunning = (sandbox: FakeSandbox | undefined, id: string) => {

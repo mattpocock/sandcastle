@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import type { SpawnOptions } from "@fly/sprites";
+import { killProcessTrees } from "./processTree.js";
 
 // A stand-in for `@fly/sprites`, for `vi.mock`: just the calls sprites()
 // makes, backed by real `sh` processes and a host directory per sprite, so
@@ -365,9 +366,7 @@ const makeSprite = async (name: string): Promise<FakeSprite> => {
 
 const destroy = async (sprite: FakeSprite): Promise<void> => {
   sprite.deleted = true;
-  for (const child of sprite.children) {
-    killGroup(child, "SIGKILL");
-  }
+  killProcessTrees([...sprite.children].map((child) => child.pid));
   await rm(sprite.dir, { recursive: true, force: true });
 };
 

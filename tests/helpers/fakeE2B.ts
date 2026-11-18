@@ -10,6 +10,7 @@ import type {
   Sandbox,
   SandboxNotFoundError,
 } from "e2b";
+import { killProcessTrees } from "./processTree.js";
 
 // A stand-in for `e2b`'s `Sandbox`, for `vi.mock`: just the calls e2b()
 // makes, backed by real `sh` processes and a host directory per sandbox
@@ -116,9 +117,7 @@ const killGroup = (child: ChildProcess): void => {
 
 const destroy = async (sandbox: FakeSdkSandbox): Promise<void> => {
   sandbox.killed = true;
-  for (const child of sandbox.running) {
-    killGroup(child);
-  }
+  killProcessTrees([...sandbox.running].map((child) => child.pid));
   await rm(path.dirname(sandbox.home), { recursive: true, force: true });
 };
 

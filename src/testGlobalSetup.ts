@@ -14,18 +14,44 @@ import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+/**
+ * The prefix of each e2e test file's own directory in the run's.
+ *
+ * Both names are short on purpose: a local sandbox's keeper listens on a Unix
+ * socket under the test's temp dir, and a socket path has room for only 107
+ * characters. `sc-test-XXXXXX/f-XXXXXX` is no longer than the one directory
+ * the run used to have.
+ */
+export const FILE_DIR_PREFIX = "f-";
+
 /** The prefixes Sandcastle itself uses — keep in sync with the ledger. */
 export const SANDCASTLE_TMP_ENTRY = /^sandcastle-(?:bundle|git|copyin)-/u;
 
+/**
+ * The Sandcastle temp entries in `dir`, and in the directory each e2e test
+ * file has inside it (see tests/helpers/processGuard.ts).
+ */
+const sandcastleEntriesIn = (dir: string, under = ""): string[] =>
+  readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    if (
+      under === "" &&
+      entry.isDirectory() &&
+      entry.name.startsWith(FILE_DIR_PREFIX)
+    ) {
+      return sandcastleEntriesIn(join(dir, entry.name), entry.name);
+    }
+    return SANDCASTLE_TMP_ENTRY.test(entry.name)
+      ? [join(under, entry.name)]
+      : [];
+  });
+
 export default function setup(): () => void {
   const originalTmpdir = process.env.TMPDIR;
-  const runTmpdir = mkdtempSync(join(tmpdir(), "sandcastle-vitest-"));
+  const runTmpdir = mkdtempSync(join(tmpdir(), "sc-test-"));
   process.env.TMPDIR = runTmpdir;
 
   return () => {
-    const leaked = readdirSync(runTmpdir).filter((name) =>
-      SANDCASTLE_TMP_ENTRY.test(name),
-    );
+    const leaked = sandcastleEntriesIn(runTmpdir);
     if (originalTmpdir === undefined) {
       delete process.env.TMPDIR;
     } else {

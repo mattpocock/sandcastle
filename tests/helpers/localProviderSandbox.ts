@@ -8,11 +8,13 @@ import type {
   ProviderExecResult,
   ProviderSandbox,
 } from "@ai-hero/sandcastle/v1";
+import { killProcessTrees } from "./processTree.js";
 
 // The operations of a provider sandbox, run for real in a host directory:
-// `sh -c` commands (each in its own process group, all killed by `close`)
-// and plain files. For tests of createSandbox through a hand-built provider,
-// which still has to run the session supervisor. POSIX only.
+// `sh -c` commands (each in its own process group; `close` kills them and
+// every group they started) and plain files. For tests of createSandbox
+// through a hand-built provider, which still has to run the session
+// supervisor. POSIX only.
 
 type Operations = Pick<
   ProviderSandbox,
@@ -69,10 +71,10 @@ export const localProviderSandbox = (dir: string): Operations => {
       await mkdir(path.dirname(target), { recursive: true });
       await writeFile(target, content);
     },
+    // The supervisor puts each agent in a process group of its own, so this
+    // kills what those groups started too.
     close: async () => {
-      for (const pid of running) {
-        kill(pid);
-      }
+      killProcessTrees(running);
     },
   };
 };
