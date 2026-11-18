@@ -20,10 +20,11 @@ import type { HostProcess } from "./processTree.js";
 import { listProcesses } from "./processTree.js";
 
 // A worker runs several files, and each sets TMPDIR for the next: keep the
-// run's directory, so the files' directories sit side by side in it.
+// run's directory, so the files' directories sit side by side in it. "f-" is
+// FILE_DIR_PREFIX in src/testGlobalSetup.ts, short for a reason given there.
 process.env.SANDCASTLE_TEST_RUN_TMPDIR ??= tmpdir();
 const runTmpdir = process.env.SANDCASTLE_TEST_RUN_TMPDIR;
-const fileTmpdir = mkdtempSync(path.join(runTmpdir, "file-"));
+const fileTmpdir = mkdtempSync(path.join(runTmpdir, "f-"));
 process.env.TMPDIR = fileTmpdir;
 
 /** How long a process killed by the file's last cleanup gets to go. */
