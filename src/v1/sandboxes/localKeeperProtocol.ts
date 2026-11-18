@@ -6,6 +6,11 @@ import { Schema } from "effect";
 // never knows which tool (bwrap, sandbox-exec…) makes the sandbox.
 
 const Env = Schema.Record({ key: Schema.String, value: Schema.String });
+/**
+ * Kill the command's process group as soon as it exits, so nothing it
+ * started outlives it: for a provider with no PID namespace to do that.
+ */
+const EndGroupOnExit = Schema.optional(Schema.Boolean);
 
 /** A request to the keeper. */
 export const KeeperRequest = Schema.Union(
@@ -21,12 +26,14 @@ export const KeeperRequest = Schema.Union(
     argv: Schema.NonEmptyArray(Schema.String),
     env: Env,
     stdin: Schema.String,
+    endGroupOnExit: EndGroupOnExit,
   }),
   /** Starts `argv` with exactly `env`, owned by the keeper alone. Replies `spawned` once it's running. */
   Schema.Struct({
     type: Schema.Literal("spawn"),
     argv: Schema.NonEmptyArray(Schema.String),
     env: Env,
+    endGroupOnExit: EndGroupOnExit,
   }),
   /** Kills everything and removes the folder. Replies `closed` once it's gone. */
   Schema.Struct({ type: Schema.Literal("close") }),

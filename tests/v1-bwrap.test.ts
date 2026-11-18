@@ -16,7 +16,7 @@ import {
   answeringAgent,
   bwrapSkipsHere,
   hangingAgent,
-} from "./helpers/bwrapAgents.js";
+} from "./helpers/localAgents.js";
 import {
   detachFromNewProcess,
   eventually,
@@ -24,7 +24,7 @@ import {
   isGone,
   processesMentioning,
   someProcessMentions,
-} from "./helpers/bwrapHost.js";
+} from "./helpers/localHost.js";
 import type { FinishReportReceiver } from "./helpers/finishReportReceiver.js";
 import { finishReportReceiver } from "./helpers/finishReportReceiver.js";
 import { providerContract } from "./helpers/providerContract.js";
@@ -378,7 +378,7 @@ describe.skipIf(bwrapSkipsHere())("bwrap() (v1)", () => {
     const hook = await finishReportReceiver();
     receivers.push(hook);
 
-    const receipt = await detachFromNewProcess(hook.url, SECRET);
+    const receipt = await detachFromNewProcess("bwrap", hook.url, SECRET);
     const delivery = await hook.first();
     const report = await verifyFinishReport({
       body: delivery.body,

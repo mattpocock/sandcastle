@@ -78,6 +78,10 @@
       "import": "./dist/v1/sandboxes/modal.js",
       "types": "./dist/v1/sandboxes/modal.d.ts"
     },
+    "./v1/sandboxes/seatbelt": {
+      "import": "./dist/v1/sandboxes/seatbelt.js",
+      "types": "./dist/v1/sandboxes/seatbelt.d.ts"
+    },
     "./v1/sandboxes/sprites": {
       "import": "./dist/v1/sandboxes/sprites.js",
       "types": "./dist/v1/sandboxes/sprites.d.ts"

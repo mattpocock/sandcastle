@@ -1,15 +1,18 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
 import { access, readdir, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 import { z } from "zod";
 
-// What the bwrap() tests look at from the host (its processes and files),
-// and a separate Node process that creates a sandbox and detaches from it.
-// Linux only (it reads /proc).
+// What the local providers' (bwrap(), seatbelt()) tests look at from the
+// host (its processes and files), and a separate Node process that creates
+// a sandbox and detaches from it. Linux (it reads /proc) and macOS (`ps`).
+
+const run = promisify(execFile);
 
 export const exists = async (file: string): Promise<boolean> =>
   access(file).then(
@@ -17,8 +20,20 @@ export const exists = async (file: string): Promise<boolean> =>
     () => false,
   );
 
+/** On macOS, the host processes whose command line holds `text`, from `ps`. */
+const psMentioning = async (text: string): Promise<string[]> => {
+  const { stdout } = await run("/bin/ps", ["-A", "-ww", "-o", "pid=,command="]);
+  return stdout.split("\n").flatMap((line) => {
+    const row = /^\s*(?<pid>\d+)\s+(?<command>.*)$/u.exec(line)?.groups;
+    return row?.["command"]?.includes(text) === true ? [row["pid"] ?? ""] : [];
+  });
+};
+
 /** The host processes whose command line holds `text`. */
 export const processesMentioning = async (text: string): Promise<string[]> => {
+  if (process.platform === "darwin") {
+    return psMentioning(text);
+  }
   const entries = await readdir("/proc");
   const pids = entries.filter((name) => /^\d+$/u.test(name));
   const lines = await Promise.all(
@@ -53,22 +68,23 @@ const TSX_LOADER = pathToFileURL(
 ).href;
 const TESTS_TSCONFIG = path.join(import.meta.dirname, "..", "tsconfig.json");
 /** A script handed to a subprocess, not an import. */
-const DETACHER = path.join(import.meta.dirname, "detachBwrapSandbox.ts");
+const DETACHER = path.join(import.meta.dirname, "detachLocalSandbox.ts");
 
 const Receipt = z.object({ sandboxId: z.string(), detachId: z.string() });
 
 /**
- * Runs tests/helpers/detachBwrapSandbox.ts in a separate Node process, which
- * creates a sandbox, detaches with a finish report to `url` signed with
+ * Runs tests/helpers/detachLocalSandbox.ts in a separate Node process, which
+ * creates a `provider` sandbox, detaches with a finish report to `url` signed with
  * `secret`, and exits; resolves with its receipt once it has exited.
  */
 export const detachFromNewProcess = async (
+  provider: "bwrap" | "seatbelt",
   url: string,
   secret: string,
 ): Promise<z.infer<typeof Receipt>> => {
   const child = spawn(
     process.execPath,
-    ["--import", TSX_LOADER, DETACHER, url, secret],
+    ["--import", TSX_LOADER, DETACHER, provider, url, secret],
     {
       env: { ...process.env, TSX_TSCONFIG_PATH: TESTS_TSCONFIG },
       stdio: ["ignore", "pipe", "pipe"],
