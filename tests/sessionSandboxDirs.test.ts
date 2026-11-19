@@ -45,6 +45,9 @@ const recordingHandle = (
   ...dirs,
   exec: async (command) => {
     recorded.commands.push(command);
+    if (command === "opencode --version") {
+      return { stdout: "2.3.0", stderr: "", exitCode: 0 };
+    }
     const find = /^find "(?<dir>[^"]+)" -type f -name "(?<glob>[^"]+)"/u.exec(
       command,
     );
@@ -190,7 +193,7 @@ describe("session capture and resume inside a sandbox", () => {
     );
 
     expect(recorded.commands).toContain(
-      `opencode export '${SESSION_ID}' > '${TEMP}/${SESSION_ID}.json'`,
+      `opencode session export '${SESSION_ID}' --standalone > '${TEMP}/${SESSION_ID}.json'`,
     );
     expect(recorded.sandboxPaths).toContain(`${TEMP}/${SESSION_ID}.json`);
   });
@@ -207,7 +210,7 @@ describe("session capture and resume inside a sandbox", () => {
       `/home/agent/.claude/projects/-work-repo/${SESSION_ID}.jsonl`,
     );
     expect(recorded.commands).toContain(
-      `opencode export '${SESSION_ID}' > '/tmp/${SESSION_ID}.json'`,
+      `opencode session export '${SESSION_ID}' --standalone > '/tmp/${SESSION_ID}.json'`,
     );
   });
 

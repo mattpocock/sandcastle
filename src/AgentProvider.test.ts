@@ -3105,9 +3105,11 @@ describe("sessionStorage", () => {
 
   /**
    * A bind-mount handle over local directories that stands in for the
-   * opencode CLI: `opencode export <id>` writes `exported` to the redirect
-   * target, and `opencode import <file>` records the file's content. Every
-   * other command runs for real.
+   * opencode CLI: `opencode --version` reports `2.3.0` (so the provider takes
+   * the V2 commands), `opencode session export <id> --standalone` writes
+   * `exported` to the redirect target, and `opencode session import <file>
+   * --standalone` records the file's content. Every other command runs for
+   * real.
    */
   const opencodeHandle = (
     exported: string,
@@ -3123,15 +3125,21 @@ describe("sessionStorage", () => {
       ...base,
       exec: async (command, options) => {
         commands.push({ command, cwd: options?.cwd });
-        const exportTo = /^opencode export \S+ > '(?<path>[^']+)'$/u.exec(
-          command,
-        )?.groups?.["path"];
+        if (command === "opencode --version") {
+          return { stdout: "2.3.0", stderr: "", exitCode: 0 };
+        }
+        const exportTo =
+          /^opencode session export \S+ --standalone > '(?<path>[^']+)'$/u.exec(
+            command,
+          )?.groups?.["path"];
         if (exportTo !== undefined) {
           await writeFile(exportTo, exported);
           return { stdout: "", stderr: "", exitCode: 0 };
         }
-        const importFrom = /^opencode import '(?<path>[^']+)'$/u.exec(command)
-          ?.groups?.["path"];
+        const importFrom =
+          /^opencode session import '(?<path>[^']+)' --standalone$/u.exec(
+            command,
+          )?.groups?.["path"];
         if (importFrom !== undefined) {
           imported.push(await readFile(importFrom, "utf8"));
           return { stdout: "", stderr: "", exitCode: 0 };
@@ -3171,7 +3179,7 @@ describe("sessionStorage", () => {
       );
       await expect(readFile(hostPath, "utf8")).resolves.toBe(exported);
       expect(commands).toContainEqual({
-        command: `opencode export '${id}' > '${join(sandboxDir, `${id}.json`)}'`,
+        command: `opencode session export '${id}' --standalone > '${join(sandboxDir, `${id}.json`)}'`,
         cwd: "/sandbox/repo",
       });
       await expect(sessionStorage.existsOnHost("/host/repo", id)).resolves.toBe(
@@ -3212,7 +3220,7 @@ describe("sessionStorage", () => {
 
       expect(imported).toStrictEqual([exported]);
       expect(commands).toContainEqual({
-        command: `opencode import '${join(sandboxDir, `${id}.json`)}'`,
+        command: `opencode session import '${join(sandboxDir, `${id}.json`)}' --standalone`,
         cwd: "/sandbox/repo",
       });
     } finally {

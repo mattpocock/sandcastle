@@ -19,6 +19,24 @@ OpenCode gets `sessionStorage`, with the session moved as its export JSON:
 - No rewrite: the import re-homes the session itself.
 - In a no-sandbox run OpenCode reads its own database, which Sandcastle can't query by id. The precheck only checks that the database exists, and OpenCode reports an unknown id itself.
 
+## OpenCode V2
+
+OpenCode V2 moved session interchange under a `session` subcommand and needs `--standalone` under `bwrap()`:
+
+```text
+opencode session export <id> --standalone > <file>
+opencode session import <file> --standalone
+```
+
+`--standalone` is required because Bubblewrap shares the host network namespace, and the host's background OpenCode service already owns the managed-service port (49374); `--standalone` spins up a private temporary server that reads the sandbox's own database.
+
+The two CLIs ship as different npm packages, so a sandbox can run either: `InitService.ts` installs `opencode-ai@latest` (V1) in Docker images, while native sandboxes (`bwrap()`, `seatbelt()`) reuse the host CLI, which may be V2. The provider therefore probes `opencode --version` in the sandbox, once per sandbox handle, and:
+
+- on major version `>= 2`, uses the `opencode session export` / `opencode session import` commands above;
+- on major version `< 2`, a failed probe, or unparseable output, keeps the V1 `opencode export` / `opencode import` commands.
+
+The fallback is deliberate: custom or unknown CLIs keep working as before.
+
 ## Considered Options
 
 1. **Copy `opencode.db` whole.** Rejected. It holds every session of every project, so copying it out leaks unrelated sessions into the host store, and copying it in overwrites the sandbox's. It also locks Sandcastle to the file's WAL state at copy time.
