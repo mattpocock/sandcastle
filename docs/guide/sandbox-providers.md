@@ -139,6 +139,7 @@ npm install @fly/sprites
 - **Image.** Sprites have one base image, with `git`, Node and the `claude` CLI already installed. Install any other agent's CLI in an `onSandboxReady` hook.
 - **Teardown.** A Sprite keeps running until it's deleted. `close()` deletes it, and so does a failed setup. If the process is interrupted (`SIGINT`/`SIGTERM`) or exits without closing the sandbox, Sandcastle deletes the Sprite from a background process.
 - **`sandboxId`** is the Sprite's name, which the Sprites CLI and API take.
+- **Other options.** `create` passes the SDK's `createSprite()` options through: `config` (`ramMB`, `cpus`, `storageGB`, `region`), `labels`, `waitForCapacity`, `runtime`, `environment` and `urlSettings`.
 - **`sudo: true`** uses the Sprite's own passwordless `sudo`.
 - **No `interactive()`.** Use `run()` or `createSandbox()`.
 
@@ -150,6 +151,7 @@ await run({
   agent: claudeCode("claude-opus-4-8"),
   sandbox: sprites({
     env: { MY_VAR: "value" }, // merged at launch, like docker()'s env
+    create: { config: { ramMB: 8192, cpus: 4 }, labels: ["sandcastle"] },
   }),
   prompt: "...",
 });

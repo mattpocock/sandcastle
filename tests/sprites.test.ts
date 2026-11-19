@@ -32,6 +32,8 @@ interface Exec {
 const api = {
   tokens: new Set<string>(),
   created: new Array<string>(),
+  /** The body of each create request, in order. */
+  createRequests: new Array<unknown>(),
   /** Sprites that exist now: created, and not yet deleted. */
   live: new Set<string>(),
   deleted: new Array<string>(),
@@ -62,7 +64,9 @@ const json = (body: unknown, status = 200): Response =>
 const CreateRequest = z.object({ name: z.string() });
 
 const createSprite = async (body: Response): Promise<Response> => {
-  const request = CreateRequest.parse(await body.json());
+  const raw: unknown = await body.json();
+  const request = CreateRequest.parse(raw);
+  api.createRequests.push(raw);
   api.created.push(request.name);
   if (api.createFails) {
     return new Response("capacity exhausted", { status: 500 });
@@ -209,6 +213,7 @@ class FakeWebSocket extends EventTarget {
 beforeEach(() => {
   api.tokens.clear();
   api.created.length = 0;
+  api.createRequests.length = 0;
   api.live.clear();
   api.deleted.length = 0;
   api.deleteFails = false;
@@ -247,6 +252,47 @@ describe("sprites() lifecycle", () => {
     await handle.close();
     expect(api.deleted).toStrictEqual([handle.sandboxId]);
     expect([...api.live]).toStrictEqual([]);
+  });
+
+  it("passes the create options through to the Sprite it creates", async () => {
+    const handle = await sprites({
+      token: "tok-option",
+      create: {
+        config: { ramMB: 8192, cpus: 4, storageGB: 50, region: "fra" },
+        labels: ["sandcastle", "ci"],
+        waitForCapacity: true,
+        runtime: "dev",
+        environment: { TZ: "UTC" },
+        urlSettings: { auth: "sprite" },
+      },
+    }).create({ env: {} });
+
+    expect(api.createRequests).toStrictEqual([
+      {
+        name: handle.sandboxId,
+        config: { ram_mb: 8192, cpus: 4, storage_gb: 50, region: "fra" },
+        labels: ["sandcastle", "ci"],
+        wait_for_capacity: true,
+        runtime: "dev",
+        environment: { TZ: "UTC" },
+        url_settings: { auth: "sprite" },
+      },
+    ]);
+    await handle.close();
+  });
+
+  it("sends only the name when create is omitted or empty", async () => {
+    const omitted = await create();
+    const empty = await sprites({ token: "tok-option", create: {} }).create({
+      env: {},
+    });
+
+    expect(api.createRequests).toStrictEqual([
+      { name: omitted.sandboxId },
+      { name: empty.sandboxId },
+    ]);
+    await omitted.close();
+    await empty.close();
   });
 
   it("closes without error when the Sprite is already gone", async () => {
