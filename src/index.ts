@@ -59,6 +59,7 @@ export { NativeInteractiveNotSupportedError } from "./nativeSandboxProvider.js";
 export { NativeSandboxUnavailableError } from "./NativeSandboxUnavailableError.js";
 export {
   claudeCode,
+  codebuddy,
   codex,
   copilot,
   cursor,
@@ -70,6 +71,7 @@ export type {
   AgentCommandOptions,
   PrintCommand,
   ClaudeCodeOptions,
+  CodebuddyOptions,
   CodexOptions,
   CopilotOptions,
   CursorOptions,
