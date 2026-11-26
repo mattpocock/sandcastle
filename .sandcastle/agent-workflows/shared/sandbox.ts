@@ -1,5 +1,6 @@
 import type { AgentStreamEvent, Sandbox } from "@ai-hero/sandcastle/v1";
 import { createSandbox } from "@ai-hero/sandcastle/v1";
+import { bwrap } from "@ai-hero/sandcastle/v1/sandboxes/bwrap";
 import { host } from "@ai-hero/sandcastle/v1/sandboxes/host";
 import { fail, required } from "./common";
 
@@ -7,10 +8,18 @@ import { fail, required } from "./common";
 export const quote = (value: string): string =>
   `'${value.replaceAll("'", String.raw`'\''`)}'`;
 
-// The sandbox every agent workflow runs in: a host() sandbox on the Actions
-// runner, its working directory an empty folder of its own that the repo is
-// cloned into. host() is not isolation: the agent runs as the runner's user.
-// It's chosen here because the runner is a throwaway VM.
+// The sandbox every agent workflow runs in, its working directory an empty
+// folder of its own that the repo is cloned into. On the Linux runners it's
+// bwrap(): the agent runs as the runner's user, and each bwrap() command has
+// its own PID namespace, so the agent can't read GH_TOKEN from the job's
+// other processes through /proc/<pid>/environ. Elsewhere (Windows, local
+// runs) it's host(), which is not isolation: the agent sees every process
+// and file the user can.
+//
+// The workflow .yml picks bwrap() with WORKFLOW_SANDBOX=bwrap, next to the
+// step that installs Bubblewrap, rather than this file keying on the
+// platform: a Linux machine without Bubblewrap (a local run) keeps host(),
+// and the tests run each provider from one process.
 
 /** How long a workflow's sandbox may live: inside its job's own timeout. */
 const TIME_LIMIT_MINUTES = 50;
@@ -19,23 +28,41 @@ const TIME_LIMIT_MINUTES = 50;
 const GIT_NAME = "sandcastle-agent[bot]";
 const GIT_EMAIL = "sandcastle-agent[bot]@users.noreply.github.com";
 
+/** The provider `WORKFLOW_SANDBOX` names: `bwrap`, or `host` (the default when unset). */
+export const workflowSandbox = (
+  value: string | undefined,
+): "bwrap" | "host" => {
+  if (value === "bwrap" || value === "host") {
+    return value;
+  }
+  if (value === undefined || value === "") {
+    return "host";
+  }
+  throw new TypeError(
+    `WORKFLOW_SANDBOX is ${JSON.stringify(value)}: set it to "bwrap" or "host", or leave it unset for host().`,
+  );
+};
+
 /**
- * A host() sandbox whose commands, the agent's included, get the repo's
- * name and the Claude Code token through their env. Never the GitHub token:
- * the agent runs with its permission bypass on untrusted issue and PR text,
- * so only the git commands that reach GitHub get it (`withGitHubToken`).
- * Its home is fresh, so nothing of the runner's `gh` login or `~/.gitconfig`
- * is seen.
+ * The workflow's sandbox, on the provider `WORKFLOW_SANDBOX` names. Its
+ * commands, the agent's included, get the repo's name and the Claude Code
+ * token through their env. Never the GitHub token: the agent runs with its
+ * permission bypass on untrusted issue and PR text, so only the git
+ * commands that reach GitHub get it (`withGitHubToken`). Its home is fresh,
+ * so nothing of the runner's `gh` login or `~/.gitconfig` is seen.
  */
-export const openSandbox = async (): Promise<Sandbox> =>
-  createSandbox({
-    provider: host(),
+export const openSandbox = async (): Promise<Sandbox> => {
+  const options = {
     env: {
       GH_REPO: required("GH_REPO"),
       CLAUDE_CODE_OAUTH_TOKEN: required("CLAUDE_CODE_OAUTH_TOKEN"),
     },
     timeLimitMinutes: TIME_LIMIT_MINUTES,
-  });
+  };
+  return workflowSandbox(process.env.WORKFLOW_SANDBOX) === "bwrap"
+    ? createSandbox({ provider: bwrap(), ...options })
+    : createSandbox({ provider: host(), ...options });
+};
 
 /**
  * A credential helper for one git command, given with `-c`, so it's never

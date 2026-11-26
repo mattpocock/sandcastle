@@ -1,20 +1,12 @@
-import { execFileSync } from "node:child_process";
-import {
-  mkdir,
-  mkdtemp,
-  readdir,
-  readFile,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Sandbox } from "@ai-hero/sandcastle/v1";
 import { claudeAgent } from "./common";
 import { runSession } from "./run-with-extraction";
 import { cloneRepo, openSandbox, run, withGitHubToken } from "./sandbox";
+import { useWorkflowSandbox, WORKFLOW_SANDBOXES } from "./test-sandboxes";
 
 // The workflows' sandbox keeps the GitHub token from the agent: it's in no
 // session's env, and the clone stores no credential. It's handed only to
@@ -35,49 +27,42 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", ()
 });
 `;
 
-/** Every file under `dir`, read as text. */
-const allText = async (dir: string): Promise<string> => {
-  const files = await readdir(dir, { recursive: true, withFileTypes: true });
-  const texts = await Promise.all(
-    files
-      .filter((entry) => entry.isFile())
-      .map(async (entry) =>
-        readFile(path.join(entry.parentPath, entry.name), "utf8"),
-      ),
+/**
+ * A bare repo with one commit on `main`, standing in for GitHub, made inside
+ * the sandbox's home (where bwrap() can see it), with GitHub's URL for the
+ * repo sent to it.
+ */
+const makeRemote = async (sandbox: Sandbox): Promise<void> => {
+  await run(
+    sandbox,
+    [
+      'git init -q -b main "$HOME/work"',
+      'git -C "$HOME/work" -c user.name=t -c user.email=t@t commit -q --allow-empty -m first',
+      'git clone -q --bare "$HOME/work" "$HOME/remote.git"',
+      `git config --global "url.file://$HOME/remote.git.insteadOf" https://github.com/${REPO}.git`,
+    ].join(" && "),
   );
-  return texts.join("\n");
 };
 
-/** A bare repo with one commit on `main`, standing in for GitHub. */
-const makeRemote = (dir: string): string => {
-  const work = path.join(dir, "work");
-  const bare = path.join(dir, "remote.git");
-  const git = (...args: string[]) =>
-    execFileSync("git", args, { cwd: work, stdio: "ignore" });
-  execFileSync("git", ["init", "-q", "-b", "main", work]);
-  git(
-    "-c",
-    "user.name=t",
-    "-c",
-    "user.email=t@t",
-    "commit",
-    "-q",
-    "--allow-empty",
-    "-m",
-    "first",
-  );
-  execFileSync("git", ["clone", "-q", "--bare", work, bare]);
-  return bare;
-};
+/** The files in the sandbox's home, tmp and working directory that hold `needle`. */
+const filesHolding = async (sandbox: Sandbox, needle: string) =>
+  sandbox.exec({
+    command: 'grep -rlF -e "$NEEDLE" "$HOME" "$TMPDIR" .',
+    env: { NEEDLE: needle },
+    allowFailure: true,
+  });
 
-describe.skipIf(process.platform === "win32")(
-  "the agent workflows' sandbox",
-  () => {
+describe.each(WORKFLOW_SANDBOXES)(
+  "the agent workflows' sandbox on $name()",
+  ({ name, skip }) => {
     let scratch = "";
     let sandbox: Sandbox | undefined;
+    let cleanup = async (): Promise<void> => undefined;
     const saved = { ...process.env };
 
-    beforeEach(async () => {
+    beforeEach(async (context) => {
+      context.skip(skip);
+      cleanup = await useWorkflowSandbox(name);
       scratch = await mkdtemp(path.join(tmpdir(), "wf-"));
       const bin = path.join(scratch, "bin");
       await mkdir(bin);
@@ -91,7 +76,9 @@ describe.skipIf(process.platform === "win32")(
 
     afterEach(async () => {
       await sandbox?.close();
+      sandbox = undefined;
       process.env = { ...saved };
+      await cleanup();
       await rm(scratch, { recursive: true, force: true });
     });
 
@@ -117,22 +104,17 @@ describe.skipIf(process.platform === "win32")(
     });
 
     it("clones with the token in that command's env only: the clone and the home store no credential", async () => {
-      const remote = makeRemote(scratch);
-      // GitHub's URL for the repo, sent to the bare repo instead.
-      await run(
-        opened(),
-        `git config --global url.${pathToFileURL(remote).href}.insteadOf https://github.com/${REPO}.git`,
-      );
+      await makeRemote(opened());
 
       await cloneRepo(opened(), { branch: "main" });
 
-      // The sandbox's folder: its workspace (the clone), home and tmp.
-      const stored = await allText(path.dirname(opened().workingDirectory));
+      const stored = await filesHolding(opened(), TOKEN);
       const helpers = await opened().exec({
         command: "git config --get-all credential.helper",
         allowFailure: true,
       });
-      expect(stored).not.toContain(TOKEN);
+      // grep's 1: it read everything and found nothing (2 is an error).
+      expect(stored).toMatchObject({ exitCode: 1, stdout: "" });
       expect(helpers).toMatchObject({ exitCode: 1, stdout: "" });
       // The one-command helper does answer with the token, from its env.
       const filled = await opened().exec(
