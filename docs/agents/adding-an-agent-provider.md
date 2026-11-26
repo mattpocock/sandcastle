@@ -56,7 +56,7 @@ These unlock extra Sandcastle features but are not required:
 
 For `sandcastle init` to offer the agent:
 
-- A reproducible install command (npm package, install script, etc.) that works inside a Debian-based Docker image.
+- A reproducible install command (npm package, install script, etc.), which init prints when a provider that runs the host's own programs can't find the CLI.
 - A documented set of env vars for auth.
 - A sensible default model string.
 
@@ -139,21 +139,19 @@ Before writing code, **verify session-ID round-trip stability empirically**: run
 
 ## Scaffold integration
 
-For the agent to appear in `sandcastle init`, add an entry to `AGENT_REGISTRY` in [`src/InitService.ts`](../../src/InitService.ts):
+For the agent to appear in `sandcastle init`, add an entry to `AGENT_REGISTRY` in [`src/initAgents.ts`](../../src/initAgents.ts). Init's `blank` template imports `factoryImport` from `@ai-hero/sandcastle/v1`, so the factory must be a v1 agent export:
 
 ```ts
 {
   name: "gemini",
   label: "Gemini",
   defaultModel: "gemini-2.5-pro",
-  factoryImport: "gemini",          // matches the export from index.ts
-  dockerfileTemplate: GEMINI_DOCKERFILE,
+  factoryImport: "gemini",          // matches the export from src/v1.ts
   envExample: `# Google AI API key
 GOOGLE_API_KEY=`,
+  hostCli: { command: "gemini", install: "npm install -g @google/gemini-cli" },
 }
 ```
-
-And a Dockerfile constant alongside the existing ones. Use `CLAUDE_CODE_DOCKERFILE` as a structural reference — keep the `usermod` block, the `{{ISSUE_TRACKER_TOOLS}}` placeholder, the `USER agent` line, and the `ENTRYPOINT ["sleep", "infinity"]`. Only the install line should differ.
 
 ## Implementation checklist
 
@@ -167,7 +165,6 @@ For a new agent provider `foo`:
 - [ ] Tests in `src/AgentProvider.test.ts` covering `buildPrintCommand` (both fresh and resume forms) and stream parsing — including session-ID extraction and error events on stdout if applicable.
 - [ ] Tests covering `sessionStorage` round-trip: capture host↔sandbox, content preserved (and rewritten correctly if `foo`'s format requires it).
 - [ ] Public export from [`src/index.ts`](../../src/index.ts): the `foo` factory and the `FooOptions` type.
-- [ ] `AGENT_REGISTRY` entry in [`src/InitService.ts`](../../src/InitService.ts).
-- [ ] `FOO_DOCKERFILE` constant in `src/InitService.ts`.
+- [ ] `AGENT_REGISTRY` entry in [`src/initAgents.ts`](../../src/initAgents.ts).
 - [ ] Changeset in `.changeset/` (patch, since pre-1.0). See [`CLAUDE.md`](../../CLAUDE.md).
 - [ ] `docs/guide/` update if the public-facing list of supported agents is mentioned there.

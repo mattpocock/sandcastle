@@ -66,7 +66,7 @@ First explained in [Iterations](./iterations.md).
 
 ## Config directory
 
-The `.sandcastle/` directory in your repo, which [init](#init) creates. It holds the main file that calls `run()`, the prompt, a Dockerfile for Docker, and the `.env` for your tokens. See [Init](./init.md#config-directory-sandcastle).
+The `.sandcastle/` directory in your repo, which [init](#init) creates. It holds the main file, the prompt, and the `.env` for your tokens. See [Init](./init.md#config-directory-sandcastle).
 
 First explained in [Sandbox providers](./sandbox-providers.md).
 
@@ -110,9 +110,7 @@ A [sandbox provider](#sandbox-provider) whose [sandbox](#sandbox) has its own fi
 
 ## Issue tracker
 
-Where the agent finds its [tasks](#task), chosen during [init](#init): GitHub Issues or Beads, for example. See [Init](./init.md).
-
-First explained in [Init](./init.md).
+Where the agent finds its [tasks](#task): GitHub Issues or Beads, for example.
 
 ## Iteration
 
@@ -238,19 +236,15 @@ First explained in [Branch strategies](./branch-strategies.md).
 
 ## Task
 
-A piece of work from the [issue tracker](#issue-tracker) that the agent picks up and works on during an [iteration](#iteration). See [Init](./init.md).
-
-First explained in [Init](./init.md).
+A piece of work from the [issue tracker](#issue-tracker) that the agent picks up and works on during an [iteration](#iteration).
 
 ## Template argument
 
-A `{{KEY}}` placeholder in a file [init](#init) scaffolds, such as the Dockerfile or the prompt, which init fills in from your choices. See [Init](./init.md#template-arguments).
-
-First explained in [Init](./init.md).
+A `{{KEY}}` placeholder in a scaffold template, which [init](#init) fills in from your choices. The `blank` template has none.
 
 ## Template argument substitution
 
-The step during [init](#init) that replaces each [template argument](#template-argument) with its value. See [Init](./init.md#template-arguments).
+The step during [init](#init) that replaces each [template argument](#template-argument) with its value.
 
 ## Terminal mode
 
