@@ -79,42 +79,47 @@ describe("the scaffolded blank main file", () => {
     );
   });
 
-  // One CLI process at a time, then one tsc over every scaffold.
-  it("typechecks against the package, for every provider", async () => {
-    const files = PROVIDERS.map((provider) =>
-      path.join(parent, `typecheck-${provider}`, ".sandcastle", "main.mts"),
-    );
-    await PROVIDERS.reduce(async (previous, provider) => {
-      await previous;
-      await initBlank(makeProject(parent, `typecheck-${provider}`), provider);
-    }, Promise.resolve());
-    const tsconfig = path.join(parent, "tsconfig.json");
-    writeFileSync(
-      tsconfig,
-      JSON.stringify({
-        compilerOptions: {
-          target: "ESNext",
-          lib: ["ESNext"],
-          module: "NodeNext",
-          moduleResolution: "NodeNext",
-          types: ["node"],
-          typeRoots: [path.join(ROOT, "node_modules", "@types")],
-          strict: true,
-          noEmit: true,
-          skipLibCheck: true,
-        },
-        files,
-      }),
-    );
+  // One CLI process at a time, then one tsc over every scaffold. The package's
+  // types are in dist/, and the windows job runs without a build.
+  it.skipIf(process.platform === "win32")(
+    "typechecks against the package, for every provider",
+    async () => {
+      const files = PROVIDERS.map((provider) =>
+        path.join(parent, `typecheck-${provider}`, ".sandcastle", "main.mts"),
+      );
+      await PROVIDERS.reduce(async (previous, provider) => {
+        await previous;
+        await initBlank(makeProject(parent, `typecheck-${provider}`), provider);
+      }, Promise.resolve());
+      const tsconfig = path.join(parent, "tsconfig.json");
+      writeFileSync(
+        tsconfig,
+        JSON.stringify({
+          compilerOptions: {
+            target: "ESNext",
+            lib: ["ESNext"],
+            module: "NodeNext",
+            moduleResolution: "NodeNext",
+            types: ["node"],
+            typeRoots: [path.join(ROOT, "node_modules", "@types")],
+            strict: true,
+            noEmit: true,
+            skipLibCheck: true,
+          },
+          files,
+        }),
+      );
 
-    const tsc = spawnSync(process.execPath, [TSC, "-p", tsconfig], {
-      encoding: "utf8",
-    });
-    expect({ status: tsc.status, stdout: tsc.stdout }).toStrictEqual({
-      status: 0,
-      stdout: "",
-    });
-  }, 240_000);
+      const tsc = spawnSync(process.execPath, [TSC, "-p", tsconfig], {
+        encoding: "utf8",
+      });
+      expect({ status: tsc.status, stdout: tsc.stdout }).toStrictEqual({
+        status: 0,
+        stdout: "",
+      });
+    },
+    240_000,
+  );
 
   // The fake runs real `sh` in temp dirs: POSIX only.
   it.skipIf(process.platform === "win32")(
