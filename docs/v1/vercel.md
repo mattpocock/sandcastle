@@ -2,7 +2,7 @@
 
 > Pre-release: `@ai-hero/sandcastle/v1/sandboxes/vercel` is the v1 API, and it may still change.
 
-`vercel()` makes [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox) microVMs for `createSandbox`. It needs `@vercel/sandbox` 3.8.0 or later (3.x) installed beside Sandcastle.
+`vercel()` makes [Vercel Sandbox](https://vercel.com/docs/vercel-sandbox) microVMs for `createSandbox`. It needs `@vercel/sandbox` 3.8.0 or later (3.x or 4.x) installed beside Sandcastle. 4.x needs Node.js 22.19.0 or later.
 
 ```ts
 import { createSandbox } from "@ai-hero/sandcastle/v1";
