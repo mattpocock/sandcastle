@@ -26,7 +26,7 @@ const TEMPLATES: readonly TemplateMetadata[] = [
   },
 ];
 
-/** The 0.x templates, built on `run()`, which 1.0.0 removed. */
+/** The 0.x templates, built on `run()`, which v1 removed. */
 const REMOVED_TEMPLATES: ReadonlySet<string> = new Set([
   "simple-loop",
   "sequential-reviewer",
@@ -46,7 +46,7 @@ export const templateError = (name: string): string | undefined => {
   }
   const available = TEMPLATES.map((t) => t.name).join(", ");
   return REMOVED_TEMPLATES.has(name)
-    ? `The "${name}" template was removed in 1.0.0, with run(). Available: ${available}. It scaffolds one sandbox and one agent session, which you build your own workflow on.`
+    ? `The "${name}" template was removed in v1, with run(). Available: ${available}. It scaffolds one sandbox and one agent session, which you build your own workflow on.`
     : `Unknown template "${name}". Available: ${available}`;
 };
 

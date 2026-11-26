@@ -11,12 +11,12 @@ npm run -s verify -- sandcastle <run> init --agent claude-code \
 
 The agent's shell has no TTY, so every prompt must come as a flag. A missing one fails with `<flags> is required in non-interactive mode (no TTY detected).`, naming every missing flag, before anything is written. The prompts themselves (a select) need a terminal and are unverifiable here.
 
-| Flag         | Values                                                                                                                                                                                     |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--agent`    | claude-code, pi, codex, cursor, opencode, copilot                                                                                                                                          |
-| `--model`    | any id. Without it, the agent's default, never the cheapest. Pass `doctor`'s model; options by hand.                                                                                       |
-| `--sandbox`  | bwrap, seatbelt, docker, podman, daytona, e2b, modal, sprites, vercel, host: one per `./v1/sandboxes/<name>` export (`src/initSandboxProviders.ts`)                                        |
-| `--template` | blank, the default. A 0.x name (simple-loop, sequential-reviewer, parallel-planner, parallel-planner-with-review) fails with `The "<name>" template was removed in 1.0.0`, writing nothing |
+| Flag         | Values                                                                                                                                                                                  |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--agent`    | claude-code, pi, codex, cursor, opencode, copilot                                                                                                                                       |
+| `--model`    | any id. Without it, the agent's default, never the cheapest. Pass `doctor`'s model; options by hand.                                                                                    |
+| `--sandbox`  | bwrap, seatbelt, docker, podman, daytona, e2b, modal, sprites, vercel, host: one per `./v1/sandboxes/<name>` export (`src/initSandboxProviders.ts`)                                     |
+| `--template` | blank, the default. A 0.x name (simple-loop, sequential-reviewer, parallel-planner, parallel-planner-with-review) fails with `The "<name>" template was removed in v1`, writing nothing |
 
 There is no package-manager flag. It is detected from `packageManager`, then the lockfile, then npm (`src/initPackageManager.ts`), and shows in the next steps' SDK install and `run sandcastle` commands.
 

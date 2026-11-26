@@ -84,9 +84,9 @@ describe("templates", () => {
     "sequential-reviewer",
     "parallel-planner",
     "parallel-planner-with-review",
-  ])("says %s was removed in 1.0.0", (name) => {
+  ])("says %s was removed in v1", (name) => {
     expect(templateError(name)).toContain(
-      `The "${name}" template was removed in 1.0.0`,
+      `The "${name}" template was removed in v1`,
     );
   });
 

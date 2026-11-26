@@ -50,7 +50,7 @@ The scaffolded main file is plain TypeScript you run with `npx tsx .sandcastle/m
 
 The sandbox starts empty: clone your repo into it with a setup `sandbox.exec(...)` before the session (the main file has an example).
 
-`--template blank` is the only template. The 0.x templates (`simple-loop`, `sequential-reviewer`, `parallel-planner` and `parallel-planner-with-review`) were removed in 1.0.0, and init says so if you ask for one.
+`--template blank` is the only template. The 0.x templates (`simple-loop`, `sequential-reviewer`, `parallel-planner` and `parallel-planner-with-review`) were removed in v1, and init says so if you ask for one.
 
 ## Related terms
 

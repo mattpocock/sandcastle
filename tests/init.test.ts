@@ -63,7 +63,7 @@ describe("sandcastle init (non-interactive)", () => {
   }, 60_000);
 
   it.each(["simple-loop", "parallel-planner"])(
-    "fails on --template %s, saying it was removed in 1.0.0, before writing anything",
+    "fails on --template %s, saying it was removed in v1, before writing anything",
     async (template) => {
       const result = await init(
         "--sandbox",
@@ -76,7 +76,7 @@ describe("sandcastle init (non-interactive)", () => {
 
       expect(result.exitCode).not.toBe(0);
       expect(`${result.stdout}${result.stderr}`).toContain(
-        `The "${template}" template was removed in 1.0.0`,
+        `The "${template}" template was removed in v1`,
       );
       expect(existsSync(join(repo.dir, ".sandcastle"))).toBe(false);
     },
