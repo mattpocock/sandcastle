@@ -66,6 +66,19 @@ jobs:
         if: github.event.pull_request.state == 'open'
         run: npm run build
 
+      # bwrap() runs the agent's sandbox (WORKFLOW_SANDBOX below): each of
+      # its commands has its own PID namespace, so the agent can't read
+      # GH_TOKEN from this job's other processes through /proc. Ubuntu
+      # 24.04's AppArmor blocks the unprivileged user namespaces bwrap
+      # needs, so lift that on this throwaway runner, as the ci job does.
+      - name: Install Bubblewrap
+        if: github.event.pull_request.state == 'open'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          bwrap --ro-bind / / true
+
       - name: Install Claude Code
         if: github.event.pull_request.state == 'open'
         run: npm install -g @anthropic-ai/claude-code
@@ -73,6 +86,10 @@ jobs:
       - name: Run implement-PR agent
         if: github.event.pull_request.state == 'open'
         env:
+          WORKFLOW_SANDBOX: bwrap
+          # Short: bwrap()'s keeper socket goes under it, and a socket path
+          # has room for only 107 characters.
+          XDG_STATE_HOME: ${{ runner.temp }}/st
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           OUTPUT_DIR: ${{ runner.temp }}
         run: npx tsx .sandcastle/agent-workflows/implement-pr/implement-pr.ts

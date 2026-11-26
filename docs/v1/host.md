@@ -2,6 +2,8 @@
 
 > [!WARNING]
 > **`host()` is not a sandbox.** Its commands run on your machine, as you, with no isolation. The agent can read everything you can, your home folder included (`~/.ssh`, `~/.aws`, `~/.config/gh` and every other credential on disk), write anywhere you can, and reach anything on your network. And v1 agents run with their default permission bypass here too: Claude Code gets `--dangerously-skip-permissions`, so it never stops to ask before it runs a command. Set `permissionMode` on the agent to turn that off. Use `host()` on a throwaway CI runner, or on a machine where you'd let the agent do anything you can do yourself.
+>
+> Even on a CI runner, the agent sees the job's other processes, so it can read their env (a token in a step's env, say) through `/proc/<pid>/environ`. On a Linux runner, [`bwrap()`](./bwrap.md) gives each command its own PID namespace, which closes that.
 
 > Pre-release: `@ai-hero/sandcastle/v1/sandboxes/host` is the v1 API, and it may still change.
 
