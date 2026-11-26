@@ -95,6 +95,8 @@ describe.skipIf(process.platform === "win32")("vercel() (v1)", () => {
         ports: [3000],
         networkPolicy: "deny-all",
         tags: { run: "r-1" },
+        // New in @vercel/sandbox 4.0.0.
+        credentials: { npm: true },
       },
     });
 
@@ -110,6 +112,7 @@ describe.skipIf(process.platform === "win32")("vercel() (v1)", () => {
       ports: [3000],
       networkPolicy: "deny-all",
       tags: { run: "r-1" },
+      credentials: { npm: true },
       token: "vc-token",
       teamId: "team_1",
       projectId: "prj_1",

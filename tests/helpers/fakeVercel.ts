@@ -8,7 +8,9 @@ import type { Writable } from "node:stream";
 import { killProcessTrees } from "./processTree.js";
 
 // A stand-in for `@vercel/sandbox`, for `vi.mock`: just the `Sandbox` calls
-// vercel() makes, backed by real `sh` processes and a host directory per
+// vercel() makes, as the dev dependency (4.x) has them. Those calls, and the
+// APIError's `response.status` a missing sandbox throws, are the same from
+// 3.8.0 through 4.x. Backed by real `sh` processes and a host directory per
 // sandbox (`<root>/<name>` is its session directory, `cwd`), so the real
 // session supervisor runs in it. Paths in the sandbox are host paths. As on
 // Vercel, a command it waits for gets no stdin, the streams it writes to are
