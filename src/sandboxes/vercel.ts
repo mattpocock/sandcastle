@@ -85,7 +85,7 @@ export interface VercelOptions {
    * The runtime of the sandbox (e.g. `"node24"`, `"node22"`, `"python3.13"`).
    *
    * Omit it to get Vercel's default image (`vercel/sandbox/universal` as of
-   * `@vercel/sandbox` 3.x), which ships coding agent CLIs such as `claude`.
+   * `@vercel/sandbox` 3.x and 4.x), which ships coding agent CLIs such as `claude`.
    * The named runtimes ship none: install your agent's CLI in an
    * `onSandboxReady` hook.
    */
