@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { beforeAll, describe, expect, it, onTestFinished } from "vitest";
-import * as sandcastle from "@ai-hero/sandcastle";
+import * as sandcastle from "@ai-hero/sandcastle/v1";
 
 // `sandcastle init --agent <name>`: which agents the CLI offers, and what each
 // one scaffolds. The CLI runs from src/main.ts through tsx as a subprocess,
@@ -32,10 +32,6 @@ const sandcastleInit = async (
     agent,
     "--sandbox",
     "docker",
-    "--issue-tracker",
-    "custom",
-    "--template",
-    "blank",
   ];
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, args, { cwd });
@@ -58,37 +54,31 @@ const AGENTS = [
     name: "claude-code",
     factory: "claudeCode",
     model: "claude-opus-4-8",
-    installs: "https://claude.ai/install.sh",
   },
   {
     name: "pi",
     factory: "pi",
     model: "claude-sonnet-4-6",
-    installs: "@earendil-works/pi-coding-agent",
   },
   {
     name: "codex",
     factory: "codex",
     model: "gpt-5.4",
-    installs: "@openai/codex",
   },
   {
     name: "cursor",
     factory: "cursor",
     model: "composer-2",
-    installs: "cursor.com/install",
   },
   {
     name: "opencode",
     factory: "opencode",
     model: "opencode/big-pickle",
-    installs: "opencode-ai",
   },
   {
     name: "copilot",
     factory: "copilot",
     model: "claude-sonnet-4.5",
-    installs: "@github/copilot",
   },
 ] as const;
 
@@ -119,8 +109,7 @@ describe("sandcastle init --agent", () => {
     );
   });
 
-  describe.each(AGENTS)("$name", ({ name, factory, model, installs }) => {
-    // Both tests read the same scaffold: one init per agent.
+  describe.each(AGENTS)("$name", ({ name, factory, model }) => {
     let result: CliResult = { exitCode: -1, output: "" };
     let scaffolded: (file: string) => string = () => "";
 
@@ -129,7 +118,7 @@ describe("sandcastle init --agent", () => {
       result = await sandcastleInit(repo, name);
       const dir = path.join(repo, ".sandcastle");
       const files = new Map(
-        ["main.mts", "Dockerfile"].map((file) => [
+        ["main.mts"].map((file) => [
           file,
           readFileSync(path.join(dir, file), "utf8"),
         ]),
@@ -142,7 +131,7 @@ describe("sandcastle init --agent", () => {
       expect(result).toMatchObject({ exitCode: 0 });
       expect(scaffolded("main.mts")).toMatch(
         new RegExp(
-          `import \\{[^}]*\\b${factory}\\b[^}]*\\} from "@ai-hero/sandcastle";`,
+          `import \\{[^}]*\\b${factory}\\b[^}]*\\} from "@ai-hero/sandcastle/v1";`,
           "u",
         ),
       );
@@ -150,12 +139,6 @@ describe("sandcastle init --agent", () => {
         `agent: ${factory}("${model}"),`,
       );
       expect(sandcastle).toHaveProperty(factory, expect.any(Function));
-    });
-
-    it(`writes a Dockerfile that installs the ${name} CLI`, () => {
-      const dockerfile = scaffolded("Dockerfile");
-      expect(dockerfile).toMatch(/^FROM /mu);
-      expect(dockerfile).toContain(installs);
     });
   });
 }, 60_000);

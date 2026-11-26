@@ -39,6 +39,6 @@ Each page below covers one term from the glossary, with the terms around it fold
 - [Structured output](./structured-output.md): getting a typed answer back from the agent, checked against a schema.
 - [Prompts](./prompts.md): a prompt as a string or a file, filling in placeholders, and running shell commands inside it.
 - [Hooks](./hooks.md): commands that run on the host or in the sandbox while it starts.
-- [Init](./init.md): `sandcastle init`, the files it scaffolds, where the agent finds its work, and the Dockerfile.
+- [Init](./init.md): `sandcastle init`, and the files it scaffolds.
 - [Run logs](./run-logs.md): showing progress in the terminal or writing it to a log file, and receiving the agent's output as it runs.
 - Reference: [`run()` and `createSandbox()`](./run.md), every option and result field, and the [CLI commands](./cli.md).

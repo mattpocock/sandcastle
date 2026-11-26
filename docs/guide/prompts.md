@@ -37,7 +37,7 @@ You must provide exactly one of:
 
 The substitution and expansion features below apply **only** to prompts sourced from `promptFile`.
 
-> **Convention**: `sandcastle init` scaffolds `.sandcastle/prompt.md` and all templates explicitly reference it via `promptFile: ".sandcastle/prompt.md"`. This is a convention, not an automatic fallback — Sandcastle does not read `.sandcastle/prompt.md` unless you pass it as `promptFile`.
+> **Convention**: `sandcastle init` scaffolds `.sandcastle/prompt.md`, which its main file reads itself. This is a convention, not an automatic fallback — Sandcastle does not read `.sandcastle/prompt.md` unless you pass it as `promptFile`.
 
 ## Dynamic context with `` !`command` ``
 
@@ -111,4 +111,4 @@ Passing `SOURCE_BRANCH` or `TARGET_BRANCH` in `promptArgs` is an error — built
 - [Structured output](./structured-output.md): the prompt must contain the output tag
 - [Hooks](./hooks.md): shell expressions run after `sandbox.onSandboxReady` hooks
 - [Branch strategies](./branch-strategies.md#source-and-target-branches): the source and [target branches](./glossary.md#target-branch)
-- [Init](./init.md): the placeholders `sandcastle init` fills in once, and the scaffolded `prompt.md`
+- [Init](./init.md): the scaffolded `prompt.md`, and how its main file runs the prompt's shell expressions

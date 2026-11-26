@@ -1,8 +1,8 @@
 import { Command, Options } from "@effect/cli";
 import { FileSystem } from "@effect/platform";
-import { Effect, Option } from "effect";
+import { Effect } from "effect";
+import type { Option } from "effect";
 import * as clack from "@clack/prompts";
-import { execFile, execSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { styleText } from "node:util";
 
@@ -12,36 +12,22 @@ import {
   buildImage as podmanBuildImage,
   removeImage as podmanRemoveImage,
 } from "./PodmanLifecycle.js";
+import { scaffold, templateError, getNextStepsLines } from "./InitService.js";
 import {
-  scaffold,
-  listTemplates,
-  listAgents,
-  getAgent,
-  listIssueTrackers,
-  getIssueTracker,
-  listSandboxProviders,
-  listSandboxProviderChoices,
-  getSandboxProvider,
-  getNextStepsLines,
   detectPackageManager,
-  addDependencyCommand,
   hostHasDependency,
-  getTemplateDependencies,
-  buildImageShellCommand,
-  parseBdVersion,
-  beadsVersionWarning,
+} from "./initPackageManager.js";
+import { agentCliWarning, getAgent, listAgents } from "./initAgents.js";
+import type { AgentEntry } from "./initAgents.js";
+import {
+  getSandboxProvider,
+  listSandboxProviderChoices,
+  listSandboxProviders,
   sandboxProviderPreflightWarning,
-  agentCliWarning,
-} from "./InitService.js";
-import type {
-  AgentEntry,
-  IssueTrackerEntry,
-  PackageManager,
-  SandboxProviderEntry,
-} from "./InitService.js";
+} from "./initSandboxProviders.js";
+import type { SandboxProviderEntry } from "./initSandboxProviders.js";
 import { defaultImageName } from "./sandboxes/docker.js";
 import { ConfigDirError, InitError } from "./errors.js";
-import type { DockerError, PodmanError } from "./errors.js";
 import { VERSION } from "./version.js";
 
 // --- Shared options ---
@@ -133,7 +119,7 @@ const missingDockerfileMessage = (
     ),
   );
 
-// --- Init flag resolution ---
+// --- Init command ---
 
 const nonInteractiveMessage = (flags: readonly string[]): string =>
   `${flags.join(", ")} ${flags.length === 1 ? "is" : "are"} required in non-interactive mode (no TTY detected).`;
@@ -185,11 +171,9 @@ const selectName = (params: {
     return selected;
   });
 
-// --- Init command ---
-
 const templateOption = Options.text("template").pipe(
   Options.withDescription(
-    "Template to scaffold (e.g. blank, simple-loop, parallel-planner)",
+    "Template to scaffold. The only one is blank, which init uses when this is left out",
   ),
   Options.optional,
 );
@@ -208,103 +192,29 @@ const initModelOption = Options.text("model").pipe(
 
 const sandboxOption = Options.text("sandbox").pipe(
   Options.withDescription(
-    "Sandbox provider to use (bwrap, seatbelt, docker or podman)",
+    `Sandbox provider to use (${listSandboxProviders()
+      .map((p) => p.name)
+      .join(", ")})`,
   ),
   Options.optional,
 );
-
-const issueTrackerOption = Options.text("issue-tracker").pipe(
-  Options.withDescription(
-    "Issue tracker to use (e.g. github-issues, beads, custom)",
-  ),
-  Options.optional,
-);
-
-// Tri-state booleans (Some(true) / Some(false) / None) so we can tell "user
-// chose false" from "user didn't pass the flag at all" — only the latter
-// triggers the interactive prompt.
-const createLabelOption = Options.choice("create-label", [
-  "true",
-  "false",
-]).pipe(
-  Options.withDescription(
-    'Whether to create the "Sandcastle" GitHub label (only meaningful with --issue-tracker github-issues)',
-  ),
-  Options.optional,
-);
-
-const buildImageOption = Options.choice("build-image", ["true", "false"]).pipe(
-  Options.withDescription(
-    "Whether to build the sandbox image now (ignored when --issue-tracker custom is selected)",
-  ),
-  Options.optional,
-);
-
-const installTemplateDepsOption = Options.choice("install-template-deps", [
-  "true",
-  "false",
-]).pipe(
-  Options.withDescription(
-    "Whether to install the template's host dependencies (e.g. zod for the planner templates)",
-  ),
-  Options.optional,
-);
-
-/**
- * Translate an `Options.choice("flag", ["true", "false"]).optional` value into
- * a tri-state boolean. None when the flag was absent; otherwise the parsed bool.
- */
-const choiceToTriBool = (
-  opt: Option.Option<"true" | "false">,
-): Option.Option<boolean> =>
-  opt._tag === "Some" ? Option.some(opt.value === "true") : Option.none();
-
-/** The host's `bd version`, or undefined when bd isn't on the PATH. */
-const detectHostBdVersion = (cwd: string): Effect.Effect<string | undefined> =>
-  Effect.async((resume) => {
-    execFile(
-      "bd",
-      ["version"],
-      { cwd, encoding: "utf8", timeout: 15_000 },
-      (_error, stdout, stderr) => {
-        resume(Effect.succeed(parseBdVersion(`${stdout}\n${stderr}`)));
-      },
-    );
-  });
 
 /** The `init` flags, as parsed. */
 interface InitFlags {
-  readonly imageName: Option.Option<string>;
   readonly template: Option.Option<string>;
   readonly agent: Option.Option<string>;
   readonly model: Option.Option<string>;
   readonly sandbox: Option.Option<string>;
-  readonly issueTracker: Option.Option<string>;
-  readonly createLabel: Option.Option<"true" | "false">;
-  readonly buildImage: Option.Option<"true" | "false">;
-  readonly installTemplateDeps: Option.Option<"true" | "false">;
 }
 
-/** The tri-state confirm flags: Some when the flag was passed. */
-interface InitConfirmChoices {
-  readonly createLabel: Option.Option<boolean>;
-  readonly buildImage: Option.Option<boolean>;
-  readonly installTemplateDeps: Option.Option<boolean>;
-}
-
-/** Fails when a registry flag names something that doesn't exist. */
+/** Fails when a flag names something that doesn't exist. */
 const validateRegistryFlags = (
   flags: InitFlags,
 ): Effect.Effect<void, InitError> =>
   Effect.gen(function* () {
-    const { template } = flags;
-    if (template._tag === "Some") {
-      const templates = listTemplates();
-      const names = templates.map((tmpl) => tmpl.name).join(", ");
-      yield* failInitUnless(
-        templates.some((tmpl) => tmpl.name === template.value),
-        `Unknown template "${template.value}". Available: ${names}`,
-      );
+    if (flags.template._tag === "Some") {
+      const error = templateError(flags.template.value);
+      yield* failInitUnless(error === undefined, error ?? "");
     }
 
     if (flags.sandbox._tag === "Some") {
@@ -314,16 +224,6 @@ const validateRegistryFlags = (
       yield* failInitUnless(
         getSandboxProvider(flags.sandbox.value) !== undefined,
         `Unknown sandbox provider "${flags.sandbox.value}". Available: ${names}`,
-      );
-    }
-
-    if (flags.issueTracker._tag === "Some") {
-      const names = listIssueTrackers()
-        .map((t) => t.name)
-        .join(", ");
-      yield* failInitUnless(
-        getIssueTracker(flags.issueTracker.value) !== undefined,
-        `Unknown issue tracker "${flags.issueTracker.value}". Available: ${names}`,
       );
     }
 
@@ -338,111 +238,11 @@ const validateRegistryFlags = (
     }
   });
 
-/**
- * Tri-state confirm: CLI flag wins; otherwise prompt interactively (or
- * fail fast in non-interactive mode naming the missing flag). Cancelling
- * the prompt is treated as abort — same shape as the select prompts.
- */
-const resolveConfirmFlag = (params: {
-  choice: Option.Option<boolean>;
-  flag: string;
-  isInteractive: boolean;
-  promptMessage: string;
-  cancelMessage: string;
-}): Effect.Effect<boolean, InitError> =>
-  Effect.gen(function* () {
-    if (params.choice._tag === "Some") {
-      return params.choice.value;
-    }
-    if (!params.isInteractive) {
-      return yield* new InitError({
-        message: nonInteractiveMessage([params.flag]),
-      });
-    }
-    const confirmed = yield* Effect.promise(() =>
-      clack.confirm({
-        message: params.promptMessage,
-        initialValue: true,
-      }),
-    );
-    if (clack.isCancel(confirmed)) {
-      return yield* new InitError({ message: params.cancelMessage });
-    }
-    return confirmed;
-  });
-
-/**
- * Whether the template needs a host dependency (zod) the host lacks, so
- * init would ask about --install-template-deps.
- */
-const asksToInstallTemplateDeps = (
-  template: Option.Option<string>,
-  choice: Option.Option<boolean>,
-  cwd: string,
-): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
-  template._tag === "Some" &&
-  choice._tag === "None" &&
-  getTemplateDependencies(template.value).includes("zod")
-    ? Effect.map(hostHasDependency(cwd, "zod"), (has) => !has)
-    : Effect.succeed(false);
-
-/** The flags a non-interactive init is missing for the prompts it would show. */
-const missingInitFlags = (
-  flags: InitFlags,
-  choices: InitConfirmChoices,
-  cwd: string,
-): Effect.Effect<string[], never, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const tracker = Option.getOrUndefined(flags.issueTracker);
-    const { template } = flags;
-    const missing: string[] = [];
-    if (flags.agent._tag === "None") {
-      missing.push("--agent");
-    }
-    if (flags.sandbox._tag === "None") {
-      missing.push("--sandbox");
-    }
-    if (tracker === undefined) {
-      missing.push("--issue-tracker");
-    }
-    if (template._tag === "None") {
-      missing.push("--template");
-    }
-    if (tracker === "github-issues" && choices.createLabel._tag === "None") {
-      missing.push("--create-label");
-    }
-    if (
-      yield* asksToInstallTemplateDeps(
-        template,
-        choices.installTemplateDeps,
-        cwd,
-      )
-    ) {
-      missing.push("--install-template-deps");
-    }
-    // --build-image only applies to a provider with an image. Without
-    // --sandbox the provider is unknown, so --build-image is still named.
-    const sandboxName = Option.getOrUndefined(flags.sandbox);
-    const providerHasImage =
-      sandboxName === undefined ||
-      getSandboxProvider(sandboxName)?.image !== undefined;
-    if (
-      tracker !== "custom" &&
-      providerHasImage &&
-      choices.buildImage._tag === "None"
-    ) {
-      missing.push("--build-image");
-    }
-    return missing;
-  });
-
 /** What the user chose, by flag or prompt. */
 interface InitSelection {
   readonly agent: AgentEntry;
   readonly model: string;
   readonly sandboxProvider: SandboxProviderEntry;
-  readonly issueTracker: IssueTrackerEntry;
-  readonly template: string;
 }
 
 const selectAgent = (
@@ -499,126 +299,56 @@ const selectSandboxProvider = (
   );
 };
 
-const selectIssueTracker = (
-  flag: Option.Option<string>,
-  isInteractive: boolean,
-): Effect.Effect<IssueTrackerEntry, InitError> =>
-  selectName({
-    flag,
-    flagName: "--issue-tracker",
-    isInteractive,
-    cancelMessage: "Issue tracker selection cancelled.",
-    prompt: {
-      message: "Select an issue tracker:",
-      initialValue: "github-issues",
-      options: listIssueTrackers().map((b) => ({
-        value: b.name,
-        label: b.label,
-      })),
-    },
-  }).pipe(
-    Effect.flatMap((name) =>
-      registryEntry(getIssueTracker(name), `issue tracker "${name}"`),
-    ),
-  );
-
-const selectTemplate = (
-  flag: Option.Option<string>,
-  isInteractive: boolean,
-): Effect.Effect<string, InitError> =>
-  selectName({
-    flag,
-    flagName: "--template",
-    isInteractive,
-    cancelMessage: "Template selection cancelled.",
-    prompt: {
-      message: "Select a template:",
-      initialValue: "blank",
-      options: listTemplates().map((tmpl) => ({
-        value: tmpl.name,
-        label: tmpl.name,
-        hint: tmpl.description,
-      })),
-    },
-  });
-
-/** Each choice: CLI flag (already validated) > interactive select. */
-const selectInitChoices = (
+/**
+ * Validates the flags and settles every choice, by flag or prompt, before
+ * anything is written. There is one template, so init never asks for one.
+ */
+const decideInit = (
   flags: InitFlags,
-  isInteractive: boolean,
 ): Effect.Effect<InitSelection, InitError> =>
   Effect.gen(function* () {
+    yield* validateRegistryFlags(flags);
+    const isInteractive = process.stdin.isTTY === true;
+
+    // Without a TTY, every prompt init would show must be answered by a flag.
+    // Name every missing flag at once, before anything is written.
+    if (!isInteractive) {
+      const missing = [
+        ...(flags.agent._tag === "None" ? ["--agent"] : []),
+        ...(flags.sandbox._tag === "None" ? ["--sandbox"] : []),
+      ];
+      yield* failInitUnless(
+        missing.length === 0,
+        nonInteractiveMessage(missing),
+      );
+    }
+
     const agent = yield* selectAgent(flags.agent, isInteractive);
-    // Resolve model: CLI flag > agent default
     const model =
       flags.model._tag === "Some" ? flags.model.value : agent.defaultModel;
     const sandboxProvider = yield* selectSandboxProvider(
       flags.sandbox,
       isInteractive,
     );
-    const issueTracker = yield* selectIssueTracker(
-      flags.issueTracker,
-      isInteractive,
-    );
-    const template = yield* selectTemplate(flags.template, isInteractive);
-    return { agent, model, sandboxProvider, issueTracker, template };
+    return { agent, model, sandboxProvider };
   });
 
 /**
- * Offer to create the "Sandcastle" label on the repo (skip for non-GitHub
- * issue trackers). CLI flag > interactive confirm. The flag is only
- * meaningful for the github-issues tracker. Returns whether it was chosen.
- */
-const offerSandcastleLabel = (
-  selection: InitSelection,
-  choice: Option.Option<boolean>,
-  context: { readonly cwd: string; readonly isInteractive: boolean },
-): Effect.Effect<boolean, InitError> =>
-  Effect.gen(function* () {
-    if (selection.issueTracker.name !== "github-issues") {
-      return false;
-    }
-    const shouldCreateLabel = yield* resolveConfirmFlag({
-      choice,
-      flag: "--create-label",
-      isInteractive: context.isInteractive,
-      promptMessage:
-        'Create a "Sandcastle" GitHub label? (Templates filter issues by this label)',
-      cancelMessage: "Label selection cancelled.",
-    });
-
-    if (shouldCreateLabel) {
-      yield* Effect.try({
-        try: () =>
-          execSync(
-            'gh label create "Sandcastle" --description "Issues for Sandcastle to work on" --color "F9A825"',
-            { cwd: context.cwd, stdio: "ignore" },
-          ),
-        catch: () => undefined,
-      }).pipe(Effect.ignore);
-    }
-    return shouldCreateLabel;
-  });
-
-/**
- * Warns about host tools the chosen setup needs but doesn't find: the native
- * sandbox tool and agent CLI, and a beads `bd` that disagrees with the image.
+ * Warns about host tools the chosen provider needs but doesn't find: the
+ * native sandbox tool, and the agent CLI a provider running the host's own
+ * programs needs.
  */
 const warnHostPrerequisites = (
   selection: InitSelection,
-  cwd: string,
 ): Effect.Effect<void, never, Display | FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const d = yield* Display;
     const { sandboxProvider } = selection;
-    // A native provider runs on the host's own sandbox tool. Check it works
-    // now, so a missing tool shows up at init, not on the first run.
     const preflightWarning = sandboxProviderPreflightWarning(sandboxProvider);
     if (preflightWarning !== undefined) {
       yield* d.status(preflightWarning, "warn");
     }
-    // ...and the agent CLI it runs is installed on the host.
-    if (sandboxProvider.image === undefined) {
+    if (sandboxProvider.runsHostPrograms) {
       const agentWarning = yield* agentCliWarning(
         selection.agent,
         sandboxProvider,
@@ -627,225 +357,7 @@ const warnHostPrerequisites = (
         yield* d.status(agentWarning, "warn");
       }
     }
-
-    // Beads sandboxes open the host's .beads/ with the image's bd, so a
-    // different host bd breaks one side or the other (see beadsVersionWarning).
-    // Only an image-based provider has an image bd to disagree with.
-    if (
-      selection.issueTracker.name === "beads" &&
-      sandboxProvider.image !== undefined
-    ) {
-      const warning = beadsVersionWarning(yield* detectHostBdVersion(cwd));
-      if (warning !== undefined) {
-        yield* d.status(warning, "warn");
-      }
-    }
   });
-
-/** Runs `installCmd`; whether it succeeded. */
-const tryInstall = (installCmd: string, cwd: string): Effect.Effect<boolean> =>
-  Effect.sync(() => {
-    try {
-      execSync(installCmd, { cwd, stdio: "ignore" });
-      return true;
-    } catch {
-      return false;
-    }
-  });
-
-/**
- * If the chosen template imports zod on the host (the planner templates
- * build their <plan> output schema with it) and the host doesn't already
- * declare it, offer to install it. Without this, the very first
- * `npx tsx .sandcastle/main.ts` crashes with ERR_MODULE_NOT_FOUND.
- * Returns the template dependencies the host now has.
- */
-const offerTemplateDeps = (
-  template: string,
-  choice: Option.Option<boolean>,
-  context: {
-    readonly cwd: string;
-    readonly isInteractive: boolean;
-    readonly packageManager: PackageManager;
-  },
-): Effect.Effect<string[], InitError, Display | FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const { cwd, packageManager } = context;
-    if (!getTemplateDependencies(template).includes("zod")) {
-      return [];
-    }
-    if (yield* hostHasDependency(cwd, "zod")) {
-      return ["zod"];
-    }
-    const installCmd = addDependencyCommand(packageManager, "zod");
-    const shouldInstall = yield* resolveConfirmFlag({
-      choice,
-      flag: "--install-template-deps",
-      isInteractive: context.isInteractive,
-      promptMessage: `The ${template} template needs a schema validator. Install zod now (\`${installCmd}\`)?`,
-      cancelMessage: "Install-template-deps selection cancelled.",
-    });
-    if (!shouldInstall) {
-      return [];
-    }
-    const d = yield* Display;
-    const installed = yield* tryInstall(installCmd, cwd);
-    yield* installed
-      ? d.status(`Installed zod with ${packageManager}.`, "success")
-      : d.status(
-          `Couldn't install zod automatically. Run \`${installCmd}\` before running the agent.`,
-          "warn",
-        );
-    return installed ? ["zod"] : [];
-  });
-
-/** Builds the scaffolded image with the provider's engine. */
-const buildDefaultImage = (
-  sandboxProvider: SandboxProviderEntry,
-  imageName: string,
-  cwd: string,
-): Effect.Effect<void, DockerError | PodmanError> => {
-  const containerfileDir = join(cwd, CONFIG_DIR);
-  return sandboxProvider.name === "podman"
-    ? podmanBuildImage(imageName, containerfileDir)
-    : buildImage(imageName, containerfileDir, {
-        buildArgs: defaultUidBuildArgs(),
-      });
-};
-
-/**
- * Prompt user before building image. The custom issue tracker scaffolds
- * an intentionally unfinished Dockerfile (the install block is a TODO),
- * so there is nothing valid to build yet — skip the build prompt entirely
- * (and silently ignore --build-image) and let the next steps point the
- * user at the setup doc.
- * A provider with no image has nothing to build, so init skips the
- * build-image prompt (and ignores --build-image) for it.
- */
-const finishInit = (
-  selection: InitSelection,
-  choice: Option.Option<boolean>,
-  context: {
-    readonly cwd: string;
-    readonly isInteractive: boolean;
-    readonly imageName: string;
-    readonly customImageName: string | undefined;
-  },
-): Effect.Effect<void, InitError | DockerError | PodmanError, Display> =>
-  Effect.gen(function* () {
-    const d = yield* Display;
-    const { sandboxProvider, issueTracker } = selection;
-    const { imageName } = context;
-    const providerLabel = sandboxProvider.label;
-    const providerImage = sandboxProvider.image;
-    if (providerImage === undefined) {
-      return yield* d.status(
-        issueTracker.name === "custom"
-          ? "Init complete! Your custom issue tracker isn't configured yet — see the steps below."
-          : "Init complete!",
-        "success",
-      );
-    }
-    if (issueTracker.name === "custom") {
-      return yield* d.status(
-        "Init complete! Your custom issue tracker isn't configured yet — see the steps below before building.",
-        "success",
-      );
-    }
-    const shouldBuild = yield* resolveConfirmFlag({
-      choice,
-      flag: "--build-image",
-      isInteractive: context.isInteractive,
-      promptMessage: `Build the default ${providerLabel} image now?`,
-      cancelMessage: "Build-image selection cancelled.",
-    });
-
-    if (!shouldBuild) {
-      return yield* d.status(
-        `Init complete! Run \`${buildImageShellCommand(providerImage, context.customImageName)}\` to build the ${providerLabel} image later.`,
-        "success",
-      );
-    }
-    yield* d.spinner(
-      `Building ${providerLabel} image '${imageName}'...`,
-      buildDefaultImage(sandboxProvider, imageName, context.cwd),
-    );
-    yield* d.status("Init complete! Image built successfully.", "success");
-  });
-
-/**
- * Validates the flags and settles every choice, by flag or prompt, before
- * anything is written.
- */
-const decideInit = (
-  flags: InitFlags,
-): Effect.Effect<
-  {
-    cwd: string;
-    isInteractive: boolean;
-    choices: InitConfirmChoices;
-    selection: InitSelection;
-  },
-  InitError,
-  FileSystem.FileSystem
-> =>
-  Effect.gen(function* () {
-    const cwd = process.cwd();
-    // Early validation of CLI flags before interactive prompts
-    yield* validateRegistryFlags(flags);
-
-    const choices: InitConfirmChoices = {
-      createLabel: choiceToTriBool(flags.createLabel),
-      buildImage: choiceToTriBool(flags.buildImage),
-      installTemplateDeps: choiceToTriBool(flags.installTemplateDeps),
-    };
-
-    const isInteractive = process.stdin.isTTY === true;
-
-    // Without a TTY, every prompt init would show must be answered by a flag.
-    // Check them all here, before anything is written (the label, .sandcastle/,
-    // zod), and name every missing flag at once, so a scripted init never
-    // stops halfway with a partial scaffold behind it.
-    if (!isInteractive) {
-      const missing = yield* missingInitFlags(flags, choices, cwd);
-      yield* failInitUnless(
-        missing.length === 0,
-        nonInteractiveMessage(missing),
-      );
-    }
-
-    const selection = yield* selectInitChoices(flags, isInteractive);
-    return { cwd, isInteractive, choices, selection };
-  });
-
-/** Scaffolds `.sandcastle/` for what the user chose. */
-const scaffoldSelection = (
-  selection: InitSelection,
-  options: {
-    readonly cwd: string;
-    readonly createLabel: boolean;
-    readonly customImageName: string | undefined;
-  },
-): Effect.Effect<{ mainFilename: string }, InitError, FileSystem.FileSystem> =>
-  scaffold(options.cwd, {
-    agent: selection.agent,
-    model: selection.model,
-    templateName: selection.template,
-    createLabel: options.createLabel,
-    issueTracker: selection.issueTracker,
-    sandboxProvider: selection.sandboxProvider,
-    imageName:
-      selection.sandboxProvider.image === undefined
-        ? undefined
-        : options.customImageName,
-  }).pipe(
-    Effect.mapError(
-      (e) =>
-        new InitError({
-          message: e instanceof Error ? e.message : e,
-        }),
-    ),
-  );
 
 /** Prints the first line plain and the rest dimmed. */
 const printLines = (
@@ -858,99 +370,40 @@ const printLines = (
     }
   });
 
-/**
- * After scaffolding: offer the template's host dependencies and the image
- * build, then print the next steps.
- */
-const completeInit = (
-  selection: InitSelection,
-  choices: InitConfirmChoices,
-  context: {
-    readonly cwd: string;
-    readonly isInteractive: boolean;
-    readonly flags: InitFlags;
-    readonly mainFilename: string;
-  },
-): Effect.Effect<
-  void,
-  InitError | DockerError | PodmanError,
-  Display | FileSystem.FileSystem
-> =>
-  Effect.gen(function* () {
-    const { cwd, flags } = context;
-    // Detect the host package manager so the zod offer below and the next
-    // steps below both use the right install command.
-    const packageManager = yield* detectPackageManager(cwd);
-    const installedDependencies = yield* offerTemplateDeps(
-      selection.template,
-      choices.installTemplateDeps,
-      { ...context, packageManager },
-    );
-
-    yield* finishInit(selection, choices.buildImage, {
-      ...context,
-      imageName: resolveImageName(flags.imageName, cwd),
-      customImageName: Option.getOrUndefined(flags.imageName),
-    });
-
-    // Show template-specific next steps
-    yield* printLines(
-      getNextStepsLines(
-        selection.template,
-        context.mainFilename,
-        selection.issueTracker,
-        selection.agent,
-        packageManager,
-        installedDependencies,
-        selection.sandboxProvider,
-      ),
-    );
-  });
-
 const initCommand = Command.make(
   "init",
   {
-    imageName: imageNameOption,
     template: templateOption,
     agent: agentOption,
     model: initModelOption,
     sandbox: sandboxOption,
-    issueTracker: issueTrackerOption,
-    createLabel: createLabelOption,
-    buildImage: buildImageOption,
-    installTemplateDeps: installTemplateDepsOption,
   },
   (flags) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const { cwd, isInteractive, choices, selection } =
-        yield* decideInit(flags);
-      const context = { cwd, isInteractive };
-      const shouldCreateLabel = yield* offerSandcastleLabel(
-        selection,
-        choices.createLabel,
-        context,
+      const cwd = process.cwd();
+      const selection = yield* decideInit(flags);
+
+      const { mainFilename } = yield* d.spinner(
+        "Scaffolding .sandcastle/ config directory...",
+        scaffold(cwd, selection),
       );
 
-      const scaffoldResult = yield* d.spinner(
-        "Scaffolding .sandcastle/ config directory...",
-        scaffoldSelection(selection, {
-          cwd,
-          createLabel: shouldCreateLabel,
-          // Only an explicit --image-name is written into the scaffold;
-          // without it the sandbox factory's own default resolves to the
-          // same name as resolveImageName.
-          customImageName: Option.getOrUndefined(flags.imageName),
+      yield* warnHostPrerequisites(selection);
+      yield* d.status("Init complete!", "success");
+
+      const { peerDependency } = selection.sandboxProvider;
+      yield* printLines(
+        getNextStepsLines({
+          mainFilename,
+          agent: selection.agent,
+          sandboxProvider: selection.sandboxProvider,
+          packageManager: yield* detectPackageManager(cwd),
+          hasPeerDependency:
+            peerDependency !== undefined &&
+            (yield* hostHasDependency(cwd, peerDependency)),
         }),
       );
-
-      yield* warnHostPrerequisites(selection, cwd);
-
-      yield* completeInit(selection, choices, {
-        ...context,
-        flags,
-        mainFilename: scaffoldResult.mainFilename,
-      });
     }),
 );
 

@@ -7,7 +7,6 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -82,10 +81,7 @@ const hostRepo = (): string => {
 /** Every flag `init` takes, so a test can drop or change one. */
 const INIT_FLAGS = {
   agent: "claude-code",
-  template: "blank",
   sandbox: "docker",
-  "issue-tracker": "beads",
-  "build-image": "false",
 } as const;
 
 const initArgs = (
@@ -137,17 +133,21 @@ describe("sandcastle init --help", () => {
     ({ output: help } = await sandcastle(["init", "--help"]));
   }, 30_000);
 
+  it.each(["--template", "--agent", "--model", "--sandbox"])(
+    "documents %s",
+    (flag) => {
+      expect(help).toContain(flag);
+    },
+  );
+
   it.each([
-    "--template",
-    "--agent",
-    "--model",
-    "--sandbox",
     "--issue-tracker",
     "--create-label",
     "--build-image",
     "--install-template-deps",
-  ])("documents %s", (flag) => {
-    expect(help).toContain(flag);
+    "--image-name",
+  ])("no longer takes %s", (flag) => {
+    expect(help).not.toContain(flag);
   });
 });
 
@@ -250,19 +250,15 @@ describe("sandcastle init: an unknown choice lists the valid ones", () => {
   it.each([
     {
       flags: { sandbox: "nonexistent" },
-      lists: ["docker", "podman"],
+      lists: ["bwrap", "docker", "podman", "daytona", "host"],
     },
     {
       flags: { agent: "claude-code", template: "nonexistent" },
-      lists: ["blank", "simple-loop"],
+      lists: ["blank"],
     },
     {
       flags: { agent: "nonexistent" },
       lists: ["claude-code"],
-    },
-    {
-      flags: { "issue-tracker": "nonexistent" },
-      lists: ["github-issues", "beads", "custom"],
     },
   ])("$flags", async ({ flags, lists }) => {
     const result = await sandcastle(initArgs(flags), hostRepo());
@@ -276,7 +272,7 @@ describe("sandcastle init: an unknown choice lists the valid ones", () => {
 }, 30_000);
 
 describe("sandcastle init without a TTY", () => {
-  it("scaffolds .sandcastle/ when every flag is given", async () => {
+  it("scaffolds .sandcastle/ when --agent and --sandbox are given", async () => {
     const repo = hostRepo();
 
     const result = await sandcastle(initArgs(INIT_FLAGS), repo);
@@ -284,13 +280,13 @@ describe("sandcastle init without a TTY", () => {
     expect(result).toMatchObject({ exitCode: 0 });
     expect(result.output).toContain("Init complete");
     expect(readdirSync(path.join(repo, ".sandcastle"))).toStrictEqual(
-      expect.arrayContaining(["Dockerfile", "prompt.md"]),
+      expect.arrayContaining(["main.mts", "prompt.md"]),
     );
   });
 
   it("fails fast, naming --agent, when it is missing", async () => {
     const result = await sandcastle(
-      initArgs({ template: "blank", sandbox: "docker" }),
+      initArgs({ sandbox: "docker" }),
       hostRepo(),
     );
 
@@ -299,146 +295,16 @@ describe("sandcastle init without a TTY", () => {
     expect(result.output).toContain("non-interactive");
   });
 
-  it("fails fast, naming --create-label, for github-issues without it", async () => {
-    const result = await sandcastle(
-      initArgs({
-        ...INIT_FLAGS,
-        "issue-tracker": "github-issues",
-        "build-image": undefined,
-      }),
-      hostRepo(),
-    );
-
-    expect(result.exitCode).not.toBe(0);
-    expect(result.output).toContain("--create-label");
-    expect(result.output).toContain("non-interactive");
-  });
-
-  it("fails before writing .sandcastle/ when --build-image is missing", async () => {
+  it("names every missing flag at once, before writing .sandcastle/", async () => {
     const repo = hostRepo();
 
-    const result = await sandcastle(
-      initArgs({
-        ...INIT_FLAGS,
-        "issue-tracker": "github-issues",
-        "create-label": "false",
-        "build-image": undefined,
-      }),
-      repo,
-    );
+    const result = await sandcastle(initArgs({ template: "blank" }), repo);
 
     expect(result.exitCode).not.toBe(0);
-    expect(result.output).toContain("--build-image");
-    expect(result.output).toContain("non-interactive");
+    expect(result.output).toContain("--agent, --sandbox are required");
     expect(sandcastleDirIn(repo)).toBe(false);
-  });
-
-  it("fails before writing .sandcastle/ when a zod template lacks --install-template-deps", async () => {
-    const repo = hostRepo();
-
-    const result = await sandcastle(
-      initArgs({ ...INIT_FLAGS, template: "parallel-planner" }),
-      repo,
-    );
-
-    expect(result.exitCode).not.toBe(0);
-    expect(result.output).toContain("--install-template-deps");
-    expect(result.output).toContain("non-interactive");
-    expect(sandcastleDirIn(repo)).toBe(false);
-  });
-
-  it("names every missing flag at once", async () => {
-    const repo = hostRepo();
-
-    const result = await sandcastle(
-      initArgs({
-        template: "blank",
-        sandbox: "docker",
-        "issue-tracker": "github-issues",
-      }),
-      repo,
-    );
-
-    expect(result.exitCode).not.toBe(0);
-    for (const flag of ["--agent", "--create-label", "--build-image"]) {
-      expect(result.output).toContain(flag);
-    }
-    expect(result.output).toContain("non-interactive");
-    expect(sandcastleDirIn(repo)).toBe(false);
-  });
-
-  it("ignores --build-image for the custom tracker and builds nothing", async () => {
-    const repo = hostRepo();
-
-    const result = await sandcastle(
-      initArgs({
-        ...INIT_FLAGS,
-        "issue-tracker": "custom",
-        "build-image": "true",
-      }),
-      repo,
-    );
-
-    expect(result).toMatchObject({ exitCode: 0 });
-    expect(result.output).toContain("Init complete");
-    expect(result.output).not.toContain("Building Docker image");
-    expect(readdirSync(path.join(repo, ".sandcastle"))).toContain(
-      "SETUP_ISSUE_TRACKER.md",
-    );
   });
 }, 30_000);
-
-// Every beads sandbox opens the host's .beads/ with the image's bd 1.3.2. A
-// different host bd breaks one side (an older one can't create issues once
-// 1.3.2 has migrated the database), so init warns. The fake bd is a POSIX
-// shell script, so these don't run on Windows.
-describe.skipIf(process.platform === "win32")(
-  "sandcastle init --issue-tracker beads and the host's bd version",
-  () => {
-    const initWithHostBd = async (versionLine: string) => {
-      const repo = hostRepo();
-      const binDir = mkdtempSync(path.join(tmpdir(), "e2e-cli-fake-bd-"));
-      onTestFinished(() => {
-        rmSync(binDir, { recursive: true, force: true });
-      });
-      writeFileSync(
-        path.join(binDir, "bd"),
-        `#!/bin/sh\necho "${versionLine}"\n`,
-        { mode: 0o755 },
-      );
-      const result = await sandcastle(initArgs(INIT_FLAGS), repo, {
-        ...process.env,
-        PATH: `${binDir}${path.delimiter}${process.env["PATH"] ?? ""}`,
-      });
-      const dockerfile = await readFile(
-        path.join(repo, ".sandcastle", "Dockerfile"),
-        "utf8",
-      );
-      return { result, dockerfile };
-    };
-
-    it("warns when the host bd is older than the image's", async () => {
-      const { result, dockerfile } = await initWithHostBd(
-        "bd version 1.0.0 (72170267: HEAD@72170267e00a)",
-      );
-
-      expect(result).toMatchObject({ exitCode: 0 });
-      expect(dockerfile).toContain("ARG BEADS_VERSION=1.3.2");
-      expect(result.output).toContain("bd 1.0.0");
-      expect(result.output).toContain("can no longer create issues");
-    });
-
-    it("says nothing when the host bd matches the image's", async () => {
-      const { result } = await initWithHostBd(
-        "bd version 1.3.2 (0123abcd: HEAD@0123abcd)",
-      );
-
-      expect(result.output).toContain("Init complete");
-      expect(result.output).not.toContain("Your host runs bd");
-    });
-  },
-  30_000,
-);
 
 // The published package runs dist/main.js. The windows job runs the e2e tests
 // without a build (postbuild needs rm/cp), so this one is Linux and macOS only.

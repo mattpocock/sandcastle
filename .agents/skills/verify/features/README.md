@@ -6,7 +6,7 @@ Every entry gives the **entry point** (what the user calls) and the **proof** (w
 
 | Surface                                                                                               | File                                         |
 | ----------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| `sandcastle init`: flags, templates, issue trackers                                                   | [init.md](init.md)                           |
+| `sandcastle init`: flags, the blank template, providers                                               | [init.md](init.md)                           |
 | `sandcastle docker\|podman build-image\|remove-image`                                                 | [images.md](images.md)                       |
 | `run()`, `createSandbox()`, `createWorktree()`                                                        | [entry-points.md](entry-points.md)           |
 | Branch strategies: `head`, `merge-to-head`, `branch`                                                  | [branch-strategies.md](branch-strategies.md) |

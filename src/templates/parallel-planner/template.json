@@ -1,4 +1,0 @@
-{
-  "name": "parallel-planner",
-  "description": "Plans parallelizable issues, executes on separate branches, merges"
-}

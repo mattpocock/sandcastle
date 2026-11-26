@@ -169,11 +169,11 @@ The `.sandcastle/` directory in a **host** repo containing sandbox configuration
 _Avoid_: ".sandcastle folder", "sandcastle dir"
 
 **Issue tracker**:
-A pluggable source of **tasks** for the **agent**, selected during **init** (e.g. GitHub Issues, Beads). Used loosely -- Beads is a dependency-aware task tracker rather than a literal issue tracker, but "issue tracker" is the umbrella term.
+A pluggable source of **tasks** for the **agent** (e.g. GitHub Issues, Beads), which 0.x's **init** templates asked for. v1's `blank` template uses none. Used loosely -- Beads is a dependency-aware task tracker rather than a literal issue tracker, but "issue tracker" is the umbrella term.
 _Avoid_: "backlog manager" (retired name), "task source"
 
 **Template argument**:
-A named `{{KEY}}` placeholder in a scaffold template (Dockerfile, prompt `.md` file) that **init** replaces with a value derived from the user's choices.
+A named `{{KEY}}` placeholder in a scaffold template that **init** replaces with a value derived from the user's choices. Init's one template, `blank`, has none.
 _Avoid_: "placeholder", "variable"
 
 **Template argument substitution**:
