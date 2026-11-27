@@ -106,8 +106,10 @@ const normalizePath = (p: string): string => p.replaceAll("\\", "/");
  * Finds an existing worktree that collides with `branch` or `worktreePath`.
  *
  * Matches by branch first, then falls back to a path match — covering the
- * mid-rebase detached-HEAD case where git reports a `null` branch. The path
- * fallback normalizes separators so it works on Windows.
+ * mid-rebase detached-HEAD case where git reports a `null` branch. A path
+ * match can also be another branch's worktree (folder names replace "/" with
+ * "-"); the caller must check its branch. The path fallback normalizes
+ * separators so it works on Windows.
  */
 export const findCollidingWorktree = (
   existing: readonly WorktreeEntry[],
@@ -340,6 +342,23 @@ const addBranchWorktree = (
   );
 
 /**
+ * The error for a branch whose worktree folder is held by another branch.
+ * Folder names replace "/" with "-", so `feature/x` and `feature-x` share
+ * one; reusing it would put the run on the wrong branch.
+ */
+const folderTakenError = (
+  branch: string,
+  path: string,
+  holder: string,
+): WorktreeError =>
+  new WorktreeError({
+    message:
+      `Branch '${branch}' needs the worktree at '${normalize(path)}', but branch '${holder}' is checked out there. ` +
+      `Worktree folders replace "/" with "-", so the two branches map to the same folder. ` +
+      `Pick a branch name that maps to a different folder, or remove that worktree first.`,
+  });
+
+/**
  * Adds a worktree for an explicit branch, or reuses the worktree that
  * already has it checked out (see reuseCollidingWorktree).
  */
@@ -356,10 +375,15 @@ const addOrReuseBranchWorktree = (
     const { branch, worktreesDir } = target;
     // Proactively detect collision before git produces a confusing error.
     // Match by branch first; fall back to target path (covers mid-rebase
-    // detached-HEAD state where the branch field is null).
+    // detached-HEAD state where the branch field is null). A path match on
+    // a different branch is that branch's worktree, never ours to reuse.
     const existing = yield* listWorktrees(repoDir);
     const collision = findCollidingWorktree(existing, branch, worktreePath);
     if (collision) {
+      const holder = collision.branch;
+      if (holder !== null && holder !== branch) {
+        return yield* folderTakenError(branch, collision.path, holder);
+      }
       return yield* reuseCollidingWorktree(collision, branch, worktreesDir);
     }
     yield* addBranchWorktree(repoDir, worktreePath, target);
@@ -415,7 +439,9 @@ const addTempBranchWorktree = (
  *   or a diverged branch is non-fatal and falls back to plain reuse.
  * - Dirty (uncommitted changes) → reuses with a console warning, no refresh.
  *
- * Collisions with the main working tree or external worktrees always throw.
+ * Collisions with the main working tree or external worktrees always throw,
+ * as does a worktree folder held by another branch (`feature/x` and
+ * `feature-x` share the folder `feature-x`).
  */
 export const create = (
   repoDir: string,
