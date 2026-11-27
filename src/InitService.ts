@@ -293,7 +293,7 @@ ARG AGENT_GID=1000
 RUN groupmod -o -g $AGENT_GID node && usermod -o -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
 
 # Install pi coding agent (run as root before USER agent)
-RUN npm install -g @earendil-works/pi-coding-agent
+RUN npm install -g @earendil-works/pi-coding-agent@1.5.2
 
 USER \${AGENT_UID}:\${AGENT_GID}
 
@@ -468,7 +468,7 @@ ANTHROPIC_API_KEY=`,
     setupCommand: `pi "$(cat ${SETUP_ISSUE_TRACKER_PATH})"`,
     hostCli: {
       command: "pi",
-      install: "npm install -g @earendil-works/pi-coding-agent",
+      install: "npm install -g @earendil-works/pi-coding-agent@1.5.2",
     },
   },
   {
@@ -627,9 +627,9 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \\
 
 // The bd release baked into the beads image. 1.0.4 is the first release whose
 // embedded backend lets several bd processes open one database at once (the
-// parallel templates' sandboxes plus the host); 1.3.2 is the release this
+// parallel templates' sandboxes plus the host); 1.3.4 is the release this
 // scaffold was verified with.
-const BEADS_VERSION = "1.3.2";
+const BEADS_VERSION = "1.3.4";
 
 // Every sandbox, including worktree sandboxes, mounts the host's .beads/ and
 // points bd at it, so all phases share the one issue database.
@@ -655,17 +655,7 @@ const sandboxOptions = {
   env: { BEADS_DIR: beadsDir },
 };`;
 
-const BEADS_TOOLS = `# Install system dependencies for Beads
-RUN apt-get update && apt-get install -y \\
-  dpkg-dev \\
-  libicu72 \\
-  && rm -rf /var/lib/apt/lists/* \\
-  && ARCH_DIR=$(dpkg-architecture -qDEB_HOST_MULTIARCH) \\
-  && for lib in /usr/lib/$ARCH_DIR/libicu*.so.72; do \\
-       ln -s "$lib" "\${lib%.72}.74"; \\
-     done
-
-# Pinned bd release. Every sandbox opens your host's beads database (see
+const BEADS_TOOLS = `# Pinned bd release. Every sandbox opens your host's beads database (see
 # sandboxOptions in main), so keep this equal to the host's \`bd version\`.
 ARG BEADS_VERSION=${BEADS_VERSION}
 RUN ARCH=$(dpkg --print-architecture) \\
@@ -680,7 +670,7 @@ RUN ARCH=$(dpkg --print-architecture) \\
 
 RUN corepack enable`;
 
-/** `bd version` prints `bd version 1.3.2 (<commit>)`; returns `1.3.2`. */
+/** `bd version` prints `bd version 1.3.4 (<commit>)`; returns `1.3.4`. */
 export const parseBdVersion = (output: string): string | undefined =>
   /\bbd version v?(?<version>\d+\.\d+\.\d+)\b/u.exec(output)?.groups?.version;
 
@@ -702,7 +692,7 @@ const compareVersions = (a: string, b: string): number => {
  * image's pinned bd. A newer bd migrates the database, after which an older
  * host bd can't create issues (`fk_events_issue`, or "Your bd binary is
  * stale"). init doesn't pin the image to the host's bd instead: the scaffold's
- * BEADS_DIR mount is verified on 1.3.2 only, and bd 1.2.2 with it silently
+ * BEADS_DIR mount is verified on 1.3.4 only, and bd 1.2.2 with it silently
  * reads an empty database.
  */
 export const beadsVersionWarning = (
