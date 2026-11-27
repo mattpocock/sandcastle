@@ -71,6 +71,24 @@ describe("createWorktree() and existing worktrees", () => {
     expect(second.worktreePath).toBe(first.worktreePath);
   }, 30_000);
 
+  it("refuses a branch whose worktree folder another branch already has", async () => {
+    // "feature/x" and "feature-x" both map to the folder "feature-x".
+    await createWorktree({
+      branchStrategy: { type: "branch", branch: "feature/x" },
+      cwd: repo,
+    });
+
+    await expect(
+      createWorktree({
+        branchStrategy: { type: "branch", branch: "feature-x" },
+        cwd: repo,
+      }),
+    ).rejects.toThrow(
+      /Branch 'feature-x' needs the worktree at '.*feature-x', but branch 'feature\/x' is checked out there\./u,
+    );
+    expect(git(repo, "branch", "--list", "feature-x")).toBe("");
+  }, 30_000);
+
   it("refuses a branch checked out outside .sandcastle/worktrees/", async () => {
     await expect(
       createWorktree({
