@@ -1,5 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -80,11 +86,54 @@ describe("bind-mount sandbox git control files", () => {
         new Set([
           `${workspace}/.git`,
           path.join(gitDir, "config"),
+          path.join(gitDir, "config.worktree"),
           path.join(gitDir, "hooks"),
           path.join(gitDir, "info"),
           path.join(gitDir, "worktrees", "w", "commondir"),
+          path.join(gitDir, "worktrees", "w", "config.worktree"),
         ]),
       );
+    },
+  );
+
+  it.skipIf(isWindows)(
+    "mounts every worktree's config.worktree read-only, keeping what is in it",
+    async () => {
+      const other = path.join(repo, "other");
+      execFileSync("git", ["worktree", "add", "-b", "other", other], {
+        cwd: repo,
+        stdio: "ignore",
+      });
+      const gitDir = path.join(repo, ".git");
+      const mainConfig = path.join(gitDir, "config.worktree");
+      writeFileSync(mainConfig, "[x]\n\ty = 1\n");
+      const { provider, mounts } = recordingProvider();
+      const sandbox = await createSandbox({
+        branch: "w",
+        cwd: repo,
+        sandbox: provider,
+      });
+      await sandbox.close();
+
+      const otherConfig = path.join(
+        gitDir,
+        "worktrees",
+        "other",
+        "config.worktree",
+      );
+      expect({
+        mounted: [mainConfig, otherConfig].map((p) =>
+          mounts().find((m) => m.sandboxPath === p),
+        ),
+        contents: [mainConfig, otherConfig].map((p) => readFileSync(p, "utf8")),
+      }).toStrictEqual({
+        mounted: [mainConfig, otherConfig].map((p) => ({
+          hostPath: p,
+          sandboxPath: p,
+          readonly: true,
+        })),
+        contents: ["[x]\n\ty = 1\n", ""],
+      });
     },
   );
 
@@ -204,9 +253,11 @@ describe("bind-mount sandbox git control files", () => {
       expect(readOnlyTargets(mounts())).toStrictEqual(
         new Set([
           `${workspace}/.git/config`,
+          `${workspace}/.git/config.worktree`,
           `${workspace}/.git/hooks`,
           `${workspace}/.git/info`,
           path.join(repo, ".git", "config"),
+          path.join(repo, ".git", "config.worktree"),
           path.join(repo, ".git", "hooks"),
           path.join(repo, ".git", "info"),
         ]),

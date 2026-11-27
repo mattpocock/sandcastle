@@ -17,7 +17,10 @@
  * 2. Overrides the config keys that run a program, through `GIT_CONFIG_*`
  *    environment variables, which beat every config file. The value kept is
  *    the one from system or global config (or the caller's own environment),
- *    never the repository's; without one, a value that runs nothing.
+ *    never the repository's; without one, a value that runs nothing. That
+ *    includes config-defined hooks (`hook.<name>.command`, git 2.54+), and
+ *    the config in every file the repository includes, under any condition
+ *    (`hostGitIncludes.ts`): a child git may read it in another context.
  * 3. Chooses which programs git may run without the repository's say:
  *    `PATH` loses relative entries and entries inside the repo (so a planted
  *    `git`, `ssh` or remote helper is never found), `git` itself is spawned
@@ -31,12 +34,10 @@ import { execFile } from "node:child_process";
 import { Effect, Option } from "effect";
 import { HostGitError } from "./errors.js";
 import type { Env } from "./hostGitConfig.js";
-import {
-  hardeningOverrides,
-  parseConfigList,
-  withConfigOverrides,
-} from "./hostGitConfig.js";
+import { hardeningOverrides, withConfigOverrides } from "./hostGitConfig.js";
 import { resolveGitDirPins } from "./hostGitDir.js";
+import { parseConfigList } from "./hostGitEntries.js";
+import { repoIncludedEntries } from "./hostGitIncludes.js";
 import {
   findGit,
   pathOf,
@@ -140,12 +141,20 @@ export const hostGitOutput = (
       });
     }
     const git = found.value;
-    const listed = yield* spawnGit(["config", "--list", "--show-scope", "-z"], {
-      git,
+    const listConfig = (flags: readonly string[]): Effect.Effect<string> =>
+      spawnGit(["config", ...flags, "--list", "-z"], { git, cwd, env }).pipe(
+        Effect.map((o) => o.stdout),
+        Effect.orElseSucceed(() => ""),
+      );
+    const listed = parseConfigList(
+      yield* listConfig(["--show-scope", "--show-origin"]),
+    );
+    const included = yield* repoIncludedEntries(listed, {
       cwd,
       env,
-    }).pipe(Effect.orElseSucceed(() => ({ stdout: "", stderr: "" })));
-    const overrides = hardeningOverrides(parseConfigList(listed.stdout));
+      listFile: (file) => listConfig(["--file", file, "--no-includes"]),
+    });
+    const overrides = hardeningOverrides([...listed, ...included]);
     return yield* spawnGit(args, {
       git,
       cwd,
