@@ -50,7 +50,7 @@ const SYSTEM_DIRS = [
  * Host dirs that stay hidden even when the host PATH names them: WSL2's
  * Windows drives and interop, so a planted `.exe` can't run.
  */
-const DENIED_ROOTS = ["/mnt", "/run/WSL"];
+export const BWRAP_DENIED_ROOTS = ["/mnt", "/run/WSL"] as const;
 const FALLBACK_PATH = "/usr/local/bin:/usr/bin:/bin";
 
 const isWithin = (path: string, root: string): boolean =>
@@ -197,7 +197,7 @@ export const sandboxArgs = (
   Effect.gen(function* () {
     const toolchain = yield* hostPathToolchainFromEnv({
       coveredRoots: SYSTEM_DIRS,
-      deniedRoots: DENIED_ROOTS,
+      deniedRoots: BWRAP_DENIED_ROOTS,
     });
     return [
       ...(yield* systemDirArgs),
