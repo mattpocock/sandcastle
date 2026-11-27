@@ -1181,20 +1181,22 @@ describe("cursor factory", () => {
     expect(command).toContain("--model 'claude-sonnet-4-6'");
   });
 
-  it("buildPrintCommand passes prompt as a positional shell-escaped argument", () => {
+  it("buildPrintCommand delivers prompt via stdin, not argv", () => {
     const provider = cursor("claude-sonnet-4-6");
-    const { command, stdin } = provider.buildPrintCommand(opts("it's a test"));
-    expect(command.endsWith(String.raw`'it'\''s a test'`)).toBe(true);
-    expect(command).not.toContain(" -p ");
-    expect(stdin).toBeUndefined();
+    const prompt = "it's a test\nand another line";
+    const { command, stdin } = provider.buildPrintCommand(opts(prompt));
+    expect(command).not.toContain("it's a test");
+    expect(command).not.toContain("\n");
+    expect(command).not.toMatch(/ -p\b/u);
+    expect(stdin).toBe(prompt);
   });
 
-  it("buildPrintCommand rejects prompts larger than the argv-safe limit", () => {
+  it("buildPrintCommand delivers a prompt over the old argv limit via stdin", () => {
     const provider = cursor("claude-sonnet-4-6");
     const huge = "x".repeat(120 * 1024 + 1);
-    expect(() => provider.buildPrintCommand(opts(huge))).toThrow(
-      /Cursor print-mode prompt/u,
-    );
+    const { command, stdin } = provider.buildPrintCommand(opts(huge));
+    expect(stdin).toBe(huge);
+    expect(command).not.toContain(huge);
   });
 
   it("buildInteractiveArgs includes binary, model and prompt", () => {
@@ -1404,13 +1406,15 @@ describe("opencode factory", () => {
     expect(provider).not.toHaveProperty("dockerfileTemplate");
   });
 
-  it("buildPrintCommand includes the model and prompt in command (no stdin)", () => {
+  it("buildPrintCommand includes the model and delivers the prompt via stdin", () => {
     const provider = opencode("opencode/big-pickle");
-    const { command, stdin } = provider.buildPrintCommand(opts("do something"));
+    const prompt = "do something\nand another line";
+    const { command, stdin } = provider.buildPrintCommand(opts(prompt));
     expect(command).toContain("opencode run");
     expect(command).toContain("opencode/big-pickle");
-    expect(command).toContain("'do something'");
-    expect(stdin).toBeUndefined();
+    expect(command).not.toContain("do something");
+    expect(command).not.toContain("\n");
+    expect(stdin).toBe(prompt);
   });
 
   it("buildPrintCommand includes --format json so the parser receives JSON events", () => {
@@ -1437,10 +1441,12 @@ describe("opencode factory", () => {
     expect(command).not.toContain("--dangerously-skip-permissions");
   });
 
-  it("buildPrintCommand shell-escapes the prompt", () => {
+  it("buildPrintCommand delivers a prompt over the old argv limit via stdin", () => {
     const provider = opencode("opencode/big-pickle");
-    const { command } = provider.buildPrintCommand(opts("it's a test"));
-    expect(command).toContain(String.raw`'it'\''s a test'`);
+    const huge = "x".repeat(120 * 1024 + 1);
+    const { command, stdin } = provider.buildPrintCommand(opts(huge));
+    expect(stdin).toBe(huge);
+    expect(command).not.toContain(huge);
   });
 
   it("buildPrintCommand shell-escapes the model", () => {
@@ -1826,14 +1832,16 @@ describe("resumeSession on non-Claude providers", () => {
     expect(command).not.toContain("--fork");
   });
 
-  it("cursor resumes a session with --resume=<id> before the prompt", () => {
+  it("cursor resumes a session with --resume=<id> and the prompt on stdin", () => {
     const provider = cursor("composer-2");
-    const { command } = provider.buildPrintCommand({
+    const { command, stdin } = provider.buildPrintCommand({
       prompt: "test",
       dangerouslySkipPermissions: true,
       resumeSession: "abc-123",
     });
-    expect(command).toContain("--resume='abc-123' 'test'");
+    expect(command).toContain("--resume='abc-123'");
+    expect(command).not.toContain("'test'");
+    expect(stdin).toBe("test");
   });
 
   it("cursor omits --resume on a fresh run", () => {
@@ -1911,11 +1919,15 @@ describe("copilot factory", () => {
     ).toThrow(/copilot/u);
   });
 
-  it("buildPrintCommand includes the model and -p prompt", () => {
+  it("buildPrintCommand includes the model and delivers the prompt via stdin", () => {
     const provider = copilot("claude-sonnet-4.5");
-    const { command } = provider.buildPrintCommand(opts("do something"));
-    expect(command).toContain("copilot -p");
-    expect(command).toContain("'do something'");
+    const prompt = "do something\nand another line";
+    const { command, stdin } = provider.buildPrintCommand(opts(prompt));
+    expect(command).toContain("copilot");
+    expect(command).not.toMatch(/ -p\b/u);
+    expect(command).not.toContain("do something");
+    expect(command).not.toContain("\n");
+    expect(stdin).toBe(prompt);
     expect(command).toContain("--model 'claude-sonnet-4.5'");
     expect(command).toContain("--output-format json");
   });
@@ -1938,18 +1950,12 @@ describe("copilot factory", () => {
     expect(command).not.toContain("--allow-all-tools");
   });
 
-  it("buildPrintCommand shell-escapes the prompt", () => {
-    const provider = copilot("claude-sonnet-4.5");
-    const { command } = provider.buildPrintCommand(opts("it's a test"));
-    expect(command).toContain(String.raw`'it'\''s a test'`);
-  });
-
-  it("buildPrintCommand rejects prompts larger than the argv-safe limit", () => {
+  it("buildPrintCommand delivers a prompt over the old argv limit via stdin", () => {
     const provider = copilot("claude-sonnet-4.5");
     const huge = "x".repeat(120 * 1024 + 1);
-    expect(() => provider.buildPrintCommand(opts(huge))).toThrow(
-      /Copilot print-mode prompt/u,
-    );
+    const { command, stdin } = provider.buildPrintCommand(opts(huge));
+    expect(stdin).toBe(huge);
+    expect(command).not.toContain(huge);
   });
 
   it("buildPrintCommand includes --effort when specified", () => {

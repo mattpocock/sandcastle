@@ -202,7 +202,7 @@ describe.runIf(isWindows)("noSandbox on Windows (cmd.exe, #940)", () => {
 
   describe("every agent provider's print command", () => {
     const model = "claude-fable-5[1m]";
-    const prompt = `Fix "the bug" in it's & | ^ %PATH% ${LONG_PROMPT.slice(0, 600)}`;
+    const prompt = `Fix "the bug"\nin it's & | ^ %PATH% ${LONG_PROMPT.slice(0, 600)}`;
     const session = "0b6c1f0e-1d2a-4c3b-9e8f-7a6b5c4d3e2f";
 
     const valueAfter = (argv: string[], flag: string): string | undefined =>
@@ -253,26 +253,35 @@ describe.runIf(isWindows)("noSandbox on Windows (cmd.exe, #940)", () => {
       expect(printed.stdin).toBe(prompt);
     });
 
-    it("cursor: --model and the prompt arrive verbatim", async () => {
-      const printed = await run(cursor(model));
+    it("cursor: --model and --resume= arrive verbatim, prompt on stdin", async () => {
+      const printed = await run(cursor(model), session);
       expect(valueAfter(printed.argv, "--model")).toBe(model);
-      expect(printed.argv.at(-1)).toBe(prompt);
+      expect(printed.argv).toContain(`--resume=${session}`);
+      expect(printed.argv).not.toContain(prompt);
+      expect(printed.stdin).toBe(prompt);
     });
 
-    it("opencode: --model, --variant, --agent and the prompt arrive verbatim", async () => {
+    it("opencode: --model, --variant, --agent and --session arrive verbatim, prompt on stdin", async () => {
       const printed = await run(
         opencode(model, { variant: "high", agent: "build plan" }),
+        session,
       );
       expect(valueAfter(printed.argv, "--model")).toBe(model);
       expect(valueAfter(printed.argv, "--variant")).toBe("high");
       expect(valueAfter(printed.argv, "--agent")).toBe("build plan");
-      expect(printed.argv.at(-1)).toBe(prompt);
+      expect(valueAfter(printed.argv, "--session")).toBe(session);
+      expect(printed.argv).not.toContain("--fork");
+      expect(printed.argv).not.toContain(prompt);
+      expect(printed.stdin).toBe(prompt);
     });
 
-    it("copilot: the prompt and --model arrive verbatim", async () => {
-      const printed = await run(copilot(model));
-      expect(valueAfter(printed.argv, "-p")).toBe(prompt);
+    it("copilot: --model and --resume= arrive verbatim, prompt on stdin, no -p", async () => {
+      const printed = await run(copilot(model), session);
+      expect(printed.argv).not.toContain("-p");
+      expect(printed.argv).not.toContain(prompt);
       expect(valueAfter(printed.argv, "--model")).toBe(model);
+      expect(printed.argv).toContain(`--resume=${session}`);
+      expect(printed.stdin).toBe(prompt);
     });
   });
 });
