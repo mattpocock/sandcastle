@@ -6,6 +6,7 @@ import { join, posix } from "node:path";
 import { assert, describe, expect, it } from "vitest";
 import {
   claudeCode,
+  codebuddy,
   codex,
   copilot,
   cursor,
@@ -2434,6 +2435,151 @@ describe("sessionStorage", () => {
     }
   });
 
+  it("codebuddy hostSessionFilePath encodes the cwd CodeBuddy-style, without a leading dash", () => {
+    // CodeBuddy joins path segments with `-` and keeps every other character
+    // (`/tmp/cb-spike` → `tmp-cb-spike`), unlike Claude's leading-dash form.
+    const provider = codebuddy("deepseek-v4.1-flash");
+    const path = sessionStorageOf(provider).hostSessionFilePath(
+      "/tmp/cb-spike",
+      "01a1b6b2-a0a7-7e33-982d-fe717cb7903b",
+    );
+    expect(path).toContain(
+      "tmp-cb-spike/01a1b6b2-a0a7-7e33-982d-fe717cb7903b.jsonl",
+    );
+    expect(path).not.toContain("-tmp-cb-spike");
+  });
+
+  it("codebuddy captureToHost rewrites entry cwd fields and lands the JSONL in the host-cwd-encoded dir", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-codebuddy-host-"));
+    const sandboxDir = await mkdtemp(
+      join(tmpdir(), "sandcastle-codebuddy-sbx-"),
+    );
+    try {
+      const id = "01a1b6b2-a0a7-7e33-982d-fe717cb7903b";
+      const sandboxCwd = "/sandbox/repo";
+      const hostCwd = "/host/repo";
+      const sandboxSessionDir = join(sandboxDir, "sandbox-repo");
+      await mkdir(sandboxSessionDir, { recursive: true });
+      const sandboxPath = join(sandboxSessionDir, `${id}.jsonl`);
+      await writeFile(
+        sandboxPath,
+        [
+          JSON.stringify({
+            type: "message",
+            cwd: sandboxCwd,
+            sessionId: id,
+            role: "user",
+            content: "hi",
+            timestamp: "2026-11-07T15:00:00Z",
+          }),
+          JSON.stringify({
+            type: "session-meta",
+            sessionId: id,
+            timestamp: "2026-11-07T15:00:00Z",
+          }),
+        ].join("\n"),
+      );
+
+      const provider = codebuddy("deepseek-v4.1-flash", {
+        sessionStorage: {
+          hostProjectsDir: hostDir,
+          sandboxProjectsDir: sandboxDir,
+        },
+      });
+      await sessionStorageOf(provider).captureToHost({
+        hostCwd,
+        sandboxCwd,
+        sessionId: id,
+        handle: fsBindMountHandle(),
+      });
+
+      const content = await readFile(
+        join(hostDir, "host-repo", `${id}.jsonl`),
+        "utf8",
+      );
+      const [first] = content.split("\n");
+      assert.isDefined(first);
+      expect(JSON.parse(first)).toMatchObject({ cwd: hostCwd, sessionId: id });
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it("codebuddy resumeIntoSandbox writes the host JSONL into the sandbox-cwd-encoded dir", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-codebuddy-host-"));
+    const sandboxDir = await mkdtemp(
+      join(tmpdir(), "sandcastle-codebuddy-sbx-"),
+    );
+    try {
+      const id = "01a1b6b3-7c2b-7a52-bd4c-7265519510da";
+      const sandboxCwd = "/sandbox/repo";
+      const hostCwd = "/host/repo";
+      const hostSessionDir = join(hostDir, "host-repo");
+      await mkdir(hostSessionDir, { recursive: true });
+      await writeFile(
+        join(hostSessionDir, `${id}.jsonl`),
+        JSON.stringify({
+          type: "message",
+          cwd: hostCwd,
+          sessionId: id,
+          role: "user",
+          content: "hi",
+          timestamp: "2026-11-07T15:00:00Z",
+        }),
+      );
+
+      const provider = codebuddy("deepseek-v4.1-flash", {
+        sessionStorage: {
+          hostProjectsDir: hostDir,
+          sandboxProjectsDir: sandboxDir,
+        },
+      });
+      await sessionStorageOf(provider).resumeIntoSandbox({
+        hostCwd,
+        sandboxCwd,
+        sessionId: id,
+        handle: fsBindMountHandle(),
+      });
+
+      const content = await readFile(
+        join(sandboxDir, "sandbox-repo", `${id}.jsonl`),
+        "utf8",
+      );
+      const [first] = content.split("\n");
+      assert.isDefined(first);
+      expect(JSON.parse(first)).toMatchObject({
+        cwd: sandboxCwd,
+        sessionId: id,
+      });
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it("codebuddy findByIdOnHost locates a session across encoded-cwd dirs", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-codebuddy-host-"));
+    try {
+      const id = "01a1b6b2-afce-73c0-83ec-be67ab59ae1d";
+      const dir = join(hostDir, "tmp-cb-spike");
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, `${id}.jsonl`), "{}\n");
+
+      const provider = codebuddy("deepseek-v4.1-flash", {
+        sessionStorage: { hostProjectsDir: hostDir },
+      });
+      const found = await sessionStorageOf(provider).findByIdOnHost(id);
+      expect(found.path).toBe(join(dir, `${id}.jsonl`));
+      const missing =
+        await sessionStorageOf(provider).findByIdOnHost("no-such-id");
+      expect(missing.path).toBeUndefined();
+      expect(missing.searchedRoot).toBe(hostDir);
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
   it("pi captureToHost transfers a session JSONL with header cwd rewritten and lands it in the host-cwd-encoded dir", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-pi-hostpath-"));
     const sandboxDir = await mkdtemp(join(tmpdir(), "sandcastle-pi-sbx-"));
@@ -3370,5 +3516,279 @@ describe("errors the agent reports in its own stream", () => {
     expect(copilot("m").parseStreamLine(line)).toStrictEqual([
       { type: "error", message: "boom" },
     ]);
+  });
+});
+
+describe("codebuddy factory", () => {
+  it("returns a provider with name 'codebuddy'", () => {
+    expect(codebuddy("deepseek-v4.1-flash").name).toBe("codebuddy");
+  });
+
+  it("does not expose envManifest or dockerfileTemplate", () => {
+    const provider = codebuddy("deepseek-v4.1-flash");
+    expect(provider).not.toHaveProperty("envManifest");
+    expect(provider).not.toHaveProperty("dockerfileTemplate");
+  });
+
+  it("injects no env by default — CODEBUDDY_IS_SANDBOX breaks session auth", () => {
+    // Verified: with CODEBUDDY_IS_SANDBOX=1 a mounted login session 401s
+    // against www.codebuddy.ai instead of copilot.tencent.com, because the
+    // CLI switches to a sandboxed auth route that cannot use the session.
+    const provider = codebuddy("deepseek-v4.1-flash");
+    expect(provider.env).toStrictEqual({});
+  });
+
+  it("passes options.env through for opt-in CODEBUDDY_IS_SANDBOX", () => {
+    const provider = codebuddy("deepseek-v4.1-flash", {
+      env: { CODEBUDDY_IS_SANDBOX: "1", OTHER: "x" },
+    });
+    expect(provider.env.CODEBUDDY_IS_SANDBOX).toBe("1");
+    expect(provider.env.OTHER).toBe("x");
+  });
+
+  it("buildPrintCommand includes -p and stream-json output", () => {
+    const provider = codebuddy("deepseek-v4.1-flash");
+    const { command } = provider.buildPrintCommand(opts("do something"));
+    expect(command).toContain("codebuddy -p");
+    expect(command).toContain("--output-format stream-json");
+    expect(command).toContain("deepseek-v4.1-flash");
+  });
+
+  it("buildPrintCommand delivers prompt via stdin, not argv", () => {
+    const provider = codebuddy("deepseek-v4.1-flash");
+    const { command, stdin } = provider.buildPrintCommand(opts("do something"));
+    expect(command).not.toContain("do something");
+    expect(stdin).toBe("do something");
+  });
+
+  it("buildPrintCommand shell-escapes the model", () => {
+    const provider = codebuddy("my model");
+    const { command } = provider.buildPrintCommand(opts("test"));
+    expect(command).toContain("--model 'my model'");
+  });
+
+  it("buildPrintCommand includes --dangerously-skip-permissions when true", () => {
+    const provider = codebuddy("deepseek-v4.1-flash");
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+    });
+    expect(command).toContain("--dangerously-skip-permissions");
+  });
+
+  it("buildPrintCommand omits the skip-permissions flag when false", () => {
+    const provider = codebuddy("deepseek-v4.1-flash");
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: false,
+    });
+    expect(command).not.toContain("--dangerously-skip-permissions");
+  });
+
+  it("buildPrintCommand replaces the skip flag with --permission-mode when set", () => {
+    const provider = codebuddy("deepseek-v4.1-flash", {
+      permissionMode: "acceptEdits",
+    });
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+    });
+    expect(command).toContain("--permission-mode acceptEdits");
+    expect(command).not.toContain("--dangerously-skip-permissions");
+  });
+
+  it("buildPrintCommand includes --resume when resumeSession is set", () => {
+    const provider = codebuddy("deepseek-v4.1-flash");
+    const { command } = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+      resumeSession: "abc-123",
+    });
+    expect(command).toContain("--resume 'abc-123'");
+    expect(command).not.toContain("--fork-session");
+  });
+
+  it("buildPrintCommand adds --fork-session only alongside --resume", () => {
+    const provider = codebuddy("deepseek-v4.1-flash");
+    const withBoth = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+      resumeSession: "abc-123",
+      forkSession: true,
+    }).command;
+    expect(withBoth).toContain("--resume 'abc-123' --fork-session");
+    const forkWithoutResume = provider.buildPrintCommand({
+      prompt: "test",
+      dangerouslySkipPermissions: true,
+      forkSession: true,
+    }).command;
+    expect(forkWithoutResume).not.toContain("--fork-session");
+    expect(forkWithoutResume).not.toContain("--resume");
+  });
+
+  it("buildInteractiveArgs takes the prompt positionally like Claude's TUI", () => {
+    const provider = codebuddy("deepseek-v4.1-flash");
+    const args = buildInteractiveArgs(provider, opts("fix the bug"));
+    expect(args).toStrictEqual([
+      "codebuddy",
+      "--dangerously-skip-permissions",
+      "--model",
+      "deepseek-v4.1-flash",
+      "fix the bug",
+    ]);
+  });
+
+  it("buildInteractiveArgs uses --permission-mode when set", () => {
+    const provider = codebuddy("deepseek-v4.1-flash", {
+      permissionMode: "plan",
+    });
+    const args = buildInteractiveArgs(provider, opts("fix the bug"));
+    expect(args).toStrictEqual([
+      "codebuddy",
+      "--permission-mode",
+      "plan",
+      "--model",
+      "deepseek-v4.1-flash",
+      "fix the bug",
+    ]);
+  });
+
+  describe("parseStreamLine (real 2.181.0 event shapes)", () => {
+    const sessionId = "01a1b6b2-a0a7-7e33-982d-fe717cb7903b";
+
+    it("parses the init line into a session_id event", () => {
+      const line = JSON.stringify({
+        type: "system",
+        subtype: "init",
+        uuid: sessionId,
+        session_id: sessionId,
+        apiKeySource: "copilot.tencent.com",
+        cwd: "/tmp/cb-spike",
+        tools: ["Agent", "Read", "Write", "Edit", "Bash"],
+        model: "deepseek-v4.1-flash",
+      });
+      expect(codebuddy("m").parseStreamLine(line)).toStrictEqual([
+        { type: "session_id", sessionId },
+      ]);
+    });
+
+    it("ignores CodeBuddy-only system subtypes", () => {
+      const provider = codebuddy("m");
+      expect(
+        provider.parseStreamLine(
+          JSON.stringify({
+            type: "system",
+            subtype: "usage_update",
+            session_id: sessionId,
+          }),
+        ),
+      ).toStrictEqual([]);
+      expect(
+        provider.parseStreamLine(
+          JSON.stringify({
+            type: "system",
+            subtype: "keepalive",
+            session_id: sessionId,
+            reason: "reasoning_in_progress",
+            elapsed_ms: 1200,
+          }),
+        ),
+      ).toStrictEqual([]);
+    });
+
+    it("emits no context_window from a thinking block whose usage is zero or null", () => {
+      const line = JSON.stringify({
+        type: "assistant",
+        uuid: "u1",
+        session_id: sessionId,
+        message: {
+          id: "m1",
+          content: [{ type: "thinking", thinking: "hmm" }],
+          model: "deepseek-v4.1-flash",
+          role: "assistant",
+          usage: {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_creation_input_tokens: null,
+            cache_read_input_tokens: null,
+          },
+        },
+      });
+      expect(codebuddy("m").parseStreamLine(line)).toStrictEqual([]);
+    });
+
+    it("emits text and context_window from a text block with real usage", () => {
+      const line = JSON.stringify({
+        type: "assistant",
+        uuid: "u2",
+        session_id: sessionId,
+        message: {
+          id: "m1",
+          content: [{ type: "text", text: "OK" }],
+          model: "deepseek-v4.1-flash",
+          role: "assistant",
+          usage: {
+            input_tokens: 26092,
+            output_tokens: 95,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 2560,
+          },
+        },
+      });
+      expect(codebuddy("m").parseStreamLine(line)).toStrictEqual([
+        { type: "text", text: "OK" },
+        { type: "context_window", contextWindow: { tokens: 28652 } },
+      ]);
+    });
+
+    it("emits a tool_call from a tool_use block", () => {
+      const line = JSON.stringify({
+        type: "assistant",
+        uuid: "u3",
+        session_id: sessionId,
+        message: {
+          id: "m2",
+          content: [
+            {
+              type: "tool_use",
+              id: "t1",
+              name: "Bash",
+              input: { command: "ls" },
+            },
+          ],
+          model: "deepseek-v4.1-flash",
+          role: "assistant",
+        },
+      });
+      expect(codebuddy("m").parseStreamLine(line)).toStrictEqual([
+        { type: "tool_call", name: "Bash", args: "ls" },
+      ]);
+    });
+
+    it("parses the result line into result and error events by is_error", () => {
+      const provider = codebuddy("m");
+      const success = JSON.stringify({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: "OK",
+        session_id: sessionId,
+        duration_ms: 2866,
+        num_turns: 3,
+      });
+      expect(provider.parseStreamLine(success)).toStrictEqual([
+        { type: "result", result: "OK" },
+      ]);
+      const failed = JSON.stringify({
+        type: "result",
+        subtype: "error_during_execution",
+        is_error: true,
+        result: "model call failed",
+        session_id: sessionId,
+      });
+      expect(provider.parseStreamLine(failed)).toStrictEqual([
+        { type: "error", message: "model call failed" },
+      ]);
+    });
   });
 });
