@@ -1735,6 +1735,81 @@ describe("Orchestrator error handling", () => {
     }
   });
 
+  it("reports the commits an agent made before its stream reported an error", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-stream-error-commits-"));
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    // A dropped streaming turn: the agent committed, then the provider closed
+    // the socket and pi reported only a connection error. The commits are on
+    // the branch, so the failure must carry them instead of discarding them.
+    const agentEnd = JSON.stringify({
+      type: "agent_end",
+      messages: [
+        {
+          role: "assistant",
+          content: [],
+          stopReason: "error",
+          errorMessage: "Connection error.: other side closed",
+        },
+      ],
+    });
+
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) => {
+      const real = makeLocalSandbox(dir);
+      return {
+        exec: (command, options) => {
+          if (command.startsWith("pi ") && options?.onLine) {
+            const { onLine } = options;
+            return Effect.gen(function* () {
+              const cwd = options.cwd ?? dir;
+              yield* Effect.promise(async () => {
+                await writeFile(join(cwd, "work.txt"), "committed work");
+                await execAsync("git add -A", { cwd });
+                await execAsync('git commit -m "work before the drop"', {
+                  cwd,
+                });
+              });
+              onLine(agentEnd);
+              return { stdout: agentEnd, stderr: "", exitCode: 0 };
+            });
+          }
+          return real.exec(command, options);
+        },
+        copyIn: (hostPath, sandboxPath) => real.copyIn(hostPath, sandboxPath),
+        copyFileOut: (sandboxPath, hostPath) =>
+          real.copyFileOut(sandboxPath, hostPath),
+      };
+    });
+
+    const exit = await Effect.runPromiseExit(
+      orchestrate({
+        provider: piFactory("anthropic/claude-haiku-5-5", {
+          captureSessions: false,
+        }),
+        hostRepoDir: hostDir,
+        iterations: 1,
+        prompt: "do some work",
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+    );
+
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      const err = Cause.squash(exit.cause);
+      expect(err).toBeInstanceOf(AgentError);
+      if (err instanceof AgentError) {
+        expect(err.commits).toHaveLength(1);
+        const sha = err.commits?.[0]?.sha;
+        expect(sha).toBeDefined();
+        const committed = await execAsync(`git log -1 --format=%s ${sha}`, {
+          cwd: hostDir,
+        });
+        expect(committed.stdout.trim()).toBe("work before the drop");
+      }
+    }
+  });
+
   it("uses the stream error as detail when the agent exits non-zero with empty stderr", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "orch-stream-error-nz-"));
 
