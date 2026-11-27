@@ -1,0 +1,5 @@
+---
+"@ai-hero/sandcastle": patch
+---
+
+Security: on git 2.54 and later, which lets hooks be defined in git config (`hook.<name>.command`), a hook defined in the repository's config could run during the git commands Sandcastle runs on the host, outside the sandbox. With a bind-mount sandbox provider (`docker()`, `podman()`, or a custom `createBindMountSandboxProvider`), a sandboxed agent could plant one when the repo uses worktree config (`extensions.worktreeConfig`, which `git sparse-checkout` sets), because `config.worktree` was writable in the sandbox. This is fixed. Sandcastle's host git now disables every config-defined hook the repository defines, including ones in files it includes under any condition, while hooks from your global and system config still run; and `.git/config.worktree` and each worktree's `config.worktree` are now mounted read-only in bind-mount sandboxes (created empty if missing), so `git config --worktree` fails inside the sandbox. Isolated providers (`vercel()`, `daytona()`) were not affected.
