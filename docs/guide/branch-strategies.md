@@ -132,11 +132,11 @@ With `branchStrategy: { type: "merge-to-head" }`, each `wt.run()` / `wt.interact
 
 ### `CreateWorktreeOptions`
 
-| Option           | Type                   | Default | Description                                                                                                         |
-| ---------------- | ---------------------- | ------- | ------------------------------------------------------------------------------------------------------------------- |
-| `branchStrategy` | WorktreeBranchStrategy | —       | **Required.** `{ type: "branch", branch }` or `{ type: "merge-to-head" }`                                           |
-| `copyToWorktree` | string[]               | —       | Host-relative file paths to copy into the worktree at creation time                                                 |
-| `timeouts`       | Timeouts               | —       | Override built-in lifecycle step timeouts (`copyToWorktreeMs`, `gitSetupMs`, `commitCollectionMs`, `mergeToHostMs`) |
+| Option           | Type                   | Default | Description                                                                                                                       |
+| ---------------- | ---------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `branchStrategy` | WorktreeBranchStrategy | —       | **Required.** `{ type: "branch", branch }` or `{ type: "merge-to-head" }`                                                         |
+| `copyToWorktree` | string[]               | —       | Host-relative file paths to copy into the worktree at creation time                                                               |
+| `timeouts`       | Timeouts               | —       | Override built-in lifecycle step timeouts (`worktreeMs`, `copyToWorktreeMs`, `gitSetupMs`, `commitCollectionMs`, `mergeToHostMs`) |
 
 ### `Worktree`
 
@@ -197,12 +197,12 @@ With `branchStrategy: { type: "merge-to-head" }`, each `wt.run()` / `wt.interact
 
 ### `WorktreeCreateSandboxOptions`
 
-| Option           | Type            | Default | Description                                                                                                         |
-| ---------------- | --------------- | ------- | ------------------------------------------------------------------------------------------------------------------- |
-| `sandbox`        | SandboxProvider | —       | **Required.** Sandbox provider (e.g. `docker()`)                                                                    |
-| `hooks`          | SandboxHooks    | —       | Lifecycle hooks (`host.*`, `sandbox.*`)                                                                             |
-| `copyToWorktree` | string[]        | —       | Host-relative file paths to copy into the worktree at creation time                                                 |
-| `timeouts`       | Timeouts        | —       | Override built-in lifecycle step timeouts (`copyToWorktreeMs`, `gitSetupMs`, `commitCollectionMs`, `mergeToHostMs`) |
+| Option           | Type            | Default | Description                                                                                                                       |
+| ---------------- | --------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `sandbox`        | SandboxProvider | —       | **Required.** Sandbox provider (e.g. `docker()`)                                                                                  |
+| `hooks`          | SandboxHooks    | —       | Lifecycle hooks (`host.*`, `sandbox.*`)                                                                                           |
+| `copyToWorktree` | string[]        | —       | Host-relative file paths to copy into the worktree at creation time                                                               |
+| `timeouts`       | Timeouts        | —       | Override built-in lifecycle step timeouts (`worktreeMs`, `copyToWorktreeMs`, `gitSetupMs`, `commitCollectionMs`, `mergeToHostMs`) |
 
 ## Source and target branches
 

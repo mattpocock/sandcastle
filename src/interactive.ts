@@ -256,14 +256,21 @@ export const interactive = async (
 
     if (!isHeadMode) {
       worktreeInfo = yield* d.taskLog("Creating worktree", () =>
-        WorktreeManager.pruneStale(hostRepoDir).pipe(
+        WorktreeManager.pruneStale(
+          hostRepoDir,
+          options.timeouts?.worktreeMs,
+        ).pipe(
           Effect.catchAll(() => Effect.void),
           Effect.andThen(
             branch !== undefined && branch !== ""
-              ? WorktreeManager.create(hostRepoDir, { branch })
+              ? WorktreeManager.create(hostRepoDir, {
+                  branch,
+                  timeoutMs: options.timeouts?.worktreeMs,
+                })
               : WorktreeManager.create(hostRepoDir, {
                   name: options.name,
                   tempBranch: resolvedBranch,
+                  timeoutMs: options.timeouts?.worktreeMs,
                 }),
           ),
         ),

@@ -309,7 +309,7 @@ export const WorktreeDockerSandboxFactory = {
 
       /** Prune stale worktrees (best-effort), then create a fresh one. */
       const pruneAndCreate = () =>
-        WorktreeManager.pruneStale(hostRepoDir).pipe(
+        WorktreeManager.pruneStale(hostRepoDir, timeouts?.worktreeMs).pipe(
           Effect.catchAll((e) =>
             Console.error(
               "[sandcastle] Warning: failed to prune stale worktrees:",
@@ -318,8 +318,16 @@ export const WorktreeDockerSandboxFactory = {
           ),
           Effect.andThen(
             branch !== undefined && branch !== ""
-              ? WorktreeManager.create(hostRepoDir, { branch, baseBranch })
-              : WorktreeManager.create(hostRepoDir, { name, tempBranch }),
+              ? WorktreeManager.create(hostRepoDir, {
+                  branch,
+                  baseBranch,
+                  timeoutMs: timeouts?.worktreeMs,
+                })
+              : WorktreeManager.create(hostRepoDir, {
+                  name,
+                  tempBranch,
+                  timeoutMs: timeouts?.worktreeMs,
+                }),
           ),
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           // A SIGINT/SIGTERM exits the process before the release below runs,
