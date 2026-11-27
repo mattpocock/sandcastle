@@ -20,7 +20,7 @@ import type {
 import { MAX_TAIL_CHARS } from "../boundedTail.js";
 import { execInSprite } from "./spritesExec.js";
 import { registerSpriteDeletion } from "./spritesShutdown.js";
-import type { Sprite } from "@fly/sprites";
+import type { CreateSpriteOptions, Sprite } from "@fly/sprites";
 
 /** The Sprite user's home: the worktree's parent, which the user can write. */
 const SPRITE_HOME = "/home/sprite";
@@ -50,6 +50,14 @@ export interface SpritesOptions {
    * overflowing V8's max string length and crashing the run.
    */
   readonly maxOutputTailChars?: number;
+
+  /**
+   * Options passed through to the SDK's `createSprite()` for each Sprite:
+   * `config` (`ramMB`, `cpus`, `storageGB`, `region`), `labels`,
+   * `waitForCapacity`, `runtime`, `environment` and `urlSettings`. Omitted,
+   * the Sprite gets the Sprites API's defaults.
+   */
+  readonly create?: CreateSpriteOptions;
 }
 
 /** An option or env var counts as unset when it is missing or empty. */
@@ -217,7 +225,10 @@ export const sprites = (options?: SpritesOptions): IsolatedSandboxProvider =>
         name,
       );
       try {
-        const sprite = await client.createSprite(name);
+        // `config` goes on its own: the SDK tells options from a bare config
+        // by their keys, so an empty `create` would otherwise be sent as one.
+        const { config, ...createOptions } = options?.create ?? {};
+        const sprite = await client.createSprite(name, config, createOptions);
         await makeWorktreeDir(sprite);
         return makeHandle(sprite, {
           env,
