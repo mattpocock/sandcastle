@@ -145,7 +145,7 @@ describe("PromptArgumentSubstitution", () => {
     expect(result).toBe(prompt);
   });
 
-  it("substitutes placeholders inside shell expressions", async () => {
+  it("substitutes placeholders inside shell expressions with shell quoting", async () => {
     const { layer } = setup();
     const result = await run(
       "Output: !`gh issue view {{NUM}}`",
@@ -154,7 +154,42 @@ describe("PromptArgumentSubstitution", () => {
     );
     // Template-authored shell blocks are marked with \x01 so the preprocessor
     // can distinguish them from `!`...`` patterns injected via arg values.
-    expect(result).toBe("Output: !\u0001`gh issue view 123`");
+    // Values inside shell expressions are shell-quoted to remain a single argument.
+    expect(result).toBe("Output: !\u0001`gh issue view '123'`");
+  });
+
+  it("shell-quotes arguments containing spaces or quotes inside shell expressions", async () => {
+    const { layer } = setup();
+    const result = await run(
+      "Query: !`gh issue list --search {{QUERY}}`",
+      { QUERY: "bug: can't reproduce" },
+      layer,
+    );
+    expect(result).toBe(
+      "Query: !\u0001`gh issue list --search 'bug: can'\\''t reproduce'`",
+    );
+  });
+
+  it("does not shell-quote substitutions outside shell expressions", async () => {
+    const { layer } = setup();
+    const result = await run(
+      "Issue: {{TITLE}} | !`gh issue view {{NUM}}`",
+      { TITLE: "feature: add 'fast' mode", NUM: 42 },
+      layer,
+    );
+    expect(result).toBe(
+      "Issue: feature: add 'fast' mode | !\u0001`gh issue view '42'`",
+    );
+  });
+
+  it("does not shell-quote substitutions inside HTML comments", async () => {
+    const { layer } = setup();
+    const result = await run(
+      "<!-- Example: !`echo {{EXAMPLE}}` -->",
+      { EXAMPLE: "hello world" },
+      layer,
+    );
+    expect(result).toBe("<!-- Example: !`echo hello world` -->");
   });
 
   it("replaces {{ KEY }} with spaces inside braces", async () => {
