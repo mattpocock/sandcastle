@@ -83,6 +83,8 @@ Only `branch` and `merge-to-head` strategies are accepted; `head` is a compile-t
 
 Pass `cwd` to target a repo other than `process.cwd()`. Relative paths resolve against `process.cwd()`; absolute paths pass through. A `CwdError` is thrown if the path does not exist or is not a directory.
 
+On Windows, worktree paths use native long names, even when `cwd` contains 8.3 short names. Both spellings refer to the same managed worktree.
+
 ```typescript
 import { createWorktree } from "@ai-hero/sandcastle";
 

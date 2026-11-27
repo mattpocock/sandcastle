@@ -2,6 +2,7 @@ import { Console, Effect, Option } from "effect";
 import type { Either } from "effect";
 import { FileSystem } from "@effect/platform";
 import { randomBytes } from "node:crypto";
+import { realpath } from "node:fs/promises";
 import { join, normalize } from "node:path";
 import { WorktreeError, WorktreeTimeoutError, withTimeout } from "./errors.js";
 import { hostGit } from "./hostGit.js";
@@ -53,6 +54,13 @@ const execGit = (
   hostGit(args, cwd).pipe(
     Effect.mapError((e) => new WorktreeError({ message: e.message })),
   );
+
+/** Expand Windows filesystem aliases before comparing with git's native paths. */
+const nativePath = (dir: string): Effect.Effect<string, WorktreeError> =>
+  Effect.tryPromise({
+    try: () => realpath(dir),
+    catch: (e) => new WorktreeError({ message: String(e) }),
+  });
 
 /**
  * Generates a temporary branch name.
@@ -432,7 +440,11 @@ export const create = (
 > =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const worktreesDir = join(repoDir, ".sandcastle", "worktrees");
+    // Git lists long native paths even when the caller supplied an 8.3 alias.
+    // Use the same spelling for the managed-worktree boundary and creation.
+    const root =
+      process.platform === "win32" ? yield* nativePath(repoDir) : repoDir;
+    const worktreesDir = join(root, ".sandcastle", "worktrees");
     yield* fs
       .makeDirectory(worktreesDir, { recursive: true })
       .pipe(Effect.mapError((e) => new WorktreeError({ message: e.message })));
@@ -446,13 +458,13 @@ export const create = (
     const worktreePath = join(worktreesDir, branch.replaceAll("/", "-"));
 
     if (hasExplicitBranch) {
-      return yield* addOrReuseBranchWorktree(repoDir, worktreePath, {
+      return yield* addOrReuseBranchWorktree(root, worktreePath, {
         branch,
         baseBranch: opts?.baseBranch,
         worktreesDir,
       });
     }
-    yield* addTempBranchWorktree(repoDir, worktreePath, branch);
+    yield* addTempBranchWorktree(root, worktreePath, branch);
     return { path: worktreePath, branch };
   }).pipe(
     withTimeout(WORKTREE_TIMEOUT_MS, () =>
@@ -605,13 +617,16 @@ export const pruneStale = (
       return;
     }
 
-    // `git worktree list` canonicalizes paths via realpath. If repoDir or
-    // .sandcastle is a symlink, joining the un-canonicalized prefix produces
-    // strings that never match git's output, and every active worktree looks
-    // orphaned. Resolve the prefix once so the Set lookup below works.
-    const realWorktreesDir = yield* fs
-      .realPath(worktreesDir)
-      .pipe(Effect.catchAll(() => Effect.succeed(worktreesDir)));
+    // Git reports real paths. A symlink or Windows 8.3 alias must not make
+    // live worktrees look orphaned when compared with that list.
+    const realWorktreesDir =
+      process.platform === "win32"
+        ? yield* nativePath(worktreesDir).pipe(
+            Effect.orElseSucceed(() => worktreesDir),
+          )
+        : yield* fs
+            .realPath(worktreesDir)
+            .pipe(Effect.orElseSucceed(() => worktreesDir));
 
     const activeWorktreePaths = yield* listActiveWorktreePaths(repoDir);
 
