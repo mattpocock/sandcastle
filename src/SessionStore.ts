@@ -9,6 +9,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { access, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, join, posix } from "node:path";
 import type { BindMountSandboxHandle, ExecResult } from "./SandboxProvider.js";
@@ -109,6 +110,22 @@ export const sandboxDirsOf = (
   tmp: handle.sandboxTmpdir ?? DEFAULT_SANDBOX_DIRS.tmp,
 });
 
+/**
+ * The cwd as the agent inside sees it: Claude Code encodes the physical path
+ * of its working directory, with symlinks resolved. Reached through a
+ * symlinked path — macOS's `/tmp` → `/private/tmp`, for instance — the agent
+ * writes its project directory under the resolved name, so looking it up by
+ * the path as given misses every session. Falls back to the path as given
+ * when it cannot be resolved on this host, such as a sandbox-side path.
+ */
+const physicalCwd = (cwd: string): string => {
+  try {
+    return realpathSync.native(cwd);
+  } catch {
+    return cwd;
+  }
+};
+
 /** Absolute host path to a Claude session JSONL file. */
 export const claudeHostSessionPath = (
   cwd: string,
@@ -116,7 +133,7 @@ export const claudeHostSessionPath = (
   projectsDir?: string,
 ): string => {
   const base = projectsDir ?? join(homeDir(), ".claude", "projects");
-  return join(base, encodeProjectPath(cwd), `${id}.jsonl`);
+  return join(base, encodeProjectPath(physicalCwd(cwd)), `${id}.jsonl`);
 };
 
 /** Sandbox-side path to a Claude session JSONL file (always POSIX separators). */
@@ -149,7 +166,7 @@ export const claudeSubagentsDirOnHost = (
   projectsDir?: string,
 ): string => {
   const base = projectsDir ?? join(homeDir(), ".claude", "projects");
-  return join(base, encodeProjectPath(cwd), id, "subagents");
+  return join(base, encodeProjectPath(physicalCwd(cwd)), id, "subagents");
 };
 
 /**
