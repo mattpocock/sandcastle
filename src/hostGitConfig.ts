@@ -4,24 +4,12 @@
  */
 
 import { devNull } from "node:os";
+import type { GitConfigEntry } from "./hostGitEntries.js";
+import { isTrusted, lastTrustedValue } from "./hostGitEntries.js";
+import { hookOverrides } from "./hostGitHooks.js";
 
 /** An environment for a child process. */
 export type Env = Readonly<Record<string, string | undefined>>;
-
-/** One entry of `git config --list --show-scope`. */
-export interface GitConfigEntry {
-  readonly scope: string;
-  readonly key: string;
-  /** `undefined` for a bare boolean key (`[core] bare`). */
-  readonly value: string | undefined;
-}
-
-/** Config scopes the sandbox cannot write. Everything else is repository-owned. */
-const TRUSTED_SCOPES: ReadonlySet<string> = new Set([
-  "system",
-  "global",
-  "command",
-]);
 
 /**
  * Keys set on every call: each group shares one git variable (aliases), so
@@ -67,9 +55,6 @@ const NAMED_KEYS: ReadonlyMap<string, string> = new Map([
   ["remote.receivepack", "git-receive-pack"],
 ]);
 
-const isTrusted = (entry: GitConfigEntry): boolean =>
-  TRUSTED_SCOPES.has(entry.scope);
-
 /** `section.variable` for a three-part key, `undefined` otherwise. */
 const namedKeyClass = (key: string): string | undefined => {
   const first = key.indexOf(".");
@@ -82,16 +67,6 @@ const namedKeyClass = (key: string): string | undefined => {
 
 const isCredentialHelperKey = (key: string): boolean =>
   key.startsWith("credential.") && key.endsWith(".helper");
-
-const lastTrustedValue = (
-  entries: readonly GitConfigEntry[],
-  keys: readonly string[],
-): string | undefined => {
-  const trusted = entries.filter((e) => isTrusted(e) && keys.includes(e.key));
-  const last = trusted.at(-1);
-  // A bare boolean key (`[core] fsmonitor`) means "true".
-  return last === undefined ? undefined : (last.value ?? "true");
-};
 
 const pinnedOverrides = (
   entries: readonly GitConfigEntry[],
@@ -155,7 +130,8 @@ const credentialOverrides = (
 /**
  * The `GIT_CONFIG_*` overrides that neutralise every program-running config
  * key the repository could have set, given the effective config as listed by
- * `git config --list --show-scope`. Exported for tests.
+ * `git config --list --show-scope --show-origin`, plus any repository config
+ * git may read in another context (`hostGitIncludes.ts`). Exported for tests.
  */
 export const hardeningOverrides = (
   entries: readonly GitConfigEntry[],
@@ -163,28 +139,8 @@ export const hardeningOverrides = (
   ...pinnedOverrides(entries),
   ...repoSetOverrides(entries),
   ...credentialOverrides(entries),
+  ...hookOverrides(entries),
 ];
-
-/** Parses `git config --list --show-scope -z`. */
-export const parseConfigList = (output: string): GitConfigEntry[] => {
-  const fields = output.split("\0");
-  const entries: GitConfigEntry[] = [];
-  for (let i = 0; i + 1 < fields.length; i += 2) {
-    const scope = fields[i] ?? "";
-    const entry = fields[i + 1] ?? "";
-    const newline = entry.indexOf("\n");
-    entries.push(
-      newline === -1
-        ? { scope, key: entry, value: undefined }
-        : {
-            scope,
-            key: entry.slice(0, newline),
-            value: entry.slice(newline + 1),
-          },
-    );
-  }
-  return entries;
-};
 
 /** Appends `overrides` after any `GIT_CONFIG_*` entries already in `env`. */
 export const withConfigOverrides = (

@@ -2,16 +2,15 @@
  * Read-only overlays for the git files a bind-mount sandbox must not write.
  *
  * The sandbox needs the host repo's `.git` writable to commit (objects, refs,
- * the worktree's admin dir). But `config`, `hooks` and `info` there, the
- * worktree's `.git` pointer file and its `commondir` decide what git commands
- * on the host read and run. Each one is mounted again, read-only, at every
+ * the worktree's admin dir). But `config`, `config.worktree`, `hooks` and
+ * `info` there, each linked worktree's `config.worktree`, the worktree's
+ * `.git` pointer file and its `commondir` decide what git commands on the
+ * host read and run. Each one is mounted again, read-only, at every
  * place it is visible inside the sandbox, and each dir between it and the
  * writable mount that holds it is bound onto itself, so it can't be moved
  * aside by renaming a parent.
  */
 
-import type { Stats } from "node:fs";
-import { lstat, mkdir, readFile, realpath } from "node:fs";
 import {
   dirname,
   isAbsolute,
@@ -22,6 +21,14 @@ import {
   sep,
 } from "node:path";
 import { Effect, Option } from "effect";
+import {
+  ensureDir,
+  ensureFile,
+  listDir,
+  readText,
+  realPath,
+  statOf,
+} from "./gitMountFs.js";
 
 /** A bind mount as passed to a bind-mount provider. */
 export interface GitMount {
@@ -31,38 +38,6 @@ export interface GitMount {
 }
 
 const GITDIR_LINE = /^gitdir: (?<path>.+)$/u;
-
-/** A node fs call as an Effect; any error becomes `None`. */
-const attempt = <A>(
-  call: (done: (error: Error | null, value: A) => void) => void,
-): Effect.Effect<Option.Option<A>> =>
-  Effect.async((resume) => {
-    call((error, value) => {
-      resume(
-        Effect.succeed(error === null ? Option.some(value) : Option.none()),
-      );
-    });
-  });
-
-const realPath = (p: string) =>
-  attempt<string>((done) => {
-    realpath(p, done);
-  });
-
-const readText = (p: string) =>
-  attempt<string>((done) => {
-    readFile(p, "utf8", done);
-  });
-
-const statOf = (p: string) =>
-  attempt<Stats>((done) => {
-    lstat(p, done);
-  });
-
-const ensureDir = (p: string) =>
-  attempt<string | undefined>((done) => {
-    mkdir(p, { recursive: true }, done);
-  });
 
 const toMountPath = (p: string): string =>
   process.platform === "win32" ? p.replaceAll("\\", "/") : p;
@@ -78,12 +53,54 @@ const relativeWithin = (
     : Option.some(rel);
 };
 
-/** `config`, `hooks` and `info` of a common dir; the dirs are created if missing. */
+/**
+ * `config.worktree` in `dir`, created empty if missing: git reads it once
+ * `extensions.worktreeConfig` is set, so a file the sandbox created there
+ * would apply to the host's later git runs. As a real path, like every
+ * control path; skipped if it is not a file and can't be created.
+ */
+const worktreeConfigIn = (dir: string) =>
+  Effect.gen(function* () {
+    yield* ensureFile(join(dir, "config.worktree"));
+    const real = yield* realPath(join(dir, "config.worktree"));
+    if (Option.isNone(real)) {
+      return [];
+    }
+    const stat = yield* statOf(real.value);
+    return Option.isSome(stat) && stat.value.isFile() ? [real.value] : [];
+  });
+
+/** Each linked worktree's admin dir under a common dir. */
+const adminDirsOf = (commonDir: string) =>
+  Effect.gen(function* () {
+    const worktrees = join(commonDir, "worktrees");
+    const names = yield* listDir(worktrees);
+    const dirs: string[] = [];
+    for (const name of Option.getOrElse(names, () => [])) {
+      const stat = yield* statOf(join(worktrees, name));
+      if (Option.isSome(stat) && stat.value.isDirectory()) {
+        dirs.push(join(worktrees, name));
+      }
+    }
+    return dirs;
+  });
+
+/**
+ * `config`, `config.worktree`, `hooks` and `info` of a common dir, and the
+ * `config.worktree` of each linked worktree; missing ones are created.
+ */
 const commonDirControlPaths = (commonDir: string) =>
   Effect.gen(function* () {
     yield* ensureDir(join(commonDir, "hooks"));
     yield* ensureDir(join(commonDir, "info"));
-    return ["config", "hooks", "info"].map((name) => join(commonDir, name));
+    const worktreeConfigs = yield* worktreeConfigIn(commonDir);
+    for (const adminDir of yield* adminDirsOf(commonDir)) {
+      worktreeConfigs.push(...(yield* worktreeConfigIn(adminDir)));
+    }
+    return [
+      ...["config", "hooks", "info"].map((name) => join(commonDir, name)),
+      ...worktreeConfigs,
+    ];
   });
 
 /** The control paths of a linked worktree whose `.git` file says `gitdir`. */
