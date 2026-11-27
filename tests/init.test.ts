@@ -314,6 +314,40 @@ describe("sandcastle init (non-interactive)", () => {
         env: { BEADS_DIR: "/home/agent/host-beads" },
       });
     }, 60_000);
+
+    it("keeps the beads mount with a custom image name", async () => {
+      const result = await runCli(
+        [
+          "init",
+          "--sandbox",
+          "docker",
+          "--agent",
+          "claude-code",
+          "--issue-tracker",
+          "beads",
+          "--template",
+          "blank",
+          "--build-image",
+          "false",
+          "--image-name",
+          "sandcastle:custom-beads",
+        ],
+        { cwd: repo.dir },
+      );
+
+      expect(result).toMatchObject({ exitCode: 0 });
+      const main = readFileSync(
+        join(repo.dir, ".sandcastle", "main.mts"),
+        "utf8",
+      );
+      expect(main).toContain(
+        'docker({ ...sandboxOptions, imageName: "sandcastle:custom-beads" })',
+      );
+      expect(scaffoldedSandboxOptions(main, repo.dir)).toStrictEqual({
+        mounts: [{ hostPath: ".beads", sandboxPath: "/home/agent/host-beads" }],
+        env: { BEADS_DIR: "/home/agent/host-beads" },
+      });
+    }, 60_000);
   });
 
   it("fails naming --sandbox when no TTY and no --sandbox are given", async () => {

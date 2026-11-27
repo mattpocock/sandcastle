@@ -2690,10 +2690,17 @@ describe("init scaffold consistency (every agent x template x sandbox x tracker)
         ),
       ].map(([call]) => call);
       expect(sandboxCalls.length).toBeGreaterThan(0);
+      const imageOnlyCall = `${sandboxProvider.name}({ imageName: "${imageName}" })`;
+      const expectedSandboxCalls = new Map([
+        [
+          "beads",
+          `${sandboxProvider.name}({ ...sandboxOptions, imageName: "${imageName}" })`,
+        ],
+        ["custom", imageOnlyCall],
+        ["github-issues", imageOnlyCall],
+      ]);
       for (const call of sandboxCalls) {
-        expect(call).toBe(
-          `${sandboxProvider.name}({ imageName: "${imageName}" })`,
-        );
+        expect(call).toBe(expectedSandboxCalls.get(issueTracker.name));
       }
 
       // .env.example: the agent's auth key declared, nothing declared twice.
