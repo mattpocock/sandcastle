@@ -1421,11 +1421,54 @@ export interface OpenCodeOptions {
 }
 
 /**
+ * The major version of an `opencode --version` output: `2` from `2.3.0`, `1`
+ * from `1.19.6`. Returns `undefined` when the output has no leading integer,
+ * so a custom or unknown CLI falls back to the V1 commands.
+ */
+const parseOpenCodeMajorVersion = (output: string): number | undefined => {
+  const match = /\d+/u.exec(output);
+  if (match === null) return undefined;
+  return Number(match[0]);
+};
+
+/**
+ * The installed CLI's major version, probed once per sandbox handle so a
+ * capture and resume on the same handle don't each run `opencode --version`.
+ * `undefined` means the probe failed and the caller should keep the V1
+ * commands.
+ */
+const openCodeMajorVersionByHandle = (
+  cache: WeakMap<BindMountSandboxHandle, number | undefined>,
+  handle: BindMountSandboxHandle,
+): Promise<number | undefined> => {
+  if (cache.has(handle)) {
+    return Promise.resolve(cache.get(handle));
+  }
+  return handle.exec("opencode --version").then(
+    (result) => {
+      const major =
+        result.exitCode === 0
+          ? parseOpenCodeMajorVersion(result.stdout)
+          : undefined;
+      cache.set(handle, major);
+      return major;
+    },
+    () => {
+      cache.set(handle, undefined);
+      return undefined;
+    },
+  );
+};
+
+/**
  * OpenCode's sessions live in its SQLite database, so a session moves as the
  * JSON of `opencode export <id>`, its documented interchange format: exported
  * in the sandbox after a run, and `opencode import`ed from the sandbox repo
- * before a resume (ADR 0022). The import keeps the session id and re-homes the
- * session to the importing project, so no rewrite is needed.
+ * before a resume (ADR 0022). OpenCode V2 moved these under `opencode session
+ * export` / `opencode session import` and needs `--standalone` under bwrap,
+ * so the provider probes the installed CLI's major version once per sandbox
+ * and picks the matching commands. The import keeps the session id and
+ * re-homes the session to the importing project, so no rewrite is needed.
  */
 const makeOpenCodeSessionStorage = (
   options?: OpenCodeOptions,
@@ -1434,6 +1477,31 @@ const makeOpenCodeSessionStorage = (
     options?.sessionStorage?.hostSessionsDir ?? opencodeHostSessionsDir();
   const exportDirOverride = options?.sessionStorage?.sandboxExportDir;
   const hostPath = (id: string): string => join(hostDir, `${id}.json`);
+  const majorVersionByHandle = new WeakMap<
+    BindMountSandboxHandle,
+    number | undefined
+  >();
+  const sandboxExport = (
+    id: string,
+    path: string,
+    handle: BindMountSandboxHandle,
+  ) =>
+    openCodeMajorVersionByHandle(majorVersionByHandle, handle).then((major) =>
+      major !== undefined && major >= 2
+        ? `opencode session export ${shellEscape(id)} --standalone > ${shellEscape(path)}`
+        : `opencode export ${shellEscape(id)} > ${shellEscape(path)}`,
+    );
+  const sandboxImport = (
+    _id: string,
+    path: string,
+    handle: BindMountSandboxHandle,
+  ) =>
+    openCodeMajorVersionByHandle(majorVersionByHandle, handle).then((major) =>
+      major !== undefined && major >= 2
+        ? `opencode session import ${shellEscape(path)} --standalone`
+        : `opencode import ${shellEscape(path)}`,
+    );
+
   return makeSessionFileStorage({
     hostRoot: hostDir,
     hostPath: (_cwd, id) => hostPath(id),
@@ -1442,9 +1510,8 @@ const makeOpenCodeSessionStorage = (
     hostPathsById: (id) => [hostPath(id), opencodeHostDatabase()],
     sandboxPath: (_cwd, id, dirs) =>
       posix.join(exportDirOverride ?? dirs.tmp, `${id}.json`),
-    sandboxExport: (id, path) =>
-      `opencode export ${shellEscape(id)} > ${shellEscape(path)}`,
-    sandboxImport: (_id, path) => `opencode import ${shellEscape(path)}`,
+    sandboxExport,
+    sandboxImport,
   });
 };
 

@@ -581,11 +581,24 @@ export interface SessionFileLayout {
   /**
    * For an agent whose sessions live in its own database: the sandbox command
    * that writes session `id` to `sandboxPath` before capture, run in the
-   * sandbox repo.
+   * sandbox repo. May probe the installed CLI via `handle` and resolve the
+   * command asynchronously.
    */
-  readonly sandboxExport?: (id: string, sandboxPath: string) => string;
-  /** The sandbox command that loads `sandboxPath` back after resume, run in the sandbox repo. */
-  readonly sandboxImport?: (id: string, sandboxPath: string) => string;
+  readonly sandboxExport?: (
+    id: string,
+    sandboxPath: string,
+    handle: BindMountSandboxHandle,
+  ) => string | Promise<string>;
+  /**
+   * The sandbox command that loads `sandboxPath` back after resume, run in the
+   * sandbox repo. May probe the installed CLI via `handle` and resolve the
+   * command asynchronously.
+   */
+  readonly sandboxImport?: (
+    id: string,
+    sandboxPath: string,
+    handle: BindMountSandboxHandle,
+  ) => string | Promise<string>;
   /** Rewrite the session's own record of its cwd when it moves. Omit to copy verbatim. */
   readonly rewrite?: (
     content: string,
@@ -618,7 +631,7 @@ const captureSessionFile =
       sandboxDirsOf(handle),
     );
     if (layout.sandboxExport !== undefined) {
-      const command = layout.sandboxExport(sessionId, source);
+      const command = await layout.sandboxExport(sessionId, source, handle);
       const result = await handle.exec(command, { cwd: sandboxCwd });
       if (result.exitCode !== 0) {
         throw sandboxCommandError(command, result);
@@ -649,7 +662,7 @@ const resumeSessionFile =
       await handle.exec(`mkdir -p ${dir}`);
       await handle.copyFileIn(source, target);
       if (layout.sandboxImport !== undefined) {
-        const command = layout.sandboxImport(sessionId, target);
+        const command = await layout.sandboxImport(sessionId, target, handle);
         const result = await handle.exec(command, { cwd: sandboxCwd });
         if (result.exitCode !== 0) {
           throw sandboxCommandError(command, result);

@@ -1,16 +1,20 @@
 // A harmless fake `opencode` for the native-sandbox run tests. Like the real
 // CLI, `opencode run` keeps the session in its own store under `$HOME`
 // (OpenCode's SQLite database lives in `~/.local/share/opencode`) and prints
-// the run as `--format json` events; `opencode export <id>` prints that
-// session's JSON to stdout, so Sandcastle captures it by redirecting the
-// export to a file inside the sandbox. It commits the prompt, then reports
-// done.
+// the run as `--format json` events; `opencode export <id>` (V1) and
+// `opencode session export <id> --standalone` (V2) print that session's JSON
+// to stdout, so Sandcastle captures it by redirecting the export to a file
+// inside the sandbox. `opencode --version` reports `2.3.0` so the provider
+// takes the V2 commands. It commits the prompt, then reports done.
 
 export const FAKE_OPENCODE_SESSION_ID = "ses_fake_native";
 
 export const FAKE_OPENCODE = `#!/bin/sh
 store="$HOME/.local/share/opencode/sessions"
 case "$1" in
+  --version)
+    printf '%s\\n' '2.3.0'
+    ;;
   run)
     for prompt; do :; done
     mkdir -p "$store"
@@ -20,6 +24,23 @@ case "$1" in
     git commit -qm "agent commit"
     printf '%s\\n' '{"type":"step_start","sessionID":"${FAKE_OPENCODE_SESSION_ID}","part":{"type":"step-start"}}'
     printf '%s\\n' '{"type":"text","sessionID":"${FAKE_OPENCODE_SESSION_ID}","part":{"type":"text","text":"Done. <promise>COMPLETE</promise>"}}'
+    ;;
+  session)
+    case "$2" in
+      export)
+        if [ ! -f "$store/$3.json" ]; then
+          echo "Session not found: $3" >&2
+          exit 1
+        fi
+        cat "$store/$3.json"
+        ;;
+      import)
+        ;;
+      *)
+        echo "fake opencode: unsupported session command $2" >&2
+        exit 1
+        ;;
+    esac
     ;;
   export)
     if [ ! -f "$store/$2.json" ]; then
